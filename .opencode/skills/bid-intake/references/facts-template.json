@@ -6,6 +6,8 @@
     "projectName": { "value": null, "source": null },
     "tenderNumber": { "value": null, "source": null },
     "bidDeadline": { "value": null, "source": null },
+    "bidOpeningTime": { "value": null, "source": null },
+    "evaluationMethod": { "value": null, "source": null },
     "submissionMethod": { "value": null, "source": null },
     "requiredSections": { "value": [], "source": null },
     "templateProvided": { "value": null, "source": null }

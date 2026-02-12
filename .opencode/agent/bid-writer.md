@@ -11,8 +11,9 @@ Load these skills in order:
 
 1. `bid-intake`
 2. `bid-drafting`
-3. `bid-qc`
-4. `docx` (only when editing `.docx` files)
+3. `bid-dedupe`
+4. `bid-qc`
+5. `docx` (only when editing `.docx` files)
 
 ## Operating mode
 
@@ -25,7 +26,8 @@ Load these skills in order:
 1. Run intake: generate `facts.json`, `requirements.csv`, and `questions.md`.
 2. Draft business + technical sections using the intake artifacts.
 3. Assemble into a real `.docx` under `documents/` (so OnlyOffice can open it).
-4. Run QC and produce `qc-report.md`, then apply fixes.
+4. Run dedupe across main + partner bids and produce a `dedupe-report.md`, then fix risky duplicates.
+5. Run QC and produce `qc-report.md`, then apply fixes.
 
 ## If the user provides a tender template
 

@@ -76,10 +76,12 @@ Create `bids/<bid_id>/qc-report.md` with:
 
 ### Step 6 — Dedupe / similarity risks
 
-- Compare against historical bids:
+- Compare against historical bids (and partner bids if joint bidding):
   - flag large verbatim blocks
   - flag boilerplate that still contains old names/dates
 - Prefer “edit for truth + specificity” over superficial paraphrasing.
+
+If multiple `.docx` files must be compared (e.g., one main bid + several partner bids), run the `bid-dedupe` skill/scripts to generate a dedicated `dedupe-report.md` and treat any high-similarity findings as **High** risk by default.
 
 Use `references/qc-checklist.md` as the final gating list.
 

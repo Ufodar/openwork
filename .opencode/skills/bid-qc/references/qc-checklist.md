@@ -10,6 +10,7 @@
 - 工期 / schedule dates are consistent everywhere.
 - Warranty/maintenance durations and SLAs are consistent everywhere.
 - Legal entity names, IDs, addresses, contacts match source materials.
+- Time-sensitive certificates are within validity windows (e.g., 社保证明/纳税证明 dates are not outdated).
 
 ## Consistency
 - No stray client/company names from older bids.

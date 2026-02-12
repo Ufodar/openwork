@@ -66,6 +66,7 @@ If the workspace is currently using the OpenWork Document Writer UI, keep final 
   - Submission structure: 商务/技术/报价 split, formatting, signatures/seals, file naming
   - Mandatory clauses and required evidence
   - Evaluation criteria and scoring points
+  - Starred (★) / core product requirements and “one-vote veto” clauses
   - Required attachments / certificates
   - Technical specs, acceptance criteria, SLAs
 - Write `requirements.csv` with one requirement per row, including citations.
@@ -74,6 +75,7 @@ If the workspace is currently using the OpenWork Document Writer UI, keep final 
 
 - Populate `facts.json` from tender + company materials:
   - Deadlines: bid submission, clarification, Q&A window
+  - Bid opening time/location (开标时间/地点) if provided
   - Schedule: planned start date, construction/implementation period, milestones
   - Warranty/maintenance: duration, response time, coverage
   - Service levels: uptime, support windows, escalation
@@ -94,6 +96,14 @@ If the workspace is currently using the OpenWork Document Writer UI, keep final 
 - Do not start drafting the bid until:
   - `facts.json` is complete for business-critical fields (or questions are acknowledged)
   - `requirements.csv` covers all tender requirements
+
+## Note on “point-to-point” (点对点应答表)
+
+Treat point-to-point responses as the core scoring artifact:
+
+- Build rows from `requirements.csv` and the tender’s scoring items.
+- Avoid “偏离” unless the tender explicitly allows it and the impact is documented.
+- For technical deviations, clearly label which items are “starred” or “core” to avoid disqualification risk.
 
 ## Quick sanity checks (before leaving intake)
 

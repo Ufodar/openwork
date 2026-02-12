@@ -1,0 +1,39 @@
+{
+  "generatedAt": "YYYY-MM-DDTHH:MM:SS±HH:MM",
+  "bidId": "string",
+  "tender": {
+    "issuer": { "value": null, "source": null },
+    "projectName": { "value": null, "source": null },
+    "tenderNumber": { "value": null, "source": null },
+    "bidDeadline": { "value": null, "source": null },
+    "submissionMethod": { "value": null, "source": null },
+    "requiredSections": { "value": [], "source": null },
+    "templateProvided": { "value": null, "source": null }
+  },
+  "entities": {
+    "bidderLegalName": { "value": null, "source": null },
+    "bidderBrandName": { "value": null, "source": null },
+    "partnerLegalNames": { "value": [], "source": null },
+    "signatory": { "value": null, "source": null }
+  },
+  "businessTerms": {
+    "warrantyPeriod": { "value": null, "source": null },
+    "maintenancePeriod": { "value": null, "source": null },
+    "responseTimeSla": { "value": null, "source": null },
+    "projectStartDate": { "value": null, "source": null },
+    "projectDuration": { "value": null, "source": null },
+    "deliverySchedule": { "value": null, "source": null }
+  },
+  "contacts": {
+    "projectContactName": { "value": null, "source": null },
+    "projectContactPhone": { "value": null, "source": null },
+    "projectContactEmail": { "value": null, "source": null }
+  },
+  "openQuestions": [],
+  "sources": [
+    {
+      "file": "path",
+      "note": "what this file is used for"
+    }
+  ]
+}

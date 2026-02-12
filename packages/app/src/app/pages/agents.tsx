@@ -22,6 +22,13 @@ const agentTypes: AgentType[] = [
     status: "available",
   },
   {
+    id: "bid-writer",
+    name: "Bid Writer",
+    description: "Draft tender/bid documents with strict fact extraction and compliance mapping",
+    icon: FileText,
+    status: "available",
+  },
+  {
     id: "code-reviewer",
     name: "Code Reviewer",
     description: "Review code for bugs, security issues, and best practices",
@@ -55,6 +62,7 @@ export default function AgentsView(props: AgentsViewProps) {
   const [agentsBusy, setAgentsBusy] = createSignal(false);
   const [agentsError, setAgentsError] = createSignal<string | null>(null);
   const [searchQuery, setSearchQuery] = createSignal("");
+  const docWriterAgents = new Set(["document-writer", "bid-writer"]);
 
   const normalizeAgentKey = (value: string) =>
     value
@@ -121,6 +129,12 @@ export default function AgentsView(props: AgentsViewProps) {
 
     if (featured.id === "document-writer") {
       const agent = resolveFeaturedAgentName(featured) ?? "document-writer";
+      props.createSessionAndOpen({ title: featured.name, agent, view: "document-writer" });
+      return;
+    }
+
+    if (featured.id === "bid-writer") {
+      const agent = resolveFeaturedAgentName(featured) ?? "bid-writer";
       props.createSessionAndOpen({ title: featured.name, agent, view: "document-writer" });
       return;
     }
@@ -264,7 +278,7 @@ export default function AgentsView(props: AgentsViewProps) {
                     props.createSessionAndOpen({
                       title: agent.name,
                       agent: agent.name,
-                      view: normalizeAgentKey(agent.name) === "document-writer" ? "document-writer" : "session",
+                      view: docWriterAgents.has(normalizeAgentKey(agent.name)) ? "document-writer" : "session",
                     })
                   }
                 >

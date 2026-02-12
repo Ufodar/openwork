@@ -1,6 +1,6 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 
-import type { HubSkillCard, SkillCard } from "../types";
+import type { CreateSessionOptions, HubSkillCard, SkillCard } from "../types";
 
 import Button from "../components/button";
 import { Edit2, FolderOpen, Loader2, Package, Plus, RefreshCw, Search, Sparkles, Trash2, Upload } from "lucide-solid";
@@ -27,7 +27,7 @@ export type SkillsViewProps = {
   uninstallSkill: (name: string) => void;
   readSkill: (name: string) => Promise<{ name: string; path: string; content: string } | null>;
   saveSkill: (input: { name: string; content: string; description?: string }) => void;
-  createSessionAndOpen: () => void;
+  createSessionAndOpen: (options?: CreateSessionOptions) => void;
   setPrompt: (value: string) => void;
 };
 

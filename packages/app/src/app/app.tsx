@@ -38,6 +38,8 @@ import DashboardView from "./pages/dashboard";
 import SessionView from "./pages/session";
 import ProtoWorkspacesView from "./pages/proto-workspaces";
 import ProtoV1UxView from "./pages/proto-v1-ux";
+import DocumentView from "./pages/document";
+import DocumentWriterView from "./pages/document-writer";
 import { createClient, unwrap, waitForHealthy, type OpencodeAuth } from "./lib/opencode";
 import {
   DEFAULT_MODEL,
@@ -52,6 +54,7 @@ import {
 import { parseMcpServersFromContent, removeMcpFromConfig, validateMcpServerName } from "./mcp";
 import type {
   Client,
+  CreateSessionOptions,
   DashboardTab,
   MessageWithParts,
   StartupPreference,
@@ -176,6 +179,8 @@ export default function App() {
     if (path.startsWith("/onboarding")) return "onboarding";
     if (path.startsWith("/session")) return "session";
     if (path.startsWith("/proto")) return "proto";
+    if (path.startsWith("/document-writer")) return "document-writer";
+    if (path.startsWith("/document")) return "document";
     return "dashboard";
   });
   const isProtoV1Ux = createMemo(() =>
@@ -226,6 +231,23 @@ export default function App() {
       navigate("/session");
       return;
     }
+    if (next === "document") {
+      navigate("/document");
+      return;
+    }
+    if (next === "document-writer") {
+      if (sessionId) {
+        goToDocumentWriter(sessionId);
+        return;
+      }
+      const fallback = activeSessionId();
+      if (fallback) {
+        goToDocumentWriter(fallback);
+        return;
+      }
+      navigate("/session");
+      return;
+    }
     goToDashboard(tab());
   };
 
@@ -236,6 +258,15 @@ export default function App() {
       return;
     }
     navigate(`/session/${trimmed}`, options);
+  };
+
+  const goToDocumentWriter = (sessionId: string, options?: { replace?: boolean }) => {
+    const trimmed = sessionId.trim();
+    if (!trimmed) {
+      navigate("/session", options);
+      return;
+    }
+    navigate(`/document-writer/${trimmed}`, options);
   };
 
   const [startupPreference, setStartupPreference] = createSignal<StartupPreference | null>(null);
@@ -949,7 +980,7 @@ export default function App() {
     if (!trimmed) {
       throw new Error("Session name is required");
     }
-    
+
     await renameSession(sessionID, trimmed);
     await refreshSidebarWorkspaceSessions(workspaceStore.activeWorkspaceId()).catch(() => undefined);
   }
@@ -1849,9 +1880,9 @@ export default function App() {
           const directoryHint = normalizeDirectoryPath(active.directory?.trim() ?? active.path?.trim() ?? "");
           const match = directoryHint
             ? items.find((entry) => {
-                const entryPath = normalizeDirectoryPath((entry.opencode?.directory ?? entry.directory ?? entry.path ?? "").trim());
-                return Boolean(entryPath && entryPath === directoryHint);
-              })
+              const entryPath = normalizeDirectoryPath((entry.opencode?.directory ?? entry.directory ?? entry.path ?? "").trim());
+              return Boolean(entryPath && entryPath === directoryHint);
+            })
             : (response.activeId ? items.find((entry) => entry.id === response.activeId) : null) ?? items[0];
           setOpenworkServerWorkspaceId(match?.id ?? response.activeId ?? null);
         } catch {
@@ -2056,9 +2087,9 @@ export default function App() {
     setRenameWorkspaceId(workspaceId);
     setRenameWorkspaceName(
       workspace.displayName?.trim() ||
-        workspace.openworkWorkspaceName?.trim() ||
-        workspace.name?.trim() ||
-        ""
+      workspace.openworkWorkspaceName?.trim() ||
+      workspace.name?.trim() ||
+      ""
     );
     setRenameWorkspaceOpen(true);
   };
@@ -3669,7 +3700,7 @@ export default function App() {
     }
   }
 
-  async function createSessionAndOpen() {
+  async function createSessionAndOpen(options?: CreateSessionOptions) {
     console.log("[DEBUG] createSessionAndOpen");
     console.log("[DEBUG] current baseUrl:", baseUrl());
     console.log("[DEBUG] engine info:", engine());
@@ -3750,11 +3781,19 @@ export default function App() {
         throw new Error(t("app.connection_lost", currentLocale()));
       }
 
+      const title = options?.title?.trim() ?? "";
+      const requestedAgent =
+        options?.agent === undefined
+          ? undefined
+          : (options.agent?.trim() ?? "") || null;
+      const nextView = options?.view ?? "session";
+
       let rawResult: Awaited<ReturnType<typeof c.session.create>>;
       try {
         mark("creating session");
         rawResult = await c.session.create({
           directory: workspaceStore.activeWorkspaceRoot().trim(),
+          title: title || undefined,
         });
         mark("session created");
       } catch (createErr) {
@@ -3799,10 +3838,21 @@ export default function App() {
 
       await selectSession(session.id);
       mark("session selected");
+
+      if (requestedAgent !== undefined) {
+        setSessionAgent(session.id, requestedAgent);
+      }
+
       // Now switch view AFTER session is selected
-      mark("view set to session");
+      mark("view set");
       // setSessionViewLockUntil(Date.now() + 1200);
-      goToSession(session.id);
+      if (nextView === "document-writer") {
+        goToDocumentWriter(session.id);
+      } else if (nextView === "document") {
+        navigate("/document");
+      } else {
+        goToSession(session.id);
+      }
     } catch (e) {
       mark("error caught", e);
       const message = e instanceof Error ? e.message : t("app.unknown_error", currentLocale());
@@ -4647,6 +4697,7 @@ export default function App() {
       suggestedPlugins: SUGGESTED_PLUGINS,
       addPlugin,
       createSessionAndOpen,
+      listAgents,
       setPrompt,
       selectSession: selectSession,
       defaultModelLabel: formatModelLabel(defaultModel(), providers()),
@@ -4864,6 +4915,7 @@ export default function App() {
   });
 
   const dashboardTabs = new Set<DashboardTab>([
+    "agents",
     "scheduled",
     "skills",
     "plugins",
@@ -4936,6 +4988,34 @@ export default function App() {
       return;
     }
 
+    if (path.startsWith("/document-writer")) {
+      const [, , sessionSegment] = rawPath.split("/");
+      const id = (sessionSegment ?? "").trim();
+
+      if (!id) {
+        const fallback = activeSessionId();
+        if (fallback) {
+          goToDocumentWriter(fallback, { replace: true });
+        } else {
+          navigate("/session", { replace: true });
+        }
+        return;
+      }
+
+      if (sessionsLoaded() && !sessions().some((session) => session.id === id)) {
+        if (selectedSessionId() === id) {
+          setSelectedSessionId(null);
+        }
+        navigate("/session", { replace: true });
+        return;
+      }
+
+      if (selectedSessionId() !== id) {
+        void selectSession(id);
+      }
+      return;
+    }
+
     if (path.startsWith("/proto-v1-ux")) {
       if (isTauriRuntime()) {
         navigate("/dashboard/scheduled", { replace: true });
@@ -4958,6 +5038,11 @@ export default function App() {
 
     if (path.startsWith("/onboarding")) {
       navigate("/session", { replace: true });
+      return;
+    }
+
+    if (path.startsWith("/document")) {
+      // Allow navigation to document view
       return;
     }
 
@@ -4987,6 +5072,16 @@ export default function App() {
         </Match>
         <Match when={currentView() === "session"}>
           <SessionView {...sessionProps()} />
+        </Match>
+        <Match when={currentView() === "document-writer"}>
+          <DocumentWriterView {...sessionProps()} />
+        </Match>
+        <Match when={currentView() === "document"}>
+          <DocumentView
+            openworkServerStatus={openworkServerStatus()}
+            openworkServerClient={openworkServerClient()}
+            openworkServerWorkspaceId={openworkServerWorkspaceId()}
+          />
         </Match>
         <Match when={true}>
           <DashboardView {...dashboardProps()} />

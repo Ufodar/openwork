@@ -125,7 +125,13 @@ export type OpencodeEvent = {
   properties?: unknown;
 };
 
-export type View = "onboarding" | "dashboard" | "session" | "proto";
+export type View = "onboarding" | "dashboard" | "session" | "proto" | "document" | "document-writer";
+
+export type CreateSessionOptions = {
+  title?: string;
+  agent?: string | null;
+  view?: View;
+};
 
 export type StartupPreference = "local" | "server";
 
@@ -140,7 +146,8 @@ export type DashboardTab =
   | "mcp"
   | "identities"
   | "config"
-  | "settings";
+  | "settings"
+  | "agents";
 
 export type SettingsTab = "general" | "model" | "advanced" | "debug";
 

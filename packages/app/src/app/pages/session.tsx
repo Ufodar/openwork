@@ -2,6 +2,7 @@ import { For, Show, createEffect, createMemo, createSignal, on, onCleanup, onMou
 import type { Agent, Part } from "@opencode-ai/sdk/v2/client";
 import type {
   ArtifactItem,
+  CreateSessionOptions,
   DashboardTab,
   ComposerDraft,
   MessageGroup,
@@ -24,6 +25,7 @@ import type { EngineInfo, OpenworkServerInfo, WorkspaceInfo } from "../lib/tauri
 
 import {
   Box,
+  Bot,
   Check,
   ChevronDown,
   ChevronRight,
@@ -113,7 +115,7 @@ export type SessionViewProps = {
   updateEnv: { supported?: boolean; reason?: string | null } | null;
   anyActiveRuns: boolean;
   installUpdateAndRestart: () => void;
-  createSessionAndOpen: () => void;
+  createSessionAndOpen: (options?: CreateSessionOptions) => void;
   sendPromptAsync: (draft: ComposerDraft) => Promise<void>;
   abortSession: (sessionId?: string) => Promise<void>;
   lastPromptSent: string;
@@ -2229,6 +2231,21 @@ export default function SessionView(props: SessionViewProps) {
           />
 
           <div class="space-y-1">
+          <button
+            type="button"
+            class={`w-full h-10 flex items-center gap-3 px-3 rounded-lg text-sm font-medium transition-colors ${
+              showRightSidebarSelection() && props.tab === "agents"
+                ? "bg-dls-active text-dls-text"
+                : "text-dls-secondary hover:text-dls-text hover:bg-dls-hover"
+            }`}
+            onClick={() => {
+              props.setTab("agents");
+              props.setView("dashboard");
+            }}
+          >
+            <Bot size={18} />
+            Agents
+          </button>
           <button
             type="button"
             class={`w-full h-10 flex items-center gap-3 px-3 rounded-lg text-sm font-medium transition-colors ${

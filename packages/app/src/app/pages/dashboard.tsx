@@ -1,5 +1,7 @@
 import { For, Match, Show, Switch, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
+import type { Agent } from "@opencode-ai/sdk/v2/client";
 import type {
+  CreateSessionOptions,
   DashboardTab,
   McpServerEntry,
   McpStatusMap,
@@ -35,10 +37,12 @@ import ConfigView from "./config";
 import SettingsView from "./settings";
 import SkillsView from "./skills";
 import IdentitiesView from "./identities";
+import AgentsView from "./agents";
 import StatusBar from "../components/status-bar";
 import ProviderAuthModal from "../components/provider-auth-modal";
 import ShareWorkspaceModal from "../components/share-workspace-modal";
 import {
+  Bot,
   Box,
   ChevronDown,
   ChevronRight,
@@ -70,6 +74,7 @@ export type DashboardViewProps = {
   submitProviderApiKey: (providerId: string, apiKey: string) => Promise<string | void>;
   view: View;
   setView: (view: View, sessionId?: string) => void;
+  listAgents: () => Promise<Agent[]>;
   startupPreference: StartupPreference | null;
   baseUrl: string;
   clientConnected: boolean;
@@ -198,7 +203,7 @@ export type DashboardViewProps = {
   showMcpReloadBanner: boolean;
   mcpReloadBlocked: boolean;
   reloadMcpEngine: () => void;
-  createSessionAndOpen: () => void;
+  createSessionAndOpen: (options?: CreateSessionOptions) => void;
   setPrompt: (value: string) => void;
   selectSession: (sessionId: string) => Promise<void> | void;
   defaultModelLabel: string;
@@ -273,6 +278,8 @@ export default function DashboardView(props: DashboardViewProps) {
         return "Identities";
       case "config":
         return "Config";
+      case "agents":
+        return "Agent Hub";
       case "settings":
         return "Settings";
       default:
@@ -1265,6 +1272,14 @@ export default function DashboardView(props: DashboardViewProps) {
               />
             </Match>
 
+            <Match when={props.tab === "agents"}>
+              <AgentsView
+                setView={props.setView}
+                listAgents={props.listAgents}
+                createSessionAndOpen={props.createSessionAndOpen}
+              />
+            </Match>
+
             <Match when={props.tab === "settings"}>
                 <SettingsView
                   startupPreference={props.startupPreference}
@@ -1424,7 +1439,16 @@ export default function DashboardView(props: DashboardViewProps) {
           mcpStatuses={props.mcpStatuses}
         />
         <nav class="md:hidden border-t border-dls-border bg-dls-surface">
-          <div class="mx-auto max-w-5xl px-4 py-3 grid grid-cols-6 gap-2">
+          <div class="mx-auto max-w-5xl px-4 py-3 grid grid-cols-7 gap-2">
+            <button
+              class={`flex flex-col items-center gap-1 text-xs ${
+                props.tab === "agents" ? "text-gray-12" : "text-gray-10"
+              }`}
+              onClick={() => props.setTab("agents")}
+            >
+              <Bot size={18} />
+              Agents
+            </button>
             <button
               class={`flex flex-col items-center gap-1 text-xs ${
                 props.tab === "scheduled" ? "text-gray-12" : "text-gray-10"
@@ -1485,6 +1509,7 @@ export default function DashboardView(props: DashboardViewProps) {
 
       <aside class="w-56 hidden md:flex flex-col bg-dls-sidebar border-l border-dls-border p-4">
         <div class="space-y-1 pt-2">
+          {navItem("agents", "Agents", <Bot size={18} />)}
           {navItem("scheduled", "Automations", <History size={18} />)}
           {navItem("skills", "Skills", <Zap size={18} />)}
           {navItem("plugins", "Plugins", <Cpu size={18} />)}

@@ -1,6 +1,6 @@
 import { For, Show, createMemo, createSignal } from "solid-js";
 
-import type { ScheduledJob } from "../types";
+import type { CreateSessionOptions, ScheduledJob } from "../types";
 import { usePlatform } from "../context/platform";
 import { formatRelativeTime, isTauriRuntime } from "../utils";
 
@@ -33,7 +33,7 @@ export type ScheduledTasksViewProps = {
   deleteJob: (name: string) => Promise<void> | void;
   isWindows: boolean;
   activeWorkspaceRoot: string;
-  createSessionAndOpen: () => void;
+  createSessionAndOpen: (options?: CreateSessionOptions) => void;
   setPrompt: (value: string) => void;
   newTaskDisabled: boolean;
 };

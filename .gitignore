@@ -30,6 +30,10 @@ packaging/docker/workspace/
 # OS
 .DS_Store
 
+# Python
+__pycache__/
+*.py[cod]
+
 # OpenCode mirror
 vendor/opencode/
 

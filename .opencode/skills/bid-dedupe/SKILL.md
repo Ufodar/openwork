@@ -16,6 +16,10 @@ Compare 2+ `.docx` bid documents and produce a dedupe report covering:
 
 This is intentionally deterministic and tool-driven to avoid subjective guessing.
 
+## Note: models without vision
+
+If the active model cannot see images (e.g. text-only models), this skill still works because it relies on deterministic hashing. For human review of duplicate images, export a contact sheet HTML via `--media-dir` (see Quick start).
+
 ## When to use
 
 - One main bid + multiple partner bids must be submitted for the same tender.
@@ -41,10 +45,16 @@ Create `bids/<bid_id>/dedupe-report.md` (and optional intermediate JSON under `b
 ```bash
 python3 .opencode/skills/bid-dedupe/scripts/compare_bids.py \
   --out bids/<bid_id>/dedupe-report.md \
+  --media-dir bids/<bid_id>/dedupe/media \
   documents/bids/<bid_id>/main.docx \
   documents/bids/<bid_id>/partner-a.docx \
   documents/bids/<bid_id>/partner-b.docx
 ```
+
+This produces:
+
+- `bids/<bid_id>/dedupe-report.md` (text+image findings)
+- `bids/<bid_id>/dedupe/media/index.html` (duplicate image contact sheet for human review)
 
 ## Workflow
 

@@ -1,0 +1,24 @@
+services:
+  onlyoffice:
+    image: onlyoffice/documentserver:latest
+    container_name: onlyoffice
+    ports:
+      - "8080:80"
+    environment:
+      # Keep JWT disabled by default for local development. If you want JWT,
+      # set ONLYOFFICE_JWT_SECRET in the OpenWork server env and enable JWT here.
+      - JWT_ENABLED=false
+    restart: always
+    volumes:
+      - onlyoffice_data:/var/www/onlyoffice/Data
+      - onlyoffice_log:/var/log/onlyoffice
+      - onlyoffice_cache:/var/lib/onlyoffice/documentserver/App_Data/cache/files
+      - onlyoffice_example:/var/www/onlyoffice/documentserver-example/public/files
+      - onlyoffice_fonts:/usr/share/fonts/truetype/custom
+
+volumes:
+  onlyoffice_data:
+  onlyoffice_log:
+  onlyoffice_cache:
+  onlyoffice_example:
+  onlyoffice_fonts:

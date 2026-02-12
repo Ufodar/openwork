@@ -22,6 +22,7 @@ import { sanitizeCommandName, validateMcpName } from "./validators.js";
 import { TokenService } from "./tokens.js";
 import { TOY_UI_CSS, TOY_UI_HTML, TOY_UI_JS, cssResponse, htmlResponse, jsResponse } from "./toy-ui.js";
 import pkg from "../package.json" with { type: "json" };
+import { createDocumentRoutes } from "./document.js";
 
 const SERVER_VERSION = pkg.version;
 
@@ -1039,6 +1040,7 @@ function serializeWorkspace(workspace: ServerConfig["workspaces"][number]) {
 
 function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: TokenService): Route[] {
   const routes: Route[] = [];
+  createDocumentRoutes(routes);
 
   addRoute(routes, "GET", "/health", "none", async () => {
     return jsonResponse({ ok: true, version: SERVER_VERSION, uptimeMs: Date.now() - config.startedAt });

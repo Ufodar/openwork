@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { openSync } from "node:fs";
 import { access, mkdir } from "node:fs/promises";
 import { createServer } from "node:net";
@@ -51,6 +51,34 @@ const logLine = (message: string) => {
   process.stdout.write(`${message}\n`);
 };
 
+const killProcessTree = (child: ChildProcess, signal: NodeJS.Signals) => {
+  if (!child.pid) return;
+
+  if (process.platform === "win32") {
+    // Best-effort: kill process + children.
+    try {
+      spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" });
+    } catch {
+      // ignore
+    }
+    return;
+  }
+
+  // If spawned detached, pid is also the process group id.
+  try {
+    process.kill(-child.pid, signal);
+    return;
+  } catch {
+    // ignore
+  }
+
+  try {
+    child.kill(signal);
+  } catch {
+    // ignore
+  }
+};
+
 const readBool = (value: string | undefined) => {
   const normalized = (value ?? "").trim().toLowerCase();
   return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
@@ -84,14 +112,9 @@ const spawnLogged = (command: string, args: string[], logPath: string, env: Node
   return spawn(command, args, {
     cwd,
     env,
+    detached: process.platform !== "win32",
     stdio: ["ignore", logFd, logFd],
   });
-};
-
-const shutdown = (label: string, code: number | null, signal: NodeJS.Signals | null) => {
-  const reason = code !== null ? `code ${code}` : signal ? `signal ${signal}` : "unknown";
-  logLine(`[dev:headless-web] ${label} exited (${reason})`);
-  process.exit(code ?? 1);
 };
 
 await ensureTmp();
@@ -250,15 +273,44 @@ const headlessProcess = spawnLogged(
   headlessEnv,
 );
 
+let stopping = false;
+let requestedExitCode: number | null = null;
+
 const stopAll = (signal: NodeJS.Signals) => {
-  webProcess.kill(signal);
-  headlessProcess.kill(signal);
+  if (stopping) return;
+  stopping = true;
+
+  killProcessTree(webProcess, signal);
+  killProcessTree(headlessProcess, signal);
+
+  if (signal !== "SIGKILL") {
+    const timer = setTimeout(() => {
+      killProcessTree(webProcess, "SIGKILL");
+      killProcessTree(headlessProcess, "SIGKILL");
+    }, 1500);
+    timer.unref?.();
+  }
+};
+
+const shutdown = (label: string, code: number | null, signal: NodeJS.Signals | null) => {
+  const reason = code !== null ? `code ${code}` : signal ? `signal ${signal}` : "unknown";
+  logLine(`[dev:headless-web] ${label} exited (${reason})`);
+
+  if (!stopping) {
+    requestedExitCode = code ?? 1;
+    stopAll("SIGTERM");
+  }
+
+  const exitCode = requestedExitCode ?? code ?? 1;
+  process.exit(exitCode);
 };
 
 process.on("SIGINT", () => {
+  requestedExitCode = 0;
   stopAll("SIGINT");
 });
 process.on("SIGTERM", () => {
+  requestedExitCode = 0;
   stopAll("SIGTERM");
 });
 

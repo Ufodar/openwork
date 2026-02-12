@@ -1,0 +1,87 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug Tauri Core",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--manifest-path=./packages/desktop/src-tauri/Cargo.toml",
+                    "--no-default-features"
+                ]
+            },
+            "execArgv": [
+                "dev",
+                "--config",
+                "packages/desktop/src-tauri/tauri.dev.conf.json"
+            ],
+            "cwd": "${workspaceFolder}",
+            "osx": {
+                "type": "lldb"
+            }
+        },
+        {
+            "type": "pwa-chrome",
+            "request": "launch",
+            "name": "Debug Frontend (Chrome)",
+            "url": "http://localhost:5173",
+            "webRoot": "${workspaceFolder}/packages/app/src",
+            "sourceMaps": true,
+            "userDataDir": false
+        },
+        {
+            "name": "Attach to Rust",
+            "type": "lldb",
+            "request": "attach",
+            "program": "${workspaceFolder}/packages/desktop/src-tauri/target/debug/openwork"
+        },
+        {
+            "type": "bun",
+            "request": "launch",
+            "name": "Debug OpenWork Server (Bun)",
+            "program": "${workspaceFolder}/packages/server/src/cli.ts",
+            "args": [
+                "--workspace",
+                "${input:workspacePath}",
+                "--approval",
+                "auto",
+                "--verbose"
+            ],
+            "cwd": "${workspaceFolder}/packages/server",
+            "console": "integratedTerminal",
+            "env": {
+                "OPENWORK_OPENCODE_BASE_URL": "http://127.0.0.1:4096"
+            }
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "Scheme D: Integrated Web (Bun/Vite)",
+            "runtimeExecutable": "pnpm",
+            "runtimeArgs": [
+                "dev:headless-web"
+            ],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal"
+        }
+    ],
+    "compounds": [
+        {
+            "name": "Full Debug (Tauri + Frontend)",
+            "configurations": [
+                "Debug Tauri Core",
+                "Debug Frontend (Chrome)"
+            ]
+        }
+    ],
+    "inputs": [
+        {
+            "id": "workspacePath",
+            "type": "promptString",
+            "description": "请输入您要调试的项目目录绝对路径",
+            "default": "${workspaceFolder}"
+        }
+    ]
+}

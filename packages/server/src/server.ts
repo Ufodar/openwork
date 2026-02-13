@@ -4049,7 +4049,11 @@ async function reloadOpencodeEngine(workspace: WorkspaceInfo): Promise<void> {
 
 async function writeOpenworkConfig(workspaceRoot: string, payload: Record<string, unknown>, merge: boolean): Promise<void> {
   const path = openworkConfigPath(workspaceRoot);
-  const next = merge ? { ...(await readOpenworkConfig(workspaceRoot)), ...payload } : payload;
+  const existing = merge ? await readOpenworkConfig(workspaceRoot) : ({} as Record<string, unknown>);
+  const next = merge ? { ...existing, ...payload } : payload;
+  if (typeof next.version !== "number") {
+    next.version = typeof existing.version === "number" ? existing.version : 1;
+  }
   await ensureDir(join(workspaceRoot, ".opencode"));
   await writeFile(path, JSON.stringify(next, null, 2) + "\n", "utf8");
 }

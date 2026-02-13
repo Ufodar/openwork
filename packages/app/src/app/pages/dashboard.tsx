@@ -74,6 +74,7 @@ export type DashboardViewProps = {
   submitProviderApiKey: (providerId: string, apiKey: string) => Promise<string | void>;
   view: View;
   setView: (view: View, sessionId?: string) => void;
+  openSessionInPreferredView: (sessionId: string) => void | Promise<void>;
   listAgents: () => Promise<Agent[]>;
   startupPreference: StartupPreference | null;
   baseUrl: string;
@@ -304,7 +305,7 @@ export default function DashboardView(props: DashboardViewProps) {
     // For same-workspace clicks, just select the session without workspace activation
     if (workspaceId === props.activeWorkspaceId) {
       void props.selectSession(sessionId);
-      props.setView("session", sessionId);
+      void props.openSessionInPreferredView(sessionId);
       return;
     }
     // For different workspace, activate workspace first
@@ -312,7 +313,7 @@ export default function DashboardView(props: DashboardViewProps) {
       void (async () => {
         await Promise.resolve(props.activateWorkspace(workspaceId));
         void props.selectSession(sessionId);
-        props.setView("session", sessionId);
+        void props.openSessionInPreferredView(sessionId);
       })();
     }, 0);
   };

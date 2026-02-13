@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -9,6 +10,8 @@ pub struct WorkspaceOpenworkConfig {
     pub authorized_roots: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reload: Option<WorkspaceOpenworkReload>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sessions: Option<HashMap<String, WorkspaceOpenworkSession>>,
 }
 
 impl Default for WorkspaceOpenworkConfig {
@@ -18,6 +21,7 @@ impl Default for WorkspaceOpenworkConfig {
             workspace: None,
             authorized_roots: Vec::new(),
             reload: None,
+            sessions: None,
         }
     }
 }
@@ -27,6 +31,13 @@ impl Default for WorkspaceOpenworkConfig {
 pub struct WorkspaceOpenworkReload {
     pub auto: Option<bool>,
     pub resume: Option<bool>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceOpenworkSession {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub view: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -57,6 +68,7 @@ impl WorkspaceOpenworkConfig {
             }),
             authorized_roots: vec![workspace_path.to_string()],
             reload: None,
+            sessions: None,
         }
     }
 }

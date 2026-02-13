@@ -2050,6 +2050,175 @@ export default function App() {
   const devtoolsCapabilities = createMemo(() => openworkServerCapabilities());
   const resolvedDevtoolsWorkspaceId = createMemo(() => devtoolsWorkspaceId() ?? openworkServerWorkspaceId());
 
+  type OpenworkSessionPrefs = { view?: View | null; [key: string]: unknown };
+
+  const normalizeStoredView = (value: unknown): View | null => {
+    switch (value) {
+      case "onboarding":
+      case "dashboard":
+      case "session":
+      case "proto":
+      case "document":
+      case "document-writer":
+        return value;
+      default:
+        return null;
+    }
+  };
+
+  const parseOpenworkSessionPrefs = (openwork: Record<string, unknown>): Record<string, OpenworkSessionPrefs> => {
+    const sessions = openwork.sessions;
+    if (!sessions || typeof sessions !== "object" || Array.isArray(sessions)) {
+      return {};
+    }
+
+    const next: Record<string, OpenworkSessionPrefs> = {};
+    for (const [sessionId, prefsValue] of Object.entries(sessions as Record<string, unknown>)) {
+      const trimmedId = sessionId.trim();
+      if (!trimmedId) continue;
+      if (!prefsValue || typeof prefsValue !== "object" || Array.isArray(prefsValue)) continue;
+
+      const prefs = { ...(prefsValue as Record<string, unknown>) } as OpenworkSessionPrefs;
+      const view = normalizeStoredView(prefs.view);
+      if (view) {
+        prefs.view = view;
+      } else {
+        delete prefs.view;
+      }
+      next[trimmedId] = prefs;
+    }
+
+    return next;
+  };
+
+  const [openworkSessionPrefsById, setOpenworkSessionPrefsById] = createSignal<Record<string, OpenworkSessionPrefs>>({});
+  const [openworkSessionPrefsLoaded, setOpenworkSessionPrefsLoaded] = createSignal(false);
+  const [openworkSessionPrefsWorkspaceId, setOpenworkSessionPrefsWorkspaceId] = createSignal<string | null>(null);
+  let openworkSessionPrefsLoadPromise: Promise<void> | null = null;
+
+  const getSessionPreferredView = (sessionId: string): View => {
+    const id = sessionId.trim();
+    if (!id) return "session";
+    const view = openworkSessionPrefsById()[id]?.view;
+    return view === "document-writer" ? "document-writer" : "session";
+  };
+
+  const ensureOpenworkSessionPrefsLoaded = async (): Promise<void> => {
+    const workspaceId = (openworkServerWorkspaceId() ?? "").trim();
+    if (!workspaceId) return;
+
+    const openworkClient = openworkServerClient();
+    const caps = resolvedOpenworkCapabilities();
+    const canRead = openworkServerStatus() === "connected" && openworkClient && (caps?.config?.read ?? false);
+
+    if (openworkSessionPrefsLoaded() && openworkSessionPrefsWorkspaceId() === workspaceId) {
+      return;
+    }
+
+    if (!canRead) {
+      setOpenworkSessionPrefsById({});
+      setOpenworkSessionPrefsWorkspaceId(workspaceId);
+      setOpenworkSessionPrefsLoaded(true);
+      return;
+    }
+
+    if (openworkSessionPrefsLoadPromise) {
+      await openworkSessionPrefsLoadPromise;
+      return;
+    }
+
+    const task = (async () => {
+      try {
+        const config = await openworkClient.getConfig(workspaceId);
+        if ((openworkServerWorkspaceId() ?? "").trim() !== workspaceId) return;
+        const openwork = config.openwork && typeof config.openwork === "object" ? (config.openwork as Record<string, unknown>) : {};
+        setOpenworkSessionPrefsById(parseOpenworkSessionPrefs(openwork));
+        setOpenworkSessionPrefsWorkspaceId(workspaceId);
+      } catch {
+        if ((openworkServerWorkspaceId() ?? "").trim() !== workspaceId) return;
+        setOpenworkSessionPrefsById({});
+        setOpenworkSessionPrefsWorkspaceId(workspaceId);
+      } finally {
+        if ((openworkServerWorkspaceId() ?? "").trim() === workspaceId) {
+          setOpenworkSessionPrefsLoaded(true);
+        }
+      }
+    })();
+
+    openworkSessionPrefsLoadPromise = task;
+    try {
+      await task;
+    } finally {
+      if (openworkSessionPrefsLoadPromise === task) {
+        openworkSessionPrefsLoadPromise = null;
+      }
+    }
+  };
+
+  const persistSessionPreferredView = async (sessionId: string, view: View): Promise<void> => {
+    const id = sessionId.trim();
+    if (!id) return;
+    if (view !== "document-writer") return;
+
+    const workspaceId = (openworkServerWorkspaceId() ?? "").trim();
+    const openworkClient = openworkServerClient();
+    const caps = resolvedOpenworkCapabilities();
+    const canWrite = openworkServerStatus() === "connected" && openworkClient && workspaceId && (caps?.config?.write ?? false);
+    if (!canWrite) return;
+
+    try {
+      await ensureOpenworkSessionPrefsLoaded();
+    } catch {
+      // ignore load failures; we'll proceed with an empty map below.
+    }
+
+    const currentWorkspaceId = (openworkServerWorkspaceId() ?? "").trim();
+    if (!currentWorkspaceId || currentWorkspaceId !== workspaceId) return;
+
+    const currentPrefs = openworkSessionPrefsById();
+    const existing = currentPrefs[id] ?? null;
+    if (existing?.view === view) return;
+
+    const nextPrefs = {
+      ...currentPrefs,
+      [id]: {
+        ...(existing ?? {}),
+        view,
+      },
+    } satisfies Record<string, OpenworkSessionPrefs>;
+
+    setOpenworkSessionPrefsById(nextPrefs);
+    setOpenworkSessionPrefsWorkspaceId(workspaceId);
+    setOpenworkSessionPrefsLoaded(true);
+
+    await openworkClient.patchConfig(workspaceId, {
+      openwork: {
+        sessions: nextPrefs as unknown as Record<string, unknown>,
+      },
+    });
+  };
+
+  const openSessionInPreferredView = async (sessionId: string): Promise<void> => {
+    const id = sessionId.trim();
+    if (!id) return;
+    try {
+      await ensureOpenworkSessionPrefsLoaded();
+    } catch {
+      // ignore
+    }
+    setView(getSessionPreferredView(id), id);
+  };
+
+  createEffect(() => {
+    const workspaceId = (openworkServerWorkspaceId() ?? "").trim();
+    setOpenworkSessionPrefsWorkspaceId(workspaceId || null);
+    setOpenworkSessionPrefsLoaded(false);
+    setOpenworkSessionPrefsById({});
+
+    if (!workspaceId) return;
+    void ensureOpenworkSessionPrefsLoaded().catch(() => undefined);
+  });
+
   function updateOpenworkServerSettings(next: OpenworkServerSettings) {
     const stored = writeOpenworkServerSettings(next);
     setOpenworkServerSettings(stored);
@@ -3843,6 +4012,10 @@ export default function App() {
         setSessionAgent(session.id, requestedAgent);
       }
 
+      if (nextView === "document-writer") {
+        persistSessionPreferredView(session.id, "document-writer").catch(() => undefined);
+      }
+
       // Now switch view AFTER session is selected
       mark("view set");
       // setSessionViewLockUntil(Date.now() + 1200);
@@ -4592,6 +4765,7 @@ export default function App() {
       submitProviderApiKey,
       view: currentView(),
       setView,
+      openSessionInPreferredView,
       startupPreference: startupPreference(),
       baseUrl: baseUrl(),
       clientConnected: Boolean(client()),
@@ -4801,6 +4975,7 @@ export default function App() {
   const sessionProps = () => ({
     selectedSessionId: activeSessionId(),
     setView,
+    openSessionInPreferredView,
     tab: tab(),
     setTab,
     setSettingsTab,

@@ -73,6 +73,7 @@ import MarkdownEditorSidebar from "../components/session/markdown-editor-sidebar
 export type SessionViewProps = {
   selectedSessionId: string | null;
   setView: (view: View, sessionId?: string) => void;
+  openSessionInPreferredView: (sessionId: string) => void | Promise<void>;
   tab: DashboardTab;
   setTab: (tab: DashboardTab) => void;
   setSettingsTab: (tab: SettingsTab) => void;
@@ -1342,14 +1343,14 @@ export default function SessionView(props: SessionViewProps) {
     // For same-workspace clicks, just select the session without workspace activation
     if (workspaceId === props.activeWorkspaceId) {
       void props.selectSession(sessionId);
-      props.setView("session", sessionId);
+      void props.openSessionInPreferredView(sessionId);
       return;
     }
     // For different workspace, activate workspace first
     void (async () => {
       await Promise.resolve(props.activateWorkspace(workspaceId));
       void props.selectSession(sessionId);
-      props.setView("session", sessionId);
+      void props.openSessionInPreferredView(sessionId);
     })();
   };
 

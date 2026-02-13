@@ -865,8 +865,20 @@ export function createOpenworkServerClient(options: { baseUrl: string; token?: s
     getConfig: (workspaceId: string) =>
       requestJson<{ opencode: Record<string, unknown>; openwork: Record<string, unknown>; updatedAt?: number | null }>(
         baseUrl,
-        `/workspace/${workspaceId}/config`,
+        `/workspace/${encodeURIComponent(workspaceId)}/config`,
         { token, hostToken, timeoutMs: timeouts.config },
+      ),
+    patchConfig: (workspaceId: string, payload: { opencode?: Record<string, unknown>; openwork?: Record<string, unknown> }) =>
+      requestJson<{ updatedAt?: number | null }>(
+        baseUrl,
+        `/workspace/${encodeURIComponent(workspaceId)}/config`,
+        {
+          token,
+          hostToken,
+          method: "PATCH",
+          body: payload,
+          timeoutMs: timeouts.config,
+        },
       ),
     setOwpenbotTelegramToken: (
       workspaceId: string,
@@ -1079,13 +1091,6 @@ export function createOpenworkServerClient(options: { baseUrl: string; token?: s
           body: { enabled, clearToken: options?.clearToken ?? false, healthPort: options?.healthPort ?? null },
         },
       ),
-    patchConfig: (workspaceId: string, payload: { opencode?: Record<string, unknown>; openwork?: Record<string, unknown> }) =>
-      requestJson<{ updatedAt?: number | null }>(baseUrl, `/workspace/${workspaceId}/config`, {
-        token,
-        hostToken,
-        method: "PATCH",
-        body: payload,
-      }),
     listReloadEvents: (workspaceId: string, options?: { since?: number }) => {
       const query = typeof options?.since === "number" ? `?since=${options.since}` : "";
       return requestJson<{ items: OpenworkReloadEvent[]; cursor?: number }>(

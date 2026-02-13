@@ -2361,6 +2361,7 @@ export function createWorkspaceStore(options: {
       workspace: existing?.workspace ?? null,
       authorizedRoots: nextRoots,
       reload: existing?.reload ?? null,
+      sessions: existing?.sessions ?? null,
     };
 
     await workspaceOpenworkWrite({ workspacePath: root, config: cfg });
@@ -2382,6 +2383,7 @@ export function createWorkspaceStore(options: {
         auto: Boolean(next.auto),
         resume: Boolean(next.resume),
       },
+      sessions: existing?.sessions ?? null,
     };
 
     await workspaceOpenworkWrite({ workspacePath: root, config: cfg });

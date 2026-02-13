@@ -175,6 +175,7 @@ export type WorkspaceOpenworkConfig = {
     auto?: boolean;
     resume?: boolean;
   } | null;
+  sessions?: Record<string, { view?: View | null }> | null;
 };
 
 export type SkillCard = {

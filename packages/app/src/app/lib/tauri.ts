@@ -285,6 +285,8 @@ export type OpencodeCommandDraft = {
   subtask?: boolean;
 };
 
+export type OpenworkSessionView = "onboarding" | "dashboard" | "session" | "proto" | "document" | "document-writer";
+
 export type WorkspaceOpenworkConfig = {
   version: number;
   workspace?: {
@@ -297,6 +299,7 @@ export type WorkspaceOpenworkConfig = {
     auto?: boolean;
     resume?: boolean;
   } | null;
+  sessions?: Record<string, { view?: OpenworkSessionView | null }> | null;
 };
 
 export async function workspaceOpenworkRead(input: {

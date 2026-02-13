@@ -62,19 +62,30 @@ If the workspace is currently using the OpenWork Document Writer UI, keep final 
 
 ### Step 2.5 — Build source material index (source-index.json)
 
-For each input `.docx` file (tender, historical bids, partner materials), run:
+Build and maintain a persistent index for all reference DOCX files.
+
+Prefer using the batch indexer script (it stores file hashes + headings and
+automatically refreshes changed files):
 
 ```bash
-python3 .opencode/skills/bid-drafting/scripts/copy_docx_section.py \
-  --source <file> --list-headings --json
+python3 .opencode/skills/bid-intake/scripts/update_source_index.py \
+  --index bids/<bid_id>/source-index.json \
+  .opencode/openwork/inbox/sessions/<sessionId>/refs
 ```
 
-Write results to `bids/<bid_id>/source-index.json`. Format:
+The index is keyed by workspace-relative file path and includes:
+- `sha256`, `size`, `mtimeMs` (cache invalidation)
+- `headings` (for cross-document copying / navigation)
+
+Format (per file):
 
 ```json
 {
   "path/to/历史标书A.docx": {
     "analyzedAt": "2026-02-13T10:30:00+08:00",
+    "sha256": "…",
+    "size": 123456,
+    "mtimeMs": 1700000000000,
     "headings": [
       { "level": 1, "text": "第一章 概述", "elementCount": 12 },
       { "level": 2, "text": "1.1 项目背景", "elementCount": 5 }

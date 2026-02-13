@@ -1,6 +1,6 @@
 import { For, Show, createEffect, createMemo, createResource, createSignal, onCleanup } from "solid-js";
 import type { Agent } from "@opencode-ai/sdk/v2/client";
-import { FileText, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw } from "lucide-solid";
+import { AtSign, ChevronDown, Download, FileText, Folder, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Trash2 } from "lucide-solid";
 import { useNavigate } from "@solidjs/router";
 
 import type { ComposerDraft, SlashCommandOption } from "../types";
@@ -15,6 +15,13 @@ type DocumentItem = {
   updatedAt: number;
   size: number;
   type: string;
+};
+
+type InboxItem = {
+  id: string;
+  path: string;
+  size: number;
+  updatedAt: number;
 };
 
 type OnlyOfficePayload = { documentServerUrl: string; config: any };
@@ -78,6 +85,11 @@ export default function DocumentWriterView(props: SessionViewProps) {
   const [documentsCollapsed, setDocumentsCollapsed] = createSignal(false);
   const [configSeq, setConfigSeq] = createSignal(0);
   const [lastSessionStatus, setLastSessionStatus] = createSignal(props.sessionStatus ?? "idle");
+  const [refsExpanded, setRefsExpanded] = createSignal<Record<string, boolean>>({});
+  const [refsBusy, setRefsBusy] = createSignal(false);
+  const [refsError, setRefsError] = createSignal<string | null>(null);
+  const [refsUploadProgress, setRefsUploadProgress] = createSignal<{ categoryId: string; done: number; total: number } | null>(null);
+  const [refsDeleteBusyId, setRefsDeleteBusyId] = createSignal<string | null>(null);
 
   const [documents, { refetch: refetchDocuments }] = createResource(apiConfig, async (cfg) => {
     if (!cfg) return [] as DocumentItem[];
@@ -85,6 +97,84 @@ export default function DocumentWriterView(props: SessionViewProps) {
     const data = (await fetchJson(url, cfg.token)) as { items?: DocumentItem[] };
     return Array.isArray(data.items) ? data.items : [];
   });
+
+  const REF_CATEGORIES = [
+    { id: "tender", label: "招标文件" },
+    { id: "templates", label: "模板/格式" },
+    { id: "business", label: "商务资料" },
+    { id: "technical", label: "技术资料" },
+    { id: "history", label: "历史标书" },
+    { id: "partners", label: "合作方材料" },
+    { id: "images", label: "图片/图纸" },
+    { id: "other", label: "其他" },
+  ] as const;
+
+  const refsInboxPrefix = createMemo(() => {
+    const id = sessionId();
+    if (!id) return "";
+    return `sessions/${id}/refs`;
+  });
+
+  const refsWorkspaceRoot = createMemo(() => {
+    const prefix = refsInboxPrefix();
+    if (!prefix) return "";
+    return `.opencode/openwork/inbox/${prefix}`;
+  });
+
+  const refsFetchInput = createMemo(() => {
+    const client = props.openworkServerClient;
+    const w = workspaceId();
+    const prefix = refsInboxPrefix();
+    if (!client || !w || !prefix) return null;
+    if (props.openworkServerStatus !== "connected") return null;
+    return { client, workspaceId: w, prefix };
+  });
+
+  const [refs, { refetch: refetchRefs }] = createResource(refsFetchInput, async (input) => {
+    if (!input) return [] as InboxItem[];
+    const data = await input.client.listInbox(input.workspaceId, { prefix: input.prefix });
+    return Array.isArray(data.items) ? (data.items as InboxItem[]) : [];
+  });
+
+  const refsByCategory = createMemo(() => {
+    const items = refs() ?? [];
+    const prefix = refsInboxPrefix();
+    const result: Record<string, InboxItem[]> = Object.fromEntries(REF_CATEGORIES.map((c) => [c.id, []]));
+    if (!prefix) return result;
+
+    const rootPrefix = `${prefix}/`;
+    for (const item of items) {
+      if (!item.path.startsWith(rootPrefix)) continue;
+      const remainder = item.path.slice(rootPrefix.length);
+      const categoryId = remainder.split("/")[0] ?? "";
+      if (!categoryId) continue;
+      const bucket = result[categoryId];
+      if (bucket) bucket.push(item);
+      else result.other.push(item);
+    }
+
+    for (const list of Object.values(result)) {
+      list.sort((a, b) => b.updatedAt - a.updatedAt);
+    }
+    return result;
+  });
+
+  const formatBytes = (bytes: number) => {
+    if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+    const units = ["B", "KB", "MB", "GB"];
+    let value = bytes;
+    let idx = 0;
+    while (value >= 1024 && idx < units.length - 1) {
+      value /= 1024;
+      idx += 1;
+    }
+    const shown = idx === 0 ? String(Math.trunc(value)) : value.toFixed(value >= 10 ? 1 : 2);
+    return `${shown} ${units[idx]}`;
+  };
+
+  const toggleRefsCategory = (categoryId: string) => {
+    setRefsExpanded((current) => ({ ...current, [categoryId]: !current[categoryId] }));
+  };
 
   const editorSource = createMemo(() => {
     const cfg = apiConfig();
@@ -123,6 +213,83 @@ export default function DocumentWriterView(props: SessionViewProps) {
     await fetchJson(url, cfg.token, { method: "POST", body: formData });
     input.value = "";
     await refetchDocuments();
+  };
+
+  const uploadReferenceFiles = async (categoryId: string, files: File[]) => {
+    const client = props.openworkServerClient;
+    const w = workspaceId();
+    const prefix = refsInboxPrefix();
+    if (!client || !w || !prefix) return;
+    if (!files.length) return;
+    if (refsBusy()) return;
+    setRefsBusy(true);
+    setRefsError(null);
+    setRefsUploadProgress({ categoryId, done: 0, total: files.length });
+    try {
+      let done = 0;
+      for (const file of files) {
+        const dest = `${prefix}/${categoryId}/${file.name}`;
+        await client.uploadInbox(w, file, { path: dest });
+        done += 1;
+        setRefsUploadProgress({ categoryId, done, total: files.length });
+      }
+      await refetchRefs();
+      setRefsExpanded((current) => ({ ...current, [categoryId]: true }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to upload files";
+      setRefsError(message);
+    } finally {
+      setRefsUploadProgress(null);
+      setRefsBusy(false);
+    }
+  };
+
+  const deleteReferenceFile = async (item: InboxItem) => {
+    const client = props.openworkServerClient;
+    const w = workspaceId();
+    if (!client || !w) return;
+    if (refsDeleteBusyId()) return;
+    const ok = window.confirm(`Delete from reference library?\n\n${item.path}`);
+    if (!ok) return;
+    setRefsDeleteBusyId(item.id);
+    setRefsError(null);
+    try {
+      await client.deleteInbox(w, item.id);
+      await refetchRefs();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to delete file";
+      setRefsError(message);
+    } finally {
+      setRefsDeleteBusyId(null);
+    }
+  };
+
+  const downloadReferenceFile = async (item: InboxItem) => {
+    const client = props.openworkServerClient;
+    const w = workspaceId();
+    if (!client || !w) return;
+    try {
+      const result = await client.downloadInbox(w, item.id);
+      const blob = new Blob([result.data], { type: result.contentType ?? "application/octet-stream" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = result.filename ?? item.path.split("/").pop() ?? "download";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to download file";
+      setRefsError(message);
+    }
+  };
+
+  const insertRefInPrompt = (workspaceRelativePath: string) => {
+    const tag = `@${workspaceRelativePath}`;
+    const existing = props.prompt.trim();
+    const next = existing ? `${existing}\n\n${tag}\n` : `${tag}\n`;
+    props.setPrompt(next);
   };
 
   const activeDocPath = createMemo(() => {
@@ -366,6 +533,155 @@ export default function DocumentWriterView(props: SessionViewProps) {
                 </For>
               </Show>
             </Show>
+          </Show>
+
+          <Show when={!documentsCollapsed()}>
+            <div class="mt-3 pt-3 border-t border-dls-border">
+              <div class="flex items-center justify-between px-2">
+                <div class="text-[10px] uppercase tracking-wider text-dls-secondary">Reference materials</div>
+                <button
+                  type="button"
+                  class="p-1.5 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
+                  onClick={() => void refetchRefs()}
+                  disabled={!serverReady() || refs.loading}
+                  title="Refresh reference files"
+                  aria-label="Refresh reference files"
+                >
+                  <RefreshCw size={14} class={refs.loading ? "animate-spin" : ""} />
+                </button>
+              </div>
+
+              <Show when={refsError()}>
+                <div class="mt-2 px-2 text-xs text-red-11 whitespace-pre-wrap break-words">{refsError()}</div>
+              </Show>
+
+              <Show when={refsWorkspaceRoot()}>
+                <button
+                  type="button"
+                  class="mt-2 mx-2 w-[calc(100%-16px)] rounded-md border border-dls-border bg-dls-surface px-2 py-1 text-[11px] text-dls-secondary hover:text-dls-text hover:bg-dls-hover flex items-center gap-2"
+                  onClick={() => insertRefInPrompt(refsWorkspaceRoot() + "/")}
+                  title="Insert reference library root (directory) into the prompt"
+                >
+                  <Folder size={14} />
+                  <span class="truncate">{refsWorkspaceRoot()}/</span>
+                  <span class="ml-auto text-[10px] text-dls-secondary flex items-center gap-1">
+                    <AtSign size={12} />
+                    Use
+                  </span>
+                </button>
+              </Show>
+
+              <Show when={refsUploadProgress()}>
+                <div class="mt-2 px-2 text-[11px] text-dls-secondary">
+                  Uploading <span class="text-dls-text">{refsUploadProgress()!.categoryId}</span>: {refsUploadProgress()!.done}/{refsUploadProgress()!.total}
+                </div>
+              </Show>
+
+              <div class="mt-2 space-y-2">
+                <For each={REF_CATEGORIES}>
+                  {(category) => {
+                    const expanded = () => Boolean(refsExpanded()[category.id]);
+                    const items = () => refsByCategory()[category.id] ?? [];
+                    return (
+                      <div class="rounded-lg border border-dls-border bg-dls-surface">
+                        <div class="flex items-center justify-between px-2 py-1.5">
+                          <button
+                            type="button"
+                            class="flex items-center gap-2 min-w-0 text-left flex-1 hover:text-dls-text text-dls-secondary"
+                            onClick={() => toggleRefsCategory(category.id)}
+                            aria-expanded={expanded()}
+                          >
+                            <ChevronDown
+                              size={14}
+                              class={`shrink-0 transition-transform ${expanded() ? "rotate-180" : ""}`}
+                            />
+                            <span class="truncate text-[12px]">{category.label}</span>
+                            <span class="ml-auto text-[10px] text-dls-secondary">{items().length}</span>
+                          </button>
+                          <label
+                            class={`ml-2 cursor-pointer p-1.5 rounded hover:bg-dls-hover ${
+                              !serverReady() || refsBusy() ? "opacity-50 cursor-not-allowed" : ""
+                            }`}
+                            title={`Upload to ${category.label}`}
+                          >
+                            <Plus size={14} class="text-dls-secondary" />
+                            <input
+                              type="file"
+                              multiple
+                              class="hidden"
+                              disabled={!serverReady() || refsBusy()}
+                              onChange={(event: Event) => {
+                                const target = event.currentTarget as HTMLInputElement;
+                                const files = Array.from(target.files ?? []);
+                                if (files.length) void uploadReferenceFiles(category.id, files);
+                                target.value = "";
+                              }}
+                            />
+                          </label>
+                        </div>
+
+                        <Show when={expanded()}>
+                          <div class="px-2 pb-2 space-y-1">
+                            <Show when={items().length > 0} fallback={<div class="py-1 text-[11px] text-dls-secondary">No files.</div>}>
+                              <For each={items()}>
+                                {(item) => {
+                                  const workspacePath = () => `.opencode/openwork/inbox/${item.path}`;
+                                  const name = () => item.path.split("/").pop() ?? item.path;
+                                  return (
+                                    <div class="flex items-center gap-2 rounded-md px-2 py-1 hover:bg-dls-hover">
+                                      <FileText size={14} class="text-dls-secondary shrink-0" />
+                                      <button
+                                        type="button"
+                                        class="min-w-0 flex-1 text-left"
+                                        onClick={() => insertRefInPrompt(workspacePath())}
+                                        title={workspacePath()}
+                                      >
+                                        <div class="text-[12px] text-dls-text truncate">{name()}</div>
+                                        <div class="text-[10px] text-dls-secondary">
+                                          {formatBytes(item.size)}
+                                        </div>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        class="p-1.5 rounded hover:bg-dls-active text-dls-secondary hover:text-dls-text"
+                                        onClick={() => insertRefInPrompt(workspacePath())}
+                                        title="Use in prompt"
+                                        aria-label="Use in prompt"
+                                      >
+                                        <AtSign size={14} />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        class="p-1.5 rounded hover:bg-dls-active text-dls-secondary hover:text-dls-text"
+                                        onClick={() => void downloadReferenceFile(item)}
+                                        title="Download"
+                                        aria-label="Download"
+                                      >
+                                        <Download size={14} />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        class="p-1.5 rounded hover:bg-dls-active text-dls-secondary hover:text-red-11 disabled:opacity-50"
+                                        onClick={() => void deleteReferenceFile(item)}
+                                        disabled={refsDeleteBusyId() === item.id}
+                                        title="Delete"
+                                        aria-label="Delete"
+                                      >
+                                        <Trash2 size={14} />
+                                      </button>
+                                    </div>
+                                  );
+                                }}
+                              </For>
+                            </Show>
+                          </div>
+                        </Show>
+                      </div>
+                    );
+                  }}
+                </For>
+              </div>
+            </div>
           </Show>
         </div>
       </div>

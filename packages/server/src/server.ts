@@ -1,4 +1,4 @@
-import { readFile, writeFile, rm, readdir, rename, stat } from "node:fs/promises";
+import { readFile, writeFile, rm, readdir, rename, stat, unlink } from "node:fs/promises";
 import { homedir, hostname } from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import type { ApprovalRequest, Capabilities, ServerConfig, WorkspaceInfo, Actor, ReloadReason, ReloadTrigger, TokenScope } from "./types.js";
@@ -995,6 +995,80 @@ async function listArtifacts(outboxRoot: string): Promise<Array<{ id: string; pa
 
   try {
     await walk(rootResolved);
+  } catch {
+    return [];
+  }
+
+  items.sort((a, b) => b.updatedAt - a.updatedAt);
+  return items;
+}
+
+function encodeInboxId(path: string): string {
+  return Buffer.from(path, "utf8").toString("base64url");
+}
+
+function decodeInboxId(id: string): string {
+  const raw = (id ?? "").trim();
+  if (!raw) {
+    throw new ApiError(400, "invalid_inbox_file", "Inbox file id is required");
+  }
+  try {
+    const decoded = Buffer.from(raw, "base64url").toString("utf8");
+    return normalizeWorkspaceRelativePath(decoded, { allowSubdirs: true });
+  } catch {
+    throw new ApiError(400, "invalid_inbox_file", "Inbox file id is invalid");
+  }
+}
+
+async function listInboxFiles(
+  inboxRoot: string,
+  options?: { prefix?: string },
+): Promise<Array<{ id: string; path: string; size: number; updatedAt: number }>> {
+  const rootResolved = resolve(inboxRoot);
+  if (!(await exists(rootResolved))) return [];
+
+  const rawPrefix = (options?.prefix ?? "").trim();
+  const prefix = rawPrefix ? normalizeWorkspaceRelativePath(rawPrefix, { allowSubdirs: true }) : "";
+  const startRoot = prefix ? resolveSafeChildPath(rootResolved, prefix) : rootResolved;
+  if (!(await exists(startRoot))) return [];
+
+  const items: Array<{ id: string; path: string; size: number; updatedAt: number }> = [];
+
+  const recordFile = async (abs: string, rel: string) => {
+    const info = await stat(abs);
+    items.push({
+      id: encodeInboxId(rel),
+      path: rel,
+      size: info.size,
+      updatedAt: info.mtimeMs,
+    });
+  };
+
+  const walk = async (dir: string) => {
+    const entries = await readdir(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const abs = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await walk(abs);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      const relWithinStart = relative(startRoot, abs);
+      const rel = normalizeWorkspaceRelativePath(prefix ? join(prefix, relWithinStart) : relWithinStart, {
+        allowSubdirs: true,
+      });
+      await recordFile(abs, rel);
+    }
+  };
+
+  try {
+    const info = await stat(startRoot);
+    if (info.isFile()) {
+      const rel = normalizeWorkspaceRelativePath(prefix, { allowSubdirs: true });
+      await recordFile(startRoot, rel);
+    } else {
+      await walk(startRoot);
+    }
   } catch {
     return [];
   }
@@ -2225,6 +2299,81 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
     });
 
     return jsonResponse({ ok: true, path: relativePath, bytes: file.size });
+  });
+
+  addRoute(routes, "GET", "/workspace/:id/inbox", "client", async (ctx) => {
+    const workspace = await resolveWorkspace(config, ctx.params.id);
+    if (!resolveInboxEnabled()) {
+      return jsonResponse({ items: [] });
+    }
+    const inboxRoot = resolveInboxDir(workspace.path);
+    const prefix = (ctx.url.searchParams.get("prefix") ?? "").trim();
+    const items = await listInboxFiles(inboxRoot, { prefix });
+    return jsonResponse({ items });
+  });
+
+  addRoute(routes, "GET", "/workspace/:id/inbox/:inboxId", "client", async (ctx) => {
+    const workspace = await resolveWorkspace(config, ctx.params.id);
+    if (!resolveInboxEnabled()) {
+      throw new ApiError(404, "inbox_disabled", "Workspace inbox is disabled");
+    }
+    const inboxRoot = resolveInboxDir(workspace.path);
+    const relativePath = decodeInboxId(ctx.params.inboxId);
+    const absPath = resolveSafeChildPath(inboxRoot, relativePath);
+    if (!(await exists(absPath))) {
+      throw new ApiError(404, "inbox_file_not_found", "Inbox file not found");
+    }
+    const info = await stat(absPath);
+    if (!info.isFile()) {
+      throw new ApiError(404, "inbox_file_not_found", "Inbox file not found");
+    }
+
+    const file = (Bun as any).file(absPath);
+    const headers = new Headers();
+    headers.set("Content-Type", file.type || "application/octet-stream");
+    headers.set("Content-Length", String(info.size));
+    headers.set("Content-Disposition", `attachment; filename="${basename(relativePath)}"`);
+    return new Response(file, { status: 200, headers });
+  });
+
+  addRoute(routes, "DELETE", "/workspace/:id/inbox/:inboxId", "client", async (ctx) => {
+    ensureWritable(config);
+    requireClientScope(ctx, "collaborator");
+    const workspace = await resolveWorkspace(config, ctx.params.id);
+    if (!resolveInboxEnabled()) {
+      throw new ApiError(404, "inbox_disabled", "Workspace inbox is disabled");
+    }
+    const inboxRoot = resolveInboxDir(workspace.path);
+    const relativePath = decodeInboxId(ctx.params.inboxId);
+    const absPath = resolveSafeChildPath(inboxRoot, relativePath);
+    if (!(await exists(absPath))) {
+      return jsonResponse({ ok: true });
+    }
+    const info = await stat(absPath);
+    if (!info.isFile()) {
+      throw new ApiError(404, "inbox_file_not_found", "Inbox file not found");
+    }
+
+    await requireApproval(ctx, {
+      workspaceId: workspace.id,
+      action: "workspace.inbox.delete",
+      summary: `Delete ${relativePath} from inbox`,
+      paths: [absPath],
+    });
+
+    await unlink(absPath);
+
+    await recordAudit(workspace.path, {
+      id: shortId(),
+      workspaceId: workspace.id,
+      actor: ctx.actor ?? { type: "remote" },
+      action: "workspace.inbox.delete",
+      target: absPath,
+      summary: `Deleted ${relativePath} from inbox`,
+      timestamp: Date.now(),
+    });
+
+    return jsonResponse({ ok: true });
   });
 
   addRoute(routes, "GET", "/workspace/:id/artifacts", "client", async (ctx) => {

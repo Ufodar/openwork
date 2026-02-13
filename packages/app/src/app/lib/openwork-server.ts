@@ -347,6 +347,17 @@ export type OpenworkArtifactList = {
   items: OpenworkArtifactItem[];
 };
 
+export type OpenworkInboxItem = {
+  id: string;
+  path: string;
+  size: number;
+  updatedAt: number;
+};
+
+export type OpenworkInboxList = {
+  items: OpenworkInboxItem[];
+};
+
 type RawJsonResponse<T> = {
   ok: boolean;
   status: number;
@@ -1266,6 +1277,30 @@ export function createOpenworkServerClient(options: { baseUrl: string; token?: s
 
       return result.text;
     },
+
+    listInbox: (workspaceId: string, options?: { prefix?: string }) => {
+      const prefix = options?.prefix?.trim();
+      const query = prefix ? `?prefix=${encodeURIComponent(prefix)}` : "";
+      return requestJson<OpenworkInboxList>(
+        baseUrl,
+        `/workspace/${encodeURIComponent(workspaceId)}/inbox${query}`,
+        { token, hostToken },
+      );
+    },
+
+    downloadInbox: (workspaceId: string, inboxId: string) =>
+      requestBinary(
+        baseUrl,
+        `/workspace/${encodeURIComponent(workspaceId)}/inbox/${encodeURIComponent(inboxId)}`,
+        { token, hostToken, timeoutMs: timeouts.binary },
+      ),
+
+    deleteInbox: (workspaceId: string, inboxId: string) =>
+      requestJson<{ ok: boolean }>(
+        baseUrl,
+        `/workspace/${encodeURIComponent(workspaceId)}/inbox/${encodeURIComponent(inboxId)}`,
+        { token, hostToken, method: "DELETE" },
+      ),
 
     readWorkspaceFile: (workspaceId: string, path: string) =>
       requestJson<OpenworkWorkspaceFileContent>(

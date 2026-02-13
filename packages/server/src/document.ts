@@ -253,6 +253,8 @@ export function createDocumentRoutes(routes: unknown[]) {
             const workspaceId = ctx.params.id;
             const docName = ctx.url.searchParams.get("doc");
             if (!docName) throw new ApiError(400, "invalid_request", "Document name is required");
+            const readonlyParam = (ctx.url.searchParams.get("readonly") ?? "").trim().toLowerCase();
+            const readOnly = readonlyParam === "1" || readonlyParam === "true" || readonlyParam === "yes";
 
             const workspace = ctx.config.workspaces.find((w: WorkspaceInfo) => w.id === workspaceId);
             if (!workspace) throw new ApiError(404, "not_found", "Workspace not found");
@@ -268,6 +270,7 @@ export function createDocumentRoutes(routes: unknown[]) {
             const stats = await stat(filePath);
             const key = createHash("sha256").update(`${docName}:${stats.mtimeMs}`).digest("hex");
 
+            const canEdit = !readOnly;
             const config: OnlyOfficeConfig = {
                 document: {
                     fileType: extname(docName).slice(1).toLowerCase(),
@@ -276,9 +279,9 @@ export function createDocumentRoutes(routes: unknown[]) {
                     url: getDownloadUrl(ctx.config.host, ctx.config.port, workspaceId, encodeURIComponent(docName)),
                     permissions: {
                         download: true,
-                        edit: true,
+                        edit: canEdit,
                         print: true,
-                        review: true,
+                        review: canEdit,
                     },
                 },
                 documentType: getDocumentType(docName),
@@ -288,11 +291,11 @@ export function createDocumentRoutes(routes: unknown[]) {
                         id: ctx.actor?.clientId || "anonymous",
                         name: "AI User", // TODO: Get actual user name
                     },
-                    mode: "edit",
+                    mode: canEdit ? "edit" : "view",
                     lang: "en",
                     customization: {
-                        autosave: true,
-                        forcesave: true,
+                        autosave: canEdit,
+                        forcesave: canEdit,
                     },
                 },
             };
@@ -372,6 +375,7 @@ export function createDocumentRoutes(routes: unknown[]) {
 
             // value 2 = ready for saving, 6 = force save
             if (body.status === 2 || body.status === 6) {
+                console.log("你要保存啦！！！！！Callback received for document:", docName, "Status:", body.status);
                 if (body.url) {
                     try {
                         const resp = await fetch(body.url);

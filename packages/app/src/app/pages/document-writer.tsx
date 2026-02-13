@@ -18,12 +18,21 @@ type DocumentItem = {
 };
 
 type OnlyOfficePayload = { documentServerUrl: string; config: any };
+type EditorSource = {
+  baseUrl: string;
+  token: string;
+  workspaceId: string;
+  doc: string;
+  seq: number;
+  readonly: boolean;
+};
 
 export default function DocumentWriterView(props: SessionViewProps) {
   const navigate = useNavigate();
 
   const sessionId = createMemo(() => props.selectedSessionId?.trim() ?? "");
   const workspaceId = createMemo(() => props.openworkServerWorkspaceId?.trim() ?? "");
+  const isAgentRunning = createMemo(() => (props.sessionStatus ?? "idle") === "running");
 
   const serverReady = createMemo(
     () =>
@@ -81,13 +90,16 @@ export default function DocumentWriterView(props: SessionViewProps) {
     const cfg = apiConfig();
     const doc = selectedDoc();
     if (!cfg || !doc) return null;
-    return { ...cfg, doc, seq: configSeq() };
+    return { ...cfg, doc, seq: configSeq(), readonly: isAgentRunning() } satisfies EditorSource;
   });
 
   const [editorPayload] = createResource(editorSource, async (input): Promise<OnlyOfficePayload | null> => {
     if (!input) return null;
     const query = new URLSearchParams();
     query.set("doc", input.doc);
+    if (input.readonly) {
+      query.set("readonly", "1");
+    }
     const url = buildUrl(input.baseUrl, input.workspaceId, "/document/config", query);
     const data = (await fetchJson(url, input.token)) as any;
     if (data && typeof data.documentServerUrl === "string" && data.config) {
@@ -118,6 +130,15 @@ export default function DocumentWriterView(props: SessionViewProps) {
     if (!doc) return "";
     const normalized = doc.trim().replace(/^\/+/, "");
     return normalized ? `documents/${normalized}` : "";
+  });
+
+  let editorLockRef: HTMLDivElement | undefined;
+  createEffect(() => {
+    if (!isAgentRunning()) return;
+    if (!selectedDoc()) return;
+    const active = document.activeElement as HTMLElement | null;
+    active?.blur?.();
+    queueMicrotask(() => editorLockRef?.focus?.());
   });
 
   createEffect(() => {
@@ -416,17 +437,35 @@ export default function DocumentWriterView(props: SessionViewProps) {
           </div>
         </div>
 
-        <div class="flex-1 min-h-0 overflow-hidden">
+      <div class="flex-1 min-h-0 overflow-hidden">
           <Show
             when={selectedDoc()}
             fallback={<div class="h-full flex items-center justify-center text-dls-secondary">Select a document to edit</div>}
           >
-            <Show when={editorPayload()} fallback={<div class="p-4 text-xs text-dls-secondary">Loading editor...</div>}>
-              <OnlyOfficeEditor
-                documentServerUrl={editorPayload()!.documentServerUrl}
-                config={editorPayload()!.config}
-              />
-            </Show>
+            <div class="relative h-full w-full">
+              <Show when={editorPayload()} fallback={<div class="p-4 text-xs text-dls-secondary">Loading editor...</div>}>
+                <OnlyOfficeEditor
+                  documentServerUrl={editorPayload()!.documentServerUrl}
+                  config={editorPayload()!.config}
+                />
+              </Show>
+              <Show when={isAgentRunning()}>
+                <div
+                  ref={editorLockRef}
+                  tabIndex={-1}
+                  class="absolute inset-0 flex items-center justify-center bg-dls-surface/70 backdrop-blur-sm"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <div class="max-w-sm rounded-xl border border-dls-border bg-dls-surface px-4 py-3 shadow-lg text-center">
+                    <div class="text-sm font-medium text-dls-text">AI is editing…</div>
+                    <div class="mt-1 text-xs text-dls-secondary">
+                      Editing is temporarily locked to prevent conflicts. The document will reload when the run finishes.
+                    </div>
+                  </div>
+                </div>
+              </Show>
+            </div>
           </Show>
         </div>
       </div>

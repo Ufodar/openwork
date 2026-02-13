@@ -650,8 +650,13 @@ def _copy_images(source_zip: zipfile.ZipFile, work_dir: str,
             new_rel.set("Type", image_type)
             new_rel.set("Target", dest_target)
 
-    # Write updated rels
-    target_rels_tree.write(target_rels_path, xml_declaration=True, encoding="UTF-8")
+    # Write updated rels. Use the default namespace (no prefixes) to match
+    # Word/OOXML conventions and minimize compatibility risk.
+    ET.register_namespace("", rels_ns)
+    try:
+        target_rels_tree.write(target_rels_path, xml_declaration=True, encoding="UTF-8")
+    finally:
+        ET.register_namespace("pr", rels_ns)
 
     return copied, warnings
 
@@ -702,7 +707,12 @@ def _update_content_types(work_dir: str) -> None:
                 elem.set("ContentType", ext_mime[ext])
                 existing_exts.add(ext)
 
-    tree.write(ct_path, xml_declaration=True, encoding="UTF-8")
+    # Write using the default namespace (no prefixes) to match OOXML conventions.
+    ET.register_namespace("", ct_ns)
+    try:
+        tree.write(ct_path, xml_declaration=True, encoding="UTF-8")
+    finally:
+        ET.register_namespace("ct", ct_ns)
 
 
 # ---------------------------------------------------------------------------
@@ -831,6 +841,19 @@ def _copy_section_impl(source_zip: zipfile.ZipFile, source_path: str,
         rtype = info.get("Type", "")
         if rtype not in allowed_rel_types:
             unsupported[rid] = rtype or "unknown relationship type"
+            continue
+
+        # Disallow external/linked images. We only support embedded images that
+        # exist as parts inside the DOCX package.
+        if rtype == image_type:
+            target_mode = (info.get("TargetMode") or "").strip()
+            target = (info.get("Target") or "").strip()
+            if target_mode.lower() == "external" or target.startswith(("http://", "https://")):
+                unsupported[rid] = f"{rtype} (external target)"
+                continue
+            if target.startswith("../../") or target.startswith("..\\.."):
+                unsupported[rid] = f"{rtype} (suspicious relative target: {target})"
+                continue
 
     if unsupported:
         details = "; ".join(f"{rid}:{rtype}" for rid, rtype in list(unsupported.items())[:12])

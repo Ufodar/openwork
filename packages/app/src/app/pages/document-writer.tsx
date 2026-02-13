@@ -1,6 +1,6 @@
 import { For, Show, createEffect, createMemo, createResource, createSignal, onCleanup } from "solid-js";
 import type { Agent } from "@opencode-ai/sdk/v2/client";
-import { AtSign, ChevronDown, Download, FileText, Folder, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Trash2 } from "lucide-solid";
+import { ArrowRight, AtSign, ChevronDown, Download, FileText, Folder, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Trash2 } from "lucide-solid";
 import { useNavigate } from "@solidjs/router";
 
 import type { ComposerDraft, SlashCommandOption } from "../types";
@@ -93,6 +93,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
   const [refsError, setRefsError] = createSignal<string | null>(null);
   const [refsUploadProgress, setRefsUploadProgress] = createSignal<{ categoryId: string; done: number; total: number } | null>(null);
   const [refsDeleteBusyId, setRefsDeleteBusyId] = createSignal<string | null>(null);
+  const [refsOpenBusyId, setRefsOpenBusyId] = createSignal<string | null>(null);
 
   const [documents, { refetch: refetchDocuments }] = createResource(apiConfig, async (cfg) => {
     if (!cfg) return [] as DocumentItem[];
@@ -300,6 +301,31 @@ export default function DocumentWriterView(props: SessionViewProps) {
     props.setPrompt(next);
   };
 
+  const openReferenceInEditor = async (item: InboxItem) => {
+    const cfg = apiConfig();
+    if (!cfg) return;
+    if (refsOpenBusyId()) return;
+    setRefsOpenBusyId(item.id);
+    setRefsError(null);
+    try {
+      const query = new URLSearchParams();
+      query.set("inboxId", item.id);
+      query.set("session", cfg.sessionId);
+      const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/import", query);
+      const result = (await fetchJson(url, cfg.token, { method: "POST" })) as { doc?: string };
+      const doc = typeof result?.doc === "string" ? result.doc.trim() : "";
+      if (!doc) throw new Error("Failed to import document");
+      setSelectedDoc(doc);
+      await refetchDocuments();
+      setConfigSeq((v) => v + 1);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to open file in editor";
+      setRefsError(message);
+    } finally {
+      setRefsOpenBusyId(null);
+    }
+  };
+
   const activeDocPath = createMemo(() => {
     const doc = selectedDoc();
     if (!doc) return "";
@@ -406,7 +432,26 @@ export default function DocumentWriterView(props: SessionViewProps) {
   };
 
   const handleSendPrompt = (draft: ComposerDraft) => {
-    props.sendPromptAsync(draft).catch(() => undefined);
+    const path = activeDocPath();
+    const shouldPrefix = draft.mode === "prompt" && !draft.command && Boolean(path);
+    if (!shouldPrefix) {
+      props.sendPromptAsync(draft).catch(() => undefined);
+      return;
+    }
+
+    const prefix = `Target document: ${path}`;
+    const baseText = draft.text ?? "";
+    const baseResolvedText = draft.resolvedText ?? null;
+    const already =
+      baseText.includes(prefix) || (typeof baseResolvedText === "string" ? baseResolvedText.includes(prefix) : false);
+    const nextDraft = already
+      ? draft
+      : {
+          ...draft,
+          text: `${prefix}\n\n${baseText}`.trim(),
+          resolvedText: baseResolvedText != null ? `${prefix}\n\n${baseResolvedText}`.trim() : undefined,
+        };
+    props.sendPromptAsync(nextDraft).catch(() => undefined);
   };
 
   const listCommands = async (): Promise<SlashCommandOption[]> => {
@@ -665,6 +710,16 @@ export default function DocumentWriterView(props: SessionViewProps) {
                                         aria-label="Use in prompt"
                                       >
                                         <AtSign size={14} />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        class="p-1.5 rounded hover:bg-dls-active text-dls-secondary hover:text-dls-text disabled:opacity-50"
+                                        onClick={() => void openReferenceInEditor(item)}
+                                        disabled={!serverReady() || refsOpenBusyId() === item.id}
+                                        title="Open in editor"
+                                        aria-label="Open in editor"
+                                      >
+                                        <ArrowRight size={14} />
                                       </button>
                                       <button
                                         type="button"

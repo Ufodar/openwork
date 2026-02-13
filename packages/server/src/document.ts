@@ -1,5 +1,5 @@
-import { readFile, writeFile, readdir, stat } from "node:fs/promises";
-import { join, resolve, relative, basename, extname, isAbsolute } from "node:path";
+import { copyFile, readFile, writeFile, readdir, stat } from "node:fs/promises";
+import { dirname, join, resolve, relative, basename, extname, isAbsolute } from "node:path";
 import { createHash } from "node:crypto";
 import jwt from "jsonwebtoken";
 import type { ServerConfig, WorkspaceInfo, Actor } from "./types.js";
@@ -157,6 +157,22 @@ function resolveDocumentsDir(workspacePath: string, sessionId?: string | null): 
     return join(root, "sessions", sessionId);
 }
 
+function resolveInboxDir(workspacePath: string): string {
+    return join(workspacePath, ".opencode", "openwork", "inbox");
+}
+
+function decodeInboxId(id: string): string {
+    const raw = (id ?? "").trim();
+    if (!raw) {
+        throw new ApiError(400, "invalid_inbox_file", "Inbox file id is required");
+    }
+    try {
+        return Buffer.from(raw, "base64url").toString("utf8");
+    } catch {
+        throw new ApiError(400, "invalid_inbox_file", "Inbox file id is invalid");
+    }
+}
+
 function resolveDocumentPathSafe(docsDir: string, relPath: string): string {
     const root = resolve(docsDir);
     const trimmed = relPath.trim();
@@ -260,6 +276,66 @@ export function createDocumentRoutes(routes: unknown[]) {
             await walk(docsDir);
             docs.sort((a, b) => b.updatedAt - a.updatedAt);
             return jsonResponse({ items: docs });
+        },
+    });
+
+    // Import a file from the workspace inbox into documents (so it can be opened in OnlyOffice)
+    routes.push({
+        method: "POST",
+        regex: /^\/w\/([^/]+)\/document\/import$/,
+        keys: ["id"],
+        auth: "client",
+        handler: async (ctx: RequestContext) => {
+            const workspaceId = ctx.params.id;
+            const inboxId = ctx.url.searchParams.get("inboxId");
+            if (!inboxId) throw new ApiError(400, "invalid_request", "inboxId is required");
+            const sessionId = parseDocumentSessionId(ctx.url.searchParams.get("session"));
+
+            const workspace = ctx.config.workspaces.find((w: WorkspaceInfo) => w.id === workspaceId);
+            if (!workspace) throw new ApiError(404, "not_found", "Workspace not found");
+
+            const inboxRoot = resolveInboxDir(workspace.path);
+            const decoded = decodeInboxId(inboxId);
+            const inboxAbs = resolveDocumentPathSafe(inboxRoot, decoded);
+            if (!(await exists(inboxAbs))) throw new ApiError(404, "not_found", "Inbox file not found");
+
+            const inboxInfo = await stat(inboxAbs);
+            if (!inboxInfo.isFile()) throw new ApiError(404, "not_found", "Inbox file not found");
+
+            const inboxRel = relative(resolve(inboxRoot), inboxAbs).replace(/\\/g, "/");
+            const docsDir = resolveDocumentsDir(workspace.path, sessionId);
+            await ensureDir(docsDir);
+
+            const destOverride = (ctx.url.searchParams.get("dest") ?? "").trim();
+            const deriveDestRel = () => {
+                if (destOverride) return destOverride;
+                if (sessionId) {
+                    const prefix = `sessions/${sessionId}/`;
+                    if (inboxRel.startsWith(prefix)) return inboxRel.slice(prefix.length);
+                }
+                return basename(inboxRel);
+            };
+
+            const initialDestRel = deriveDestRel().replace(/^\/+/, "");
+            const ext = extname(initialDestRel).toLowerCase();
+            if (!ALLOWED_EXTENSIONS.has(ext)) {
+                throw new ApiError(400, "invalid_request", "Unsupported document type");
+            }
+
+            let destRel = initialDestRel;
+            let destAbs = resolveDocumentPathSafe(docsDir, destRel);
+            if (await exists(destAbs)) {
+                const dirRel = dirname(destRel).replace(/\\/g, "/");
+                const base = basename(destRel, ext);
+                const unique = `${base}-${shortId()}${ext}`;
+                destRel = dirRel && dirRel !== "." ? `${dirRel}/${unique}` : unique;
+                destAbs = resolveDocumentPathSafe(docsDir, destRel);
+            }
+
+            await ensureDir(dirname(destAbs));
+            await copyFile(inboxAbs, destAbs);
+
+            return jsonResponse({ ok: true, doc: destRel });
         },
     });
 

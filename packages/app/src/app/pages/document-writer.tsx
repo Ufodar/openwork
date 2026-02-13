@@ -8,6 +8,7 @@ import type { SessionViewProps } from "./session";
 import OnlyOfficeEditor from "../components/onlyoffice-editor";
 import MessageList from "../components/session/message-list";
 import Composer from "../components/session/composer";
+import { DOCUMENT_UPLOAD_ACCEPT } from "../lib/documents";
 
 type DocumentItem = {
   name: string;
@@ -264,7 +265,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
                   class="hidden"
                   disabled={!serverReady()}
                   onChange={handleUpload}
-                  accept=".docx,.docm,.dotx,.xlsx,.xlsm,.pptx,.pptm,.csv"
+                  accept={DOCUMENT_UPLOAD_ACCEPT}
                 />
               </label>
             </div>
@@ -311,7 +312,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
                   class="hidden"
                   disabled={!serverReady()}
                   onChange={handleUpload}
-                  accept=".docx,.docm,.dotx,.xlsx,.xlsm,.pptx,.pptm,.csv"
+                  accept={DOCUMENT_UPLOAD_ACCEPT}
                 />
               </label>
             </div>

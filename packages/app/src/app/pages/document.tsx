@@ -3,6 +3,7 @@ import { useParams } from "@solidjs/router";
 import OnlyOfficeEditor from "../components/onlyoffice-editor";
 import { FileText, Plus } from "lucide-solid";
 import type { OpenworkServerClient, OpenworkServerStatus } from "../lib/openwork-server";
+import { DOCUMENT_UPLOAD_ACCEPT } from "../lib/documents";
 
 interface DocumentItem {
     name: string;
@@ -134,7 +135,7 @@ export default function DocumentView(props: DocumentViewProps) {
                     <h2 class="font-semibold text-dls-text">Documents</h2>
                     <label class="cursor-pointer p-1 hover:bg-dls-hover rounded">
                         <Plus size={16} />
-                        <input type="file" class="hidden" onChange={handleUpload} accept=".docx,.xlsx,.pptx" />
+                        <input type="file" class="hidden" onChange={handleUpload} accept={DOCUMENT_UPLOAD_ACCEPT} />
                     </label>
                 </div>
                 <div class="flex-1 overflow-y-auto p-2">

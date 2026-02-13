@@ -74,7 +74,7 @@ export type DashboardViewProps = {
   submitProviderApiKey: (providerId: string, apiKey: string) => Promise<string | void>;
   view: View;
   setView: (view: View, sessionId?: string) => void;
-  openSessionInPreferredView: (sessionId: string) => void | Promise<void>;
+  openSessionInPreferredView: (sessionId: string, options?: { title?: string | null }) => void | Promise<void>;
   listAgents: () => Promise<Agent[]>;
   startupPreference: StartupPreference | null;
   baseUrl: string;
@@ -301,11 +301,11 @@ export default function DashboardView(props: DashboardViewProps) {
         : "Remote"
       : "Local";
 
-  const openSessionFromList = (workspaceId: string, sessionId: string) => {
+  const openSessionFromList = (workspaceId: string, sessionId: string, sessionTitle?: string | null) => {
     // For same-workspace clicks, just select the session without workspace activation
     if (workspaceId === props.activeWorkspaceId) {
       void props.selectSession(sessionId);
-      void props.openSessionInPreferredView(sessionId);
+      void props.openSessionInPreferredView(sessionId, { title: sessionTitle ?? null });
       return;
     }
     // For different workspace, activate workspace first
@@ -313,7 +313,7 @@ export default function DashboardView(props: DashboardViewProps) {
       void (async () => {
         await Promise.resolve(props.activateWorkspace(workspaceId));
         void props.selectSession(sessionId);
-        void props.openSessionInPreferredView(sessionId);
+        void props.openSessionInPreferredView(sessionId, { title: sessionTitle ?? null });
       })();
     }, 0);
   };
@@ -943,12 +943,12 @@ export default function DashboardView(props: DashboardViewProps) {
                                         ? "bg-dls-active text-dls-text"
                                         : "hover:bg-dls-hover"
                                     }`}
-                                    onClick={() => openSessionFromList(workspace().id, session.id)}
+                                    onClick={() => openSessionFromList(workspace().id, session.id, session.title)}
                                     onKeyDown={(event) => {
                                       if (event.key !== "Enter" && event.key !== " ") return;
                                       if (event.isComposing || event.keyCode === 229) return;
                                       event.preventDefault();
-                                      openSessionFromList(workspace().id, session.id);
+                                      openSessionFromList(workspace().id, session.id, session.title);
                                     }}
                                   >
                                     <span class="text-sm text-dls-text truncate mr-2 font-medium">
@@ -992,12 +992,12 @@ export default function DashboardView(props: DashboardViewProps) {
                                           ? "bg-dls-active text-dls-text"
                                           : "hover:bg-dls-hover"
                                       }`}
-                                      onClick={() => openSessionFromList(workspace().id, session.id)}
+                                      onClick={() => openSessionFromList(workspace().id, session.id, session.title)}
                                       onKeyDown={(event) => {
                                         if (event.key !== "Enter" && event.key !== " ") return;
                                         if (event.isComposing || event.keyCode === 229) return;
                                         event.preventDefault();
-                                        openSessionFromList(workspace().id, session.id);
+                                        openSessionFromList(workspace().id, session.id, session.title);
                                       }}
                                     >
                                       <span class="text-sm text-dls-text truncate mr-2 font-medium">

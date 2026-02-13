@@ -2308,10 +2308,27 @@ export default function App() {
     if (currentView() !== "document-writer") return;
     const sessionId = activeSessionId();
     if (!sessionId) return;
+    const openworkClient = openworkServerClient();
+    const caps = resolvedOpenworkCapabilities();
+    const canReadWrite =
+      openworkServerStatus() === "connected" &&
+      Boolean(openworkClient) &&
+      Boolean((openworkServerWorkspaceId() ?? "").trim()) &&
+      (caps?.config?.read ?? false) &&
+      (caps?.config?.write ?? false);
+    if (!canReadWrite) return;
     persistSessionPreferredView(sessionId, "document-writer").catch(() => undefined);
   });
 
-  const openSessionInPreferredView = async (sessionId: string): Promise<void> => {
+  const inferSessionPreferredView = (title?: string | null): View | null => {
+    const normalized = (title ?? "").trim().toLowerCase();
+    if (!normalized) return null;
+    if (normalized.includes("document writer")) return "document-writer";
+    if (normalized.includes("bid writer")) return "document-writer";
+    return null;
+  };
+
+  const openSessionInPreferredView = async (sessionId: string, options?: { title?: string | null }): Promise<void> => {
     const id = sessionId.trim();
     if (!id) return;
     try {
@@ -2319,7 +2336,13 @@ export default function App() {
     } catch {
       // ignore
     }
-    setView(getSessionPreferredView(id), id);
+    const stored = getSessionPreferredView(id);
+    const inferred = inferSessionPreferredView(options?.title);
+    const resolved = stored !== "session" ? stored : inferred ?? stored;
+    setView(resolved, id);
+    if (resolved === "document-writer") {
+      persistSessionPreferredView(id, "document-writer").catch(() => undefined);
+    }
   };
 
   createEffect(() => {

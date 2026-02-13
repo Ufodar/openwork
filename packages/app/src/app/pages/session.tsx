@@ -73,7 +73,7 @@ import MarkdownEditorSidebar from "../components/session/markdown-editor-sidebar
 export type SessionViewProps = {
   selectedSessionId: string | null;
   setView: (view: View, sessionId?: string) => void;
-  openSessionInPreferredView: (sessionId: string) => void | Promise<void>;
+  openSessionInPreferredView: (sessionId: string, options?: { title?: string | null }) => void | Promise<void>;
   tab: DashboardTab;
   setTab: (tab: DashboardTab) => void;
   setSettingsTab: (tab: SettingsTab) => void;
@@ -1338,19 +1338,19 @@ export default function SessionView(props: SessionViewProps) {
     props.setPrompt(draft.text);
   };
 
-  const openSessionFromList = (workspaceId: string, sessionId: string) => {
+  const openSessionFromList = (workspaceId: string, sessionId: string, sessionTitle?: string | null) => {
     if (!sessionId) return;
     // For same-workspace clicks, just select the session without workspace activation
     if (workspaceId === props.activeWorkspaceId) {
       void props.selectSession(sessionId);
-      void props.openSessionInPreferredView(sessionId);
+      void props.openSessionInPreferredView(sessionId, { title: sessionTitle ?? null });
       return;
     }
     // For different workspace, activate workspace first
     void (async () => {
       await Promise.resolve(props.activateWorkspace(workspaceId));
       void props.selectSession(sessionId);
-      void props.openSessionInPreferredView(sessionId);
+      void props.openSessionInPreferredView(sessionId, { title: sessionTitle ?? null });
     })();
   };
 
@@ -1634,12 +1634,12 @@ export default function SessionView(props: SessionViewProps) {
                                         ? "bg-dls-active text-dls-text"
                                         : "hover:bg-dls-hover"
                                     }`}
-                                    onClick={() => openSessionFromList(workspace().id, session.id)}
+                                    onClick={() => openSessionFromList(workspace().id, session.id, session.title)}
                                     onKeyDown={(event) => {
                                       if (event.key !== "Enter" && event.key !== " ") return;
                                       if (event.isComposing || event.keyCode === 229) return;
                                       event.preventDefault();
-                                      openSessionFromList(workspace().id, session.id);
+                                      openSessionFromList(workspace().id, session.id, session.title);
                                     }}
                                   >
                                     <span class="text-sm text-dls-text truncate mr-2 font-medium">
@@ -1685,12 +1685,12 @@ export default function SessionView(props: SessionViewProps) {
                                           ? "bg-dls-active text-dls-text"
                                           : "hover:bg-dls-hover"
                                       }`}
-                                      onClick={() => openSessionFromList(workspace().id, session.id)}
+                                      onClick={() => openSessionFromList(workspace().id, session.id, session.title)}
                                       onKeyDown={(event) => {
                                         if (event.key !== "Enter" && event.key !== " ") return;
                                         if (event.isComposing || event.keyCode === 229) return;
                                         event.preventDefault();
-                                        openSessionFromList(workspace().id, session.id);
+                                        openSessionFromList(workspace().id, session.id, session.title);
                                       }}
                                     >
                                       <span class="text-sm text-dls-text truncate mr-2 font-medium">

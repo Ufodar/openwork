@@ -125,6 +125,7 @@ const SLIDE_EXTENSIONS = [
 ];
 
 const ALLOWED_EXTENSIONS = new Set([...WORD_EXTENSIONS, ...CELL_EXTENSIONS, ...SLIDE_EXTENSIONS]);
+const SESSION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 
 // Helper to get document type from extension
 function getDocumentType(filename: string): "word" | "cell" | "slide" {
@@ -141,8 +142,19 @@ function getDocumentType(filename: string): "word" | "cell" | "slide" {
     return "word"; // Default
 }
 
-function resolveDocumentsDir(workspacePath: string): string {
-    return join(workspacePath, "documents");
+function parseDocumentSessionId(rawSessionId: string | null): string | null {
+    const value = (rawSessionId ?? "").trim();
+    if (!value) return null;
+    if (!SESSION_ID_PATTERN.test(value)) {
+        throw new ApiError(400, "invalid_request", "Invalid session id");
+    }
+    return value;
+}
+
+function resolveDocumentsDir(workspacePath: string, sessionId?: string | null): string {
+    const root = join(workspacePath, "documents");
+    if (!sessionId) return root;
+    return join(root, "sessions", sessionId);
 }
 
 function resolveDocumentPathSafe(docsDir: string, relPath: string): string {
@@ -186,14 +198,21 @@ function resolveOnlyOfficePublicBaseUrl(host: string, port: number): string {
     return `http://${normalizedHost}:${port}`;
 }
 
-function getCallbackUrl(host: string, port: number, workspaceId: string, docId: string): string {
-    const baseUrl = resolveOnlyOfficePublicBaseUrl(host, port);
-    return `${baseUrl}/w/${workspaceId}/document/callback?docId=${docId}`;
+function buildDocumentQuery(docId: string, sessionId?: string | null): string {
+    const query = new URLSearchParams();
+    query.set("docId", docId);
+    if (sessionId) query.set("session", sessionId);
+    return query.toString();
 }
 
-function getDownloadUrl(host: string, port: number, workspaceId: string, docId: string): string {
+function getCallbackUrl(host: string, port: number, workspaceId: string, docId: string, sessionId?: string | null): string {
     const baseUrl = resolveOnlyOfficePublicBaseUrl(host, port);
-    return `${baseUrl}/w/${workspaceId}/document/file?docId=${docId}`;
+    return `${baseUrl}/w/${workspaceId}/document/callback?${buildDocumentQuery(docId, sessionId)}`;
+}
+
+function getDownloadUrl(host: string, port: number, workspaceId: string, docId: string, sessionId?: string | null): string {
+    const baseUrl = resolveOnlyOfficePublicBaseUrl(host, port);
+    return `${baseUrl}/w/${workspaceId}/document/file?${buildDocumentQuery(docId, sessionId)}`;
 }
 
 export function createDocumentRoutes(routes: unknown[]) {
@@ -205,10 +224,11 @@ export function createDocumentRoutes(routes: unknown[]) {
         auth: "client",
         handler: async (ctx: RequestContext) => {
             const workspaceId = ctx.params.id;
+            const sessionId = parseDocumentSessionId(ctx.url.searchParams.get("session"));
             const workspace = ctx.config.workspaces.find((w: WorkspaceInfo) => w.id === workspaceId);
             if (!workspace) throw new ApiError(404, "not_found", "Workspace not found");
 
-            const docsDir = resolveDocumentsDir(workspace.path);
+            const docsDir = resolveDocumentsDir(workspace.path, sessionId);
             await ensureDir(docsDir);
 
             const docs: Array<{ name: string; updatedAt: number; size: number; type: string }> = [];
@@ -253,13 +273,14 @@ export function createDocumentRoutes(routes: unknown[]) {
             const workspaceId = ctx.params.id;
             const docName = ctx.url.searchParams.get("doc");
             if (!docName) throw new ApiError(400, "invalid_request", "Document name is required");
+            const sessionId = parseDocumentSessionId(ctx.url.searchParams.get("session"));
             const readonlyParam = (ctx.url.searchParams.get("readonly") ?? "").trim().toLowerCase();
             const readOnly = readonlyParam === "1" || readonlyParam === "true" || readonlyParam === "yes";
 
             const workspace = ctx.config.workspaces.find((w: WorkspaceInfo) => w.id === workspaceId);
             if (!workspace) throw new ApiError(404, "not_found", "Workspace not found");
 
-            const docsDir = resolveDocumentsDir(workspace.path);
+            const docsDir = resolveDocumentsDir(workspace.path, sessionId);
             const filePath = resolveDocumentPathSafe(docsDir, docName);
 
             if (!(await exists(filePath))) {
@@ -268,7 +289,7 @@ export function createDocumentRoutes(routes: unknown[]) {
             }
 
             const stats = await stat(filePath);
-            const key = createHash("sha256").update(`${docName}:${stats.mtimeMs}`).digest("hex");
+            const key = createHash("sha256").update(`${sessionId ?? "workspace"}:${docName}:${stats.mtimeMs}`).digest("hex");
 
             const canEdit = !readOnly;
             const config: OnlyOfficeConfig = {
@@ -276,7 +297,7 @@ export function createDocumentRoutes(routes: unknown[]) {
                     fileType: extname(docName).slice(1).toLowerCase(),
                     key: key,
                     title: docName,
-                    url: getDownloadUrl(ctx.config.host, ctx.config.port, workspaceId, encodeURIComponent(docName)),
+                    url: getDownloadUrl(ctx.config.host, ctx.config.port, workspaceId, docName, sessionId),
                     permissions: {
                         download: true,
                         edit: canEdit,
@@ -286,7 +307,7 @@ export function createDocumentRoutes(routes: unknown[]) {
                 },
                 documentType: getDocumentType(docName),
                 editorConfig: {
-                    callbackUrl: getCallbackUrl(ctx.config.host, ctx.config.port, workspaceId, encodeURIComponent(docName)),
+                    callbackUrl: getCallbackUrl(ctx.config.host, ctx.config.port, workspaceId, docName, sessionId),
                     user: {
                         id: ctx.actor?.clientId || "anonymous",
                         name: "AI User", // TODO: Get actual user name
@@ -320,12 +341,13 @@ export function createDocumentRoutes(routes: unknown[]) {
             const workspaceId = ctx.params.id;
             const docName = ctx.url.searchParams.get("docId");
             if (!docName) throw new ApiError(400, "invalid_request", "Document ID is required");
+            const sessionId = parseDocumentSessionId(ctx.url.searchParams.get("session"));
 
             // Validate workspace exists in config (even though we don't auth, we need path)
             const workspace = ctx.config.workspaces.find((w: WorkspaceInfo) => w.id === workspaceId);
             if (!workspace) throw new ApiError(404, "not_found", "Workspace not found");
 
-            const docsDir = resolveDocumentsDir(workspace.path);
+            const docsDir = resolveDocumentsDir(workspace.path, sessionId);
             const filePath = resolveDocumentPathSafe(docsDir, docName);
 
             if (!(await exists(filePath))) throw new ApiError(404, "not_found", "File not found");
@@ -367,6 +389,7 @@ export function createDocumentRoutes(routes: unknown[]) {
             const workspaceId = ctx.params.id;
             const docName = ctx.url.searchParams.get("docId");
             if (!docName) return jsonResponse({ error: 0 }); // OnlyOffice expects { error: 0 }
+            const sessionId = parseDocumentSessionId(ctx.url.searchParams.get("session"));
 
             const workspace = ctx.config.workspaces.find((w: WorkspaceInfo) => w.id === workspaceId);
             if (!workspace) return jsonResponse({ error: 1 });
@@ -382,7 +405,7 @@ export function createDocumentRoutes(routes: unknown[]) {
                         if (!resp.ok) throw new Error("Failed to download");
 
                         const buffer = await resp.arrayBuffer();
-                        const docsDir = resolveDocumentsDir(workspace.path);
+                        const docsDir = resolveDocumentsDir(workspace.path, sessionId);
                         await ensureDir(docsDir);
                         const filePath = resolveDocumentPathSafe(docsDir, docName);
 
@@ -406,6 +429,7 @@ export function createDocumentRoutes(routes: unknown[]) {
         auth: "client",
         handler: async (ctx: RequestContext) => {
             const workspaceId = ctx.params.id;
+            const sessionId = parseDocumentSessionId(ctx.url.searchParams.get("session"));
             const workspace = ctx.config.workspaces.find((w: WorkspaceInfo) => w.id === workspaceId);
             if (!workspace) throw new ApiError(404, "not_found", "Workspace not found");
 
@@ -416,7 +440,7 @@ export function createDocumentRoutes(routes: unknown[]) {
                 throw new ApiError(400, "invalid_request", "File is required");
             }
 
-            const docsDir = resolveDocumentsDir(workspace.path);
+            const docsDir = resolveDocumentsDir(workspace.path, sessionId);
             await ensureDir(docsDir);
 
             const name = basename(file.name);

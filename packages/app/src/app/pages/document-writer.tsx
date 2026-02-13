@@ -29,6 +29,7 @@ type EditorSource = {
   baseUrl: string;
   token: string;
   workspaceId: string;
+  sessionId: string;
   doc: string;
   seq: number;
   readonly: boolean;
@@ -51,12 +52,14 @@ export default function DocumentWriterView(props: SessionViewProps) {
   const apiConfig = createMemo(() => {
     const client = props.openworkServerClient;
     if (!client) return null;
-    const id = workspaceId();
-    if (!id) return null;
+    const workspace = workspaceId();
+    const session = sessionId();
+    if (!workspace || !session) return null;
     return {
       baseUrl: client.baseUrl,
       token: client.token?.trim() ?? "",
-      workspaceId: id,
+      workspaceId: workspace,
+      sessionId: session,
     };
   });
 
@@ -93,7 +96,9 @@ export default function DocumentWriterView(props: SessionViewProps) {
 
   const [documents, { refetch: refetchDocuments }] = createResource(apiConfig, async (cfg) => {
     if (!cfg) return [] as DocumentItem[];
-    const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/documents");
+    const query = new URLSearchParams();
+    query.set("session", cfg.sessionId);
+    const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/documents", query);
     const data = (await fetchJson(url, cfg.token)) as { items?: DocumentItem[] };
     return Array.isArray(data.items) ? data.items : [];
   });
@@ -187,6 +192,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
     if (!input) return null;
     const query = new URLSearchParams();
     query.set("doc", input.doc);
+    query.set("session", input.sessionId);
     if (input.readonly) {
       query.set("readonly", "1");
     }
@@ -209,7 +215,9 @@ export default function DocumentWriterView(props: SessionViewProps) {
     const formData = new FormData();
     formData.append("file", file);
 
-    const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/upload");
+    const query = new URLSearchParams();
+    query.set("session", cfg.sessionId);
+    const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/upload", query);
     await fetchJson(url, cfg.token, { method: "POST", body: formData });
     input.value = "";
     await refetchDocuments();
@@ -296,7 +304,15 @@ export default function DocumentWriterView(props: SessionViewProps) {
     const doc = selectedDoc();
     if (!doc) return "";
     const normalized = doc.trim().replace(/^\/+/, "");
-    return normalized ? `documents/${normalized}` : "";
+    if (!normalized) return "";
+    const session = apiConfig()?.sessionId ?? sessionId();
+    if (!session) return "";
+    return `documents/sessions/${session}/${normalized}`;
+  });
+
+  createEffect(() => {
+    sessionId();
+    setSelectedDoc(null);
   });
 
   createEffect(() => {

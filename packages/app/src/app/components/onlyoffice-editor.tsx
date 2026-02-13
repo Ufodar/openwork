@@ -30,6 +30,26 @@ export default function OnlyOfficeEditor(props: OnlyOfficeEditorProps) {
   const [scriptStatus, setScriptStatus] = createSignal<"idle" | "loading" | "ready" | "error">("idle");
   const [scriptError, setScriptError] = createSignal<string | null>(null);
   const [editorError, setEditorError] = createSignal<string | null>(null);
+  const [lastInitSignature, setLastInitSignature] = createSignal<string | null>(null);
+
+  const destroyEditor = () => {
+    if (docEditor?.destroyEditor) {
+      docEditor.destroyEditor();
+    }
+    docEditor = null;
+  };
+
+  const configSignature = createMemo(() => {
+    const cfg = props.config as any;
+    const key = cfg?.document?.key;
+    const url = cfg?.document?.url;
+    const mode = cfg?.editorConfig?.mode;
+    const parts: string[] = [];
+    if (typeof key === "string" && key.trim()) parts.push(`key=${key.trim()}`);
+    if (typeof url === "string" && url.trim()) parts.push(`url=${url.trim()}`);
+    if (typeof mode === "string" && mode.trim()) parts.push(`mode=${mode.trim()}`);
+    return parts.join("|") || null;
+  });
 
   createEffect(() => {
     const url = scriptUrl();
@@ -89,16 +109,17 @@ export default function OnlyOfficeEditor(props: OnlyOfficeEditorProps) {
     const status = scriptStatus();
     const config = props.config;
     const id = containerId();
+    const signature = configSignature();
 
-    setEditorError(null);
     if (status !== "ready") return;
     if (!containerRef) return;
     if (!config) return;
+    if (docEditor && signature && lastInitSignature() === signature) return;
 
-    if (docEditor?.destroyEditor) {
-      docEditor.destroyEditor();
-      docEditor = null;
-    }
+    setEditorError(null);
+    setLastInitSignature(signature);
+
+    destroyEditor();
 
     try {
       const api = window.DocsAPI;
@@ -109,14 +130,13 @@ export default function OnlyOfficeEditor(props: OnlyOfficeEditorProps) {
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to initialize OnlyOffice editor.";
       setEditorError(message);
+      destroyEditor();
+      setLastInitSignature(null);
     }
+  });
 
-    onCleanup(() => {
-      if (docEditor?.destroyEditor) {
-        docEditor.destroyEditor();
-      }
-      docEditor = null;
-    });
+  onCleanup(() => {
+    destroyEditor();
   });
 
   const errorMessage = createMemo(() => scriptError() ?? editorError());

@@ -2304,6 +2304,13 @@ export default function App() {
     });
   };
 
+  createEffect(() => {
+    if (currentView() !== "document-writer") return;
+    const sessionId = activeSessionId();
+    if (!sessionId) return;
+    persistSessionPreferredView(sessionId, "document-writer").catch(() => undefined);
+  });
+
   const openSessionInPreferredView = async (sessionId: string): Promise<void> => {
     const id = sessionId.trim();
     if (!id) return;

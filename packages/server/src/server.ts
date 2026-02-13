@@ -765,12 +765,17 @@ function resolveOutboxEnabled(): boolean {
 }
 
 function resolveInboxMaxBytes(): number {
+  // Keep this aligned with `startServer()`'s Bun `maxRequestBodySize` so
+  // clients can upload large reference libraries without hitting surprise
+  // limits in the app layer.
+  const cap = 1_000_000_000; // 1GB (decimal)
+  const defaultMax = cap;
   const raw = (process.env.OPENWORK_INBOX_MAX_BYTES ?? "").trim();
   const parsed = raw ? Number(raw) : NaN;
   if (Number.isFinite(parsed) && parsed > 0) {
-    return Math.min(Math.trunc(parsed), 250_000_000);
+    return Math.min(Math.trunc(parsed), cap);
   }
-  return 50_000_000;
+  return defaultMax;
 }
 
 function resolveToyUiEnabled(): boolean {
@@ -2283,9 +2288,13 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
     });
 
     await ensureDir(dirname(dest));
-    const bytes = Buffer.from(await file.arrayBuffer());
     const tmp = `${dest}.tmp-${shortId()}`;
-    await writeFile(tmp, bytes);
+    if (typeof Bun !== "undefined" && typeof Bun.write === "function") {
+      await Bun.write(tmp, file);
+    } else {
+      const bytes = Buffer.from(await file.arrayBuffer());
+      await writeFile(tmp, bytes);
+    }
     await rename(tmp, dest);
 
     await recordAudit(workspace.path, {

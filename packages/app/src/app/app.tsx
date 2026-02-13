@@ -2095,6 +2095,96 @@ export default function App() {
   const [openworkSessionPrefsLoaded, setOpenworkSessionPrefsLoaded] = createSignal(false);
   const [openworkSessionPrefsWorkspaceId, setOpenworkSessionPrefsWorkspaceId] = createSignal<string | null>(null);
   let openworkSessionPrefsLoadPromise: Promise<void> | null = null;
+  let openworkWorkspaceIdResolvePromise: Promise<string | null> | null = null;
+
+  const ensureOpenworkServerWorkspaceIdResolved = async (): Promise<string | null> => {
+    const existing = (openworkServerWorkspaceId() ?? "").trim();
+    if (existing) return existing;
+
+    const openworkClient = openworkServerClient();
+    if (!openworkClient || openworkServerStatus() !== "connected") {
+      return null;
+    }
+
+    if (openworkWorkspaceIdResolvePromise) {
+      return await openworkWorkspaceIdResolvePromise;
+    }
+
+    const activeWorkspaceId = untrack(() => workspaceStore.activeWorkspaceId());
+    const activeDisplay = untrack(() => workspaceStore.activeWorkspaceDisplay());
+    const openworkUrl = untrack(() => openworkServerUrl().trim());
+    const localRootHint = untrack(() => normalizeDirectoryPath(workspaceStore.activeWorkspaceRoot().trim()));
+
+    const task = (async () => {
+      try {
+        if (activeDisplay.workspaceType === "remote" && activeDisplay.remoteType === "openwork") {
+          const inferredWorkspaceId =
+            parseOpenworkWorkspaceIdFromUrl(activeDisplay.openworkHostUrl ?? "") ??
+            parseOpenworkWorkspaceIdFromUrl(activeDisplay.baseUrl ?? "") ??
+            parseOpenworkWorkspaceIdFromUrl(openworkUrl);
+          const storedId = activeDisplay.openworkWorkspaceId?.trim() || inferredWorkspaceId || null;
+          if (storedId) {
+            if (workspaceStore.activeWorkspaceId() === activeWorkspaceId) {
+              setOpenworkServerWorkspaceId(storedId);
+            }
+            return storedId;
+          }
+        }
+
+        const response = await openworkClient.listWorkspaces();
+        const items = Array.isArray(response.items) ? response.items : [];
+        if (!items.length) return response.activeId ?? null;
+
+        if (activeDisplay.workspaceType === "remote" && activeDisplay.remoteType === "openwork") {
+          const directoryHint = normalizeDirectoryPath(activeDisplay.directory?.trim() ?? activeDisplay.path?.trim() ?? "");
+          const match = directoryHint
+            ? items.find((entry) => {
+              const entryPath = normalizeDirectoryPath((entry.opencode?.directory ?? entry.directory ?? entry.path ?? "").trim());
+              return Boolean(entryPath && entryPath === directoryHint);
+            })
+            : (response.activeId ? items.find((entry) => entry.id === response.activeId) : null) ?? items[0];
+          const resolvedId = match?.id ?? response.activeId ?? null;
+          if (!resolvedId) return null;
+          if (workspaceStore.activeWorkspaceId() === activeWorkspaceId) {
+            setOpenworkServerWorkspaceId(resolvedId);
+          }
+          return resolvedId;
+        }
+
+        if (activeDisplay.workspaceType === "local") {
+          const match =
+            (localRootHint ? items.find((entry) => normalizeDirectoryPath(entry.path) === localRootHint) : null) ??
+            (response.activeId ? items.find((entry) => entry.id === response.activeId) : null) ??
+            items[0];
+          const resolvedId = match?.id ?? response.activeId ?? null;
+          if (!resolvedId) return null;
+          if (workspaceStore.activeWorkspaceId() === activeWorkspaceId) {
+            setOpenworkServerWorkspaceId(resolvedId);
+          }
+          return resolvedId;
+        }
+
+        const fallback = (response.activeId ? items.find((entry) => entry.id === response.activeId) : null) ?? items[0];
+        const resolvedId = fallback?.id ?? response.activeId ?? null;
+        if (!resolvedId) return null;
+        if (workspaceStore.activeWorkspaceId() === activeWorkspaceId) {
+          setOpenworkServerWorkspaceId(resolvedId);
+        }
+        return resolvedId;
+      } catch {
+        return null;
+      }
+    })();
+
+    openworkWorkspaceIdResolvePromise = task;
+    try {
+      return await task;
+    } finally {
+      if (openworkWorkspaceIdResolvePromise === task) {
+        openworkWorkspaceIdResolvePromise = null;
+      }
+    }
+  };
 
   const getSessionPreferredView = (sessionId: string): View => {
     const id = sessionId.trim();
@@ -2104,7 +2194,10 @@ export default function App() {
   };
 
   const ensureOpenworkSessionPrefsLoaded = async (): Promise<void> => {
-    const workspaceId = (openworkServerWorkspaceId() ?? "").trim();
+    let workspaceId = (openworkServerWorkspaceId() ?? "").trim();
+    if (!workspaceId) {
+      workspaceId = (await ensureOpenworkServerWorkspaceIdResolved())?.trim() ?? "";
+    }
     if (!workspaceId) return;
 
     const openworkClient = openworkServerClient();
@@ -2160,27 +2253,40 @@ export default function App() {
     if (!id) return;
     if (view !== "document-writer") return;
 
-    const workspaceId = (openworkServerWorkspaceId() ?? "").trim();
     const openworkClient = openworkServerClient();
     const caps = resolvedOpenworkCapabilities();
-    const canWrite = openworkServerStatus() === "connected" && openworkClient && workspaceId && (caps?.config?.write ?? false);
-    if (!canWrite) return;
+    const canReadWrite =
+      openworkServerStatus() === "connected" &&
+      openworkClient &&
+      (caps?.config?.read ?? false) &&
+      (caps?.config?.write ?? false);
+    if (!canReadWrite) return;
 
-    try {
-      await ensureOpenworkSessionPrefsLoaded();
-    } catch {
-      // ignore load failures; we'll proceed with an empty map below.
+    let workspaceId = (openworkServerWorkspaceId() ?? "").trim();
+    if (!workspaceId) {
+      workspaceId = (await ensureOpenworkServerWorkspaceIdResolved())?.trim() ?? "";
+    }
+    if (!workspaceId) return;
+
+    let basePrefs: Record<string, OpenworkSessionPrefs> | null = null;
+    if (openworkSessionPrefsLoaded() && openworkSessionPrefsWorkspaceId() === workspaceId) {
+      basePrefs = openworkSessionPrefsById();
+    } else {
+      try {
+        const config = await openworkClient.getConfig(workspaceId);
+        const openwork =
+          config.openwork && typeof config.openwork === "object" ? (config.openwork as Record<string, unknown>) : {};
+        basePrefs = parseOpenworkSessionPrefs(openwork);
+      } catch {
+        return;
+      }
     }
 
-    const currentWorkspaceId = (openworkServerWorkspaceId() ?? "").trim();
-    if (!currentWorkspaceId || currentWorkspaceId !== workspaceId) return;
-
-    const currentPrefs = openworkSessionPrefsById();
-    const existing = currentPrefs[id] ?? null;
+    const existing = basePrefs[id] ?? null;
     if (existing?.view === view) return;
 
     const nextPrefs = {
-      ...currentPrefs,
+      ...(basePrefs ?? {}),
       [id]: {
         ...(existing ?? {}),
         view,

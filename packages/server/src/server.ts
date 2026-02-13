@@ -246,9 +246,11 @@ export function startServer(config: ServerConfig) {
     hostname: string;
     port: number;
     fetch: (request: Request) => Response | Promise<Response>;
+    maxRequestBodySize?: number;
   } = {
     hostname: config.host,
     port: config.port,
+    maxRequestBodySize: 1024 * 1024 * 1024,
     fetch: async (request: Request) => {
       const url = new URL(request.url);
       const startedAt = Date.now();
@@ -260,16 +262,16 @@ export function startServer(config: ServerConfig) {
       const finalize = (response: Response) => {
         const wrapped = withCors(response, request, config);
         if (config.logRequests) {
-            logRequest({
-              logger,
-              request,
-              response: wrapped,
-              durationMs: Date.now() - startedAt,
-              authMode,
-              proxyService,
-              proxyBaseUrl,
-              error: errorMessage,
-            });
+          logRequest({
+            logger,
+            request,
+            response: wrapped,
+            durationMs: Date.now() - startedAt,
+            authMode,
+            proxyService,
+            proxyBaseUrl,
+            error: errorMessage,
+          });
         }
         return wrapped;
       };
@@ -1026,11 +1028,11 @@ function serializeWorkspace(workspace: ServerConfig["workspaces"][number]) {
   const opencode =
     workspace.baseUrl || opencodeDirectory || opencodeUsername || opencodePassword
       ? {
-          baseUrl: workspace.baseUrl,
-          directory: opencodeDirectory ?? undefined,
-          username: opencodeUsername,
-          password: opencodePassword,
-        }
+        baseUrl: workspace.baseUrl,
+        directory: opencodeDirectory ?? undefined,
+        username: opencodeUsername,
+        password: opencodePassword,
+      }
       : undefined;
   return {
     ...rest,
@@ -2454,10 +2456,10 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
     const repoPayload = body?.repo && typeof body.repo === "object" ? (body.repo as Record<string, unknown>) : undefined;
     const repo = repoPayload
       ? {
-          owner: typeof repoPayload.owner === "string" ? repoPayload.owner : undefined,
-          repo: typeof repoPayload.repo === "string" ? repoPayload.repo : undefined,
-          ref: typeof repoPayload.ref === "string" ? repoPayload.ref : undefined,
-        }
+        owner: typeof repoPayload.owner === "string" ? repoPayload.owner : undefined,
+        repo: typeof repoPayload.repo === "string" ? repoPayload.repo : undefined,
+        ref: typeof repoPayload.ref === "string" ? repoPayload.ref : undefined,
+      }
       : undefined;
 
     await requireApproval(ctx, {

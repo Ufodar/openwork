@@ -128,8 +128,11 @@ const openworkPort = await resolvePort(process.env.OPENWORK_PORT, "127.0.0.1");
 const webPort = await resolvePort(process.env.OPENWORK_WEB_PORT, "127.0.0.1");
 const openworkToken = process.env.OPENWORK_TOKEN ?? randomUUID();
 const openworkHostToken = process.env.OPENWORK_HOST_TOKEN ?? randomUUID();
-const defaultOpenworkServerBin = path.join(cwd, "packages/server/dist/bin/openwork-server");
-const defaultOwpenbotBin = path.join(cwd, "packages/owpenbot/dist/bin/owpenbot");
+// Default to source entrypoints so dev iteration never requires rebuilding binaries.
+// - openwrk can run `.ts` via Bun automatically.
+// - For production / binary parity, override via OPENWORK_SERVER_BIN / OWPENBOT_BIN.
+const defaultOpenworkServerBin = path.join(cwd, "packages/server/src/cli.ts");
+const defaultOwpenbotBin = path.join(cwd, "packages/owpenbot/src/cli.ts");
 
 const resolveBinOverride = (value: string | undefined, fallback: string) => {
   const trimmed = (value ?? "").trim();

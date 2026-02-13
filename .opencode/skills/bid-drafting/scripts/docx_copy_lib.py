@@ -942,11 +942,26 @@ def _copy_section_impl(source_zip: zipfile.ZipFile, source_path: str,
 def _repack_docx(work_dir: str, output_path: str) -> None:
     """Pack a directory back into a DOCX ZIP file."""
     # Ensure output directory exists
-    os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+    out_dir = os.path.dirname(os.path.abspath(output_path))
+    os.makedirs(out_dir, exist_ok=True)
 
-    with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as zout:
-        for dirpath, dirnames, filenames in os.walk(work_dir):
-            for filename in filenames:
-                file_path = os.path.join(dirpath, filename)
-                arcname = os.path.relpath(file_path, work_dir)
-                zout.write(file_path, arcname)
+    # Write to a temp file first, then atomically replace the output.
+    # This avoids corrupting the target when --output == --target and the
+    # process crashes mid-write.
+    fd, tmp_path = tempfile.mkstemp(prefix=".docx_copy_", suffix=".tmp", dir=out_dir)
+    os.close(fd)
+
+    try:
+        with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as zout:
+            for dirpath, dirnames, filenames in os.walk(work_dir):
+                for filename in filenames:
+                    file_path = os.path.join(dirpath, filename)
+                    arcname = os.path.relpath(file_path, work_dir)
+                    zout.write(file_path, arcname)
+        os.replace(tmp_path, output_path)
+    finally:
+        try:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+        except OSError:
+            pass

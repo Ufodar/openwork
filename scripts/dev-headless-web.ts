@@ -124,8 +124,11 @@ const viteHost = process.env.VITE_HOST ?? process.env.HOST ?? host;
 const publicHost = process.env.OPENWORK_PUBLIC_HOST ?? null;
 const clientHost = publicHost ?? (host === "0.0.0.0" ? "127.0.0.1" : host);
 const workspace = process.env.OPENWORK_WORKSPACE ?? cwd;
-const openworkPort = await resolvePort(process.env.OPENWORK_PORT, "127.0.0.1");
-const webPort = await resolvePort(process.env.OPENWORK_WEB_PORT, "127.0.0.1");
+// Resolve ports on the actual bind host to avoid false positives (e.g. a port
+// may be free on 127.0.0.1 but already taken on another interface, which would
+// make binding to 0.0.0.0 fail with EADDRINUSE).
+const openworkPort = await resolvePort(process.env.OPENWORK_PORT, host);
+const webPort = await resolvePort(process.env.OPENWORK_WEB_PORT, viteHost);
 const openworkToken = process.env.OPENWORK_TOKEN ?? randomUUID();
 const openworkHostToken = process.env.OPENWORK_HOST_TOKEN ?? randomUUID();
 // Default to source entrypoints so dev iteration never requires rebuilding binaries.

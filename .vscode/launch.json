@@ -63,6 +63,11 @@
             "runtimeArgs": [
                 "dev:headless-web"
             ],
+            "env": {
+                "OPENWORK_SERVER_BIN": "packages/server/src/cli.ts",
+                "OWPENBOT_BIN": "packages/owpenbot/src/cli.ts",
+                "OPENWORK_DEV_HEADLESS_WEB_AUTOBUILD": "0"
+            },
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal"
         }

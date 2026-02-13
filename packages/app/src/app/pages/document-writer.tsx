@@ -132,15 +132,6 @@ export default function DocumentWriterView(props: SessionViewProps) {
     return normalized ? `documents/${normalized}` : "";
   });
 
-  let editorLockRef: HTMLDivElement | undefined;
-  createEffect(() => {
-    if (!isAgentRunning()) return;
-    if (!selectedDoc()) return;
-    const active = document.activeElement as HTMLElement | null;
-    active?.blur?.();
-    queueMicrotask(() => editorLockRef?.focus?.());
-  });
-
   createEffect(() => {
     const prev = lastSessionStatus();
     const next = props.sessionStatus ?? "idle";
@@ -451,16 +442,14 @@ export default function DocumentWriterView(props: SessionViewProps) {
               </Show>
               <Show when={isAgentRunning()}>
                 <div
-                  ref={editorLockRef}
-                  tabIndex={-1}
-                  class="absolute inset-0 flex items-center justify-center bg-dls-surface/70 backdrop-blur-sm"
+                  class="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center px-4"
                   role="status"
                   aria-live="polite"
                 >
-                  <div class="max-w-sm rounded-xl border border-dls-border bg-dls-surface px-4 py-3 shadow-lg text-center">
-                    <div class="text-sm font-medium text-dls-text">AI is editing…</div>
-                    <div class="mt-1 text-xs text-dls-secondary">
-                      Editing is temporarily locked to prevent conflicts. The document will reload when the run finishes.
+                  <div class="max-w-lg rounded-xl border border-dls-border bg-dls-surface/90 px-4 py-2 shadow-lg backdrop-blur">
+                    <div class="text-xs text-dls-secondary">
+                      <span class="font-medium text-dls-text">AI is editing…</span>{" "}
+                      View-only mode is enabled to prevent conflicts. The document will reload when the run finishes.
                     </div>
                   </div>
                 </div>

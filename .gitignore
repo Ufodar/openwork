@@ -43,6 +43,7 @@ vendor/opencode/
 
 # OpenWork workspace-local artifacts
 .opencode/openwork/
+.opencode/openwork.json
 
 # Workspace documents (OnlyOffice)
 documents/

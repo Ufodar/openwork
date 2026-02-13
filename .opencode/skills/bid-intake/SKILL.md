@@ -60,13 +60,40 @@ If the workspace is currently using the OpenWork Document Writer UI, keep final 
   - List of all input files (exact paths)
   - Which file appears to be the “source of truth” for business terms (often a form/table)
 
+### Step 2.5 — Build source material index (source-index.json)
+
+For each input `.docx` file (tender, historical bids, partner materials), run:
+
+```bash
+python3 .opencode/skills/bid-drafting/scripts/copy_docx_section.py \
+  --source <file> --list-headings --json
+```
+
+Write results to `bids/<bid_id>/source-index.json`. Format:
+
+```json
+{
+  "path/to/历史标书A.docx": {
+    "analyzedAt": "2026-02-13T10:30:00+08:00",
+    "headings": [
+      { "level": 1, "text": "第一章 概述", "elementCount": 12 },
+      { "level": 2, "text": "1.1 项目背景", "elementCount": 5 }
+    ]
+  }
+}
+```
+
+This is a **persistent cache** — subsequent operations (drafting, copy, QC) will read from cache instead of re-analyzing. The cache is per-bid, lives on disk, and survives context compression / session restarts.
+
+This index serves as the "材料地图" — telling you and the user what content is available in each source file.
+
 ### Step 3 — Extract requirements into a compliance matrix
 
 - Read the tender instructions end-to-end and extract *actionable requirements*:
   - Submission structure: 商务/技术/报价 split, formatting, signatures/seals, file naming
   - Mandatory clauses and required evidence
-  - Evaluation criteria and scoring points
-  - Starred (★) / core product requirements and “one-vote veto” clauses
+  - Evaluation criteria and scoring points: extract the scoring method (综合评分/最低价), business/technical/price score breakdown with point values, and mark individual item weights
+  - Starred (★) / core product requirements and "one-vote veto" clauses: mark these in `requirements.csv` with `priority=starred`
   - Required attachments / certificates
   - Technical specs, acceptance criteria, SLAs
 - Write `requirements.csv` with one requirement per row, including citations.

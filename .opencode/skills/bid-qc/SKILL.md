@@ -56,7 +56,7 @@ Create `bids/<bid_id>/qc-report.md` with:
   - legal entity names, IDs, addresses, contacts
 - Flag mismatches or missing values.
 
-### Step 4 — Consistency + “entity hygiene”
+### Step 4 — Consistency + "entity hygiene"
 
 - Scan for:
   - inconsistent company name variants (legal name vs brand name)
@@ -64,6 +64,9 @@ Create `bids/<bid_id>/qc-report.md` with:
   - stray client names from historical bids
   - wrong people names/titles/dates
   - mismatched logos/images
+- **Qualification document check**: verify that the company name on each certificate/qualification file matches `facts.json` → `entities.bidderLegalName`. Mismatch is **Blocker**.
+- **Certificate expiry check**: verify that time-sensitive certificates (社保证明、纳税证明、资质证书) have validity dates that extend past the bid deadline. Expired is **Blocker**.
+- **Stray company name search**: grep the entire target document for company names from historical bids that differ from the current `bidderLegalName`. Any hit is **High**.
 - If needed, unpack `.docx` with the `docx` skill and grep the OOXML for risky strings.
 
 ### Step 5 — Formatting + template compliance
@@ -82,6 +85,14 @@ Create `bids/<bid_id>/qc-report.md` with:
 - Prefer “edit for truth + specificity” over superficial paraphrasing.
 
 If multiple `.docx` files must be compared (e.g., one main bid + several partner bids), run the `bid-dedupe` skill/scripts to generate a dedicated `dedupe-report.md` and treat any high-similarity findings as **High** risk by default.
+
+### Step 7 — Point-to-point completeness check
+
+- For every row in `requirements.csv` with `priority=starred` or `priority=must`:
+  - Verify a response exists at the mapped `response_location`.
+  - If the response is missing or contains only a placeholder (`<<TBD: ...>>`), flag as **Blocker**.
+- For all other requirements:
+  - Verify a response exists. Missing is **High**.
 
 Use `references/qc-checklist.md` as the final gating list.
 

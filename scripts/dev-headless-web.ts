@@ -1,6 +1,6 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { openSync } from "node:fs";
-import { access, mkdir } from "node:fs/promises";
+import { access, mkdir, readdir, stat } from "node:fs/promises";
 import { createServer } from "node:net";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
@@ -128,17 +128,47 @@ const openworkPort = await resolvePort(process.env.OPENWORK_PORT, "127.0.0.1");
 const webPort = await resolvePort(process.env.OPENWORK_WEB_PORT, "127.0.0.1");
 const openworkToken = process.env.OPENWORK_TOKEN ?? randomUUID();
 const openworkHostToken = process.env.OPENWORK_HOST_TOKEN ?? randomUUID();
-const openworkServerBin = path.join(cwd, "packages/server/dist/bin/openwork-server");
-const owpenbotBin = path.join(cwd, "packages/owpenbot/dist/bin/owpenbot");
+const defaultOpenworkServerBin = path.join(cwd, "packages/server/dist/bin/openwork-server");
+const defaultOwpenbotBin = path.join(cwd, "packages/owpenbot/dist/bin/owpenbot");
+
+const resolveBinOverride = (value: string | undefined, fallback: string) => {
+  const trimmed = (value ?? "").trim();
+  if (!trimmed) return fallback;
+  return path.isAbsolute(trimmed) ? trimmed : path.join(cwd, trimmed);
+};
+
+const openworkServerBin = resolveBinOverride(process.env.OPENWORK_SERVER_BIN, defaultOpenworkServerBin);
+const owpenbotBin = resolveBinOverride(process.env.OWPENBOT_BIN, defaultOwpenbotBin);
+
+const resolveLatestMtimeMs = async (dir: string): Promise<number> => {
+  let latest = 0;
+  const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
+  for (const entry of entries) {
+    const abs = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      latest = Math.max(latest, await resolveLatestMtimeMs(abs));
+      continue;
+    }
+    if (!entry.isFile()) continue;
+    const info = await stat(abs).catch(() => null);
+    if (!info) continue;
+    latest = Math.max(latest, info.mtimeMs);
+  }
+  return latest;
+};
 
 const ensureOpenworkServer = async () => {
+  const isSourceEntrypoint = openworkServerBin.endsWith(".ts") || openworkServerBin.endsWith(".js");
   try {
     await access(openworkServerBin);
   } catch {
-    if (!autoBuildEnabled) {
+    if (!autoBuildEnabled || openworkServerBin !== defaultOpenworkServerBin || isSourceEntrypoint) {
       logLine(`[dev:headless-web] Missing OpenWork server binary at ${openworkServerBin}`);
       logLine("[dev:headless-web] Auto-build disabled (OPENWORK_DEV_HEADLESS_WEB_AUTOBUILD=0)");
       logLine("[dev:headless-web] Run: pnpm --filter openwork-server build:bin");
+      if (isSourceEntrypoint) {
+        logLine("[dev:headless-web] Or set OPENWORK_SERVER_BIN to a valid entrypoint path.");
+      }
       logLine("[dev:headless-web] Or unset/enable OPENWORK_DEV_HEADLESS_WEB_AUTOBUILD to auto-build.");
       process.exit(1);
     }
@@ -153,16 +183,34 @@ const ensureOpenworkServer = async () => {
       process.exit(1);
     }
   }
+
+  if (!autoBuildEnabled) return;
+  if (isSourceEntrypoint) return;
+  if (openworkServerBin !== defaultOpenworkServerBin) return;
+
+  const [binaryInfo, latestSrcMtime] = await Promise.all([
+    stat(openworkServerBin).catch(() => null),
+    resolveLatestMtimeMs(path.join(cwd, "packages/server/src")),
+  ]);
+  if (!binaryInfo) return;
+  if (latestSrcMtime <= binaryInfo.mtimeMs) return;
+
+  logLine("[dev:headless-web] Detected openwork-server source changes; rebuilding binary");
+  await runCommand("pnpm", ["--filter", "openwork-server", "build:bin"]);
 };
 
 const ensureOwpenbot = async () => {
+  const isSourceEntrypoint = owpenbotBin.endsWith(".ts") || owpenbotBin.endsWith(".js");
   try {
     await access(owpenbotBin);
   } catch {
-    if (!autoBuildEnabled) {
+    if (!autoBuildEnabled || owpenbotBin !== defaultOwpenbotBin || isSourceEntrypoint) {
       logLine(`[dev:headless-web] Missing owpenbot binary at ${owpenbotBin}`);
       logLine("[dev:headless-web] Auto-build disabled (OPENWORK_DEV_HEADLESS_WEB_AUTOBUILD=0)");
       logLine("[dev:headless-web] Run: pnpm --filter owpenwork build:bin");
+      if (isSourceEntrypoint) {
+        logLine("[dev:headless-web] Or set OWPENBOT_BIN to a valid entrypoint path.");
+      }
       logLine("[dev:headless-web] Or unset/enable OPENWORK_DEV_HEADLESS_WEB_AUTOBUILD to auto-build.");
       process.exit(1);
     }
@@ -204,7 +252,7 @@ const headlessEnv = {
   OPENWORK_HOST_TOKEN: openworkHostToken,
   OPENWORK_SERVER_BIN: openworkServerBin,
   OPENWRK_SIDECAR_SOURCE: process.env.OPENWRK_SIDECAR_SOURCE ?? "external",
-  OWPENBOT_BIN: process.env.OWPENBOT_BIN ?? owpenbotBin,
+  OWPENBOT_BIN: owpenbotBin,
 };
 
 await ensureOpenworkServer();

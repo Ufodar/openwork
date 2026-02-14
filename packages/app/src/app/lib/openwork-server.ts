@@ -530,6 +530,7 @@ export function hydrateOpenworkServerSettingsFromEnv() {
 
     const currentUrlNormalized = normalizeOpenworkServerUrl(current.urlOverride ?? "") ?? "";
     const envUrlNormalized = normalizeOpenworkServerUrl(envUrl) ?? "";
+    const allowEnvTokenOverride = Boolean(import.meta.env?.DEV);
 
     if (!current.urlOverride && envUrl) {
       next.urlOverride = normalizeOpenworkServerUrl(envUrl) ?? undefined;
@@ -548,7 +549,7 @@ export function hydrateOpenworkServerSettingsFromEnv() {
       const sameTarget =
         Boolean(envUrlNormalized) &&
         (!currentUrlNormalized || currentUrlNormalized === envUrlNormalized);
-      if ((!current.token && envToken) || (sameTarget && current.token?.trim() !== envToken)) {
+      if (!current.token || (allowEnvTokenOverride && sameTarget && current.token?.trim() !== envToken)) {
         next.token = envToken;
         changed = true;
       }

@@ -46,9 +46,9 @@ Create `bids/<bid_id>/dedupe-report.md` (and optional intermediate JSON under `b
 python3 .opencode/skills/bid-dedupe/scripts/compare_bids.py \
   --out bids/<bid_id>/dedupe-report.md \
   --media-dir bids/<bid_id>/dedupe/media \
-  documents/bids/<bid_id>/main.docx \
-  documents/bids/<bid_id>/partner-a.docx \
-  documents/bids/<bid_id>/partner-b.docx
+  documents/.../main.docx \
+  documents/.../partner-a.docx \
+  documents/.../partner-b.docx
 ```
 
 This produces:
@@ -70,14 +70,14 @@ This produces:
 - Extract chunks per `.docx`:
 
 ```bash
-python3 .opencode/skills/bid-dedupe/scripts/extract_docx_chunks.py documents/bids/<bid_id>/main.docx \
+python3 .opencode/skills/bid-dedupe/scripts/extract_docx_chunks.py documents/.../main.docx \
   --out bids/<bid_id>/dedupe/main.chunks.json
 ```
 
 - Extract image hashes:
 
 ```bash
-python3 .opencode/skills/bid-dedupe/scripts/extract_docx_media_hashes.py documents/bids/<bid_id>/main.docx \
+python3 .opencode/skills/bid-dedupe/scripts/extract_docx_media_hashes.py documents/.../main.docx \
   --out bids/<bid_id>/dedupe/main.images.json
 ```
 

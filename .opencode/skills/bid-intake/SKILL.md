@@ -51,7 +51,7 @@ If the workspace is currently using the OpenWork Document Writer UI, keep final 
 - Choose a stable `bid_id` (tender number or short slug).
 - Create:
   - `bids/<bid_id>/` for structured artifacts
-  - `documents/bids/<bid_id>/` for any `.docx` you want to open in OnlyOffice
+  - `documents/` for any `.docx` you want to open in OnlyOffice (in Document Writer UI this is session-scoped under `documents/sessions/<sessionId>/...`)
 
 ### Step 2 — Inventory all inputs
 
@@ -59,44 +59,6 @@ If the workspace is currently using the OpenWork Document Writer UI, keep final 
   - Tender name + issuer + bid deadline (if found)
   - List of all input files (exact paths)
   - Which file appears to be the “source of truth” for business terms (often a form/table)
-
-### Step 2.5 — Build source material index (source-index.json)
-
-Build and maintain a persistent index for all reference DOCX files.
-
-Prefer using the batch indexer script (it stores file hashes + headings and
-automatically refreshes changed files):
-
-```bash
-python3 .opencode/skills/bid-intake/scripts/update_source_index.py \
-  --index bids/<bid_id>/source-index.json \
-  .opencode/openwork/inbox/sessions/<sessionId>/refs
-```
-
-The index is keyed by workspace-relative file path and includes:
-- `sha256`, `size`, `mtimeMs` (cache invalidation)
-- `headings` (for cross-document copying / navigation)
-
-Format (per file):
-
-```json
-{
-  "path/to/历史标书A.docx": {
-    "analyzedAt": "2026-02-13T10:30:00+08:00",
-    "sha256": "…",
-    "size": 123456,
-    "mtimeMs": 1700000000000,
-    "headings": [
-      { "level": 1, "text": "第一章 概述", "elementCount": 12 },
-      { "level": 2, "text": "1.1 项目背景", "elementCount": 5 }
-    ]
-  }
-}
-```
-
-This is a **persistent cache** — subsequent operations (drafting, copy, QC) will read from cache instead of re-analyzing. The cache is per-bid, lives on disk, and survives context compression / session restarts.
-
-This index serves as the "材料地图" — telling you and the user what content is available in each source file.
 
 ### Step 3 — Extract requirements into a compliance matrix
 

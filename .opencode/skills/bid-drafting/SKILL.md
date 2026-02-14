@@ -34,8 +34,9 @@ If `facts.json` or `requirements.csv` is missing or incomplete, stop and run `bi
 
 ### Step 1 — Choose the target `.docx`
 
-- If the tender provides a template `.docx`: copy it to a working file (e.g., `documents/bids/<bid_id>/draft.docx`).
-- If there is no template: create `documents/bids/<bid_id>/draft.docx` using your preferred company template, or create a new document skeleton.
+- If the UI/user provides a `Target document: documents/.../xxx.docx` line, that file is the target — edit it in place.
+- Otherwise, if the tender provides a template `.docx`: copy it to a working file under `documents/` (so OnlyOffice can open it in the Document Writer UI).
+- If there is no template: create a working `.docx` under `documents/` using your preferred company template, or create a new document skeleton.
 
 When editing `.docx`, load the `docx` skill and follow its OOXML workflow (tracked changes, pack/unpack/validate).
 
@@ -86,30 +87,17 @@ Use `references/business-outline.md` and `references/technical-outline.md` as st
   - which facts were consumed
   - which open questions remain
 
-## Source material cache: source-index.json
-
-Before accessing any @mentioned `.docx` file, check `bids/<bid_id>/source-index.json`.
-
-- **Cache hit** → use cached headings, do NOT re-analyze the file.
-- **Cache miss** → run `copy_docx_section.py --source <file> --list-headings --json` and save the result.
-- If the user explicitly asks to re-analyze a file, delete its cache entry and re-run.
-
-Format:
-```json
-{
-  "documents/refs/历史标书.docx": {
-    "analyzedAt": "2026-02-13T...",
-    "headings": [
-      { "level": 1, "text": "第一章 概述", "elementCount": 12 },
-      { "level": 2, "text": "1.1 项目背景", "elementCount": 5 }
-    ]
-  }
-}
-```
-
 ## Cross-document content assembly
 
 When the user @mentions a source file and asks you to copy/insert content from it:
+
+**First, analyze the file structure.** Before any copy or extraction, understand what the file contains:
+- DOCX: run `copy_docx_section.py --source <file> --list-headings --json`
+- PDF: use `pdf` skill to extract text and identify chapter/section boundaries
+- Excel: use `xlsx` skill to list sheets, column headers, and row counts
+- PPT: use `pptx` skill to extract slide titles
+
+Then match the result against the user's request, confirm scope if ambiguous, and execute.
 
 ### What the copier supports (and what it does NOT)
 
@@ -129,7 +117,7 @@ Not supported (the tool will error rather than produce a broken DOCX):
 
 ### If the user wants verbatim copy (保留格式复制):
 
-1. Check `source-index.json` cache; if miss, run `--list-headings --json` and update cache.
+1. Run `--list-headings --json` to discover the source document structure.
 2. Confirm the section with the user if ambiguous.
 3. Run:
    ```bash
@@ -163,21 +151,45 @@ Users often give imprecise instructions. Examples and how to handle:
 
 | User says | What they mean | Your action |
 |-----------|----------------|-------------|
-| "把公司资质那块全拿过去" | Copy all qualification sections | Find 资质-related sections in source-index.json → list them back → confirm scope → copy |
-| "技术方案参考 @A @B @C" | Synthesize from multiple sources | Read relevant sections from each via cache → propose outline → assemble section by section |
+| "把公司资质那块全拿过去" | Copy all qualification sections | Run --list-headings to find 资质-related sections → list them back → confirm scope → copy |
+| "技术方案参考 @A @B @C" | Synthesize from multiple sources | Analyze each file's structure → read relevant sections → propose outline → assemble section by section |
 | "格式参考 @X，内容参考 @Y" | Copy structure from X, fill with Y's content | Copy X's section first (gets format) → replace content with Y's material via docx skill edits |
 | "点对点把技术模块完成" | Fill point-to-point response table | Read requirements.csv for tech items → find matching content in @mentioned sources → assemble responses |
 
 ### When to ask vs when to act:
 
 - **Ask** when: multiple sections could match, user @mentions 3+ files without clear roles, instruction contradicts available materials.
-- **Act** when: single obvious match in cache, user has established a pattern in this session, instruction is specific enough.
+- **Act** when: single obvious match after analysis, user has established a pattern in this session, instruction is specific enough.
 
 ### Content source priority:
 
-1. **Verbatim copy** from source → adapt specific values (dates, names) — fastest, highest fidelity
-2. **Copy structure**, rewrite content — medium effort
-3. **Generate from scratch** — last resort, only when no source material
+1. **Verbatim copy** from DOCX source → adapt specific values (dates, names) — fastest, highest fidelity
+2. **Extract + formatted write** from non-DOCX source (PDF/Excel/PPT) → write into target using target's styles — medium effort
+3. **Copy structure**, rewrite content — medium effort
+4. **Generate from scratch** — last resort, only when no source material
+
+### Assembling from non-DOCX sources (PDF / Excel / PPT):
+
+When the source material is not `.docx`, `copy_docx_section.py` cannot be used. Instead:
+
+1. **Extract content** using the appropriate skill:
+   - PDF → `pdf` skill (pdfplumber for text/tables)
+   - Excel → `xlsx` skill (read structured data)
+   - PPT → `pptx` skill (extract text content)
+2. **Write into target .docx** using the `docx` skill (unpack → edit XML → pack):
+   - **Must use the target document's existing styles** (heading styles, body text style, table styles)
+   - Every paragraph must have the correct `w:pStyle` matching the target document's conventions
+   - Tables must reuse the target document's table style (e.g., `w:tblStyle`)
+   - Never insert unstyled/raw paragraphs — they will look visually inconsistent
+3. **Verify** the result opens correctly in OnlyOffice and formatting matches surrounding content
+
+### Style alignment rule (applies to ALL assembly paths):
+
+The assembled content must visually match the target document. If the result looks inconsistent (different fonts, sizes, spacing), the tool provides no value over manual copy-paste. Specifically:
+
+- After DOCX-to-DOCX copy: check if source styles conflict with target styles. If fonts/sizes differ, adjust the copied content to use target styles via `docx` skill.
+- After content extraction + write: always assign target document styles, never create new ad-hoc styles.
+- After any assembly operation: the user should not need to manually fix formatting.
 
 ### Companion bids (陪标):
 

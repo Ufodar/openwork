@@ -11,7 +11,19 @@ This document captures bid-writing requirements and maps them to the current Ope
 
 ## Core insight: 标书 = 组装，不是写作
 
-~50% of a bid document comes from other DOCX files (historical bids, partner documents, tender requirements). The system must support **cross-document content assembly** with format preservation, not just prose generation.
+~50% of a bid document comes from other files (historical bids, partner documents, tender requirements). The system must support **cross-document content assembly** with format preservation, not just prose generation.
+
+Source materials come in multiple formats, each requiring a different assembly strategy:
+
+| Source format | Assembly path | Fidelity |
+|---------------|--------------|----------|
+| **.docx** | `copy_docx_section.py` — OOXML-level section copy with style/numbering/image merge | Highest (format-preserving) |
+| **.doc** | Convert to .docx (pandoc/LibreOffice), then same as above | High |
+| **.pdf** | Extract text/tables via `pdf` skill → write into target using target's styles | Medium (content only) |
+| **.xlsx** | Read structured data via `xlsx` skill → fill into target tables | Medium (data only) |
+| **.pptx** | Extract text via `pptx` skill → use as content reference | Low (text only) |
+
+**Critical design constraint**: converting PDF/Excel/PPT to .docx at upload time is NOT viable — PDF-to-DOCX conversion quality is unreliable (especially for scanned documents), and Excel/PPT lose their structural value when flattened to Word format. The correct approach is format-aware routing, not forced format unification.
 
 ## Observed constraints (from internal team discussion)
 
@@ -33,19 +45,19 @@ Why:
 
 ### Agents
 - `document-writer` — edits `.docx` with OnlyOffice + chat.
-- `bid-writer` — runs the bid workflow using bid skills + `docx`. Interprets user instructions, manages source-index cache, orchestrates copy/adapt/write operations.
+- `bid-writer` — runs the bid workflow using bid skills + `docx`. Interprets user instructions, orchestrates copy/adapt/write operations.
 
 ### Skills (workflow phases)
 - `bid-intake`
-  - Outputs: `facts.json`, `requirements.csv`, `questions.md`, `intake-summary.md`, `source-index.json`
+  - Outputs: `facts.json`, `requirements.csv`, `questions.md`, `intake-summary.md`
   - Principle: every key fact has a citation; no guessing.
-  - **New**: Step 2.5 builds a source material index (`source-index.json`) by analyzing all input DOCX headings.
 - `bid-drafting`
   - Uses: `facts.json` + `requirements.csv` to draft 商务/技术 into a real `.docx`.
   - Preserves template formatting and uses tracked changes when editing.
-  - **New**: Cross-document content assembly via `copy_docx_section.py`.
-  - **New**: `source-index.json` cache for avoiding repeated document analysis.
+  - **New**: Cross-document content assembly via `copy_docx_section.py` (DOCX→DOCX only).
+  - **New**: Multi-format assembly routing — PDF/Excel/PPT sources use extract-then-write path with target style alignment.
   - **New**: Guidance for handling vague user instructions.
+  - **New**: Style alignment rule — all assembled content must use target document styles.
 - `bid-dedupe`
   - Compares 2+ `.docx` drafts for risky duplicate **text and images**.
   - Outputs: `dedupe-report.md`
@@ -54,18 +66,13 @@ Why:
   - **New**: Qualification document company name check, certificate expiry check, stray company name search, point-to-point completeness check.
 
 ### Tools
-- `copy_docx_section.py` — Cross-document section copy tool (OOXML-level).
+- `copy_docx_section.py` — Cross-document section copy tool (OOXML-level). **DOCX→DOCX only.**
   - `--list-headings`: Discover document structure (heading tree with element counts).
   - Copy mode: Extract a section from source → remap IDs → insert into target → merge styles/numbering/images.
   - Handles: rId, numId, bookmarkId, paraId/textId remapping; style chain copying; image dedup by SHA256.
   - Limitations: supports images + external hyperlinks; intentionally errors on footnotes/endnotes/comments/charts/SmartArt/embedded objects to avoid corrupt output.
+  - **Not applicable** to non-DOCX sources (PDF, Excel, PPT) — those use extract-then-write via their respective skills.
 - `docx_copy_lib.py` — Library powering the copy tool.
-
-### Source material cache (`source-index.json`)
-- Per-bid JSON file caching heading analysis results for each DOCX.
-- Avoids re-analyzing large documents on every interaction.
-- Cache hit → use cached headings. Cache miss → run `--list-headings --json` and write back.
-- User can request re-analysis to invalidate cache entries.
 
 ### UI
 - Agent Hub → launch Bid Writer in the Document Writer layout (documents + OnlyOffice + chat).
@@ -74,14 +81,16 @@ Why:
 
 1. **Intake (gate 1)**
    - Ingest tender + materials → generate `facts.json` + `requirements.csv`.
-   - Build `source-index.json` for all input DOCX files.
    - Ask questions for missing values; do not draft yet.
 2. **Assemble / Draft (gate 2)**
-   - Create/modify `documents/bids/<bid_id>/draft.docx`.
-   - Content source priority:
-     1. Verbatim copy from source → adapt specific values (fastest, highest fidelity)
-     2. Copy structure, rewrite content (medium effort)
-     3. Generate from scratch (last resort)
+   - Create/modify the target `.docx` under `documents/` (in Document Writer UI this is session-scoped under `documents/sessions/<sessionId>/...`).
+   - Assembly routing by source format:
+     - **DOCX sources** → `copy_docx_section.py` for format-preserving copy, then adapt values
+     - **PDF sources** → extract text/tables via `pdf` skill → write into target using target's styles
+     - **Excel sources** → read data via `xlsx` skill → fill into target document tables
+     - **PPT sources** → extract text via `pptx` skill → use as content reference for writing
+     - **.doc sources** → convert to .docx first, then treat as DOCX
+   - **Style alignment**: all assembled content must use the target document's styles. If the result looks visually inconsistent with surrounding content, it provides no value over manual copy-paste.
    - Ensure every requirement has a mapped response location.
 3. **Dedupe (gate 3)**
    - Compare main + partner drafts → `dedupe-report.md`.
@@ -111,3 +120,32 @@ Why:
 - Do not modify factual values to "look different".
 - Keep all high-stakes values in `facts.json` as the single source-of-truth.
 - Prefer deterministic scripts for extraction, hashing, and validation.
+
+## Design decisions log
+
+### Multi-format assembly: route by format, don't convert at upload
+
+**Decision**: Use format-aware routing (DOCX→copy, PDF→extract, Excel→read data) instead of converting all uploads to DOCX.
+
+**Rationale**:
+- PDF→DOCX conversion is unreliable: scanned PDFs produce garbage, complex layouts lose structure, and the resulting DOCX has no usable heading styles for `copy_docx_section.py`.
+- Excel→DOCX loses the core value (structured tabular data, formulas). Bid scenarios need to read data and fill into target tables, not flatten to paragraphs.
+- PPT→DOCX loses visual structure (slides become flat text).
+- Only `.doc`→`.docx` is worth converting (same document model, high conversion quality via LibreOffice).
+
+### Style alignment as a hard requirement
+
+**Decision**: Assembled content must use the target document's existing styles. This is treated as a correctness requirement, not a nice-to-have.
+
+**Rationale**: If the user copies a chapter from a historical bid and the result has different fonts/sizes/spacing from the rest of the target document, the user must manually fix formatting — which means the tool provided negative value (they wasted time running it, then still had to do manual work). The bar is: after assembly, the user should not need to touch formatting.
+
+### No persistent source-index cache
+
+**Decision**: Removed `source-index.json`. Agent analyzes reference files on demand instead of maintaining a persistent cache.
+
+**Rationale**:
+- `--list-headings` runs in milliseconds (ZIP decompress + XML parse); caching it saves negligible time.
+- Within a session, the agent's context already holds previous analysis results — no cache needed.
+- Across sessions, the intake artifacts (`facts.json`, `requirements.csv`, `intake-summary.md`) already capture what was learned — a separate index is redundant.
+- The cache introduced a consistency problem: files could change but the cache would not, leading the agent to act on stale information.
+- The "analyze before acting" workflow pattern is preserved — it's now expressed as "run the tool to discover structure" rather than "check the cache".

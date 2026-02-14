@@ -19,6 +19,15 @@ x-shared: &shared
   volumes:
     # Mount the entire repo so both services share node_modules + source
     - ../../:/app
+    # IMPORTANT: keep container node_modules isolated from the host (macOS vs Linux binaries)
+    - node-modules:/app/node_modules
+    - node-modules-agent-lab:/app/packages/agent-lab/node_modules
+    - node-modules-app:/app/packages/app/node_modules
+    - node-modules-desktop:/app/packages/desktop/node_modules
+    - node-modules-headless:/app/packages/headless/node_modules
+    - node-modules-landing:/app/packages/landing/node_modules
+    - node-modules-owpenbot:/app/packages/owpenbot/node_modules
+    - node-modules-server:/app/packages/server/node_modules
     - pnpm-store:/root/.local/share/pnpm/store
     - bun-install:/root/.bun
     - ${OPENWORK_WORKSPACE:-./workspace}:/workspace
@@ -188,3 +197,19 @@ volumes:
     name: openwork-dev-pnpm-store
   bun-install:
     name: openwork-dev-bun-install
+  node-modules:
+    name: openwork-dev-node_modules
+  node-modules-agent-lab:
+    name: openwork-dev-node_modules-agent-lab
+  node-modules-app:
+    name: openwork-dev-node_modules-app
+  node-modules-desktop:
+    name: openwork-dev-node_modules-desktop
+  node-modules-headless:
+    name: openwork-dev-node_modules-headless
+  node-modules-landing:
+    name: openwork-dev-node_modules-landing
+  node-modules-owpenbot:
+    name: openwork-dev-node_modules-owpenbot
+  node-modules-server:
+    name: openwork-dev-node_modules-server

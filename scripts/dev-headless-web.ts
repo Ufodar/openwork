@@ -1,15 +1,44 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { openSync } from "node:fs";
-import { access, mkdir, readdir, stat } from "node:fs/promises";
+import { access, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 
 const cwd = process.cwd();
 const tmpDir = path.join(cwd, "tmp");
+const statePath = path.join(tmpDir, "dev-headless-web.state.json");
 
 const ensureTmp = async () => {
   await mkdir(tmpDir, { recursive: true });
+};
+
+type DevHeadlessWebState = {
+  schemaVersion: 1;
+  updatedAt: number;
+  webPid?: number;
+  headlessPid?: number;
+  openworkPort?: number;
+  webPort?: number;
+};
+
+const readState = async (): Promise<DevHeadlessWebState | null> => {
+  try {
+    const raw = await readFile(statePath, "utf8");
+    const parsed = JSON.parse(raw) as Partial<DevHeadlessWebState> | null;
+    if (!parsed || parsed.schemaVersion !== 1) return null;
+    return parsed as DevHeadlessWebState;
+  } catch {
+    return null;
+  }
+};
+
+const writeState = async (state: DevHeadlessWebState) => {
+  try {
+    await writeFile(statePath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+  } catch {
+    // ignore
+  }
 };
 
 const isPortFree = (port: number, host: string) =>
@@ -51,6 +80,59 @@ const logLine = (message: string) => {
   process.stdout.write(`${message}\n`);
 };
 
+const sleep = (ms: number) =>
+  new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    timer.unref?.();
+  });
+
+const waitForPortFree = async (port: number, host: string, timeoutMs: number) => {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (await isPortFree(port, host)) return true;
+    await sleep(100);
+  }
+  return false;
+};
+
+const readPidCommand = (pid: number): string | null => {
+  if (!Number.isFinite(pid) || pid <= 0) return null;
+  if (process.platform === "win32") return null;
+  try {
+    const result = spawnSync("ps", ["-o", "command=", "-p", String(pid)], { encoding: "utf8" });
+    if (result.status !== 0) return null;
+    const value = String(result.stdout || "").trim();
+    return value || null;
+  } catch {
+    return null;
+  }
+};
+
+const killProcessGroup = (pid: number, signal: NodeJS.Signals) => {
+  if (!Number.isFinite(pid) || pid <= 0) return;
+  if (process.platform === "win32") {
+    try {
+      spawnSync("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore" });
+    } catch {
+      // ignore
+    }
+    return;
+  }
+
+  try {
+    process.kill(-pid, signal);
+    return;
+  } catch {
+    // ignore
+  }
+
+  try {
+    process.kill(pid, signal);
+  } catch {
+    // ignore
+  }
+};
+
 const killProcessTree = (child: ChildProcess, signal: NodeJS.Signals) => {
   if (!child.pid) return;
 
@@ -85,6 +167,9 @@ const readBool = (value: string | undefined) => {
 };
 
 const silent = process.argv.includes("--silent");
+const cleanupEnabled = process.env.OPENWORK_DEV_HEADLESS_WEB_CLEANUP == null
+  ? true
+  : readBool(process.env.OPENWORK_DEV_HEADLESS_WEB_CLEANUP);
 
 const autoBuildEnabled = process.env.OPENWORK_DEV_HEADLESS_WEB_AUTOBUILD == null
   ? true
@@ -119,16 +204,97 @@ const spawnLogged = (command: string, args: string[], logPath: string, env: Node
 
 await ensureTmp();
 
+const workspace = process.env.OPENWORK_WORKSPACE ?? cwd;
+
+const previousState = await readState();
+let cleanupRequested = false;
+if (cleanupEnabled && previousState && (previousState.webPid || previousState.headlessPid)) {
+  const candidates: Array<{ pid?: number; label: string; matcher: (cmd: string) => boolean }> = [
+    {
+      pid: previousState.webPid,
+      label: "web",
+      matcher: (cmd) => cmd.includes("openwork-ui") && cmd.includes("vite"),
+    },
+    {
+      pid: previousState.headlessPid,
+      label: "openwrk",
+      matcher: (cmd) => cmd.includes("openwrk") && cmd.includes("start"),
+    },
+  ];
+
+  let killedAny = false;
+  for (const entry of candidates) {
+    const pid = entry.pid ?? 0;
+    if (!pid) continue;
+    const cmd = readPidCommand(pid);
+    if (cmd && !entry.matcher(cmd)) continue;
+    killedAny = true;
+    logLine(`[dev:headless-web] Cleaning up stale ${entry.label} (pid ${pid})`);
+    killProcessGroup(pid, "SIGTERM");
+  }
+
+  if (killedAny) {
+    cleanupRequested = true;
+    const timer = setTimeout(() => {
+      for (const entry of candidates) {
+        const pid = entry.pid ?? 0;
+        if (!pid) continue;
+        const cmd = readPidCommand(pid);
+        if (cmd && !entry.matcher(cmd)) continue;
+        killProcessGroup(pid, "SIGKILL");
+      }
+    }, 1500);
+    timer.unref?.();
+  }
+}
+
+if (cleanupEnabled && !previousState && process.platform !== "win32") {
+  try {
+    const ps = spawnSync("ps", ["-eo", "pid=,command="], { encoding: "utf8" });
+    const lines = String(ps.stdout || "").split("\n");
+    const matcher = `--filter openwrk dev -- start --workspace ${workspace}`;
+    for (const line of lines) {
+      if (!line.includes(matcher)) continue;
+      const pid = Number(line.trim().split(/\s+/, 1)[0]);
+      if (!Number.isFinite(pid) || pid <= 0) continue;
+      logLine(`[dev:headless-web] Cleaning up stale openwrk (pid ${pid})`);
+      killProcessGroup(pid, "SIGTERM");
+      cleanupRequested = true;
+    }
+  } catch {
+    // ignore
+  }
+}
+
 const host = process.env.OPENWORK_HOST ?? "0.0.0.0";
 const viteHost = process.env.VITE_HOST ?? process.env.HOST ?? host;
 const publicHost = process.env.OPENWORK_PUBLIC_HOST ?? null;
 const clientHost = publicHost ?? (host === "0.0.0.0" ? "127.0.0.1" : host);
-const workspace = process.env.OPENWORK_WORKSPACE ?? cwd;
 // Resolve ports on the actual bind host to avoid false positives (e.g. a port
 // may be free on 127.0.0.1 but already taken on another interface, which would
 // make binding to 0.0.0.0 fail with EADDRINUSE).
-const openworkPort = await resolvePort(process.env.OPENWORK_PORT, host);
-const webPort = await resolvePort(process.env.OPENWORK_WEB_PORT, viteHost);
+const desiredOpenworkPortRaw = process.env.OPENWORK_PORT ??
+  (previousState?.openworkPort ? String(previousState.openworkPort) : undefined);
+const desiredWebPortRaw = process.env.OPENWORK_WEB_PORT ??
+  (previousState?.webPort ? String(previousState.webPort) : undefined);
+if (cleanupRequested) {
+  const desiredOpenworkPort = desiredOpenworkPortRaw ? Number(desiredOpenworkPortRaw) : NaN;
+  if (Number.isFinite(desiredOpenworkPort) && desiredOpenworkPort > 0) {
+    await waitForPortFree(desiredOpenworkPort, host, 2000);
+  }
+  const desiredWebPort = desiredWebPortRaw ? Number(desiredWebPortRaw) : NaN;
+  if (Number.isFinite(desiredWebPort) && desiredWebPort > 0) {
+    await waitForPortFree(desiredWebPort, viteHost, 2000);
+  }
+}
+const openworkPort = await resolvePort(
+  desiredOpenworkPortRaw,
+  host,
+);
+const webPort = await resolvePort(
+  desiredWebPortRaw,
+  viteHost,
+);
 const openworkToken = process.env.OPENWORK_TOKEN ?? randomUUID();
 const openworkHostToken = process.env.OPENWORK_HOST_TOKEN ?? randomUUID();
 // Default to source entrypoints so dev iteration never requires rebuilding binaries.
@@ -370,3 +536,12 @@ process.on("SIGTERM", () => {
 
 webProcess.on("exit", (code, signal) => shutdown("web", code, signal));
 headlessProcess.on("exit", (code, signal) => shutdown("openwrk", code, signal));
+
+await writeState({
+  schemaVersion: 1,
+  updatedAt: Date.now(),
+  webPid: webProcess.pid ?? undefined,
+  headlessPid: headlessProcess.pid ?? undefined,
+  openworkPort,
+  webPort,
+});

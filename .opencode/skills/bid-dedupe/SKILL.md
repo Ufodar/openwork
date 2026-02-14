@@ -12,7 +12,7 @@ description: This skill should be used to detect risky duplicate text and images
 1. 检查会话中可用的 .docx 文件
 2. 对所有 .docx 文件运行 compare_bids.py
 3. 在对话中展示摘要结果
-4. 保存完整报告到会话目录
+4. 保存完整报告到会话目录（优先写到当前 session 的 refs/other，便于在 UI 下载）
 5. 等待用户多轮调整指令
 
 ## Overview
@@ -39,7 +39,8 @@ If the active model cannot see images (e.g. text-only models), this skill still 
 
 ## Output
 
-Create `bids/<bid_id>/dedupe-report.md` (and optional intermediate JSON under `bids/<bid_id>/dedupe/`).
+- Workflow mode: create `bids/<bid_id>/dedupe-report.md` (and optional intermediate JSON under `bids/<bid_id>/dedupe/`).
+- OpenWork quick mode: prefer `.opencode/openwork/inbox/sessions/<sessionId>/refs/other/dedupe-report.md` so the report shows up in the reference library and is easy to download/share.
 
 ## Non‑Negotiables
 

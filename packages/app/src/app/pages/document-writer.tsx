@@ -35,6 +35,19 @@ type EditorSource = {
   readonly: boolean;
 };
 
+const ONLYOFFICE_IMPORT_EXTENSIONS = new Set(
+  DOCUMENT_UPLOAD_ACCEPT.split(",")
+    .map((ext) => ext.trim().toLowerCase())
+    .filter(Boolean),
+);
+
+const isOnlyOfficeImportable = (path: string) => {
+  const base = path.split("/").pop() ?? path;
+  const match = base.toLowerCase().match(/\.[^.]+$/);
+  if (!match) return false;
+  return ONLYOFFICE_IMPORT_EXTENSIONS.has(match[0]);
+};
+
 export default function DocumentWriterView(props: SessionViewProps) {
   const navigate = useNavigate();
 
@@ -682,6 +695,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
                                 {(item) => {
                                   const workspacePath = () => `.opencode/openwork/inbox/${item.path}`;
                                   const name = () => item.path.split("/").pop() ?? item.path;
+                                  const importable = () => isOnlyOfficeImportable(item.path);
                                   return (
                                     <div class="flex items-center gap-2 rounded-md px-2 py-1 hover:bg-dls-hover">
                                       <FileText size={14} class="text-dls-secondary shrink-0" />
@@ -709,8 +723,8 @@ export default function DocumentWriterView(props: SessionViewProps) {
                                         type="button"
                                         class="p-1.5 rounded hover:bg-dls-active text-dls-secondary hover:text-dls-text disabled:opacity-50"
                                         onClick={() => void openReferenceInEditor(item)}
-                                        disabled={!serverReady() || refsOpenBusyId() === item.id}
-                                        title="Open in editor"
+                                        disabled={!serverReady() || refsOpenBusyId() === item.id || !importable()}
+                                        title={importable() ? "Open in editor" : "Unsupported file type"}
                                         aria-label="Open in editor"
                                       >
                                         <ArrowRight size={14} />

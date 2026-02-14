@@ -36,7 +36,7 @@ services:
 
         # --- Install system deps ---
         apt-get update -qq && apt-get install -y -qq --no-install-recommends \
-          curl ca-certificates unzip git >/dev/null 2>&1
+          curl ca-certificates unzip git python3 python3-pip >/dev/null 2>&1
 
         # --- Install bun (cached in named volume) ---
         export BUN_INSTALL="/root/.bun"
@@ -53,21 +53,30 @@ services:
         echo "[headless] Installing dependencies..."
         pnpm install --no-frozen-lockfile
 
-        # --- Build Linux binaries into container-local path ---
+        # --- Stage sidecar executables into container-local path ---
         # Avoids overwriting macOS-native binaries on the host mount.
+        #
+        # NOTE: bun build --compile can be flaky on macOS host mounts (virtiofs),
+        # so we stage small launchers that execute the TS entrypoints directly.
         export OPENWORK_SERVER_BIN="/tmp/openwork-bins/openwork-server"
         export OWPENBOT_BIN="/tmp/openwork-bins/owpenbot"
         mkdir -p /tmp/openwork-bins
 
-        echo "[headless] Building openwork-server binary (linux)..."
-        cd /app/packages/server && bun build --compile src/cli.ts --outfile ./openwork-server-compiled \
-          && cp ./openwork-server-compiled "$$OPENWORK_SERVER_BIN" && rm -f ./openwork-server-compiled
+        echo "[headless] Staging openwork-server launcher..."
+        cat > "$$OPENWORK_SERVER_BIN" <<'EOF'
+        #!/bin/sh
+        set -e
+        exec bun /app/packages/server/src/cli.ts "$$@"
+        EOF
+        chmod +x "$$OPENWORK_SERVER_BIN"
 
-        echo "[headless] Building owpenbot binary (linux)..."
-        OWPENBOT_VERSION=$$(node -p "require('/app/packages/owpenbot/package.json').version")
-        cd /app/packages/owpenbot && bun build --compile src/cli.ts \
-          --define "__OWPENBOT_VERSION__=\"$${OWPENBOT_VERSION}\"" --outfile ./owpenbot-compiled \
-          && cp ./owpenbot-compiled "$$OWPENBOT_BIN" && rm -f ./owpenbot-compiled
+        echo "[headless] Staging owpenbot launcher..."
+        cat > "$$OWPENBOT_BIN" <<'EOF'
+        #!/bin/sh
+        set -e
+        exec bun /app/packages/owpenbot/src/cli.ts "$$@"
+        EOF
+        chmod +x "$$OWPENBOT_BIN"
 
         cd /app
 

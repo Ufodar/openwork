@@ -290,6 +290,10 @@ export function createDocumentRoutes(routes: unknown[]) {
             const inboxId = ctx.url.searchParams.get("inboxId");
             if (!inboxId) throw new ApiError(400, "invalid_request", "inboxId is required");
             const sessionId = parseDocumentSessionId(ctx.url.searchParams.get("session"));
+            const mode = (ctx.url.searchParams.get("mode") ?? "").trim().toLowerCase() || "reuse";
+            if (!["reuse", "copy", "overwrite"].includes(mode)) {
+                throw new ApiError(400, "invalid_request", "Invalid import mode");
+            }
 
             const workspace = ctx.config.workspaces.find((w: WorkspaceInfo) => w.id === workspaceId);
             if (!workspace) throw new ApiError(404, "not_found", "Workspace not found");
@@ -325,11 +329,20 @@ export function createDocumentRoutes(routes: unknown[]) {
             let destRel = initialDestRel;
             let destAbs = resolveDocumentPathSafe(docsDir, destRel);
             if (await exists(destAbs)) {
-                const dirRel = dirname(destRel).replace(/\\/g, "/");
-                const base = basename(destRel, ext);
-                const unique = `${base}-${shortId()}${ext}`;
-                destRel = dirRel && dirRel !== "." ? `${dirRel}/${unique}` : unique;
-                destAbs = resolveDocumentPathSafe(docsDir, destRel);
+                const destInfo = await stat(destAbs).catch(() => null);
+                if (destInfo && !destInfo.isFile()) {
+                    throw new ApiError(409, "conflict", "Document path is occupied");
+                }
+                if (mode === "reuse") {
+                    return jsonResponse({ ok: true, doc: destRel, reused: true });
+                }
+                if (mode === "copy") {
+                    const dirRel = dirname(destRel).replace(/\\/g, "/");
+                    const base = basename(destRel, ext);
+                    const unique = `${base}-${shortId()}${ext}`;
+                    destRel = dirRel && dirRel !== "." ? `${dirRel}/${unique}` : unique;
+                    destAbs = resolveDocumentPathSafe(docsDir, destRel);
+                }
             }
 
             await ensureDir(dirname(destAbs));

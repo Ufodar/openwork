@@ -20,6 +20,8 @@ type DevHeadlessWebState = {
   headlessPid?: number;
   openworkPort?: number;
   webPort?: number;
+  openworkToken?: string;
+  openworkHostToken?: string;
 };
 
 const readState = async (): Promise<DevHeadlessWebState | null> => {
@@ -295,8 +297,12 @@ const webPort = await resolvePort(
   desiredWebPortRaw,
   viteHost,
 );
-const openworkToken = process.env.OPENWORK_TOKEN ?? randomUUID();
-const openworkHostToken = process.env.OPENWORK_HOST_TOKEN ?? randomUUID();
+const openworkToken = process.env.OPENWORK_TOKEN ??
+  previousState?.openworkToken ??
+  randomUUID();
+const openworkHostToken = process.env.OPENWORK_HOST_TOKEN ??
+  previousState?.openworkHostToken ??
+  randomUUID();
 // Default to source entrypoints so dev iteration never requires rebuilding binaries.
 // - openwrk can run `.ts` via Bun automatically.
 // - For production / binary parity, override via OPENWORK_SERVER_BIN / OWPENBOT_BIN.
@@ -544,4 +550,6 @@ await writeState({
   headlessPid: headlessProcess.pid ?? undefined,
   openworkPort,
   webPort,
+  openworkToken,
+  openworkHostToken,
 });

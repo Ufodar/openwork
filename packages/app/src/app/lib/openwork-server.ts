@@ -528,6 +528,9 @@ export function hydrateOpenworkServerSettingsFromEnv() {
     const next: OpenworkServerSettings = { ...current };
     let changed = false;
 
+    const currentUrlNormalized = normalizeOpenworkServerUrl(current.urlOverride ?? "") ?? "";
+    const envUrlNormalized = normalizeOpenworkServerUrl(envUrl) ?? "";
+
     if (!current.urlOverride && envUrl) {
       next.urlOverride = normalizeOpenworkServerUrl(envUrl) ?? undefined;
       changed = true;
@@ -541,9 +544,14 @@ export function hydrateOpenworkServerSettingsFromEnv() {
       }
     }
 
-    if (!current.token && envToken) {
-      next.token = envToken;
-      changed = true;
+    if (envToken) {
+      const sameTarget =
+        Boolean(envUrlNormalized) &&
+        (!currentUrlNormalized || currentUrlNormalized === envUrlNormalized);
+      if ((!current.token && envToken) || (sameTarget && current.token?.trim() !== envToken)) {
+        next.token = envToken;
+        changed = true;
+      }
     }
 
     if (changed) {

@@ -1087,6 +1087,7 @@ export default function Composer(props: ComposerProps) {
   };
 
   const handleKeyDown = (event: KeyboardEvent) => {
+    event.stopPropagation();
     // Make slash chips behave like single tokens.
     if ((event.key === "Backspace" || event.key === "Delete") && editorRef) {
       const selection = window.getSelection();

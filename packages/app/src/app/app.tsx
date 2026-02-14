@@ -5274,6 +5274,7 @@ export default function App() {
     if (path.startsWith("/session")) {
       const [, , sessionSegment] = rawPath.split("/");
       const id = (sessionSegment ?? "").trim();
+      const forcedView = new URLSearchParams(location.search).get("view") === "session";
 
       if (!id) {
         const fallback = activeSessionId();
@@ -5295,6 +5296,29 @@ export default function App() {
 
       if (selectedSessionId() !== id) {
         void selectSession(id);
+      }
+
+      if (!forcedView) {
+        const stored = getSessionPreferredView(id);
+        const title = sessions().find((session) => session.id === id)?.title ?? null;
+        const inferred = inferSessionPreferredView(title);
+        const resolved = stored !== "session" ? stored : inferred ?? stored;
+        if (resolved === "document-writer") {
+          goToDocumentWriter(id, { replace: true });
+          return;
+        }
+
+        void (async () => {
+          try {
+            await ensureOpenworkSessionPrefsLoaded();
+          } catch {
+            return;
+          }
+          if (location.pathname.trim().toLowerCase() !== `/session/${id.toLowerCase()}`) return;
+          if (new URLSearchParams(location.search).get("view") === "session") return;
+          if (getSessionPreferredView(id) !== "document-writer") return;
+          goToDocumentWriter(id, { replace: true });
+        })();
       }
       return;
     }

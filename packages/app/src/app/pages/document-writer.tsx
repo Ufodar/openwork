@@ -806,7 +806,11 @@ export default function DocumentWriterView(props: SessionViewProps) {
             <button
               type="button"
               class="rounded-lg border border-dls-border bg-dls-surface px-2 py-1 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover disabled:opacity-50"
-              onClick={() => navigate(`/session/${sessionId()}`)}
+              onClick={() => {
+                const id = sessionId();
+                if (!id) return;
+                navigate(`/session/${id}?view=session`);
+              }}
               disabled={!sessionId()}
               title="Open session view"
             >

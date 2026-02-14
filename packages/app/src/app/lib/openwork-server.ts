@@ -1,5 +1,5 @@
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
-import { isTauriRuntime } from "../utils";
+import { formatBytes, isTauriRuntime } from "../utils";
 import type { ScheduledJob } from "./tauri";
 
 export type OpenworkServerCapabilities = {
@@ -1264,13 +1264,25 @@ export function createOpenworkServerClient(options: { baseUrl: string; token?: s
 
       if (!result.ok) {
         let message = result.text.trim();
+        let details: any = null;
         try {
           const json = message ? JSON.parse(message) : null;
           if (json && typeof json.message === "string") {
             message = json.message;
           }
+          details = json?.details ?? null;
         } catch {
           // ignore
+        }
+        if (result.status === 413 && details && typeof details === "object") {
+          const maxBytes = typeof details.maxBytes === "number" ? details.maxBytes : null;
+          const sizeBytes = typeof details.size === "number" ? details.size : null;
+          if (maxBytes && Number.isFinite(maxBytes) && maxBytes > 0) {
+            const sizeLabel = sizeBytes && Number.isFinite(sizeBytes) && sizeBytes > 0
+              ? formatBytes(sizeBytes)
+              : formatBytes(file.size);
+            message = `${message || "File exceeds upload limit"} (max ${formatBytes(maxBytes)}, got ${sizeLabel})`;
+          }
         }
         throw new OpenworkServerError(result.status, "request_failed", message || "Inbox upload failed");
       }

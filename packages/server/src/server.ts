@@ -250,7 +250,9 @@ export function startServer(config: ServerConfig) {
   } = {
     hostname: config.host,
     port: config.port,
-    maxRequestBodySize: 1024 * 1024 * 1024,
+    // Keep this aligned with inbox upload limits so large reference libraries
+    // don't fail before reaching the handler.
+    maxRequestBodySize: resolveInboxMaxBytes(),
     fetch: async (request: Request) => {
       const url = new URL(request.url);
       const startedAt = Date.now();

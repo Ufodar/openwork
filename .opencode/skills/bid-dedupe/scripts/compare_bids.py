@@ -15,6 +15,36 @@ from typing import Dict, List, Optional, Tuple
 from docx_dedupe_lib import DocxChunk, DocxImageHash, extract_docx_chunks, extract_docx_images, hamming_distance64, normalize_text
 
 
+def compile_regex_list(values: Optional[List[str]], *, flag: str) -> List[re.Pattern[str]]:
+    compiled: List[re.Pattern[str]] = []
+    for value in values or []:
+        if not value:
+            continue
+        try:
+            compiled.append(re.compile(value))
+        except re.error as e:
+            raise SystemExit(f"Invalid {flag} regex: {value!r} ({e})")
+    return compiled
+
+
+def filter_chunks_by_title(
+    chunks: List[DocxChunk],
+    include: List[re.Pattern[str]],
+    exclude: List[re.Pattern[str]],
+) -> List[DocxChunk]:
+    if not include and not exclude:
+        return chunks
+    out: List[DocxChunk] = []
+    for chunk in chunks:
+        title = chunk.title or ""
+        if include and not any(p.search(title) for p in include):
+            continue
+        if exclude and any(p.search(title) for p in exclude):
+            continue
+        out.append(chunk)
+    return out
+
+
 def excerpt(text: str, limit: int = 140) -> str:
     t = normalize_text(text)
     if len(t) <= limit:
@@ -192,6 +222,14 @@ def write_report(
     docs: List[str],
     chunks_by_doc: Dict[str, List[DocxChunk]],
     images_by_doc: Dict[str, List[DocxImageHash]],
+    *,
+    exclude_tables: bool,
+    include_title_regex: List[str],
+    exclude_title_regex: List[str],
+    exact_min_chars: int,
+    min_chars: int,
+    simhash_max_dist: int,
+    sim_threshold: float,
     media_dir: Optional[str] = None,
 ) -> None:
     out = Path(out_path)
@@ -222,7 +260,11 @@ def write_report(
         for c in chunks:
             chunk_map.setdefault(c.sha256, []).append((doc, c))
 
-    exact_text_groups = [items for sha, items in chunk_map.items() if len(items) > 1 and items[0][1].char_count >= 200]
+    exact_text_groups = [
+        items
+        for sha, items in chunk_map.items()
+        if len(items) > 1 and items[0][1].char_count >= exact_min_chars
+    ]
     exact_text_groups.sort(key=lambda g: g[0][1].char_count, reverse=True)
 
     # Exact duplicates (images)
@@ -242,13 +284,10 @@ def write_report(
 
     # Near duplicates (text)
     near_pairs: List[Tuple[str, str, DocxChunk, DocxChunk, int, float]] = []
-    SIMHASH_MAX_DIST = 4
-    RATIO_THRESHOLD = 0.92
-    MIN_CHARS = 400
 
     for a, b in itertools.combinations(docs, 2):
-        a_chunks = [c for c in chunks_by_doc[a] if c.char_count >= MIN_CHARS]
-        b_chunks = [c for c in chunks_by_doc[b] if c.char_count >= MIN_CHARS]
+        a_chunks = [c for c in chunks_by_doc[a] if c.char_count >= min_chars]
+        b_chunks = [c for c in chunks_by_doc[b] if c.char_count >= min_chars]
         if not a_chunks or not b_chunks:
             continue
 
@@ -257,12 +296,12 @@ def write_report(
                 if ca.sha256 == cb.sha256:
                     continue
                 dist = hamming_distance64(ca.simhash, cb.simhash)
-                if dist > SIMHASH_MAX_DIST:
+                if dist > simhash_max_dist:
                     continue
                 ra = normalize_text(ca.text)
                 rb = normalize_text(cb.text)
                 ratio = SequenceMatcher(None, ra, rb).ratio()
-                if ratio >= RATIO_THRESHOLD:
+                if ratio >= sim_threshold:
                     near_pairs.append((a, b, ca, cb, dist, ratio))
 
     near_pairs.sort(key=lambda x: x[5], reverse=True)
@@ -273,9 +312,25 @@ def write_report(
         for doc in docs:
             f.write(f"- `{doc}`\n")
 
+        f.write("\n## Settings\n\n")
+        f.write(f"- exclude tables: `{str(exclude_tables).lower()}`\n")
+        if include_title_regex:
+            f.write("- include title regex:\n")
+            for value in include_title_regex:
+                f.write(f"  - `{value}`\n")
+        if exclude_title_regex:
+            f.write("- exclude title regex:\n")
+            for value in exclude_title_regex:
+                f.write(f"  - `{value}`\n")
+        f.write(f"- exact min chars: `{exact_min_chars}`\n")
+        f.write(f"- near min chars: `{min_chars}`\n")
+        f.write(f"- simhash max dist: `{simhash_max_dist}`\n")
+        f.write(f"- near sim threshold: `{sim_threshold}`\n")
+
         if contact_sheet_path:
             f.write("\n## Media exports\n\n")
             f.write(f"- Contact sheet (HTML): `{contact_sheet_path}`\n")
+            f.write("- Note: image analysis is document-wide and is not filtered by section titles.\n")
 
         f.write("\n## Exact duplicate images (highest risk)\n\n")
         if not exact_image_groups:
@@ -327,10 +382,57 @@ def write_report(
 def main() -> int:
     parser = argparse.ArgumentParser(description="Compare multiple bid .docx files for duplicate text/images.")
     parser.add_argument("docx", nargs="+", help="2+ .docx files to compare")
-    parser.add_argument("--out", required=True, help="Output report path (markdown)")
+    parser.add_argument(
+        "--out",
+        help="Output report path (markdown). Required unless --list-headings is set.",
+    )
     parser.add_argument(
         "--media-dir",
         help="If set, export embedded media to this directory and write an HTML contact sheet (index.html) for human review.",
+    )
+    parser.add_argument(
+        "--list-headings",
+        action="store_true",
+        help="Print detected headings (chunk titles) for each .docx and exit.",
+    )
+    parser.add_argument(
+        "--exclude-tables",
+        action="store_true",
+        help="Skip table content when extracting text chunks (useful to reduce noise from standard forms).",
+    )
+    parser.add_argument(
+        "--include-title-regex",
+        action="append",
+        help="Only analyze text chunks whose heading title matches this regex (can be repeated).",
+    )
+    parser.add_argument(
+        "--exclude-title-regex",
+        action="append",
+        help="Exclude text chunks whose heading title matches this regex (can be repeated).",
+    )
+    parser.add_argument(
+        "--exact-min-chars",
+        type=int,
+        default=200,
+        help="Ignore exact-duplicate text blocks shorter than this (default: 200).",
+    )
+    parser.add_argument(
+        "--min-chars",
+        type=int,
+        default=400,
+        help="Ignore text chunks shorter than this for near-duplicate detection (default: 400).",
+    )
+    parser.add_argument(
+        "--simhash-max-dist",
+        type=int,
+        default=4,
+        help="Only compare chunks whose simhash Hamming distance is <= this value (default: 4).",
+    )
+    parser.add_argument(
+        "--sim-threshold",
+        type=float,
+        default=0.92,
+        help="Near-duplicate text similarity threshold from 0..1 (SequenceMatcher ratio, default: 0.92).",
     )
     args = parser.parse_args()
 
@@ -338,10 +440,57 @@ def main() -> int:
     if len(docs) < 2:
         raise SystemExit("Provide at least 2 .docx files.")
 
-    chunks_by_doc: Dict[str, List[DocxChunk]] = {doc: extract_docx_chunks(doc) for doc in docs}
+    if args.sim_threshold < 0 or args.sim_threshold > 1:
+        raise SystemExit("--sim-threshold must be between 0 and 1.")
+    if args.exact_min_chars <= 0:
+        raise SystemExit("--exact-min-chars must be > 0.")
+    if args.min_chars <= 0:
+        raise SystemExit("--min-chars must be > 0.")
+    if args.simhash_max_dist < 0:
+        raise SystemExit("--simhash-max-dist must be >= 0.")
+
+    include_patterns = compile_regex_list(args.include_title_regex, flag="--include-title-regex")
+    exclude_patterns = compile_regex_list(args.exclude_title_regex, flag="--exclude-title-regex")
+
+    chunks_by_doc: Dict[str, List[DocxChunk]] = {}
+    for doc in docs:
+        chunks = extract_docx_chunks(doc, include_tables=not args.exclude_tables)
+        chunks_by_doc[doc] = filter_chunks_by_title(chunks, include_patterns, exclude_patterns)
+
+    if args.list_headings:
+        for doc in docs:
+            print(f"\n== {Path(doc).name} ==")
+            chunks = chunks_by_doc.get(doc, [])
+            if not chunks:
+                print("(no headings detected)")
+                continue
+            seen: set[str] = set()
+            for chunk in chunks:
+                if chunk.title in seen:
+                    continue
+                seen.add(chunk.title)
+                print(f"- {chunk.title} ({chunk.char_count} chars)")
+        return 0
+
+    if not args.out:
+        raise SystemExit("--out is required unless --list-headings is set.")
+
     images_by_doc: Dict[str, List[DocxImageHash]] = {doc: extract_docx_images(doc) for doc in docs}
 
-    write_report(args.out, docs, chunks_by_doc, images_by_doc, media_dir=args.media_dir)
+    write_report(
+        args.out,
+        docs,
+        chunks_by_doc,
+        images_by_doc,
+        exclude_tables=bool(args.exclude_tables),
+        include_title_regex=[v for v in (args.include_title_regex or []) if v],
+        exclude_title_regex=[v for v in (args.exclude_title_regex or []) if v],
+        exact_min_chars=int(args.exact_min_chars),
+        min_chars=int(args.min_chars),
+        simhash_max_dist=int(args.simhash_max_dist),
+        sim_threshold=float(args.sim_threshold),
+        media_dir=args.media_dir,
+    )
     print(f"Wrote report -> {args.out}")
     return 0
 

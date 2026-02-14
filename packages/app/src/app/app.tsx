@@ -2325,6 +2325,7 @@ export default function App() {
     if (!normalized) return null;
     if (normalized.includes("document writer")) return "document-writer";
     if (normalized.includes("bid writer")) return "document-writer";
+    if (normalized.includes("bid dedupe")) return "document-writer";
     return null;
   };
 

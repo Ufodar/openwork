@@ -29,6 +29,13 @@ const agentTypes: AgentType[] = [
     status: "available",
   },
   {
+    id: "bid-dedupe",
+    name: "Bid Dedupe",
+    description: "Compare bid documents for duplicate text and images",
+    icon: Search,
+    status: "available",
+  },
+  {
     id: "code-reviewer",
     name: "Code Reviewer",
     description: "Review code for bugs, security issues, and best practices",
@@ -62,7 +69,7 @@ export default function AgentsView(props: AgentsViewProps) {
   const [agentsBusy, setAgentsBusy] = createSignal(false);
   const [agentsError, setAgentsError] = createSignal<string | null>(null);
   const [searchQuery, setSearchQuery] = createSignal("");
-  const docWriterAgents = new Set(["document-writer", "bid-writer"]);
+  const docWriterAgents = new Set(["document-writer", "bid-writer", "bid-dedupe"]);
 
   const normalizeAgentKey = (value: string) =>
     value
@@ -135,6 +142,12 @@ export default function AgentsView(props: AgentsViewProps) {
 
     if (featured.id === "bid-writer") {
       const agent = resolveFeaturedAgentName(featured) ?? "bid-writer";
+      props.createSessionAndOpen({ title: featured.name, agent, view: "document-writer" });
+      return;
+    }
+
+    if (featured.id === "bid-dedupe") {
+      const agent = resolveFeaturedAgentName(featured) ?? "bid-dedupe";
       props.createSessionAndOpen({ title: featured.name, agent, view: "document-writer" });
       return;
     }

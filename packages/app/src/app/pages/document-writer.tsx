@@ -447,10 +447,10 @@ export default function DocumentWriterView(props: SessionViewProps) {
     const nextDraft = already
       ? draft
       : {
-          ...draft,
-          text: `${prefix}\n\n${baseText}`.trim(),
-          resolvedText: baseResolvedText != null ? `${prefix}\n\n${baseResolvedText}`.trim() : undefined,
-        };
+        ...draft,
+        text: `${prefix}\n\n${baseText}`.trim(),
+        resolvedText: baseResolvedText != null ? `${prefix}\n\n${baseResolvedText}`.trim() : undefined,
+      };
     props.sendPromptAsync(nextDraft).catch(() => undefined);
   };
 
@@ -466,9 +466,8 @@ export default function DocumentWriterView(props: SessionViewProps) {
     <div class="flex h-screen w-full bg-dls-surface text-dls-text font-sans overflow-hidden">
       {/* Left: Document list */}
       <div
-        class={`shrink-0 border-r border-dls-border flex flex-col bg-dls-sidebar transition-[width] duration-200 ease-out ${
-          documentsCollapsed() ? "w-14" : "w-64"
-        }`}
+        class={`shrink-0 border-r border-dls-border flex flex-col bg-dls-sidebar transition-[width] duration-200 ease-out ${documentsCollapsed() ? "w-14" : "w-64"
+          }`}
       >
         <Show
           when={!documentsCollapsed()}
@@ -494,9 +493,8 @@ export default function DocumentWriterView(props: SessionViewProps) {
                 <RefreshCw size={16} class={documents.loading ? "animate-spin" : ""} />
               </button>
               <label
-                class={`cursor-pointer p-2 hover:bg-dls-hover rounded ${
-                  !serverReady() ? "opacity-50 cursor-not-allowed" : ""
-                }`}
+                class={`cursor-pointer p-2 hover:bg-dls-hover rounded ${!serverReady() ? "opacity-50 cursor-not-allowed" : ""
+                  }`}
                 title="Upload"
               >
                 <Plus size={16} />
@@ -541,9 +539,8 @@ export default function DocumentWriterView(props: SessionViewProps) {
                 <RefreshCw size={16} class={documents.loading ? "animate-spin" : ""} />
               </button>
               <label
-                class={`cursor-pointer p-2 hover:bg-dls-hover rounded ${
-                  !serverReady() ? "opacity-50 cursor-not-allowed" : ""
-                }`}
+                class={`cursor-pointer p-2 hover:bg-dls-hover rounded ${!serverReady() ? "opacity-50 cursor-not-allowed" : ""
+                  }`}
                 title="Upload"
               >
                 <Plus size={16} />
@@ -575,13 +572,11 @@ export default function DocumentWriterView(props: SessionViewProps) {
                 <For each={documents() ?? []}>
                   {(doc) => (
                     <button
-                      class={`w-full rounded flex items-center mb-1 transition-colors ${
-                        documentsCollapsed() ? "justify-center p-2" : "text-left p-2 gap-2"
-                      } ${
-                        selectedDoc() === doc.name
+                      class={`w-full rounded flex items-center mb-1 transition-colors ${documentsCollapsed() ? "justify-center p-2" : "text-left p-2 gap-2"
+                        } ${selectedDoc() === doc.name
                           ? "bg-dls-hover text-dls-text"
                           : "text-dls-secondary hover:bg-dls-surface"
-                      }`}
+                        }`}
                       onClick={() => setSelectedDoc(doc.name)}
                       title={documentsCollapsed() ? doc.name : undefined}
                     >
@@ -660,9 +655,8 @@ export default function DocumentWriterView(props: SessionViewProps) {
                             <span class="ml-auto text-[10px] text-dls-secondary">{items().length}</span>
                           </button>
                           <label
-                            class={`ml-2 cursor-pointer p-1.5 rounded hover:bg-dls-hover ${
-                              !serverReady() || refsBusy() ? "opacity-50 cursor-not-allowed" : ""
-                            }`}
+                            class={`ml-2 cursor-pointer p-1.5 rounded hover:bg-dls-hover ${!serverReady() || refsBusy() ? "opacity-50 cursor-not-allowed" : ""
+                              }`}
                             title={`Upload to ${category.label}`}
                           >
                             <Plus size={14} class="text-dls-secondary" />
@@ -819,7 +813,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
           </div>
         </div>
 
-      <div class="flex-1 min-h-0 overflow-hidden">
+        <div class="flex-1 min-h-0 overflow-hidden">
           <Show
             when={selectedDoc()}
             fallback={<div class="h-full flex items-center justify-center text-dls-secondary">Select a document to edit</div>}

@@ -120,7 +120,7 @@ class DocxChunk:
     simhash: int
 
 
-def extract_docx_chunks(docx_path: str) -> List[DocxChunk]:
+def extract_docx_chunks(docx_path: str, *, include_tables: bool = True) -> List[DocxChunk]:
     path = Path(docx_path)
     with zipfile.ZipFile(path) as z:
         xml_bytes = z.read("word/document.xml")
@@ -167,6 +167,9 @@ def extract_docx_chunks(docx_path: str) -> List[DocxChunk]:
                 # blank paragraph: treat as separator
                 current_lines.append("")
         elif tag.endswith("}tbl"):
+            if not include_tables:
+                current_lines.append("")
+                continue
             # Flatten table rows into lines
             for tr in child.findall(".//w:tr", W_NS):
                 cells: List[str] = []
@@ -241,4 +244,3 @@ def json_dump(obj: Any, path: str) -> None:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(obj, f, ensure_ascii=False, indent=2)
-

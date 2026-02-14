@@ -5,6 +5,16 @@ description: This skill should be used to detect risky duplicate text and images
 
 # Bid Dedupe
 
+## Quick mode（独立使用）
+
+当作为独立原子功能使用时（不是更大工作流的一部分）：
+
+1. 检查会话中可用的 .docx 文件
+2. 对所有 .docx 文件运行 compare_bids.py
+3. 在对话中展示摘要结果
+4. 保存完整报告到会话目录
+5. 等待用户多轮调整指令
+
 ## Overview
 
 Compare 2+ `.docx` bid documents and produce a dedupe report covering:
@@ -61,9 +71,14 @@ This produces:
 ### Step 1 — Choose scope and thresholds
 
 - Default thresholds are tuned for large bids; adjust only if the report is too noisy:
-  - near-duplicate text similarity threshold: `0.92`
-  - simhash Hamming distance filter: `<= 4`
-  - ignore short chunks (`< 400 chars`) for near-duplicate detection
+  - near-duplicate text similarity threshold: `--sim-threshold 0.92`
+  - simhash Hamming distance filter: `--simhash-max-dist 4`
+  - ignore short chunks (`--min-chars 400`) for near-duplicate detection
+  - ignore short exact duplicates (`--exact-min-chars 200`)
+- To reduce noise from standard forms/tables, use `--exclude-tables` (text only).
+- To limit the analysis to specific sections, use:
+  - `--list-headings` to inspect detected chunk titles
+  - `--include-title-regex` / `--exclude-title-regex` to filter text chunks by heading title
 
 ### Step 2 — Generate intermediate artifacts (optional)
 

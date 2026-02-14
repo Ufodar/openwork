@@ -149,3 +149,21 @@ Why:
 - Across sessions, the intake artifacts (`facts.json`, `requirements.csv`, `intake-summary.md`) already capture what was learned — a separate index is redundant.
 - The cache introduced a consistency problem: files could change but the cache would not, leading the agent to act on stale information.
 - The "analyze before acting" workflow pattern is preserved — it's now expressed as "run the tool to discover structure" rather than "check the cache".
+
+### Atomic features before workflow (原子功能优先于工作流)
+
+**Decision**: Decompose the bid-writing workflow into 6 atomic features, each with its own focused agent (~40 lines). Validate each independently before chaining into a pipeline.
+
+**Rationale**:
+- "对话式助手" is 鸡肋: simple ops users do faster, complex chains agents can't do well
+- Atomic features have clear success criteria (file in → report out, no ambiguity)
+- Each feature has multi-turn conversation for refinement (user stays in control)
+- One focused agent per feature outperforms one omnibus agent trying to do everything
+- Existing production-grade tools (compare_bids.py, copy_docx_section.py) map cleanly to atomic features
+
+**The 6 features**: 查重对比, 陪标换皮, 章节组装, 招标分析, 差异化改写, 质量检查
+
+**Anti-patterns**:
+- Don't build the pipeline before validating individual atoms
+- Don't create new skills when existing ones can be reused with a "Quick mode" header
+- Don't write 200-line agent prompts — atomic agents are ~40 lines max

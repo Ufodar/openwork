@@ -58,7 +58,7 @@ color: "#0EA5E9"
 |------|----------|------|
 | **.docx** | `copy_docx_section.py --list-headings --json` 获取结构；`docx` skill 的 `unpack.py` 读取 XML；或 `pandoc` 转文本 | 主力格式，支持跨文档复制 |
 | **.pdf** | `pdf` skill：`pdfplumber` 提取文本/表格；`pypdf` 合并/拆分 | 常见于招标文件正文 |
-| **.xlsx / .xls** | `xlsx` skill：`unpack.py` 读取 XML；或 `markitdown` 转文本 | 常见于商务报价表、设备清单 |
+| **.xlsx / .xls** | `xlsx` skill：优先用 `preview_xlsx.py` 快速预览/提取表格；必要时 `unpack.py` 读取 XML；`.xls` 先用 LibreOffice 转为 `.xlsx` | 常见于商务报价表、设备清单 |
 | **.pptx** | `pptx` skill：`markitdown` 提取文本；`thumbnail.py` 查看幻灯片 | 常见于公司介绍、方案汇报 |
 | **.doc** (旧版 Word) | `bash: pandoc input.doc -t plain` 或 LibreOffice 转换为 .docx | 先转格式再处理 |
 

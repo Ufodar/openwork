@@ -29,6 +29,7 @@ import argparse
 import csv
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -236,6 +237,111 @@ def trim_empty_rows(rows: list[list[str]]) -> list[list[str]]:
     return out
 
 
+def _normalize_tech_rows(rows: list[list[str]]) -> list[list[str]]:
+    normalized: list[list[str]] = []
+    for row in rows:
+        # Expect: 序号 | 招标要求 | 投标应答 | 偏离说明 | 证明材料页码?
+        row = list(row) + [""] * (5 - len(row))
+        seq = (row[0] or "").strip()
+        req = (row[1] or "").strip()
+        ans = (row[2] or "").strip()
+        dev = (row[3] or "").strip()
+        proof = (row[4] or "").strip()
+        if not (seq or req or ans or dev or proof):
+            continue
+        if not seq:
+            m = re.match(r"^\s*(\d+)\s*[\.、]", req)
+            if m:
+                seq = m.group(1)
+        if not dev:
+            dev = "无偏离"
+        normalized.append([seq, req, ans, dev, proof])
+    return normalized
+
+
+def _normalize_equipment_rows(rows: list[list[str]]) -> list[list[str]]:
+    # The equipment sheet often alternates between:
+    # - a row with 序号 + 产品名称 (no model/qty)
+    # - a row with 产品型号 + 描述 + 数量 (no 序号/名称)
+    # We collapse these pairs for a cleaner table.
+    normalized: list[list[str]] = []
+
+    i = 0
+    while i < len(rows):
+        row = list(rows[i]) + [""] * (6 - len(rows[i]))
+        seq = (row[0] or "").strip()
+        name = (row[1] or "").strip()
+        model = (row[2] or "").strip()
+        desc = (row[3] or "").strip()
+        qty = (row[4] or "").strip()
+        remark = (row[5] or "").strip()
+
+        # Drop grouping/footer rows.
+        if name.startswith("Site_") or name in {"总计", "合计"}:
+            i += 1
+            continue
+
+        is_name_row = bool(seq and name and not (model or desc or qty or remark))
+        if is_name_row and i + 1 < len(rows):
+            nxt = list(rows[i + 1]) + [""] * (6 - len(rows[i + 1]))
+            nxt_seq = (nxt[0] or "").strip()
+            nxt_name = (nxt[1] or "").strip()
+            nxt_model = (nxt[2] or "").strip()
+            nxt_desc = (nxt[3] or "").strip()
+            nxt_qty = (nxt[4] or "").strip()
+            nxt_remark = (nxt[5] or "").strip()
+
+            is_detail_row = (not nxt_seq and not nxt_name) and bool(
+                nxt_model or nxt_desc or nxt_qty or nxt_remark
+            )
+            if is_detail_row:
+                model = nxt_model
+                desc = nxt_desc
+                qty = nxt_qty
+                remark = nxt_remark or remark
+                normalized.append([seq, name, model, desc, qty, remark])
+                i += 2
+                continue
+
+        if seq or name or model or desc or qty or remark:
+            normalized.append([seq, name, model, desc, qty, remark])
+        i += 1
+
+    return normalized
+
+
+def _scoring_breakdown_table(facts: dict) -> TableSpec | None:
+    scoring = (facts.get("scoring") or {}).get("breakdown") or {}
+    if not scoring:
+        return None
+
+    rows: list[list[str]] = []
+    price = scoring.get("price") or {}
+    if price:
+        rows.append(["价格", str(price.get("points") or ""), str(price.get("rule") or "")])
+
+    technical = scoring.get("technical") or {}
+    items = technical.get("items") or []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        note = item.get("note") or ""
+        rule = (item.get("rule") or "").strip()
+        detail = rule if rule else note
+        rows.append(
+            [
+                f"技术 - {item.get('name') or ''}".strip(),
+                str(item.get("points") or ""),
+                detail,
+            ]
+        )
+
+    if not rows:
+        return None
+
+    return TableSpec(headers=["评分项", "分值", "规则/说明"], rows=rows)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Draft an MVP bid into an existing target .docx")
     parser.add_argument("--target", required=True, help="Target .docx to edit in place")
@@ -336,6 +442,13 @@ def main() -> int:
     project_number = facts.get("tender", {}).get("projectNumber") or "<<TBD>>"
     budget = facts.get("tender", {}).get("budget") or "<<TBD>>"
     agency_name = facts.get("procurementAgency", {}).get("name") or "<<TBD>>"
+    bid_deadline = facts.get("bidDeadline") or "<<TBD>>"
+    bid_opening_loc = (facts.get("bidOpening") or {}).get("location") or "<<TBD>>"
+    delivery = ((facts.get("businessTerms") or {}).get("delivery") or {}).get("value") or "<<TBD>>"
+    bid_validity = ((facts.get("businessTerms") or {}).get("bidValidity") or {}).get("value") or "<<TBD>>"
+    bid_bond = ((facts.get("businessTerms") or {}).get("bidBond") or {}).get("value") or "<<TBD>>"
+    perf_bond = ((facts.get("businessTerms") or {}).get("performanceBond") or {}).get("value") or "<<TBD>>"
+    payment = ((facts.get("businessTerms") or {}).get("payment") or {}).get("value") or "<<TBD>>"
 
     elements.append(paragraph("投标文件（草稿）", style="Heading1", align="center", bold=True))
     elements.append(paragraph(f"项目名称：{project_name}"))
@@ -350,6 +463,13 @@ def main() -> int:
         ["项目编号", project_number],
         ["预算金额", budget],
         ["采购代理机构", agency_name],
+        ["投标截止/开标时间", bid_deadline],
+        ["开标地点", bid_opening_loc],
+        ["交货期/工期", delivery],
+        ["投标有效期", bid_validity],
+        ["投标保证金", bid_bond],
+        ["履约保证金", perf_bond],
+        ["付款方式（摘要）", payment],
         ["项目类型", "政府采购（专门面向中小企业）" if facts.get("eligibility", {}).get("面向中小企业") else "<<TBD>>"],
     ]
     elements.append(table(TableSpec(headers=["项目属性", "内容"], rows=info_rows), col_widths_dxa=[2500, 6500]))
@@ -378,6 +498,10 @@ def main() -> int:
     elements.append(paragraph(f"评标方法：{scoring.get('method') or '<<TBD>>'}"))
     if scoring.get("description"):
         elements.append(paragraph(f"说明：{scoring.get('description')}"))
+    breakdown = _scoring_breakdown_table(facts)
+    if breakdown:
+        elements.append(paragraph(""))
+        elements.append(table(breakdown, col_widths_dxa=[2500, 900, 5600]))
     elements.append(paragraph(""))
 
     elements.append(paragraph("四、技术参数响应与偏离说明（点对点）", style="Heading1"))
@@ -386,8 +510,8 @@ def main() -> int:
         tech_header_idx = find_header_row_index(tech_rows, "序号")
         if tech_header_idx is not None:
             tech_rows = tech_rows[tech_header_idx:]
-        tech_headers = tech_rows[0]
-        tech_data = tech_rows[1:]
+        tech_headers = (tech_rows[0] + [""] * 5)[:5]
+        tech_data = _normalize_tech_rows(tech_rows[1:])
         # Keep at most 5 columns for readability.
         tech_headers = tech_headers[:5]
         tech_data = [row[:5] for row in tech_data]
@@ -403,8 +527,8 @@ def main() -> int:
 
     elements.append(paragraph("五、设备清单（摘要）", style="Heading1"))
     if equip_rows and len(equip_rows) >= 2:
-        equip_headers = equip_rows[0][:6]
-        equip_data = [row[:6] for row in equip_rows[1:]]
+        equip_headers = (equip_rows[0] + [""] * 6)[:6]
+        equip_data = _normalize_equipment_rows([row[:6] for row in equip_rows[1:]])
         elements.append(
             table(
                 TableSpec(headers=equip_headers, rows=equip_data),
@@ -429,8 +553,45 @@ def main() -> int:
         header_idx = find_header_row_index(brand_rows, "序号")
         if header_idx is not None:
             brand_rows = brand_rows[header_idx:]
-        brand_headers = brand_rows[0][:6] if brand_rows else ["序号", "模块", "招标要求", "投标应答", "偏离说明", "证明材料页码"]
-        brand_data = [row[:6] for row in brand_rows[1:51]]
+        brand_header = brand_rows[0] if brand_rows else []
+
+        def _idx(name: str) -> int | None:
+            try:
+                return brand_header.index(name)
+            except ValueError:
+                return None
+
+        idx_seq = _idx("序号") or 0
+        idx_module = _idx("模块") or 1
+        idx_req = _idx("招标要求") or 2
+        idx_ans = _idx("投标应答") or 3
+        idx_dev = _idx("偏离说明") or 4
+        idx_proof = _idx("证明材料页码")
+        if idx_proof is None:
+            idx_proof = 6 if len(brand_header) > 6 else (len(brand_header) - 1)
+
+        cols = [idx_seq, idx_module, idx_req, idx_ans, idx_dev, idx_proof]
+        brand_headers = ["序号", "模块", "招标要求", "投标应答", "偏离说明", "证明材料页码"]
+
+        brand_data: list[list[str]] = []
+        for raw in brand_rows[1:]:
+            row = list(raw)
+            if len(row) <= max(cols):
+                row += [""] * (max(cols) + 1 - len(row))
+
+            picked = [(row[i] or "").strip() for i in cols]
+            if not any(picked):
+                continue
+
+            seq = picked[0]
+            # Skip section headers like "（一）报价要求" and keep numeric items only.
+            if not re.fullmatch(r"\d+", seq):
+                continue
+
+            brand_data.append(picked)
+            if len(brand_data) >= 50:
+                break
+
         elements.append(
             table(
                 TableSpec(headers=brand_headers, rows=brand_data),

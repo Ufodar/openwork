@@ -294,6 +294,16 @@ def main() -> int:
     parser.add_argument("--tech-xlsx", required=True, help="Technical response table .xlsx")
     parser.add_argument("--equip-xlsx", required=True, help="Equipment list .xlsx")
     parser.add_argument("--brand-xls", help="Brand deviation .xls/.xlsx (optional)")
+    parser.add_argument(
+        "--forms-source-doc",
+        help="Optional .docx containing tender/partner form templates (e.g. 开标一览表、授权书等) to append",
+    )
+    parser.add_argument(
+        "--forms-heading",
+        action="append",
+        default=[],
+        help="Heading to copy from --forms-source-doc (repeatable). Defaults to a standard set when omitted.",
+    )
     args = parser.parse_args()
 
     workspace = Path.cwd()
@@ -336,6 +346,51 @@ def main() -> int:
         cmd += ["--brand-xls", str(Path(args.brand_xls))]
 
     subprocess.check_call(cmd)
+
+    # Optionally append form templates from a reference document (usually tender attachments
+    # or a partner bid). This improves "professional completeness" without relying on LLM.
+    if args.forms_source_doc:
+        forms_doc = Path(args.forms_source_doc)
+        if not forms_doc.exists():
+            raise SystemExit(f"Missing forms source document: {forms_doc}")
+        copy_script = workspace / ".opencode" / "skills" / "bid-drafting" / "scripts" / "copy_docx_section.py"
+        if not copy_script.exists():
+            raise SystemExit(f"Missing section copy script: {copy_script}")
+
+        default_forms = [
+            "开标一览表",
+            "开标分项一览表",
+            "法定代表人授权书",
+            "法定代表人身份证明书",
+            "无重大违法记录声明",
+            "中小企业声明函",
+            "投标产品点对点应答表",
+            "投标产品配置清单",
+            "售后服务承诺",
+        ]
+        headings = args.forms_heading or default_forms
+        failures: list[str] = []
+        for heading in headings:
+            copy_cmd = [
+                sys.executable,
+                str(copy_script),
+                "--source",
+                str(forms_doc),
+                "--target",
+                str(out_doc),
+                "--output",
+                str(out_doc),
+                "--source-heading",
+                heading,
+                "--match-mode",
+                "exact",
+            ]
+            try:
+                subprocess.check_call(copy_cmd)
+            except subprocess.CalledProcessError as error:
+                failures.append(f"{heading} (exit {error.returncode})")
+        if failures:
+            print("WARNING: failed to append some form sections:", ", ".join(failures), file=sys.stderr)
 
     tender_text = None
     if args.tender_doc:

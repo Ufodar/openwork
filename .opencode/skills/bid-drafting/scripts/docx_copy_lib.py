@@ -75,16 +75,20 @@ W_TAG_SECTPR = f"{{{NS['w']}}}sectPr"
 HEADING_STYLE_HINTS = ("heading", "title", "标题", "Heading", "Title", "TOC")
 
 HEADING_TEXT_PATTERNS: List[Tuple[re.Pattern, int]] = [
+    # 第X部分 → level 1
+    (re.compile(r"^\s*第[一二三四五六七八九十百千\d]+部分(?:\s*.+)?$"), 1),
     # 第X章 → level 1
-    (re.compile(r"^\s*第[一二三四五六七八九十百千\d]+章\s*.+$"), 1),
+    (re.compile(r"^\s*第[一二三四五六七八九十百千\d]+章(?:\s*.+)?$"), 1),
     # 第X节 → level 2
-    (re.compile(r"^\s*第[一二三四五六七八九十百千\d]+节\s*.+$"), 2),
+    (re.compile(r"^\s*第[一二三四五六七八九十百千\d]+节(?:\s*.+)?$"), 2),
     # 一、 / 二. → level 2
     (re.compile(r"^\s*[一二三四五六七八九十]+[、.]\s*.+$"), 2),
     # （一） / (1) → level 3
     (re.compile(r"^\s*[\(（][一二三四五六七八九十\d]+[\)）]\s*.+$"), 3),
     # 1.2.3 style → level = dot_count + 1
-    (re.compile(r"^\s*(\d+(?:\.\d+)*)\s+.+$"), -1),  # -1 = dynamic
+    # Supports both "1.1 项目背景" and "1.1项目背景".
+    # Limit the first segment to 1-3 digits to avoid misclassifying dates like 2025年...
+    (re.compile(r"^\s*(\d{1,3}(?:\.\d{1,3})*)(?:\s*[\-—.、．]?\s*)\S.+$"), -1),  # -1 = dynamic
 ]
 
 
@@ -788,6 +792,30 @@ def _copy_section_impl(source_zip: zipfile.ZipFile, source_path: str,
 
     if not section_elements:
         raise ValueError(f"Section '{source_heading}' is empty in source document")
+
+    # Strip section properties embedded in paragraph properties.
+    #
+    # These often reference header/footer parts via relationships (r:id) which we
+    # intentionally do not copy across documents. Keeping them would either:
+    # - trigger "unsupported relationship" errors, or
+    # - risk producing a corrupt output if we attempted to copy them partially.
+    #
+    # For cross-document section copy, dropping embedded sectPr is the safer
+    # default (the target document's section settings remain in effect).
+    stripped_sectpr = 0
+    for elem in section_elements:
+        for p in elem.iter(W_TAG_P):
+            ppr = p.find("w:pPr", NS)
+            if ppr is None:
+                continue
+            for sectpr in list(ppr.findall("w:sectPr", NS)):
+                ppr.remove(sectpr)
+                stripped_sectpr += 1
+    if stripped_sectpr:
+        result.warnings.append(
+            f"Stripped {stripped_sectpr} embedded section properties (w:sectPr) from copied content "
+            "to avoid unsafe header/footer relationships."
+        )
 
     # Count paragraphs and tables
     for elem in section_elements:

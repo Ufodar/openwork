@@ -475,6 +475,15 @@ def main() -> int:
     elements.append(table(TableSpec(headers=["项目属性", "内容"], rows=info_rows), col_widths_dxa=[2500, 6500]))
     elements.append(paragraph(""))
 
+    # Tender-required composition buckets (helps reviewers map draft sections to tender expectations).
+    elements.append(paragraph("投标文件组成（对照招标文件）", style="Heading1"))
+    elements.append(paragraph("报价文件：见《开标一览表》《开标分项一览表》等（报价需按招标文件附件格式填写）。"))
+    elements.append(paragraph("资格文件：见“资格要求与商务要求（清单）”及后续资质附件。"))
+    elements.append(paragraph("技术文件：见“技术参数响应与偏离说明（点对点）”、“设备清单（摘要）”及技术方案附件。"))
+    elements.append(paragraph("承诺文件：见“售后与服务承诺（摘要）”及承诺函附件。"))
+    elements.append(paragraph("其他补充文件：见“待确认问题清单”等。"))
+    elements.append(paragraph(""))
+
     elements.append(paragraph("二、资格要求与商务要求（清单）", style="Heading1"))
     checklist_rows: list[list[str]] = []
     for r in requirements:

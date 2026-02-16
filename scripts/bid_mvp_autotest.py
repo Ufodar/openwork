@@ -16,9 +16,11 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import re
 import subprocess
 import sys
+import tempfile
 import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -49,6 +51,168 @@ def normalize_text(s: str) -> str:
     out = re.sub(r"\s+", "", s or "")
     out = re.sub(r"[，。,．；;:：、/\\\\（）()\\[\\]【】《》〈〉“”\"'‘’·•…—-]+", "", out)
     return out
+
+
+def extract_search_terms(requirement: str) -> list[str]:
+    """
+    Extract a few stable terms from a requirement string for best-effort evidence scanning.
+
+    Heuristics:
+    - keep longer CJK/ASCII chunks (>=3 chars)
+    - keep uppercase tokens like API/SDK (>=2 chars)
+    - drop very short / generic tokens to reduce noise
+    """
+    cleaned = re.sub(r"[，。,．；;:：、/\\\\（）()\\[\\]【】《》〈〉“”\"'‘’·•…—-]+", " ", requirement or "")
+    parts = [p.strip() for p in cleaned.split() if p.strip()]
+    terms: list[str] = []
+    for part in parts:
+        if len(part) >= 3:
+            terms.append(part)
+            continue
+        if re.fullmatch(r"[A-Z]{2,}", part):
+            terms.append(part)
+            continue
+    # De-dup preserving order
+    out: list[str] = []
+    seen: set[str] = set()
+    for t in terms:
+        if t in seen:
+            continue
+        out.append(t)
+        seen.add(t)
+    return out
+
+
+def read_pdf_text(pdf_path: Path, *, max_chars: int = 500_000) -> str:
+    """
+    Best-effort text extraction using `pdftotext` if available.
+    Returns empty string when extraction isn't possible.
+    """
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as tmp:
+            tmp_path = Path(tmp.name)
+        try:
+            subprocess.run(
+                ["pdftotext", str(pdf_path), str(tmp_path)],
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            text = tmp_path.read_text(encoding="utf-8", errors="ignore")
+            return text[:max_chars]
+        finally:
+            try:
+                tmp_path.unlink()
+            except FileNotFoundError:
+                pass
+    except Exception:
+        return ""
+
+
+def read_text_file(path: Path, *, max_chars: int = 500_000) -> str:
+    try:
+        return path.read_text(encoding="utf-8", errors="ignore")[:max_chars]
+    except Exception:
+        return ""
+
+
+def list_files(root: Path, *, max_files: int = 500) -> list[Path]:
+    files: list[Path] = []
+    try:
+        for dirpath, _, filenames in os.walk(root):
+            for name in filenames:
+                if name in {".DS_Store", "Thumbs.db"}:
+                    continue
+                files.append(Path(dirpath) / name)
+                if len(files) >= max_files:
+                    return files
+    except Exception:
+        return files
+    return files
+
+
+def scan_evidence_files(
+    *,
+    root: Path,
+    rows: list[dict[str, str]],
+    max_files: int = 200,
+    max_bytes_per_file: int = 250_000_000,  # 250MB
+) -> dict[str, list[str]]:
+    """
+    Best-effort evidence scanning across the session reference library.
+
+    Returns: { requirement_id: [relative file paths that contain any extracted term] }
+    """
+    files = list_files(root, max_files=max_files)
+    if not files:
+        return {}
+
+    # Prepare term queries per requirement row.
+    queries: dict[str, list[str]] = {}
+    for row in rows:
+        req_id = (row.get("ID") or "").strip()
+        req_text = (row.get("Requirement") or "").strip()
+        if not req_id or not req_text:
+            continue
+        terms = extract_search_terms(req_text)
+        if terms:
+            queries[req_id] = terms
+
+    if not queries:
+        return {}
+
+    # Cache normalized text per file to avoid repeated extraction.
+    norm_cache: dict[Path, str] = {}
+
+    def load_norm(p: Path) -> str:
+        if p in norm_cache:
+            return norm_cache[p]
+        try:
+            info = p.stat()
+        except Exception:
+            norm_cache[p] = ""
+            return ""
+        if info.is_dir() or not info.is_file():
+            norm_cache[p] = ""
+            return ""
+        if info.size > max_bytes_per_file:
+            norm_cache[p] = ""
+            return ""
+
+        ext = p.suffix.lower()
+        text = ""
+        if ext == ".docx":
+            try:
+                text = read_docx_text(p)
+            except Exception:
+                text = ""
+        elif ext == ".pdf":
+            text = read_pdf_text(p)
+        elif ext in {".txt", ".md", ".csv", ".tsv", ".json"}:
+            text = read_text_file(p)
+        else:
+            text = ""
+
+        norm_cache[p] = normalize_text(text)
+        return norm_cache[p]
+
+    results: dict[str, list[str]] = {req_id: [] for req_id in queries.keys()}
+
+    for p in files:
+        rel = str(p.relative_to(root))
+        norm = load_norm(p)
+        if not norm:
+            continue
+        for req_id, terms in queries.items():
+            if results[req_id]:
+                # Keep a small cap per requirement to avoid huge reports.
+                if len(results[req_id]) >= 6:
+                    continue
+            if any(normalize_text(t) in norm for t in terms):
+                results[req_id].append(rel)
+
+    # Remove empty hits
+    return {k: v for k, v in results.items() if v}
 
 
 def read_requirements(requirements_csv: Path) -> list[dict[str, str]]:
@@ -258,6 +422,7 @@ def build_qc_report(
     facts_json: Path,
     requirements_csv: Path,
     tender_text: Optional[str],
+    refs_root: Optional[Path],
 ) -> str:
     now = datetime.now().astimezone()
     facts = json.loads(facts_json.read_text(encoding="utf-8"))
@@ -401,6 +566,13 @@ def build_qc_report(
                     + "、".join(missing_buckets)
                 )
 
+    evidence_hits: dict[str, list[str]] = {}
+    if refs_root and need_provide_nonqual:
+        try:
+            evidence_hits = scan_evidence_files(root=refs_root, rows=need_provide_nonqual)
+        except Exception:
+            evidence_hits = {}
+
     ok = not blockers and not highs
 
     def render_list(items: Iterable[str]) -> str:
@@ -428,12 +600,30 @@ def build_qc_report(
     lines.append("## Low")
     lines.append(render_list(lows))
     lines.append("")
+    if refs_root:
+        lines.append("## Evidence scan (refs/)")
+        if evidence_hits:
+            for row in need_provide_nonqual:
+                req_id = (row.get("ID") or "").strip()
+                if not req_id:
+                    continue
+                hits = evidence_hits.get(req_id)
+                if not hits:
+                    continue
+                terms = extract_search_terms((row.get("Requirement") or "").strip())
+                lines.append(f"- {req_id}: terms={ '、'.join(terms[:6]) if terms else '（无）' }")
+                lines.append("  - hits: " + "；".join(hits[:6]) + ("；..." if len(hits) > 6 else ""))
+        else:
+            lines.append("- （无匹配；可能缺少证明材料或材料为扫描件需 OCR）")
+        lines.append("")
     lines.append("## Next actions (suggested)")
     actions: list[str] = []
     if need_provide_qual:
         actions.append("收集并补齐资格/资质材料（营业执照/审计/纳税社保/中小企业声明函等），否则存在废标风险。")
     if need_provide_nonqual:
         actions.append("补齐待提供的支撑/证明材料（含星号条款证明材料、案例合同/验收/人员社保等），否则可能失分或不满足实质性要求。")
+        if refs_root and evidence_hits:
+            actions.append("已在 refs/ 中发现疑似相关材料（见 Evidence scan），可优先人工核对并补充到投标附件/证明材料页码。")
     if missing_forms:
         actions.append("用模板/历史标书补齐招标文件附件格式（开标一览表、授权书、声明函、点对点应答表、配置清单等）。")
     if placeholders:
@@ -616,12 +806,19 @@ def main() -> int:
             copied_headings=copied_headings,
         )
 
+    refs_root = None
+    if args.session_id:
+        candidate = workspace / ".opencode" / "openwork" / "inbox" / "sessions" / args.session_id / "refs"
+        if candidate.exists():
+            refs_root = candidate
+
     qc_report = build_qc_report(
         bid_id=args.bid_id,
         draft_docx=out_doc,
         facts_json=facts_json,
         requirements_csv=requirements_csv,
         tender_text=tender_text,
+        refs_root=refs_root,
     )
 
     qc_path = bid_dir / "qc-report.md"

@@ -323,11 +323,14 @@ def build_qc_report(
             highs.append(f"草稿中未找到关键章节：{label}（{anchor}）。")
 
     # 5) Submission-critical missing items (based on requirements Status)
-    need_provide = [r for r in reqs if (r.get("Status") or "") in {"待提供"}]
-    need_fill = [r for r in reqs if (r.get("Status") or "") in {"待填写"}]
-    need_verify = [r for r in reqs if "需核对" in (r.get("Status") or "")]
+    def _status(row: dict[str, str]) -> str:
+        return (row.get("Status") or "").strip()
+
+    need_provide = [r for r in reqs if "待提供" in _status(r)]
+    need_fill = [r for r in reqs if _status(r) in {"待填写"}]
+    need_verify = [r for r in reqs if "需核对" in _status(r)]
     need_template_fill = [
-        r for r in reqs if ("待填" in (r.get("Status") or "")) and (r.get("Status") or "") not in {"待填写"}
+        r for r in reqs if ("待填" in _status(r)) and _status(r) not in {"待填写"}
     ]
 
     need_provide_qual = [r for r in need_provide if (r.get("Category") or "") == "资格要求"]
@@ -427,8 +430,10 @@ def build_qc_report(
     lines.append("")
     lines.append("## Next actions (suggested)")
     actions: list[str] = []
-    if need_provide:
+    if need_provide_qual:
         actions.append("收集并补齐资格/资质材料（营业执照/审计/纳税社保/中小企业声明函等），否则存在废标风险。")
+    if need_provide_nonqual:
+        actions.append("补齐待提供的支撑/证明材料（含星号条款证明材料、案例合同/验收/人员社保等），否则可能失分或不满足实质性要求。")
     if missing_forms:
         actions.append("用模板/历史标书补齐招标文件附件格式（开标一览表、授权书、声明函、点对点应答表、配置清单等）。")
     if placeholders:

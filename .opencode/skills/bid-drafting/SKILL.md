@@ -40,22 +40,29 @@ If `facts.json` or `requirements.csv` is missing or incomplete, stop and run `bi
 
 When editing `.docx`, load the `docx` skill and follow its OOXML workflow (tracked changes, pack/unpack/validate).
 
-### Quick path (MVP script)
+### Quick path (MVP: assemble from references)
 
-If you need a **deterministic MVP draft** (no LLM-invented docx generators, no `python-docx` dependency), use:
+If you need a baseline bid quickly and want the result to **look like a real bid document**, prefer **format-preserving assembly**:
+
+- Copy pre-formatted forms/sections from reference bids (partner/history) into your target template.
+- Avoid generating new ad-hoc tables/styles (those usually look unprofessional and drift from the template).
 
 ```bash
-python3 .opencode/skills/bid-drafting/scripts/draft_bid_mvp.py \
+python3 .opencode/skills/bid-drafting/scripts/assemble_bid_mvp.py \
   --target documents/sessions/<session_id>/<target>.docx \
-  --facts bids/<bid_id>/facts.json \
-  --requirements bids/<bid_id>/requirements.csv \
-  --questions bids/<bid_id>/questions.md \
-  --tech-xlsx ".opencode/openwork/inbox/sessions/<session_id>/refs/technical/技术应答表-新华三.xlsx" \
-  --equip-xlsx ".opencode/openwork/inbox/sessions/<session_id>/refs/technical/天津职业技术师范大学网络+智算项目清单-新华三.xlsx" \
-  --brand-xls ".opencode/openwork/inbox/sessions/<session_id>/refs/technical/天职师大项目伙伴3技术偏离表_品牌.xls"
+  --tender ".opencode/openwork/inbox/sessions/<session_id>/refs/tender/<tender>.doc" \
+  --tender-heading "四、提交投标文件截止时间、开标时间和地点" \
+  --partner ".opencode/openwork/inbox/sessions/<session_id>/refs/partners/<partner>.doc" \
+  --partner-heading "开标一览表" \
+  --partner-heading "开标分项一览表" \
+  --partner-heading "投标产品点对点应答表" \
+  --partner-heading "投标产品配置清单" \
+  --partner-heading "售后服务承诺"
 ```
 
-This edits the target doc in place and appends a structured draft section set (tables + checklists). It does **not** produce tracked changes.
+This edits the target doc in place and inserts the chosen sections at the end (or after a target heading when you use the copier directly).
+
+Legacy note: `draft_bid_mvp.py` still exists for quick table append, but it will not match most tender templates; prefer `assemble_bid_mvp.py` for MVP.
 
 ### Step 2 — Generate an outline from `requirements.csv`
 

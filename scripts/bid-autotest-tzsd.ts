@@ -258,6 +258,54 @@ const run = async () => {
   report.push("");
 
   const targetDocAbs = resolve(join(cwd, "documents", "sessions", sessionId, uploadedDoc.name));
+
+  report.push("## Fill bid tables (xlsx -> docx)");
+  const inboxRoot = resolve(join(cwd, ".opencode", "openwork", "inbox"));
+  const techInboxPath = resolve(join(inboxRoot, `sessions/${sessionId}/refs/technical/${basename(paths.techXlsx)}`));
+  const equipInboxPath = resolve(join(inboxRoot, `sessions/${sessionId}/refs/technical/${basename(paths.equipXlsx)}`));
+  const fillScript = resolve(join(cwd, ".opencode", "skills", "bid-drafting", "scripts", "fill_bid_tables_mvp.py"));
+  const fill = spawnSync(
+    "python3",
+    [
+      fillScript,
+      "--docx",
+      targetDocAbs,
+      "--tech-xlsx",
+      techInboxPath,
+      "--equip-xlsx",
+      equipInboxPath,
+      "--brand",
+      "新华三",
+      "--manufacturer",
+      "新华三技术有限公司",
+      "--origin",
+      "中国",
+      "--unit",
+      "台",
+      "--price-placeholder",
+      "详见报价文件",
+      "--spec-placeholder",
+      "详见开标分项一览表",
+    ],
+    { encoding: "utf8" },
+  );
+  if (fill.status !== 0) {
+    throw new Error(`fill_bid_tables_mvp.py failed: ${String(fill.stderr || fill.stdout || "").trim() || "unknown"}`);
+  }
+  report.push("```");
+  report.push(String(fill.stdout || "").trim());
+  report.push("```");
+  report.push("");
+
+  report.push("## QC gate (deterministic checks)");
+  const qcScript = resolve(join(cwd, ".opencode", "skills", "bid-drafting", "scripts", "qc_bid_mvp.py"));
+  const qc = spawnSync("python3", [qcScript, "--docx", targetDocAbs], { encoding: "utf8" });
+  report.push(`- Status: ${qc.status === 0 ? "PASS" : "FAIL"}`);
+  report.push("```");
+  report.push(String(qc.stdout || qc.stderr || "").trim());
+  report.push("```");
+  report.push("");
+
   report.push("## Output");
   report.push(`- DOCX: \`${targetDocAbs}\``);
 

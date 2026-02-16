@@ -60,7 +60,26 @@ python3 .opencode/skills/bid-drafting/scripts/assemble_bid_mvp.py \
   --partner-heading "售后服务承诺"
 ```
 
-This edits the target doc in place and inserts the chosen sections at the end (or after a target heading when you use the copier directly).
+Then fill the key bid forms from XLSX inputs (point-to-point responses + equipment list):
+
+```bash
+python3 .opencode/skills/bid-drafting/scripts/fill_bid_tables_mvp.py \
+  --docx documents/sessions/<session_id>/<target>.docx \
+  --tech-xlsx ".opencode/openwork/inbox/sessions/<session_id>/refs/technical/<tech>.xlsx" \
+  --equip-xlsx ".opencode/openwork/inbox/sessions/<session_id>/refs/technical/<equip>.xlsx"
+```
+
+Notes:
+- This edits the target doc in place.
+- It updates existing pre-formatted tables (no ad-hoc TableGrid generation).
+- Price cells are filled with placeholders (e.g. “详见报价文件”) unless you provide real price data.
+
+Finally, run a deterministic QC gate (fails if obvious issues remain: missing tables, empty critical cells, leftover <<TBD>>):
+
+```bash
+python3 .opencode/skills/bid-drafting/scripts/qc_bid_mvp.py \
+  --docx documents/sessions/<session_id>/<target>.docx
+```
 
 Legacy note: `draft_bid_mvp.py` still exists for quick table append, but it will not match most tender templates; prefer `assemble_bid_mvp.py` for MVP.
 

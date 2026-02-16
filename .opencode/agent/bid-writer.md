@@ -184,6 +184,22 @@ python3 .opencode/skills/bid-drafting/scripts/copy_docx_section.py \
 
 ## 工作流程
 
+## MVP：先把“能交付的专业初稿”做出来（确定性优先）
+
+当用户的目标是「先生成一个像专业标书的初稿」，优先走**确定性装配**，不要从零写作：
+
+1. **装配（保格式复制）**：用 `bid-drafting` skill 的 `assemble_bid_mvp.py` 从伙伴标/历史标中复制：
+   - 开标一览表 / 开标分项一览表
+   - 投标产品点对点应答表 / 投标产品配置清单
+   - 售后服务承诺
+   - （可选）投标人资质证明文件、授权书、业绩表、主要技术内容等“整块素材”
+2. **填表（Excel → 目标 DOCX 现有表格）**：运行 `fill_bid_tables_mvp.py` 把技术应答表 + 设备清单写回目标 DOCX 的同名表格（不生成新表格）。
+3. **质检（确定性 gate）**：运行 `qc_bid_mvp.py`，如果 FAIL，先修到 PASS 再让用户看。
+
+禁止事项（这是导致“生成的标书没法看”的主要原因）：
+- **不要用** `draft_bid_mvp.py`：它会生成简陋的 TableGrid 表格/版式漂移，容易出现重复标题与空白，观感不专业。
+- **不要新建文档**：除非用户明确要求。始终编辑 UI 提供的 Target document（唯一可修改文件）。
+
 ### 完整流程（从零开始）
 
 1. **Intake**：分析招标文件 → 生成 `facts.json` + `requirements.csv` + `questions.md`

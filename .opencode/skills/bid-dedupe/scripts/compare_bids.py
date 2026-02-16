@@ -263,7 +263,9 @@ def write_report(
     exact_text_groups = [
         items
         for sha, items in chunk_map.items()
-        if len(items) > 1 and items[0][1].char_count >= exact_min_chars
+        if len(items) > 1
+        and len({doc for doc, _ in items}) > 1
+        and items[0][1].char_count >= exact_min_chars
     ]
     exact_text_groups.sort(key=lambda g: g[0][1].char_count, reverse=True)
 
@@ -276,10 +278,10 @@ def write_report(
             if img.dhash:
                 dhash_map.setdefault(img.dhash, []).append((doc, img))
 
-    exact_image_groups = [items for sha, items in img_map.items() if len(items) > 1]
+    exact_image_groups = [items for sha, items in img_map.items() if len(items) > 1 and len({doc for doc, _ in items}) > 1]
     exact_image_groups.sort(key=lambda g: g[0][1].size_bytes, reverse=True)
 
-    near_image_groups = [items for dh, items in dhash_map.items() if len(items) > 1]
+    near_image_groups = [items for dh, items in dhash_map.items() if len(items) > 1 and len({doc for doc, _ in items}) > 1]
     near_image_groups.sort(key=lambda g: g[0][1].size_bytes, reverse=True)
 
     # Near duplicates (text)

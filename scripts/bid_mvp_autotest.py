@@ -60,6 +60,165 @@ def read_requirements(requirements_csv: Path) -> list[dict[str, str]]:
         return rows
 
 
+def write_requirements(requirements_csv: Path, rows: list[dict[str, str]]) -> None:
+    if not rows:
+        return
+    fieldnames = list(rows[0].keys())
+    with requirements_csv.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({k: row.get(k, "") for k in fieldnames})
+
+
+def list_docx_headings(copy_script: Path, docx_path: Path) -> list[str]:
+    cmd = [sys.executable, str(copy_script), "--source", str(docx_path), "--list-headings", "--json"]
+    out = subprocess.check_output(cmd)
+    payload = json.loads(out.decode("utf-8"))
+    if not isinstance(payload, list):
+        return []
+    headings: list[str] = []
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        text = (item.get("text") or "").strip()
+        if text:
+            headings.append(text)
+    return headings
+
+
+def pick_headings(headings: list[str], want: list[str], *, max_per_want: int = 3) -> list[str]:
+    """
+    Select headings from `headings` that best match each `want` pattern.
+    Strategy:
+      1) exact match
+      2) contains match (first N)
+    """
+    out: list[str] = []
+    seen: set[str] = set()
+
+    for pattern in want:
+        pattern = (pattern or "").strip()
+        if not pattern:
+            continue
+
+        chosen = [h for h in headings if h == pattern][:max_per_want]
+        if not chosen:
+            chosen = [h for h in headings if pattern in h][:max_per_want]
+
+        for h in chosen:
+            if h in seen:
+                continue
+            out.append(h)
+            seen.add(h)
+
+    return out
+
+
+def auto_resolve_requirements(
+    *,
+    requirements_csv: Path,
+    draft_docx: Path,
+    copied_headings: list[str],
+) -> None:
+    """
+    Best-effort status updates to reduce "missing materials" noise when we've already
+    appended evidence from a reference document.
+
+    Conservative policy:
+    - Only changes away from '待提供' / '待填写' when the *draft doc* contains strong anchors.
+    - Marks as '需核对' instead of '已提供' to preserve reviewer safety.
+    """
+    rows = read_requirements(requirements_csv)
+    if not rows:
+        return
+
+    doc_text = read_docx_text(draft_docx)
+    doc_n = normalize_text(doc_text)
+
+    def _has_any(needles: list[str]) -> bool:
+        return any(normalize_text(n) in doc_n for n in needles if n)
+
+    def _set(row: dict[str, str], status: str, location: str) -> None:
+        row["Status"] = status
+        if location:
+            row["ResponseLocation"] = location
+
+    copied_n = {normalize_text(h) for h in copied_headings if h}
+
+    # Qualification evidence anchors (common bid attachments)
+    qual_anchors = [
+        "营业执照",
+        "审计报告",
+        "资信证明",
+        "税收证明",
+        "纳税",
+        "社保证明",
+        "社会保障",
+        "中小企业声明函",
+        "重大税收违法失信主体",
+    ]
+
+    # Scoring/support evidence anchors (cases + acceptance + staffing)
+    support_anchors = [
+        "投标人主要业绩表",
+        "合同一",
+        "合同二",
+        "合同三",
+        "验收单",
+        "项目人员名单",
+        "项目人员社保证明",
+    ]
+
+    for row in rows:
+        status = (row.get("Status") or "").strip()
+        cat = (row.get("Category") or "").strip()
+        req = (row.get("Requirement") or "").strip()
+
+        if status == "待提供":
+            if cat == "资格要求":
+                needs: list[str] = []
+                if "营业执照" in req:
+                    needs += ["营业执照"]
+                if ("审计" in req) or ("财务" in req) or ("资信" in req):
+                    needs += ["审计报告", "资信证明", "财务报告"]
+                if ("税收" in req) or ("纳税" in req):
+                    needs += ["税收证明", "纳税"]
+                if ("社会保障" in req) or ("社保" in req):
+                    needs += ["社保证明", "社会保障"]
+                if "中小企业声明函" in req:
+                    needs += ["中小企业声明函"]
+                if "重大税收违法失信" in req:
+                    needs += ["重大税收违法失信主体"]
+
+                # Combined proof: require both tax + social signals.
+                needs_tax = ("税收" in req) or ("纳税" in req)
+                needs_social = ("社会保障" in req) or ("社保" in req)
+                ok = False
+                if needs_tax and needs_social:
+                    ok = _has_any(["税收证明", "纳税"]) and _has_any(["社保证明", "社会保障"])
+                else:
+                    ok = _has_any(needs) if needs else _has_any(qual_anchors)
+
+                if ok and copied_n:
+                    if any(normalize_text(k) in copied_n for k in needs if k) or any(
+                        normalize_text(k) in copied_n for k in qual_anchors
+                    ):
+                        _set(row, "已提供(需核对)", "资质附件（来自参考材料，需核对日期/主体）")
+                continue
+
+            if _has_any(support_anchors) and any(normalize_text(k) in copied_n for k in support_anchors):
+                _set(row, "已提供(需核对)", "支撑材料附件（来自参考材料）")
+                continue
+
+        if status == "待填写":
+            if ("报价" in req) and _has_any(["开标一览表", "开标分项一览表"]):
+                _set(row, "已包含模板(待填)", "商务标-报价表")
+                continue
+
+    write_requirements(requirements_csv, rows)
+
+
 def parse_cn_datetime(value: str) -> Optional[datetime]:
     """
     Parse strings like:
@@ -166,6 +325,10 @@ def build_qc_report(
     # 5) Submission-critical missing items (based on requirements Status)
     need_provide = [r for r in reqs if (r.get("Status") or "") in {"待提供"}]
     need_fill = [r for r in reqs if (r.get("Status") or "") in {"待填写"}]
+    need_verify = [r for r in reqs if "需核对" in (r.get("Status") or "")]
+    need_template_fill = [
+        r for r in reqs if ("待填" in (r.get("Status") or "")) and (r.get("Status") or "") not in {"待填写"}
+    ]
 
     need_provide_qual = [r for r in need_provide if (r.get("Category") or "") == "资格要求"]
     need_provide_nonqual = [r for r in need_provide if (r.get("Category") or "") != "资格要求"]
@@ -187,6 +350,18 @@ def build_qc_report(
             "存在待填写的条目（通常是报价/商务表单）。示例："
             + "；".join(f"{r.get('ID')} {r.get('Category')}" for r in need_fill[:6])
             + ("；..." if len(need_fill) > 6 else "")
+        )
+    if need_template_fill:
+        mediums.append(
+            "存在“已包含模板但仍需人工填写”的条目。示例："
+            + "；".join(f"{r.get('ID')} {r.get('Category')}" for r in need_template_fill[:6])
+            + ("；..." if len(need_template_fill) > 6 else "")
+        )
+    if need_verify:
+        mediums.append(
+            "存在“已提供但需核对有效性/日期/主体”的材料（不可盲目提交）。示例："
+            + "；".join(f"{r.get('ID')} {r.get('Category')}" for r in need_verify[:8])
+            + ("；..." if len(need_verify) > 8 else "")
         )
 
     # 6) Tender-required structure hints (cheap keyword gate)
@@ -349,6 +524,7 @@ def main() -> int:
 
     # Optionally append form templates from a reference document (usually tender attachments
     # or a partner bid). This improves "professional completeness" without relying on LLM.
+    copied_headings: list[str] = []
     if args.forms_source_doc:
         forms_doc = Path(args.forms_source_doc)
         if not forms_doc.exists():
@@ -357,18 +533,49 @@ def main() -> int:
         if not copy_script.exists():
             raise SystemExit(f"Missing section copy script: {copy_script}")
 
-        default_forms = [
-            "开标一览表",
-            "开标分项一览表",
-            "法定代表人授权书",
-            "法定代表人身份证明书",
-            "无重大违法记录声明",
-            "中小企业声明函",
-            "投标产品点对点应答表",
-            "投标产品配置清单",
-            "售后服务承诺",
-        ]
-        headings = args.forms_heading or default_forms
+        if args.forms_heading:
+            headings = args.forms_heading
+        else:
+            available = list_docx_headings(copy_script, forms_doc)
+
+            # P0: common tender-required forms (always try to include)
+            want_forms = [
+                "开标一览表",
+                "开标分项一览表",
+                "法定代表人授权书",
+                "法定代表人身份证明书",
+                "无重大违法记录声明",
+                "中小企业声明函",
+                "投标产品点对点应答表",
+                "投标产品配置清单",
+                "售后服务承诺",
+            ]
+
+            # P0: qualification attachments (try to include when present)
+            want_qual = [
+                "营业执照",
+                "审计报告",
+                "资信证明",
+                "税收证明",
+                "纳税证明",
+                "社保证明",
+                "重大税收违法失信主体",
+                "项目人员社保证明",
+            ]
+
+            # P1: scoring/support evidence (cases + acceptance + staffing)
+            want_support = [
+                "投标人主要业绩表",
+                "合同",
+                "验收单",
+                "项目人员名单",
+            ]
+
+            headings = []
+            headings += pick_headings(available, want_forms, max_per_want=1)
+            headings += pick_headings(available, want_qual, max_per_want=2)
+            headings += pick_headings(available, want_support, max_per_want=3)
+
         failures: list[str] = []
         for heading in headings:
             copy_cmd = [
@@ -387,6 +594,7 @@ def main() -> int:
             ]
             try:
                 subprocess.check_call(copy_cmd)
+                copied_headings.append(heading)
             except subprocess.CalledProcessError as error:
                 failures.append(f"{heading} (exit {error.returncode})")
         if failures:
@@ -395,6 +603,13 @@ def main() -> int:
     tender_text = None
     if args.tender_doc:
         tender_text = read_tender_text_quick(Path(args.tender_doc))
+
+    if copied_headings:
+        auto_resolve_requirements(
+            requirements_csv=requirements_csv,
+            draft_docx=out_doc,
+            copied_headings=copied_headings,
+        )
 
     qc_report = build_qc_report(
         bid_id=args.bid_id,

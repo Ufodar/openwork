@@ -762,6 +762,16 @@ export default function DocumentWriterView(props: SessionViewProps) {
               >
                 <RefreshCw size={16} class={documents.loading ? "animate-spin" : ""} />
               </button>
+              <button
+                type="button"
+                class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
+                onClick={() => void archiveOtherDocuments()}
+                disabled={!serverReady() || !selectedDoc() || archiveBusy()}
+                title="Archive other documents"
+                aria-label="Archive other documents"
+              >
+                <FolderArchive size={16} />
+              </button>
               <label
                 class={`cursor-pointer p-2 hover:bg-dls-hover rounded ${!serverReady() ? "opacity-50 cursor-not-allowed" : ""
                   }`}

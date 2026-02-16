@@ -69,7 +69,12 @@ def simhash64(text: str) -> int:
 
 
 def hamming_distance64(a: int, b: int) -> int:
-    return (a ^ b).bit_count()
+    # int.bit_count() is only available in newer Python versions.
+    x = a ^ b
+    try:
+        return x.bit_count()  # type: ignore[attr-defined]
+    except AttributeError:
+        return bin(x).count("1")
 
 
 def _node_text(node: ET.Element) -> str:

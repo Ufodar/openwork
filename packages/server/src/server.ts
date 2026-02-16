@@ -4217,7 +4217,13 @@ async function writeOpenworkConfig(workspaceRoot: string, payload: Record<string
     next.version = typeof existing.version === "number" ? existing.version : 1;
   }
   await ensureDir(join(workspaceRoot, ".opencode"));
-  await writeFile(path, JSON.stringify(next, null, 2) + "\n", "utf8");
+  const tmpPath = `${path}.tmp-${shortId()}`;
+  try {
+    await writeFile(tmpPath, JSON.stringify(next, null, 2) + "\n", "utf8");
+    await rename(tmpPath, path);
+  } finally {
+    await rm(tmpPath, { force: true }).catch(() => undefined);
+  }
 }
 
 async function requireApproval(

@@ -644,10 +644,10 @@ export default function DocumentWriterView(props: SessionViewProps) {
   };
 
   return (
-    <div class="flex h-screen w-full bg-dls-surface text-dls-text font-sans overflow-hidden">
+    <div class="relative isolate flex h-screen w-full bg-dls-surface text-dls-text font-sans overflow-hidden">
       {/* Left: Document list */}
       <div
-        class={`shrink-0 border-r border-dls-border flex flex-col bg-dls-sidebar transition-[width] duration-200 ease-out ${documentsCollapsed() ? "w-14" : "w-64"
+        class={`relative z-20 shrink-0 border-r border-dls-border flex flex-col bg-dls-sidebar transition-[width] duration-200 ease-out ${documentsCollapsed() ? "w-14" : "w-64"
           }`}
       >
         <Show
@@ -950,7 +950,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
       </div>
 
       {/* Middle: OnlyOffice */}
-      <div class="flex-1 min-w-0 flex flex-col">
+      <div class="relative z-0 flex-1 min-w-0 flex flex-col">
         <div class="h-12 border-b border-dls-border flex items-center justify-between px-3">
           <div class="flex items-center gap-2 min-w-0">
             <button
@@ -1043,7 +1043,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
       </div>
 
       {/* Right: Chat */}
-      <div class="shrink-0 w-[420px] border-l border-dls-border flex flex-col bg-dls-surface">
+      <div class="relative z-30 shrink-0 w-[420px] border-l border-dls-border flex flex-col bg-dls-surface">
         <div class="h-12 border-b border-dls-border px-3 flex items-center justify-between">
           <div class="min-w-0">
             <div class="text-sm font-medium text-dls-text truncate">Chat</div>

@@ -360,6 +360,74 @@ export function createDocumentRoutes(routes: unknown[]) {
         },
     });
 
+    // Archive documents (move into a hidden `.archive/` folder under the session docs dir)
+    //
+    // This is a safety feature for Document Writer sessions to avoid clutter from
+    // many generated drafts. We move files instead of deleting them.
+    routes.push({
+        method: "POST",
+        regex: /^\/w\/([^/]+)\/document\/archive$/,
+        keys: ["id"],
+        auth: "client",
+        handler: async (ctx: RequestContext) => {
+            const workspaceId = ctx.params.id;
+            const sessionId = parseDocumentSessionId(ctx.url.searchParams.get("session"));
+            if (!sessionId) throw new ApiError(400, "invalid_request", "session is required");
+
+            const workspace = ctx.config.workspaces.find((w: WorkspaceInfo) => w.id === workspaceId);
+            if (!workspace) throw new ApiError(404, "not_found", "Workspace not found");
+
+            const payload = (await ctx.request.json().catch(() => null)) as any;
+            if (!payload || typeof payload !== "object") {
+                throw new ApiError(400, "invalid_payload", "Expected JSON body");
+            }
+
+            const keep = typeof payload.keep === "string" ? payload.keep.trim().replace(/^\/+/, "") : "";
+            const includeRefs = Boolean(payload.includeRefs);
+            if (!keep) throw new ApiError(400, "invalid_request", "keep is required");
+
+            const docsDir = resolveDocumentsDir(workspace.path, sessionId);
+            await ensureDir(docsDir);
+
+            const keepAbs = resolveDocumentPathSafe(docsDir, keep);
+            if (!(await exists(keepAbs))) throw new ApiError(404, "not_found", "Keep document not found");
+
+            const archiveId = new Date().toISOString().replace(/[:.]/g, "-");
+            const archiveRoot = join(docsDir, ".archive", archiveId);
+            await ensureDir(archiveRoot);
+
+            const archived: string[] = [];
+
+            const walk = async (dir: string) => {
+                const entries = await readdir(dir, { withFileTypes: true });
+                for (const entry of entries) {
+                    if (entry.name.startsWith(".")) continue; // hide dot dirs/files
+                    const fullPath = join(dir, entry.name);
+                    if (entry.isDirectory()) {
+                        await walk(fullPath);
+                        continue;
+                    }
+                    if (!entry.isFile()) continue;
+                    const ext = extname(entry.name).toLowerCase();
+                    if (!ALLOWED_EXTENSIONS.has(ext)) continue;
+
+                    const relName = relative(docsDir, fullPath).replace(/\\/g, "/");
+                    if (relName === keep) continue;
+                    if (!includeRefs && relName.startsWith("refs/")) continue;
+
+                    const srcAbs = resolveDocumentPathSafe(docsDir, relName);
+                    const destAbs = resolve(join(archiveRoot, relName));
+                    await ensureDir(dirname(destAbs));
+                    await rename(srcAbs, destAbs);
+                    archived.push(relName);
+                }
+            };
+
+            await walk(docsDir);
+            return jsonResponse({ ok: true, archiveDir: `.archive/${archiveId}`, archived });
+        },
+    });
+
     // Import a file from the workspace inbox into documents (so it can be opened in OnlyOffice)
     routes.push({
         method: "POST",

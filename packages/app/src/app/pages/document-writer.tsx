@@ -1,6 +1,6 @@
 import { For, Show, createEffect, createMemo, createResource, createSignal, onCleanup } from "solid-js";
 import type { Agent } from "@opencode-ai/sdk/v2/client";
-import { ArrowRight, AtSign, ChevronDown, Copy, Download, FileText, Folder, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Trash2, X } from "lucide-solid";
+import { ArrowRight, AtSign, ChevronDown, Copy, Download, FileText, Folder, FolderArchive, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Trash2, X } from "lucide-solid";
 import { useNavigate } from "@solidjs/router";
 
 import type { ComposerDraft, SlashCommandOption } from "../types";
@@ -118,6 +118,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
   const [selectedDoc, setSelectedDoc] = createSignal<string | null>(null);
   const [documentsCollapsed, setDocumentsCollapsed] = createSignal(false);
   const [configSeq, setConfigSeq] = createSignal(0);
+  const [archiveBusy, setArchiveBusy] = createSignal(false);
   const [lastSessionStatus, setLastSessionStatus] = createSignal(props.sessionStatus ?? "idle");
   const [refsExpanded, setRefsExpanded] = createSignal<Record<string, boolean>>({});
   const [refsBusy, setRefsBusy] = createSignal(false);
@@ -262,6 +263,38 @@ export default function DocumentWriterView(props: SessionViewProps) {
     await fetchJson(url, cfg.token, { method: "POST", body: formData });
     input.value = "";
     await refetchDocuments();
+  };
+
+  const archiveOtherDocuments = async () => {
+    const cfg = apiConfig();
+    const keep = selectedDoc();
+    if (!cfg || !keep) return;
+    if (archiveBusy()) return;
+    const ok = window.confirm(
+      `Archive all other documents in this session?\n\nKeep: ${keep}\n\nThis moves files into a hidden .archive/ folder (they will disappear from the list).`,
+    );
+    if (!ok) return;
+
+    setArchiveBusy(true);
+    setToastMessage(null);
+    try {
+      const query = new URLSearchParams();
+      query.set("session", cfg.sessionId);
+      const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/archive", query);
+      const result = (await fetchJson(url, cfg.token, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ keep }),
+      })) as { archived?: unknown[] };
+      const count = Array.isArray(result.archived) ? result.archived.length : 0;
+      setToastMessage(count ? `Archived ${count} documents.` : "No documents to archive.");
+      await refetchDocuments();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to archive documents";
+      setToastMessage(message);
+    } finally {
+      setArchiveBusy(false);
+    }
   };
 
   const uploadReferenceFiles = async (categoryId: string, files: File[]) => {
@@ -672,6 +705,16 @@ export default function DocumentWriterView(props: SessionViewProps) {
                 aria-label="Refresh documents"
               >
                 <RefreshCw size={16} class={documents.loading ? "animate-spin" : ""} />
+              </button>
+              <button
+                type="button"
+                class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
+                onClick={() => void archiveOtherDocuments()}
+                disabled={!serverReady() || !selectedDoc() || archiveBusy()}
+                title="Archive other documents"
+                aria-label="Archive other documents"
+              >
+                <FolderArchive size={16} />
               </button>
               <label
                 class={`cursor-pointer p-2 hover:bg-dls-hover rounded ${!serverReady() ? "opacity-50 cursor-not-allowed" : ""

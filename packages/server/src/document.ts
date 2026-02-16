@@ -1,6 +1,7 @@
-import { copyFile, readFile, writeFile, readdir, stat } from "node:fs/promises";
+import { copyFile, readFile, writeFile, readdir, stat, rm, rename } from "node:fs/promises";
 import { dirname, join, resolve, relative, basename, extname, isAbsolute } from "node:path";
 import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import jwt from "jsonwebtoken";
 import type { ServerConfig, WorkspaceInfo, Actor } from "./types.js";
 import { ApiError } from "./errors.js";
@@ -125,6 +126,7 @@ const SLIDE_EXTENSIONS = [
 ];
 
 const ALLOWED_EXTENSIONS = new Set([...WORD_EXTENSIONS, ...CELL_EXTENSIONS, ...SLIDE_EXTENSIONS]);
+const DOCX_ZIP_EXTENSIONS = new Set([".docx", ".docm", ".dotx", ".dotm"]);
 const SESSION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 
 // Helper to get document type from extension
@@ -161,6 +163,14 @@ function resolveInboxDir(workspacePath: string): string {
     return join(workspacePath, ".opencode", "openwork", "inbox");
 }
 
+function resolveDocxConversionCacheDir(workspacePath: string): string {
+    return join(workspacePath, ".opencode", "openwork", "cache", "docx-convert");
+}
+
+function resolveDocxSectionCopyScriptPath(workspacePath: string): string {
+    return join(workspacePath, ".opencode", "skills", "bid-drafting", "scripts", "copy_docx_section.py");
+}
+
 function decodeInboxId(id: string): string {
     const raw = (id ?? "").trim();
     if (!raw) {
@@ -170,6 +180,77 @@ function decodeInboxId(id: string): string {
         return Buffer.from(raw, "base64url").toString("utf8");
     } catch {
         throw new ApiError(400, "invalid_inbox_file", "Inbox file id is invalid");
+    }
+}
+
+async function ensureDocxZipPath(workspacePath: string, inputPath: string): Promise<string> {
+    const ext = extname(inputPath).toLowerCase();
+    if (DOCX_ZIP_EXTENSIONS.has(ext)) return inputPath;
+
+    if (ext !== ".doc") {
+        throw new ApiError(400, "unsupported_docx_copy_source", "Only .docx/.docm/.dotx/.dotm sources are supported (or .doc with LibreOffice installed).");
+    }
+
+    const cacheDir = resolveDocxConversionCacheDir(workspacePath);
+    await ensureDir(cacheDir);
+
+    const info = await stat(inputPath);
+    const signature = createHash("sha256")
+        .update(`${inputPath}:${info.size}:${info.mtimeMs}`)
+        .digest("hex")
+        .slice(0, 12);
+    const dest = join(cacheDir, `converted-${signature}.docx`);
+    if (await exists(dest)) return dest;
+
+    const tmpDir = join(cacheDir, `tmp-${shortId()}`);
+    await ensureDir(tmpDir);
+    try {
+        const convert = spawnSync(
+            "soffice",
+            [
+                "--headless",
+                "--nologo",
+                "--nofirststartwizard",
+                "--convert-to",
+                "docx",
+                "--outdir",
+                tmpDir,
+                inputPath,
+            ],
+            { encoding: "utf8" },
+        );
+        if (convert.status !== 0) {
+            const stderr = String(convert.stderr || "").trim();
+            const stdout = String(convert.stdout || "").trim();
+            throw new ApiError(
+                400,
+                "docx_conversion_failed",
+                stderr || stdout || "Failed to convert .doc to .docx (LibreOffice).",
+            );
+        }
+
+        const expected = join(tmpDir, `${basename(inputPath, ext)}.docx`);
+        const convertedPath = (await exists(expected))
+            ? expected
+            : (() => {
+                // Best-effort fallback: pick the first .docx file in the output dir.
+                return null;
+            })();
+
+        let source = convertedPath;
+        if (!source) {
+            const entries = await readdir(tmpDir, { withFileTypes: true });
+            const found = entries.find((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".docx"));
+            if (!found) {
+                throw new ApiError(400, "docx_conversion_failed", "LibreOffice did not produce a .docx output.");
+            }
+            source = join(tmpDir, found.name);
+        }
+
+        await rename(source, dest);
+        return dest;
+    } finally {
+        await rm(tmpDir, { recursive: true, force: true }).catch(() => undefined);
     }
 }
 
@@ -349,6 +430,203 @@ export function createDocumentRoutes(routes: unknown[]) {
             await copyFile(inboxAbs, destAbs);
 
             return jsonResponse({ ok: true, doc: destRel });
+        },
+    });
+
+    // List headings in a DOCX document (source inbox or session document)
+    routes.push({
+        method: "GET",
+        regex: /^\/w\/([^/]+)\/document\/headings$/,
+        keys: ["id"],
+        auth: "client",
+        handler: async (ctx: RequestContext) => {
+            const workspaceId = ctx.params.id;
+            const sessionId = parseDocumentSessionId(ctx.url.searchParams.get("session"));
+            const inboxId = (ctx.url.searchParams.get("inboxId") ?? "").trim();
+            const docName = (ctx.url.searchParams.get("doc") ?? "").trim();
+            if (!inboxId && !docName) {
+                throw new ApiError(400, "invalid_request", "inboxId or doc is required");
+            }
+            if (inboxId && docName) {
+                throw new ApiError(400, "invalid_request", "Provide either inboxId or doc, not both");
+            }
+
+            const workspace = ctx.config.workspaces.find((w: WorkspaceInfo) => w.id === workspaceId);
+            if (!workspace) throw new ApiError(404, "not_found", "Workspace not found");
+
+            let sourcePath: string;
+            if (inboxId) {
+                if (!sessionId) {
+                    throw new ApiError(400, "invalid_request", "session is required for inbox headings");
+                }
+                const inboxRoot = resolveInboxDir(workspace.path);
+                const decoded = decodeInboxId(inboxId);
+                const prefix = `sessions/${sessionId}/`;
+                if (!decoded.startsWith(prefix)) {
+                    throw new ApiError(403, "forbidden", "Inbox file is not in this session");
+                }
+                const inboxAbs = resolveDocumentPathSafe(inboxRoot, decoded);
+                if (!(await exists(inboxAbs))) throw new ApiError(404, "not_found", "Inbox file not found");
+                sourcePath = await ensureDocxZipPath(workspace.path, inboxAbs);
+            } else {
+                if (!sessionId) {
+                    throw new ApiError(400, "invalid_request", "session is required for document headings");
+                }
+                const docsDir = resolveDocumentsDir(workspace.path, sessionId);
+                const docAbs = resolveDocumentPathSafe(docsDir, docName);
+                if (!(await exists(docAbs))) throw new ApiError(404, "not_found", "Document not found");
+                const ext = extname(docAbs).toLowerCase();
+                if (!DOCX_ZIP_EXTENSIONS.has(ext)) {
+                    throw new ApiError(400, "unsupported_docx_copy_target", "Only .docx/.docm/.dotx/.dotm documents are supported.");
+                }
+                sourcePath = docAbs;
+            }
+
+            const scriptPath = resolveDocxSectionCopyScriptPath(workspace.path);
+            if (!(await exists(scriptPath))) {
+                throw new ApiError(500, "missing_dependency", "copy_docx_section.py is missing in this workspace");
+            }
+
+            const result = spawnSync(
+                "python3",
+                [scriptPath, "--source", sourcePath, "--list-headings", "--json"],
+                { encoding: "utf8" },
+            );
+            if (result.status !== 0) {
+                const stderr = String(result.stderr || "").trim();
+                const stdout = String(result.stdout || "").trim();
+                throw new ApiError(400, "headings_failed", stderr || stdout || "Failed to list headings");
+            }
+
+            const stdout = String(result.stdout || "").trim();
+            let items: unknown;
+            try {
+                items = JSON.parse(stdout) as unknown;
+            } catch {
+                throw new ApiError(500, "headings_failed", "Failed to parse headings output");
+            }
+            if (!Array.isArray(items)) {
+                throw new ApiError(500, "headings_failed", "Unexpected headings output");
+            }
+            return jsonResponse({ items });
+        },
+    });
+
+    // Copy a heading-delimited section from an inbox DOCX into a target session DOCX
+    routes.push({
+        method: "POST",
+        regex: /^\/w\/([^/]+)\/document\/copy-section$/,
+        keys: ["id"],
+        auth: "client",
+        handler: async (ctx: RequestContext) => {
+            const workspaceId = ctx.params.id;
+            const sessionId = parseDocumentSessionId(ctx.url.searchParams.get("session"));
+            if (!sessionId) throw new ApiError(400, "invalid_request", "session is required");
+
+            const targetDoc = (ctx.url.searchParams.get("doc") ?? "").trim();
+            if (!targetDoc) throw new ApiError(400, "invalid_request", "doc is required");
+
+            const workspace = ctx.config.workspaces.find((w: WorkspaceInfo) => w.id === workspaceId);
+            if (!workspace) throw new ApiError(404, "not_found", "Workspace not found");
+
+            const docsDir = resolveDocumentsDir(workspace.path, sessionId);
+            const targetAbs = resolveDocumentPathSafe(docsDir, targetDoc);
+            if (!(await exists(targetAbs))) throw new ApiError(404, "not_found", "Target document not found");
+            const targetExt = extname(targetAbs).toLowerCase();
+            if (!DOCX_ZIP_EXTENSIONS.has(targetExt)) {
+                throw new ApiError(400, "unsupported_docx_copy_target", "Only .docx/.docm/.dotx/.dotm targets are supported.");
+            }
+
+            const body = (await ctx.request.json().catch(() => null)) as any;
+            if (!body || typeof body !== "object") {
+                throw new ApiError(400, "invalid_payload", "Expected JSON body");
+            }
+
+            const sourceInboxId = (body.sourceInboxId ?? "").trim();
+            const sourceHeading = (body.sourceHeading ?? "").trim();
+            const sourceHeadingIndex = Number.isFinite(body.sourceHeadingIndex) ? Number(body.sourceHeadingIndex) : null;
+            const targetHeading = typeof body.targetHeading === "string" ? body.targetHeading.trim() : "";
+            const targetHeadingIndex = Number.isFinite(body.targetHeadingIndex) ? Number(body.targetHeadingIndex) : null;
+            const excludeSourceHeading = Boolean(body.excludeSourceHeading);
+            const matchMode = typeof body.matchMode === "string" ? body.matchMode.trim().toLowerCase() : "exact";
+
+            if (!sourceInboxId) throw new ApiError(400, "invalid_request", "sourceInboxId is required");
+            if (!sourceHeading) throw new ApiError(400, "invalid_request", "sourceHeading is required");
+            if (!["exact", "contains", "startswith"].includes(matchMode)) {
+                throw new ApiError(400, "invalid_request", "Invalid matchMode");
+            }
+
+            const inboxRoot = resolveInboxDir(workspace.path);
+            const decoded = decodeInboxId(sourceInboxId);
+            const prefix = `sessions/${sessionId}/`;
+            if (!decoded.startsWith(prefix)) {
+                throw new ApiError(403, "forbidden", "Inbox file is not in this session");
+            }
+            const inboxAbs = resolveDocumentPathSafe(inboxRoot, decoded);
+            if (!(await exists(inboxAbs))) throw new ApiError(404, "not_found", "Source inbox file not found");
+
+            const sourceAbs = await ensureDocxZipPath(workspace.path, inboxAbs);
+            const scriptPath = resolveDocxSectionCopyScriptPath(workspace.path);
+            if (!(await exists(scriptPath))) {
+                throw new ApiError(500, "missing_dependency", "copy_docx_section.py is missing in this workspace");
+            }
+
+            const tmpOutput = `${targetAbs}.tmp-${shortId()}`;
+            const args = [
+                scriptPath,
+                "--source",
+                sourceAbs,
+                "--target",
+                targetAbs,
+                "--output",
+                tmpOutput,
+                "--source-heading",
+                sourceHeading,
+                "--match-mode",
+                matchMode,
+            ];
+            if (sourceHeadingIndex && Number.isFinite(sourceHeadingIndex)) {
+                args.push("--source-heading-index", String(Math.trunc(sourceHeadingIndex)));
+            }
+            if (targetHeading) {
+                args.push("--target-heading", targetHeading);
+                if (targetHeadingIndex && Number.isFinite(targetHeadingIndex)) {
+                    args.push("--target-heading-index", String(Math.trunc(targetHeadingIndex)));
+                }
+            }
+            if (excludeSourceHeading) {
+                args.push("--exclude-source-heading");
+            }
+
+            const result = spawnSync("python3", args, { encoding: "utf8" });
+            if (result.status !== 0) {
+                await rm(tmpOutput, { force: true }).catch(() => undefined);
+                const stderr = String(result.stderr || "").trim();
+                const stdout = String(result.stdout || "").trim();
+                throw new ApiError(400, "copy_section_failed", stderr || stdout || "Failed to copy section");
+            }
+
+            await rename(tmpOutput, targetAbs);
+
+            const stdout = String(result.stdout || "").trim();
+            const match = stdout.match(/Copied:\s*(\d+)\s+paragraphs,\s*(\d+)\s+tables,\s*(\d+)\s+images,\s*(\d+)\s+styles/i);
+            const stats = match
+                ? {
+                    paragraphs: Number(match[1]),
+                    tables: Number(match[2]),
+                    images: Number(match[3]),
+                    styles: Number(match[4]),
+                }
+                : null;
+
+            const warnings = String(result.stderr || "")
+                .split("\n")
+                .map((line) => line.trim())
+                .filter(Boolean)
+                .filter((line) => line.toLowerCase().startsWith("warning:"))
+                .map((line) => line.replace(/^warning:\s*/i, ""));
+
+            return jsonResponse({ ok: true, stats, warnings });
         },
     });
 

@@ -1,6 +1,6 @@
 import { For, Show, createEffect, createMemo, createResource, createSignal, onCleanup } from "solid-js";
 import type { Agent } from "@opencode-ai/sdk/v2/client";
-import { ArrowRight, AtSign, ChevronDown, Download, FileText, Folder, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Trash2 } from "lucide-solid";
+import { ArrowRight, AtSign, ChevronDown, Copy, Download, FileText, Folder, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Trash2, X } from "lucide-solid";
 import { useNavigate } from "@solidjs/router";
 
 import type { ComposerDraft, SlashCommandOption } from "../types";
@@ -25,6 +25,12 @@ type InboxItem = {
 };
 
 type OnlyOfficePayload = { documentServerUrl: string; config: any };
+type DocHeading = {
+  level: number;
+  text: string;
+  elementCount: number;
+};
+type HeadingChoice = DocHeading & { occurrence: number };
 type EditorSource = {
   baseUrl: string;
   token: string;
@@ -47,6 +53,18 @@ const isOnlyOfficeImportable = (path: string) => {
   if (!match) return false;
   return ONLYOFFICE_IMPORT_EXTENSIONS.has(match[0]);
 };
+
+const DOCX_SECTION_COPY_TARGET_EXTENSIONS = new Set([".docx", ".docm", ".dotx", ".dotm"]);
+const DOCX_SECTION_COPY_SOURCE_EXTENSIONS = new Set([...DOCX_SECTION_COPY_TARGET_EXTENSIONS, ".doc"]);
+
+const getFileExtension = (value: string) => {
+  const base = value.split("/").pop() ?? value;
+  const match = base.toLowerCase().match(/\.[^.]+$/);
+  return match ? match[0] : "";
+};
+
+const isDocxSectionCopyTarget = (value: string) => DOCX_SECTION_COPY_TARGET_EXTENSIONS.has(getFileExtension(value));
+const isDocxSectionCopySource = (value: string) => DOCX_SECTION_COPY_SOURCE_EXTENSIONS.has(getFileExtension(value));
 
 export default function DocumentWriterView(props: SessionViewProps) {
   const navigate = useNavigate();
@@ -107,6 +125,15 @@ export default function DocumentWriterView(props: SessionViewProps) {
   const [refsUploadProgress, setRefsUploadProgress] = createSignal<{ categoryId: string; done: number; total: number } | null>(null);
   const [refsDeleteBusyId, setRefsDeleteBusyId] = createSignal<string | null>(null);
   const [refsOpenBusyId, setRefsOpenBusyId] = createSignal<string | null>(null);
+  const [sectionCopyOpen, setSectionCopyOpen] = createSignal(false);
+  const [sectionCopySource, setSectionCopySource] = createSignal<InboxItem | null>(null);
+  const [sectionCopySourceHeading, setSectionCopySourceHeading] = createSignal<HeadingChoice | null>(null);
+  const [sectionCopyTargetHeading, setSectionCopyTargetHeading] = createSignal<HeadingChoice | null>(null);
+  const [sectionCopyExcludeHeading, setSectionCopyExcludeHeading] = createSignal(true);
+  const [sectionCopyBusy, setSectionCopyBusy] = createSignal(false);
+  const [sectionCopyError, setSectionCopyError] = createSignal<string | null>(null);
+  const [sectionCopySourceQuery, setSectionCopySourceQuery] = createSignal("");
+  const [sectionCopyTargetQuery, setSectionCopyTargetQuery] = createSignal("");
 
   const [documents, { refetch: refetchDocuments }] = createResource(apiConfig, async (cfg) => {
     if (!cfg) return [] as DocumentItem[];
@@ -336,6 +363,147 @@ export default function DocumentWriterView(props: SessionViewProps) {
       setRefsError(message);
     } finally {
       setRefsOpenBusyId(null);
+    }
+  };
+
+  const withHeadingOccurrences = (items: DocHeading[]): HeadingChoice[] => {
+    const seen = new Map<string, number>();
+    return items.map((item) => {
+      const prev = seen.get(item.text) ?? 0;
+      const next = prev + 1;
+      seen.set(item.text, next);
+      return { ...item, occurrence: next };
+    });
+  };
+
+  const sectionCopySourceHeadingsRequest = createMemo(() => {
+    const cfg = apiConfig();
+    const source = sectionCopySource();
+    if (!cfg || !source || !sectionCopyOpen()) return null;
+    const query = new URLSearchParams();
+    query.set("inboxId", source.id);
+    query.set("session", cfg.sessionId);
+    const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/headings", query);
+    return { url, token: cfg.token };
+  });
+
+  const sectionCopyTargetHeadingsRequest = createMemo(() => {
+    const cfg = apiConfig();
+    const doc = selectedDoc();
+    if (!cfg || !doc || !sectionCopyOpen()) return null;
+    if (!isDocxSectionCopyTarget(doc)) return null;
+    const query = new URLSearchParams();
+    query.set("doc", doc);
+    query.set("session", cfg.sessionId);
+    const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/headings", query);
+    return { url, token: cfg.token };
+  });
+
+  const [sectionCopySourceHeadings] = createResource(sectionCopySourceHeadingsRequest, async (input) => {
+    if (!input) return [] as HeadingChoice[];
+    const data = (await fetchJson(input.url, input.token)) as { items?: DocHeading[] };
+    const items = Array.isArray(data.items) ? data.items : [];
+    return withHeadingOccurrences(items);
+  });
+
+  const [sectionCopyTargetHeadings] = createResource(sectionCopyTargetHeadingsRequest, async (input) => {
+    if (!input) return [] as HeadingChoice[];
+    const data = (await fetchJson(input.url, input.token)) as { items?: DocHeading[] };
+    const items = Array.isArray(data.items) ? data.items : [];
+    return withHeadingOccurrences(items);
+  });
+
+  const filteredSectionCopySourceHeadings = createMemo(() => {
+    const query = sectionCopySourceQuery().trim().toLowerCase();
+    const items = sectionCopySourceHeadings() ?? [];
+    if (!query) return items;
+    return items.filter((item) => item.text.toLowerCase().includes(query));
+  });
+
+  const filteredSectionCopyTargetHeadings = createMemo(() => {
+    const query = sectionCopyTargetQuery().trim().toLowerCase();
+    const items = sectionCopyTargetHeadings() ?? [];
+    if (!query) return items;
+    return items.filter((item) => item.text.toLowerCase().includes(query));
+  });
+
+  const openSectionCopyModal = (item: InboxItem) => {
+    if (!serverReady()) return;
+    const doc = selectedDoc();
+    if (!doc) {
+      setToastMessage("Select a target document first.");
+      return;
+    }
+    if (!isDocxSectionCopyTarget(doc)) {
+      setToastMessage("Target document must be .docx/.docm/.dotx/.dotm for section copy.");
+      return;
+    }
+    if (!isDocxSectionCopySource(item.path)) {
+      setToastMessage("Source file must be .docx/.docm/.dotx/.dotm (or .doc with LibreOffice).");
+      return;
+    }
+    setSectionCopySource(item);
+    setSectionCopySourceHeading(null);
+    setSectionCopyTargetHeading(null);
+    setSectionCopyExcludeHeading(true);
+    setSectionCopySourceQuery("");
+    setSectionCopyTargetQuery("");
+    setSectionCopyError(null);
+    setSectionCopyOpen(true);
+  };
+
+  const closeSectionCopyModal = () => {
+    setSectionCopyOpen(false);
+    setSectionCopyError(null);
+  };
+
+  const runSectionCopy = async () => {
+    const cfg = apiConfig();
+    const doc = selectedDoc();
+    const source = sectionCopySource();
+    const sourceHeading = sectionCopySourceHeading();
+    if (!cfg || !doc || !source || !sourceHeading) return;
+    if (sectionCopyBusy()) return;
+    setSectionCopyBusy(true);
+    setSectionCopyError(null);
+
+    try {
+      const query = new URLSearchParams();
+      query.set("doc", doc);
+      query.set("session", cfg.sessionId);
+      const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/copy-section", query);
+      const payload: Record<string, unknown> = {
+        sourceInboxId: source.id,
+        sourceHeading: sourceHeading.text,
+        sourceHeadingIndex: sourceHeading.occurrence,
+        matchMode: "exact",
+        excludeSourceHeading: sectionCopyExcludeHeading(),
+      };
+      const targetHeading = sectionCopyTargetHeading();
+      if (targetHeading) {
+        payload.targetHeading = targetHeading.text;
+        payload.targetHeadingIndex = targetHeading.occurrence;
+      }
+
+      const result = (await fetchJson(url, cfg.token, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })) as { stats?: { paragraphs: number; tables: number; images: number; styles: number } | null; warnings?: string[] };
+
+      const stats = result?.stats ?? null;
+      const summary = stats
+        ? `Inserted (${stats.paragraphs}p, ${stats.tables}t, ${stats.images}i)`
+        : "Inserted section";
+      setToastMessage(summary);
+      closeSectionCopyModal();
+      setConfigSeq((v) => v + 1);
+      await refetchDocuments();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to insert section";
+      setSectionCopyError(message);
+    } finally {
+      setSectionCopyBusy(false);
     }
   };
 
@@ -731,6 +899,22 @@ export default function DocumentWriterView(props: SessionViewProps) {
                                       </button>
                                       <button
                                         type="button"
+                                        class="p-1.5 rounded hover:bg-dls-active text-dls-secondary hover:text-dls-text disabled:opacity-50"
+                                        onClick={() => openSectionCopyModal(item)}
+                                        disabled={
+                                          !serverReady() ||
+                                          isAgentRunning() ||
+                                          !selectedDoc() ||
+                                          !isDocxSectionCopyTarget(selectedDoc() ?? "") ||
+                                          !isDocxSectionCopySource(item.path)
+                                        }
+                                        title="Insert section into target"
+                                        aria-label="Insert section into target"
+                                      >
+                                        <Copy size={14} />
+                                      </button>
+                                      <button
+                                        type="button"
                                         class="p-1.5 rounded hover:bg-dls-active text-dls-secondary hover:text-dls-text"
                                         onClick={() => void downloadReferenceFile(item)}
                                         title="Download"
@@ -922,6 +1106,216 @@ export default function DocumentWriterView(props: SessionViewProps) {
           attachmentsDisabledReason={attachmentsDisabledReason()}
         />
       </div>
+
+      <Show when={sectionCopyOpen()}>
+        <div
+          class="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeSectionCopyModal();
+          }}
+        >
+          <div
+            class="w-full max-w-4xl rounded-2xl border border-dls-border bg-dls-surface shadow-2xl overflow-hidden"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div class="flex items-center justify-between px-4 py-3 border-b border-dls-border">
+              <div class="min-w-0">
+                <div class="text-sm font-semibold text-dls-text truncate">Insert section</div>
+                <div class="mt-1 text-[11px] text-dls-secondary truncate">
+                  Target: {selectedDoc() ?? "—"}
+                </div>
+              </div>
+              <button
+                type="button"
+                class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text"
+                onClick={closeSectionCopyModal}
+                aria-label="Close"
+                title="Close"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div class="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div class="min-w-0">
+                <div class="text-xs font-medium text-dls-text">Source heading</div>
+                <div class="mt-2">
+                  <input
+                    type="text"
+                    value={sectionCopySourceQuery()}
+                    onInput={(event) => setSectionCopySourceQuery(event.currentTarget.value)}
+                    placeholder="Search headings…"
+                    class="w-full rounded-lg border border-dls-border bg-dls-surface px-3 py-2 text-xs text-dls-text placeholder:text-dls-secondary focus:outline-none focus:ring-2 focus:ring-dls-accent/40"
+                  />
+                </div>
+                <div class="mt-2 rounded-lg border border-dls-border overflow-hidden max-h-[360px] overflow-y-auto">
+                  <Show when={!sectionCopySourceHeadings.loading} fallback={<div class="p-3 text-xs text-dls-secondary">Loading…</div>}>
+                    <Show
+                      when={filteredSectionCopySourceHeadings().length > 0}
+                      fallback={<div class="p-3 text-xs text-dls-secondary">No headings found.</div>}
+                    >
+                      <For each={filteredSectionCopySourceHeadings()}>
+                        {(heading) => {
+                          const selected = createMemo(() => {
+                            const current = sectionCopySourceHeading();
+                            if (!current) return false;
+                            return current.text === heading.text && current.occurrence === heading.occurrence;
+                          });
+                          return (
+                            <button
+                              type="button"
+                              class={`w-full text-left px-3 py-2 border-b border-dls-border/50 last:border-b-0 hover:bg-dls-hover ${selected() ? "bg-dls-active" : ""
+                                }`}
+                              onClick={() => setSectionCopySourceHeading(heading)}
+                              title={heading.text}
+                            >
+                              <div class="flex items-start gap-2">
+                                <div class="shrink-0 text-[10px] text-dls-secondary w-6 pt-0.5">
+                                  {heading.level}
+                                </div>
+                                <div class="min-w-0 flex-1">
+                                  <div
+                                    class="text-xs text-dls-text truncate"
+                                    style={{ "padding-left": `${Math.max(0, heading.level - 1) * 12}px` }}
+                                  >
+                                    {heading.text}
+                                  </div>
+                                  <div class="mt-1 text-[10px] text-dls-secondary">
+                                    {heading.elementCount} elements
+                                    <Show when={heading.occurrence > 1}>
+                                      {" "}
+                                      · #{heading.occurrence}
+                                    </Show>
+                                  </div>
+                                </div>
+                              </div>
+                            </button>
+                          );
+                        }}
+                      </For>
+                    </Show>
+                  </Show>
+                </div>
+              </div>
+
+              <div class="min-w-0">
+                <div class="flex items-center justify-between">
+                  <div class="text-xs font-medium text-dls-text">Insert after (optional)</div>
+                  <button
+                    type="button"
+                    class="text-[11px] text-dls-secondary hover:text-dls-text disabled:opacity-50"
+                    disabled={!sectionCopyTargetHeading()}
+                    onClick={() => setSectionCopyTargetHeading(null)}
+                  >
+                    Clear
+                  </button>
+                </div>
+                <div class="mt-2">
+                  <input
+                    type="text"
+                    value={sectionCopyTargetQuery()}
+                    onInput={(event) => setSectionCopyTargetQuery(event.currentTarget.value)}
+                    placeholder="Search target headings…"
+                    class="w-full rounded-lg border border-dls-border bg-dls-surface px-3 py-2 text-xs text-dls-text placeholder:text-dls-secondary focus:outline-none focus:ring-2 focus:ring-dls-accent/40"
+                    disabled={!selectedDoc() || !isDocxSectionCopyTarget(selectedDoc() ?? "")}
+                  />
+                </div>
+                <div class="mt-2 rounded-lg border border-dls-border overflow-hidden max-h-[360px] overflow-y-auto">
+                  <Show when={!sectionCopyTargetHeadings.loading} fallback={<div class="p-3 text-xs text-dls-secondary">Loading…</div>}>
+                    <Show
+                      when={filteredSectionCopyTargetHeadings().length > 0}
+                      fallback={<div class="p-3 text-xs text-dls-secondary">No headings found.</div>}
+                    >
+                      <For each={filteredSectionCopyTargetHeadings()}>
+                        {(heading) => {
+                          const selected = createMemo(() => {
+                            const current = sectionCopyTargetHeading();
+                            if (!current) return false;
+                            return current.text === heading.text && current.occurrence === heading.occurrence;
+                          });
+                          return (
+                            <button
+                              type="button"
+                              class={`w-full text-left px-3 py-2 border-b border-dls-border/50 last:border-b-0 hover:bg-dls-hover ${selected() ? "bg-dls-active" : ""
+                                }`}
+                              onClick={() => setSectionCopyTargetHeading(heading)}
+                              title={heading.text}
+                            >
+                              <div class="flex items-start gap-2">
+                                <div class="shrink-0 text-[10px] text-dls-secondary w-6 pt-0.5">
+                                  {heading.level}
+                                </div>
+                                <div class="min-w-0 flex-1">
+                                  <div
+                                    class="text-xs text-dls-text truncate"
+                                    style={{ "padding-left": `${Math.max(0, heading.level - 1) * 12}px` }}
+                                  >
+                                    {heading.text}
+                                  </div>
+                                  <div class="mt-1 text-[10px] text-dls-secondary">
+                                    {heading.elementCount} elements
+                                    <Show when={heading.occurrence > 1}>
+                                      {" "}
+                                      · #{heading.occurrence}
+                                    </Show>
+                                  </div>
+                                </div>
+                              </div>
+                            </button>
+                          );
+                        }}
+                      </For>
+                    </Show>
+                  </Show>
+                </div>
+              </div>
+            </div>
+
+            <div class="px-4 pb-4 space-y-3">
+              <label class="flex items-center gap-2 text-xs text-dls-secondary">
+                <input
+                  type="checkbox"
+                  checked={sectionCopyExcludeHeading()}
+                  onChange={(event) => setSectionCopyExcludeHeading(event.currentTarget.checked)}
+                />
+                Exclude source heading (copy content only)
+              </label>
+
+              <Show when={sectionCopyError() || sectionCopySourceHeadings.error || sectionCopyTargetHeadings.error}>
+                <div class="rounded-lg border border-red-11/30 bg-red-3/20 px-3 py-2 text-xs text-red-11">
+                  {sectionCopyError() ||
+                    (sectionCopySourceHeadings.error instanceof Error
+                      ? sectionCopySourceHeadings.error.message
+                      : sectionCopyTargetHeadings.error instanceof Error
+                        ? sectionCopyTargetHeadings.error.message
+                        : "Something went wrong.")}
+                </div>
+              </Show>
+            </div>
+
+            <div class="px-4 py-3 border-t border-dls-border flex items-center justify-end gap-2">
+              <button
+                type="button"
+                class="rounded-lg border border-dls-border bg-dls-surface px-3 py-1.5 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover"
+                onClick={closeSectionCopyModal}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                class="rounded-lg border border-dls-border bg-dls-surface px-3 py-1.5 text-xs text-dls-text hover:bg-dls-hover disabled:opacity-50"
+                onClick={() => void runSectionCopy()}
+                disabled={sectionCopyBusy() || !sectionCopySourceHeading()}
+                title={!sectionCopySourceHeading() ? "Select a source heading" : "Insert"}
+              >
+                <Show when={!sectionCopyBusy()} fallback={"Working…"}>
+                  Insert
+                </Show>
+              </button>
+            </div>
+          </div>
+        </div>
+      </Show>
     </div>
   );
 }

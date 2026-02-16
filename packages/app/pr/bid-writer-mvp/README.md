@@ -12,3 +12,7 @@ Repro (example):
 2. Generate/update the draft with `python3 scripts/bid_mvp_autotest.py ...`.
 3. Open `http://127.0.0.1:<webPort>/document-writer/<sessionId>` and select the generated `.docx`.
 
+Screenshots:
+
+- `document-writer-generated-draft.png`: baseline flow evidence.
+- `document-writer-autotest-loaded.png`: autotest-generated draft loaded in OnlyOffice.

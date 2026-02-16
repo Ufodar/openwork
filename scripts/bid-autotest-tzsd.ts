@@ -235,6 +235,23 @@ const run = async () => {
     }),
   });
 
+  // Partner: common submission forms / technical response tables
+  for (const heading of ["开标分项一览表", "投标产品点对点应答表", "投标产品配置清单", "售后服务承诺"] as const) {
+    copySteps.push({
+      label: `Partner -> ${heading}`,
+      result: await copySection({
+        baseUrl,
+        token,
+        workspaceId,
+        sessionId,
+        targetDoc: uploadedDoc.name,
+        sourceInboxId: partnerUpload.inboxId,
+        sourceHeading: heading,
+        excludeSourceHeading: false,
+      }),
+    });
+  }
+
   for (const step of copySteps) {
     report.push(`- ${step.label}: ok`);
   }

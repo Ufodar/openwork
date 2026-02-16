@@ -4168,7 +4168,10 @@ async function runStart(args: ParsedArgs) {
       ? SANDBOX_INTERNAL_OPENCODE_PORT
       : await resolvePort(
           readNumber(args.flags, "opencode-port", undefined, "OPENWORK_OPENCODE_PORT"),
-          "127.0.0.1",
+          // Bind checks should match the actual bind host to avoid EADDRINUSE
+          // when a port is free on 127.0.0.1 but already taken on another
+          // interface (binding to 0.0.0.0 would fail).
+          opencodeBindHost,
         );
   const opencodeAuth = readBool(args.flags, "opencode-auth", true, "OPENWORK_OPENCODE_AUTH");
   const opencodeUsername = opencodeAuth
@@ -4181,7 +4184,8 @@ async function runStart(args: ParsedArgs) {
   const openworkHost = readFlag(args.flags, "openwork-host") ?? process.env.OPENWORK_HOST ?? "0.0.0.0";
   const openworkPort = await resolvePort(
     readNumber(args.flags, "openwork-port", undefined, "OPENWORK_PORT"),
-    "127.0.0.1",
+    // See opencodePort note above: ensure we probe on the bind host.
+    openworkHost,
   );
   // Always choose a free owpenbot health port by default (avoid conflicts with
   // other local processes using 3005).

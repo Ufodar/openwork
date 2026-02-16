@@ -33,6 +33,22 @@ Optional env vars (via `.env` or `export`):
 
 ---
 
+## OnlyOffice (Document Writer) + Chinese fonts
+
+The Document Writer view uses **OnlyOffice DocumentServer** for in-browser editing.
+
+If your bid/tender templates use common Chinese fonts like `宋体/等线/黑体/楷体`, a default OnlyOffice Docker image may not have them installed, leading to heavy font substitution and “潦草/不工整” rendering compared to Word.
+
+For local dev, you can patch an existing OnlyOffice container by installing open-source CJK fonts + fontconfig aliases:
+
+```bash
+./scripts/onlyoffice-install-cjk-fonts.sh opencode-onlyoffice-1
+```
+
+Then reload the document in OpenWork.
+
+---
+
 ## Production container
 
 This is a minimal packaging template to run the OpenWork Host contract in a single container.

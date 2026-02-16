@@ -33,6 +33,8 @@ const DEFAULT_DATASET_ROOT =
   "/Users/storm/Pictures/untitled folder/标书文件/智能员工资料/tzsd项目伙伴";
 const DEFAULT_TEMPLATE_PATH = "/Users/storm/Pictures/主标空模版.docx";
 
+type AutotestPreset = "forms" | "full";
+
 const readDevState = async (): Promise<DevHeadlessWebState | null> => {
   const statePath = join(cwd, "tmp", "dev-headless-web.state.json");
   try {
@@ -148,6 +150,11 @@ const run = async () => {
   const workspaceId = workspaces.activeId ?? workspaces.items?.[0]?.id;
   if (!workspaceId) throw new Error("Unable to resolve workspaceId from /workspaces");
 
+  const preset = (process.env.BID_AUTOTEST_PRESET ?? "forms").trim().toLowerCase() as AutotestPreset;
+  if (preset !== "forms" && preset !== "full") {
+    throw new Error(`Unsupported BID_AUTOTEST_PRESET: ${preset} (expected 'forms' or 'full')`);
+  }
+
   const sessionId = `ses_autotest_tzsd_${Date.now().toString(36)}`;
   const datasetRoot = DEFAULT_DATASET_ROOT;
   const templatePath = DEFAULT_TEMPLATE_PATH;
@@ -168,6 +175,7 @@ const run = async () => {
   report.push(`- Session: \`${sessionId}\``);
   report.push(`- OpenWork: \`${baseUrl}\``);
   report.push(`- Workspace: \`${workspaceId}\``);
+  report.push(`- Preset: \`${preset}\``);
   report.push("");
 
   report.push("## Upload target document");
@@ -250,6 +258,32 @@ const run = async () => {
         excludeSourceHeading: false,
       }),
     });
+  }
+
+  if (preset === "full") {
+    for (const heading of [
+      "投标人资质证明文件",
+      "法定代表人授权书",
+      "法定代表人身份证明书",
+      "无重大违法记录声明",
+      "中小企业声明函",
+      "投标人主要业绩表",
+      "主要技术内容",
+    ] as const) {
+      copySteps.push({
+        label: `Partner -> ${heading}`,
+        result: await copySection({
+          baseUrl,
+          token,
+          workspaceId,
+          sessionId,
+          targetDoc: uploadedDoc.name,
+          sourceInboxId: partnerUpload.inboxId,
+          sourceHeading: heading,
+          excludeSourceHeading: false,
+        }),
+      });
+    }
   }
 
   for (const step of copySteps) {

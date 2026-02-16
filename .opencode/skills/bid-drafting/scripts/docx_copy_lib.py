@@ -88,7 +88,9 @@ HEADING_TEXT_PATTERNS: List[Tuple[re.Pattern, int]] = [
     # 1.2.3 style → level = dot_count + 1
     # Supports both "1.1 项目背景" and "1.1项目背景".
     # Limit the first segment to 1-3 digits to avoid misclassifying dates like 2025年...
-    (re.compile(r"^\s*(\d{1,3}(?:\.\d{1,3})*)(?:\s*[\-—.、．]?\s*)\S.+$"), -1),  # -1 = dynamic
+    # Also require the number prefix not to be immediately followed by another digit
+    # (so "2025年..." won't match by capturing only "202").
+    (re.compile(r"^\s*(\d{1,3}(?:\.\d{1,3})*)(?!\d)(?:\s*[\-—.、．]?\s*)\S.+$"), -1),  # -1 = dynamic
 ]
 
 
@@ -130,6 +132,13 @@ def _heading_level(text: str, style_val: Optional[str]) -> Optional[int]:
                 if m:
                     return int(m.group(1))
                 return 1  # Style says heading but no number → level 1
+
+    # Avoid treating full sentences / list items as headings.
+    # This is especially important for tender documents where requirements are
+    # written as numbered sentences ending with "；"/"。" which would otherwise
+    # break section boundaries (elementCount becomes 0 for real headings).
+    if stripped.endswith(("。", "；", ";", "!", "！", "?", "？")):
+        return None
 
     # Too long to be a heading (heuristic)
     if len(stripped) > 80:

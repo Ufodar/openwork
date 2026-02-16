@@ -17,10 +17,14 @@ W_NS = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
 HEADING_STYLE_HINTS = ("heading", "title", "标题", "Heading", "Title")
 
 HEADING_TEXT_PATTERNS = [
-    re.compile(r"^\s*\d+(?:\.\d+)*\s+.+$"),  # 1 / 1.2 / 1.2.3
-    re.compile(r"^\s*[一二三四五六七八九十]+[、.]\s*.+$"),  # 一、 / 二.
-    re.compile(r"^\s*第[一二三四五六七八九十0-9]+[章节]\s*.+$"),  # 第三章
-    re.compile(r"^\s*[\(（][一二三四五六七八九十0-9]+[\)）]\s*.+$"),  # （一）
+    # Numeric headings (allow "1.1 项目背景" and "1.1项目背景"; avoid matching years like 2025年 by requiring next char not digit).
+    re.compile(r"^\s*\d{1,3}(?:\.\d{1,3})*(?!\d)(?:\s*[\-—.、．]?\s*)\S.+$"),
+    # Chinese numbered headings: 一、 / 二.
+    re.compile(r"^\s*[一二三四五六七八九十]+[、.]\s*.+$"),
+    # 第三章 / 第一章 (suffix optional)
+    re.compile(r"^\s*第[一二三四五六七八九十百千0-9]+[章节](?:\s*.+)?$"),
+    # （一） / (1)
+    re.compile(r"^\s*[\(（][一二三四五六七八九十0-9]+[\)）]\s*.+$"),
 ]
 
 
@@ -111,6 +115,11 @@ def _is_heading(text: str, style_val: Optional[str]) -> bool:
 
     # Heuristic headings should be short-ish
     if len(stripped) > 60:
+        return False
+
+    # Avoid treating full sentences / list items as headings, which would create
+    # overly fragmented chunks (and breaks section boundaries for copy tools).
+    if stripped.endswith(("。", "；", ";", "!", "！", "?", "？")):
         return False
 
     return any(pat.match(stripped) for pat in HEADING_TEXT_PATTERNS)

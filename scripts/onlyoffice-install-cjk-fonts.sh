@@ -138,15 +138,121 @@ cat > /etc/fonts/conf.d/99-openwork-cjk-aliases.conf <<"EOF"
       <family>Noto Serif CJK SC</family>
     </prefer>
   </alias>
+
+  <!-- Common macOS / vendor fonts seen in bid templates -->
+  <alias>
+    <family>苹方-简</family>
+    <prefer>
+      <family>Noto Sans CJK SC</family>
+      <family>WenQuanYi Micro Hei</family>
+      <family>WenQuanYi Zen Hei</family>
+    </prefer>
+  </alias>
+  <alias>
+    <!-- Fontconfig parses "苹方-简" as family "苹方" (style suffix), so alias both. -->
+    <family>苹方</family>
+    <prefer>
+      <family>Noto Sans CJK SC</family>
+      <family>WenQuanYi Micro Hei</family>
+      <family>WenQuanYi Zen Hei</family>
+    </prefer>
+  </alias>
+  <alias>
+    <family>PingFang SC</family>
+    <prefer>
+      <family>Noto Sans CJK SC</family>
+      <family>WenQuanYi Micro Hei</family>
+      <family>WenQuanYi Zen Hei</family>
+    </prefer>
+  </alias>
+  <alias>
+    <family>.AppleSystemUIFont</family>
+    <prefer>
+      <family>Noto Sans CJK SC</family>
+      <family>WenQuanYi Micro Hei</family>
+      <family>WenQuanYi Zen Hei</family>
+    </prefer>
+  </alias>
+
+  <!-- HanYi fonts in some templates -->
+  <alias>
+    <family>汉仪中黑KW</family>
+    <prefer>
+      <family>Noto Sans CJK SC</family>
+      <family>WenQuanYi Micro Hei</family>
+      <family>WenQuanYi Zen Hei</family>
+    </prefer>
+  </alias>
+  <alias>
+    <family>汉仪书宋二KW</family>
+    <prefer>
+      <family>Noto Serif CJK SC</family>
+      <family>AR PL UMing CN</family>
+      <family>WenQuanYi Micro Hei</family>
+    </prefer>
+  </alias>
+
+  <!-- Common Windows Chinese fonts -->
+  <alias>
+    <family>微软雅黑</family>
+    <prefer>
+      <family>Noto Sans CJK SC</family>
+      <family>WenQuanYi Micro Hei</family>
+      <family>WenQuanYi Zen Hei</family>
+    </prefer>
+  </alias>
+  <alias>
+    <family>Microsoft YaHei</family>
+    <prefer>
+      <family>Noto Sans CJK SC</family>
+      <family>WenQuanYi Micro Hei</family>
+      <family>WenQuanYi Zen Hei</family>
+    </prefer>
+  </alias>
+  <alias>
+    <family>仿宋</family>
+    <prefer>
+      <family>Noto Serif CJK SC</family>
+      <family>AR PL UMing CN</family>
+    </prefer>
+  </alias>
+  <alias>
+    <family>FangSong</family>
+    <prefer>
+      <family>Noto Serif CJK SC</family>
+      <family>AR PL UMing CN</family>
+    </prefer>
+  </alias>
+  <alias>
+    <family>方正小标宋</family>
+    <prefer>
+      <family>Noto Serif CJK SC</family>
+      <family>AR PL UMing CN</family>
+    </prefer>
+  </alias>
+  <alias>
+    <family>小标宋</family>
+    <prefer>
+      <family>Noto Serif CJK SC</family>
+      <family>AR PL UMing CN</family>
+    </prefer>
+  </alias>
 </fontconfig>
 EOF
 
 fc-cache -f >/dev/null
+
+# OnlyOffice caches fonts list; regenerate to pick up new families.
+if command -v documentserver-generate-allfonts.sh >/dev/null 2>&1; then
+  documentserver-generate-allfonts.sh >/dev/null 2>&1 || true
+fi
 echo "OK: fonts installed + aliases configured"
 echo "fc-match 宋体 => $(fc-match "宋体")"
 echo "fc-match 等线 => $(fc-match "等线")"
 echo "fc-match 黑体 => $(fc-match "黑体")"
 echo "fc-match 楷体 => $(fc-match "楷体")"
+echo "fc-match 苹方-简 => $(fc-match "苹方-简")"
+echo "fc-match .AppleSystemUIFont => $(fc-match ".AppleSystemUIFont")"
 '
 
 if [[ "$RESTART" == "1" ]]; then
@@ -156,4 +262,3 @@ if [[ "$RESTART" == "1" ]]; then
 else
   echo "[onlyoffice] Skipping restart (--no-restart)." >&2
 fi
-

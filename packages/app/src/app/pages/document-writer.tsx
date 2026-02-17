@@ -17,6 +17,12 @@ type DocumentItem = {
   type: string;
 };
 
+type DocumentWriterUiState = {
+  schemaVersion: 1;
+  targetDoc?: string;
+  activeDoc?: string;
+};
+
 type InboxItem = {
   id: string;
   path: string;
@@ -115,10 +121,43 @@ export default function DocumentWriterView(props: SessionViewProps) {
     return await response.json();
   };
 
-  const [selectedDoc, setSelectedDoc] = createSignal<string | null>(null);
+  const docWriterStateKey = createMemo(() => {
+    const w = workspaceId();
+    const s = sessionId();
+    if (!w || !s) return "";
+    return `openwork.document-writer.ui.v1:${w}:${s}`;
+  });
+
+  const readDocWriterState = (key: string): DocumentWriterUiState | null => {
+    if (!key || typeof window === "undefined") return null;
+    try {
+      const raw = window.localStorage.getItem(key);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as Partial<DocumentWriterUiState> | null;
+      if (!parsed || parsed.schemaVersion !== 1) return null;
+      return parsed as DocumentWriterUiState;
+    } catch {
+      return null;
+    }
+  };
+
+  const writeDocWriterState = (key: string, state: DocumentWriterUiState) => {
+    if (!key || typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(key, JSON.stringify(state));
+    } catch {
+      // ignore
+    }
+  };
+
+  // "Target" is the document we mutate via agent/tools. "Active" is what OnlyOffice currently displays.
+  // Active can temporarily point at a reference preview while the target remains stable.
+  const [targetDoc, setTargetDoc] = createSignal<string | null>(null);
+  const [activeDoc, setActiveDoc] = createSignal<string | null>(null);
   const [documentsCollapsed, setDocumentsCollapsed] = createSignal(false);
   const [configSeq, setConfigSeq] = createSignal(0);
   const [archiveBusy, setArchiveBusy] = createSignal(false);
+  const [otherDocsExpanded, setOtherDocsExpanded] = createSignal(false);
   const [lastSessionStatus, setLastSessionStatus] = createSignal(props.sessionStatus ?? "idle");
   const [refsExpanded, setRefsExpanded] = createSignal<Record<string, boolean>>({});
   const [refsBusy, setRefsBusy] = createSignal(false);
@@ -143,6 +182,18 @@ export default function DocumentWriterView(props: SessionViewProps) {
     const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/documents", query);
     const data = (await fetchJson(url, cfg.token)) as { items?: DocumentItem[] };
     return Array.isArray(data.items) ? data.items : [];
+  });
+
+  const documentsList = createMemo(() => documents() ?? []);
+  const targetDocInList = createMemo(() => {
+    const name = (targetDoc() ?? "").trim();
+    if (!name) return null;
+    return (documentsList() ?? []).find((doc) => doc.name === name) ?? null;
+  });
+  const otherDocsList = createMemo(() => {
+    const name = (targetDoc() ?? "").trim();
+    if (!name) return [] as DocumentItem[];
+    return (documentsList() ?? []).filter((doc) => doc.name !== name);
   });
 
   const REF_CATEGORIES = [
@@ -225,9 +276,15 @@ export default function DocumentWriterView(props: SessionViewProps) {
 
   const editorSource = createMemo(() => {
     const cfg = apiConfig();
-    const doc = selectedDoc();
+    const doc = activeDoc();
+    const target = targetDoc();
     if (!cfg || !doc) return null;
-    return { ...cfg, doc, seq: configSeq(), readonly: isAgentRunning() } satisfies EditorSource;
+    return {
+      ...cfg,
+      doc,
+      seq: configSeq(),
+      readonly: isAgentRunning() || (Boolean(target) && doc !== target),
+    } satisfies EditorSource;
   });
 
   const [editorPayload] = createResource(editorSource, async (input): Promise<OnlyOfficePayload | null> => {
@@ -260,14 +317,20 @@ export default function DocumentWriterView(props: SessionViewProps) {
     const query = new URLSearchParams();
     query.set("session", cfg.sessionId);
     const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/upload", query);
-    await fetchJson(url, cfg.token, { method: "POST", body: formData });
+    const result = (await fetchJson(url, cfg.token, { method: "POST", body: formData })) as { name?: string };
     input.value = "";
     await refetchDocuments();
+    const name = typeof result?.name === "string" ? result.name.trim() : "";
+    if (name) {
+      setTargetDoc(name);
+      setActiveDoc(name);
+      setConfigSeq((v) => v + 1);
+    }
   };
 
   const archiveOtherDocuments = async () => {
     const cfg = apiConfig();
-    const keep = selectedDoc();
+    const keep = targetDoc();
     if (!cfg || !keep) return;
     if (archiveBusy()) return;
     const ok = window.confirm(
@@ -378,18 +441,30 @@ export default function DocumentWriterView(props: SessionViewProps) {
     const cfg = apiConfig();
     if (!cfg) return;
     if (refsOpenBusyId()) return;
+    if (!targetDoc()) {
+      setRefsError("Upload/select a target document first. Reference files are preview-only.");
+      return;
+    }
     setRefsOpenBusyId(item.id);
     setRefsError(null);
     try {
+      const prefix = refsInboxPrefix();
+      const rootPrefix = prefix ? `${prefix}/` : "";
+      const remainder = rootPrefix && item.path.startsWith(rootPrefix) ? item.path.slice(rootPrefix.length) : item.path;
+      const categoryId = (remainder.split("/")[0] ?? "other").trim() || "other";
+      const filename = item.path.split("/").pop() ?? "reference";
+      const dest = `.refs/${categoryId}/${filename}`;
+
       const query = new URLSearchParams();
       query.set("inboxId", item.id);
       query.set("session", cfg.sessionId);
+      query.set("dest", dest);
+      query.set("mode", "overwrite");
       const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/import", query);
       const result = (await fetchJson(url, cfg.token, { method: "POST" })) as { doc?: string };
       const doc = typeof result?.doc === "string" ? result.doc.trim() : "";
       if (!doc) throw new Error("Failed to import document");
-      setSelectedDoc(doc);
-      await refetchDocuments();
+      setActiveDoc(doc);
       setConfigSeq((v) => v + 1);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to open file in editor";
@@ -422,7 +497,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
 
   const sectionCopyTargetHeadingsRequest = createMemo(() => {
     const cfg = apiConfig();
-    const doc = selectedDoc();
+    const doc = targetDoc();
     if (!cfg || !doc || !sectionCopyOpen()) return null;
     if (!isDocxSectionCopyTarget(doc)) return null;
     const query = new URLSearchParams();
@@ -462,7 +537,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
 
   const openSectionCopyModal = (item: InboxItem) => {
     if (!serverReady()) return;
-    const doc = selectedDoc();
+    const doc = targetDoc();
     if (!doc) {
       setToastMessage("Select a target document first.");
       return;
@@ -492,7 +567,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
 
   const runSectionCopy = async () => {
     const cfg = apiConfig();
-    const doc = selectedDoc();
+    const doc = targetDoc();
     const source = sectionCopySource();
     const sourceHeading = sectionCopySourceHeading();
     if (!cfg || !doc || !source || !sourceHeading) return;
@@ -541,7 +616,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
   };
 
   const activeDocPath = createMemo(() => {
-    const doc = selectedDoc();
+    const doc = targetDoc();
     if (!doc) return "";
     const normalized = doc.trim().replace(/^\/+/, "");
     if (!normalized) return "";
@@ -552,7 +627,46 @@ export default function DocumentWriterView(props: SessionViewProps) {
 
   createEffect(() => {
     sessionId();
-    setSelectedDoc(null);
+    setTargetDoc(null);
+    setActiveDoc(null);
+  });
+
+  createEffect(() => {
+    const key = docWriterStateKey();
+    if (!key) return;
+    const state = readDocWriterState(key);
+    const nextTarget = typeof state?.targetDoc === "string" ? state.targetDoc.trim() : "";
+    const nextActive = typeof state?.activeDoc === "string" ? state.activeDoc.trim() : "";
+    if (nextTarget) setTargetDoc(nextTarget);
+    if (nextActive) setActiveDoc(nextActive);
+  });
+
+  createEffect(() => {
+    const key = docWriterStateKey();
+    if (!key) return;
+    const t = targetDoc();
+    const a = activeDoc();
+    writeDocWriterState(key, {
+      schemaVersion: 1,
+      targetDoc: t ? t : undefined,
+      activeDoc: a ? a : undefined,
+    });
+  });
+
+  createEffect(() => {
+    const items = documents() ?? [];
+    if (!items.length) return;
+
+    if (!targetDoc()) {
+      const preferred = items.find((doc) => !doc.name.startsWith("refs/")) ?? items[0];
+      setTargetDoc(preferred.name);
+      if (!activeDoc()) setActiveDoc(preferred.name);
+      return;
+    }
+
+    if (targetDoc() && !activeDoc()) {
+      setActiveDoc(targetDoc());
+    }
   });
 
   createEffect(() => {
@@ -560,7 +674,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
     const next = props.sessionStatus ?? "idle";
     setLastSessionStatus(next);
     if (prev !== "running" || next === "running") return;
-    if (!selectedDoc()) return;
+    if (!targetDoc()) return;
     if (!serverReady()) return;
     setConfigSeq((v) => v + 1);
     void refetchDocuments();
@@ -710,7 +824,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
                 type="button"
                 class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
                 onClick={() => void archiveOtherDocuments()}
-                disabled={!serverReady() || !selectedDoc() || archiveBusy()}
+                disabled={!serverReady() || !targetDoc() || archiveBusy()}
                 title="Archive other documents"
                 aria-label="Archive other documents"
               >
@@ -762,16 +876,16 @@ export default function DocumentWriterView(props: SessionViewProps) {
               >
                 <RefreshCw size={16} class={documents.loading ? "animate-spin" : ""} />
               </button>
-              <button
-                type="button"
-                class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
-                onClick={() => void archiveOtherDocuments()}
-                disabled={!serverReady() || !selectedDoc() || archiveBusy()}
-                title="Archive other documents"
-                aria-label="Archive other documents"
-              >
-                <FolderArchive size={16} />
-              </button>
+                <button
+                  type="button"
+                  class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
+                  onClick={() => void archiveOtherDocuments()}
+                  disabled={!serverReady() || !targetDoc() || archiveBusy()}
+                  title="Archive other documents"
+                  aria-label="Archive other documents"
+                >
+                  <FolderArchive size={16} />
+                </button>
               <label
                 class={`cursor-pointer p-2 hover:bg-dls-hover rounded ${!serverReady() ? "opacity-50 cursor-not-allowed" : ""
                   }`}
@@ -802,25 +916,94 @@ export default function DocumentWriterView(props: SessionViewProps) {
                 </div>
               }
             >
-              <Show when={(documents() ?? []).length > 0} fallback={<div class="p-2 text-xs text-dls-secondary">No documents yet.</div>}>
-                <For each={documents() ?? []}>
-                  {(doc) => (
+              <Show
+                when={(documentsList() ?? []).length > 0}
+                fallback={<div class="p-2 text-xs text-dls-secondary">No documents yet.</div>}
+              >
+                <Show
+                  when={Boolean(targetDocInList())}
+                  fallback={
+                    <For each={documentsList()}>
+                      {(doc) => (
+                        <button
+                          class={`w-full rounded flex items-center mb-1 transition-colors ${documentsCollapsed() ? "justify-center p-2" : "text-left p-2 gap-2"
+                            } ${activeDoc() === doc.name
+                              ? "bg-dls-hover text-dls-text"
+                              : "text-dls-secondary hover:bg-dls-surface"
+                            }`}
+                          onClick={() => {
+                            setTargetDoc(doc.name);
+                            setActiveDoc(doc.name);
+                          }}
+                          title={documentsCollapsed() ? doc.name : undefined}
+                        >
+                          <FileText size={16} />
+                          <Show when={!documentsCollapsed()}>
+                            <span class="truncate">{doc.name}</span>
+                          </Show>
+                        </button>
+                      )}
+                    </For>
+                  }
+                >
+                  <button
+                    class={`w-full rounded flex items-center mb-1 transition-colors ${documentsCollapsed() ? "justify-center p-2" : "text-left p-2 gap-2"
+                      } ${activeDoc() === targetDocInList()!.name
+                        ? "bg-dls-hover text-dls-text"
+                        : "text-dls-secondary hover:bg-dls-surface"
+                      }`}
+                    onClick={() => setActiveDoc(targetDocInList()!.name)}
+                    title={documentsCollapsed() ? targetDocInList()!.name : undefined}
+                  >
+                    <FileText size={16} />
+                    <Show when={!documentsCollapsed()}>
+                      <span class="truncate">
+                        {targetDocInList()!.name}
+                        <span class="ml-2 text-[10px] text-dls-secondary">(target)</span>
+                      </span>
+                    </Show>
+                  </button>
+
+                  <Show when={otherDocsList().length > 0 && !documentsCollapsed()}>
                     <button
-                      class={`w-full rounded flex items-center mb-1 transition-colors ${documentsCollapsed() ? "justify-center p-2" : "text-left p-2 gap-2"
-                        } ${selectedDoc() === doc.name
-                          ? "bg-dls-hover text-dls-text"
-                          : "text-dls-secondary hover:bg-dls-surface"
-                        }`}
-                      onClick={() => setSelectedDoc(doc.name)}
-                      title={documentsCollapsed() ? doc.name : undefined}
+                      type="button"
+                      class="w-full mt-1 rounded flex items-center justify-between px-2 py-2 text-[11px] text-dls-secondary hover:text-dls-text hover:bg-dls-hover"
+                      onClick={() => setOtherDocsExpanded((v) => !v)}
+                      aria-expanded={otherDocsExpanded()}
                     >
-                      <FileText size={16} />
-                      <Show when={!documentsCollapsed()}>
-                        <span class="truncate">{doc.name}</span>
-                      </Show>
+                      <span>Other documents</span>
+                      <span class="flex items-center gap-2">
+                        <span class="text-[10px]">{otherDocsList().length}</span>
+                        <ChevronDown size={14} class={`transition-transform ${otherDocsExpanded() ? "rotate-180" : ""}`} />
+                      </span>
                     </button>
-                  )}
-                </For>
+                    <Show when={otherDocsExpanded()}>
+                      <div class="mt-1">
+                        <For each={otherDocsList()}>
+                          {(doc) => (
+                            <button
+                              class={`w-full rounded flex items-center mb-1 transition-colors ${documentsCollapsed() ? "justify-center p-2" : "text-left p-2 gap-2"
+                                } ${activeDoc() === doc.name
+                                  ? "bg-dls-hover text-dls-text"
+                                  : "text-dls-secondary hover:bg-dls-surface"
+                                }`}
+                              onClick={() => {
+                                setTargetDoc(doc.name);
+                                setActiveDoc(doc.name);
+                              }}
+                              title={documentsCollapsed() ? doc.name : undefined}
+                            >
+                              <FileText size={16} />
+                              <Show when={!documentsCollapsed()}>
+                                <span class="truncate">{doc.name}</span>
+                              </Show>
+                            </button>
+                          )}
+                        </For>
+                      </div>
+                    </Show>
+                  </Show>
+                </Show>
               </Show>
             </Show>
           </Show>
@@ -957,8 +1140,8 @@ export default function DocumentWriterView(props: SessionViewProps) {
                                         disabled={
                                           !serverReady() ||
                                           isAgentRunning() ||
-                                          !selectedDoc() ||
-                                          !isDocxSectionCopyTarget(selectedDoc() ?? "") ||
+                                          !targetDoc() ||
+                                          !isDocxSectionCopyTarget(targetDoc() ?? "") ||
                                           !isDocxSectionCopySource(item.path)
                                         }
                                         title="Insert section into target"
@@ -1002,10 +1185,10 @@ export default function DocumentWriterView(props: SessionViewProps) {
         </div>
       </div>
 
-      {/* Middle: OnlyOffice */}
-      <div class="relative z-0 flex-1 min-w-0 flex flex-col">
-        <div class="h-12 border-b border-dls-border flex items-center justify-between px-3">
-          <div class="flex items-center gap-2 min-w-0">
+	      {/* Middle: OnlyOffice */}
+	      <div class="relative z-0 flex-1 min-w-0 flex flex-col">
+	        <div class="h-12 border-b border-dls-border flex items-center justify-between px-3">
+	          <div class="flex items-center gap-2 min-w-0">
             <button
               type="button"
               class="p-2 -ml-1 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text"
@@ -1016,38 +1199,42 @@ export default function DocumentWriterView(props: SessionViewProps) {
               <Show when={documentsCollapsed()} fallback={<PanelLeftClose size={16} />}>
                 <PanelLeftOpen size={16} />
               </Show>
-            </button>
-            <div class="text-xs text-dls-secondary truncate">
-              <Show when={selectedDoc()} fallback={"Select a document"}>
-                Editing: <span class="text-dls-text">{selectedDoc()}</span>
-              </Show>
-            </div>
-          </div>
-          <div class="flex items-center gap-2">
+	            </button>
+	            <div class="text-xs text-dls-secondary truncate">
+	              <Show when={targetDoc()} fallback={"Upload/select a target document"}>
+	                Target: <span class="text-dls-text">{targetDoc()}</span>
+	                <Show when={activeDoc() && activeDoc() !== targetDoc()}>
+	                  <span class="ml-2 text-dls-secondary">· Viewing:</span>{" "}
+	                  <span class="text-dls-text">{activeDoc()}</span>
+	                </Show>
+	              </Show>
+	            </div>
+	          </div>
+	          <div class="flex items-center gap-2">
             <button
               type="button"
               class="rounded-lg border border-dls-border bg-dls-surface px-2 py-1 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover disabled:opacity-50"
-              onClick={() => {
-                const path = activeDocPath();
-                if (!path) return;
-                const existing = props.prompt.trim();
-                const next = existing ? `${existing}\n\nTarget document: ${path}\n` : `Target document: ${path}\n`;
-                props.setPrompt(next);
-              }}
-              disabled={!activeDocPath()}
-              title="Insert document path into the prompt"
-            >
-              Use in prompt
-            </button>
+	              onClick={() => {
+	                const path = activeDocPath();
+	                if (!path) return;
+	                const existing = props.prompt.trim();
+	                const next = existing ? `${existing}\n\nTarget document: ${path}\n` : `Target document: ${path}\n`;
+	                props.setPrompt(next);
+	              }}
+	              disabled={!activeDocPath()}
+	              title="Insert document path into the prompt"
+	            >
+	              Use in prompt
+	            </button>
             <button
               type="button"
-              class="rounded-lg border border-dls-border bg-dls-surface px-2 py-1 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover disabled:opacity-50"
-              onClick={() => setConfigSeq((v) => v + 1)}
-              disabled={!selectedDoc()}
-              title="Reload OnlyOffice config"
-            >
-              Reload
-            </button>
+	              class="rounded-lg border border-dls-border bg-dls-surface px-2 py-1 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover disabled:opacity-50"
+	              onClick={() => setConfigSeq((v) => v + 1)}
+	              disabled={!activeDoc()}
+	              title="Reload OnlyOffice config"
+	            >
+	              Reload
+	            </button>
             <button
               type="button"
               class="rounded-lg border border-dls-border bg-dls-surface px-2 py-1 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover disabled:opacity-50"
@@ -1064,21 +1251,42 @@ export default function DocumentWriterView(props: SessionViewProps) {
           </div>
         </div>
 
-        <div class="flex-1 min-h-0 overflow-hidden">
-          <Show
-            when={selectedDoc()}
-            fallback={<div class="h-full flex items-center justify-center text-dls-secondary">Select a document to edit</div>}
-          >
-            <div class="relative h-full w-full">
-              <Show when={editorPayload()} fallback={<div class="p-4 text-xs text-dls-secondary">Loading editor...</div>}>
-                <OnlyOfficeEditor
-                  documentServerUrl={editorPayload()!.documentServerUrl}
-                  config={editorPayload()!.config}
-                />
-              </Show>
-              <Show when={isAgentRunning()}>
-                <div
-                  class="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center px-4"
+	        <div class="flex-1 min-h-0 overflow-hidden">
+	          <Show
+	            when={activeDoc()}
+	            fallback={<div class="h-full flex items-center justify-center text-dls-secondary">Select a document to edit</div>}
+	          >
+	            <div class="relative h-full w-full">
+	              <Show when={editorPayload()} fallback={<div class="p-4 text-xs text-dls-secondary">Loading editor...</div>}>
+	                <OnlyOfficeEditor
+	                  documentServerUrl={editorPayload()!.documentServerUrl}
+	                  config={editorPayload()!.config}
+	                />
+	              </Show>
+	              <Show when={targetDoc() && activeDoc() && activeDoc() !== targetDoc()}>
+	                <div
+	                  class="pointer-events-none absolute inset-x-0 top-3 flex justify-center px-4"
+	                  role="status"
+	                  aria-live="polite"
+	                >
+	                  <div class="max-w-lg rounded-xl border border-dls-border bg-dls-surface/90 px-4 py-2 shadow-lg backdrop-blur">
+	                    <div class="text-xs text-dls-secondary">
+	                      <span class="font-medium text-dls-text">Preview mode</span>{" "}
+	                      (chat edits <span class="text-dls-text">{targetDoc()}</span>).{" "}
+	                      <button
+	                        type="button"
+	                        class="pointer-events-auto ml-2 underline text-dls-secondary hover:text-dls-text"
+	                        onClick={() => setActiveDoc(targetDoc())}
+	                      >
+	                        Back to target
+	                      </button>
+	                    </div>
+	                  </div>
+	                </div>
+	              </Show>
+	              <Show when={isAgentRunning()}>
+	                <div
+	                  class="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center px-4"
                   role="status"
                   aria-live="polite"
                 >
@@ -1089,11 +1297,11 @@ export default function DocumentWriterView(props: SessionViewProps) {
                     </div>
                   </div>
                 </div>
-              </Show>
-            </div>
-          </Show>
-        </div>
-      </div>
+	              </Show>
+	            </div>
+	          </Show>
+	        </div>
+	      </div>
 
       {/* Right: Chat */}
       <div class="relative z-30 shrink-0 w-[420px] border-l border-dls-border flex flex-col bg-dls-surface">
@@ -1171,13 +1379,13 @@ export default function DocumentWriterView(props: SessionViewProps) {
             class="w-full max-w-4xl rounded-2xl border border-dls-border bg-dls-surface shadow-2xl overflow-hidden"
             onMouseDown={(event) => event.stopPropagation()}
           >
-            <div class="flex items-center justify-between px-4 py-3 border-b border-dls-border">
-              <div class="min-w-0">
-                <div class="text-sm font-semibold text-dls-text truncate">Insert section</div>
-                <div class="mt-1 text-[11px] text-dls-secondary truncate">
-                  Target: {selectedDoc() ?? "—"}
-                </div>
-              </div>
+	            <div class="flex items-center justify-between px-4 py-3 border-b border-dls-border">
+	              <div class="min-w-0">
+	                <div class="text-sm font-semibold text-dls-text truncate">Insert section</div>
+	                <div class="mt-1 text-[11px] text-dls-secondary truncate">
+	                  Target: {targetDoc() ?? "—"}
+	                </div>
+	              </div>
               <button
                 type="button"
                 class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text"
@@ -1268,11 +1476,11 @@ export default function DocumentWriterView(props: SessionViewProps) {
                     type="text"
                     value={sectionCopyTargetQuery()}
                     onInput={(event) => setSectionCopyTargetQuery(event.currentTarget.value)}
-                    placeholder="Search target headings…"
-                    class="w-full rounded-lg border border-dls-border bg-dls-surface px-3 py-2 text-xs text-dls-text placeholder:text-dls-secondary focus:outline-none focus:ring-2 focus:ring-dls-accent/40"
-                    disabled={!selectedDoc() || !isDocxSectionCopyTarget(selectedDoc() ?? "")}
-                  />
-                </div>
+	                    placeholder="Search target headings…"
+	                    class="w-full rounded-lg border border-dls-border bg-dls-surface px-3 py-2 text-xs text-dls-text placeholder:text-dls-secondary focus:outline-none focus:ring-2 focus:ring-dls-accent/40"
+	                    disabled={!targetDoc() || !isDocxSectionCopyTarget(targetDoc() ?? "")}
+	                  />
+	                </div>
                 <div class="mt-2 rounded-lg border border-dls-border overflow-hidden max-h-[360px] overflow-y-auto">
                   <Show when={!sectionCopyTargetHeadings.loading} fallback={<div class="p-3 text-xs text-dls-secondary">Loading…</div>}>
                     <Show

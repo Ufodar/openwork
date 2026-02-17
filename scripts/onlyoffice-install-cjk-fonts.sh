@@ -242,7 +242,7 @@ EOF
 
 # Make aliases "weak" so if the real font family exists (e.g. host-mounted PingFang / Microsoft fonts),
 # it wins; otherwise fall back to the open-source substitutes above.
-sed -i 's/<alias>/<alias binding="weak">/g' /etc/fonts/conf.d/99-openwork-cjk-aliases.conf
+sed -i "s/<alias>/<alias binding=\\\"weak\\\">/g" /etc/fonts/conf.d/99-openwork-cjk-aliases.conf
 
 fc-cache -f >/dev/null
 

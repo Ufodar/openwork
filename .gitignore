@@ -30,6 +30,9 @@ packaging/docker/workspace/
 # OS
 .DS_Store
 
+# Playwright CLI artifacts
+.playwright-cli/
+
 # Python
 __pycache__/
 *.py[cod]

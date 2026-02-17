@@ -157,6 +157,30 @@ def _heading_level(text: str, style_val: Optional[str]) -> Optional[int]:
     return None
 
 
+def _normalize_heading_text(text: str) -> str:
+    return re.sub(r"\s+", "", (text or "").strip())
+
+
+def _strip_duplicate_leading_heading(section_elements: List[ET.Element]) -> bool:
+    if len(section_elements) < 2:
+        return False
+    first, second = section_elements[0], section_elements[1]
+    if first.tag != W_TAG_P or second.tag != W_TAG_P:
+        return False
+    first_text = _normalize_heading_text(_node_text(first))
+    second_text = _normalize_heading_text(_node_text(second))
+    if not first_text or first_text != second_text:
+        return False
+    first_level = _heading_level(first_text, _paragraph_style_val(first))
+    second_level = _heading_level(second_text, _paragraph_style_val(second))
+    if first_level is None:
+        return False
+    if second_level is not None:
+        return False
+    section_elements.pop(1)
+    return True
+
+
 # ---------------------------------------------------------------------------
 # Data structures
 # ---------------------------------------------------------------------------
@@ -798,6 +822,11 @@ def _copy_section_impl(source_zip: zipfile.ZipFile, source_path: str,
         if child.tag == W_TAG_SECTPR:
             continue
         section_elements.append(child)
+
+    if not exclude_source_heading and _strip_duplicate_leading_heading(section_elements):
+        result.warnings.append(
+            "Stripped a duplicate non-heading paragraph immediately following the section heading."
+        )
 
     if not section_elements:
         raise ValueError(f"Section '{source_heading}' is empty in source document")

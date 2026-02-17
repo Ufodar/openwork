@@ -71,9 +71,14 @@ def qc_docx(docx_path: Path) -> tuple[list[str], list[str], list[TableStats]]:
 
     # Basic heading duplication check (heuristic; may false-positive if TOC exists).
     for key in ["开标一览表", "开标分项一览表", "投标产品点对点应答表", "投标产品配置清单"]:
-        count = full_text.count(key)
-        if count > 2:
-            warnings.append(f"Heading '{key}' appears {count} times (possible duplication).")
+        # Count paragraph-level occurrences to avoid false positives (e.g. notes that mention a form name).
+        para_count = 0
+        for p in body.findall(w("p")):
+            txt = (_cell_text(p) or "").strip()
+            if txt == key:
+                para_count += 1
+        if para_count > 1:
+            warnings.append(f"Heading '{key}' appears {para_count} times (possible duplication).")
 
     tables = body.findall(w("tbl"))
     found = {
@@ -242,4 +247,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

@@ -144,6 +144,121 @@ const copySection = async (input: {
   });
 };
 
+const runAssembleForms = async (input: {
+  baseUrl: string;
+  token: string;
+  workspaceId: string;
+  sessionId: string;
+  targetDoc: string;
+  partnerInboxId: string;
+  matchMode?: "contains" | "exact" | "startswith";
+  force?: boolean;
+}) => {
+  const url = new URL(`/w/${encodeURIComponent(input.workspaceId)}/bid/assemble`, input.baseUrl);
+  url.searchParams.set("session", input.sessionId);
+  url.searchParams.set("doc", input.targetDoc);
+  const payload = {
+    partnerInboxId: input.partnerInboxId,
+    matchMode: input.matchMode ?? "contains",
+    force: Boolean(input.force),
+  };
+  return await fetchJson(url.toString(), input.token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+};
+
+const runFillTables = async (input: {
+  baseUrl: string;
+  token: string;
+  workspaceId: string;
+  sessionId: string;
+  targetDoc: string;
+  techXlsxInboxId?: string;
+  equipXlsxInboxId?: string;
+  brand?: string;
+  manufacturer?: string;
+  origin?: string;
+  unit?: string;
+  pricePlaceholder?: string;
+  specPlaceholder?: string;
+}) => {
+  const url = new URL(`/w/${encodeURIComponent(input.workspaceId)}/bid/fill`, input.baseUrl);
+  url.searchParams.set("session", input.sessionId);
+  url.searchParams.set("doc", input.targetDoc);
+  const payload = {
+    techXlsxInboxId: input.techXlsxInboxId ?? "",
+    equipXlsxInboxId: input.equipXlsxInboxId ?? "",
+    brand: input.brand ?? "",
+    manufacturer: input.manufacturer ?? "",
+    origin: input.origin ?? "",
+    unit: input.unit ?? "",
+    pricePlaceholder: input.pricePlaceholder ?? "",
+    specPlaceholder: input.specPlaceholder ?? "",
+  };
+  return await fetchJson(url.toString(), input.token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+};
+
+const runQcGate = async (input: {
+  baseUrl: string;
+  token: string;
+  workspaceId: string;
+  sessionId: string;
+  targetDoc: string;
+}) => {
+  const url = new URL(`/w/${encodeURIComponent(input.workspaceId)}/bid/qc`, input.baseUrl);
+  url.searchParams.set("session", input.sessionId);
+  url.searchParams.set("doc", input.targetDoc);
+  return await fetchJson(url.toString(), input.token, { method: "POST" });
+};
+
+const runPreviewPdf = async (input: {
+  baseUrl: string;
+  token: string;
+  workspaceId: string;
+  sessionId: string;
+  targetDoc: string;
+}) => {
+  const url = new URL(`/w/${encodeURIComponent(input.workspaceId)}/bid/preview-pdf`, input.baseUrl);
+  url.searchParams.set("session", input.sessionId);
+  url.searchParams.set("doc", input.targetDoc);
+  return await fetchJson(url.toString(), input.token, { method: "POST" });
+};
+
+const runDedupe = async (input: {
+  baseUrl: string;
+  token: string;
+  workspaceId: string;
+  sessionId: string;
+  targetDoc: string;
+  inboxIds: string[];
+  excludeTables?: boolean;
+  simThreshold?: number;
+  includeTitleRegex?: string[];
+  excludeTitleRegex?: string[];
+}) => {
+  const url = new URL(`/w/${encodeURIComponent(input.workspaceId)}/bid/dedupe`, input.baseUrl);
+  url.searchParams.set("session", input.sessionId);
+  url.searchParams.set("doc", input.targetDoc);
+  const payload = {
+    inboxIds: input.inboxIds,
+    excludeTables: Boolean(input.excludeTables),
+    simThreshold: input.simThreshold,
+    includeTitleRegex: input.includeTitleRegex ?? [],
+    excludeTitleRegex: input.excludeTitleRegex ?? [],
+  };
+  return await fetchJson(url.toString(), input.token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+};
+
 const run = async () => {
   const { baseUrl, token } = await resolveServer();
   const workspaces = (await fetchJson(`${baseUrl}/workspaces`, token)) as WorkspaceListResponse;
@@ -206,17 +321,30 @@ const run = async () => {
   await pushUpload("Brand deviation (xls)", paths.brandDeviationXls, "technical");
   report.push("");
 
-  report.push("## Assemble (copy sections into target)");
   const tenderUpload = uploads.find((u) => u.label.startsWith("Tender"));
   const partnerUpload = uploads.find((u) => u.label.startsWith("Partner"));
   if (!tenderUpload || !partnerUpload) throw new Error("Missing tender/partner uploads");
 
-  const copySteps: Array<{ label: string; result: unknown }> = [];
+  report.push("## Assemble forms (module: bid/assemble)");
+  const assemble = (await runAssembleForms({
+    baseUrl,
+    token,
+    workspaceId,
+    sessionId,
+    targetDoc: uploadedDoc.name,
+    partnerInboxId: partnerUpload.inboxId,
+    matchMode: "contains",
+    force: false,
+  })) as { report?: { inboxPath?: string } };
+  report.push(`- Source: \`${partnerUpload.dest}\``);
+  report.push(`- Report: \`${assemble?.report?.inboxPath ?? "(missing)"}\``);
+  report.push("");
 
-  // Tender: deadlines / open time & place
-  copySteps.push({
-    label: "Tender -> 截止/开标时间地点",
-    result: await copySection({
+  // Optional: pull a single tender section into the target for human reference.
+  // This is NOT part of the deterministic module flow, but it mirrors common manual workflows.
+  report.push("## Copy tender section (optional: document/copy-section)");
+  try {
+    await copySection({
       baseUrl,
       token,
       workspaceId,
@@ -225,119 +353,69 @@ const run = async () => {
       sourceInboxId: tenderUpload.inboxId,
       sourceHeading: "四、提交投标文件截止时间、开标时间和地点",
       excludeSourceHeading: false,
-    }),
-  });
-
-  // Partner: formatted bid opening table
-  copySteps.push({
-    label: "Partner -> 开标一览表",
-    result: await copySection({
-      baseUrl,
-      token,
-      workspaceId,
-      sessionId,
-      targetDoc: uploadedDoc.name,
-      sourceInboxId: partnerUpload.inboxId,
-      sourceHeading: "开标一览表",
-      excludeSourceHeading: false,
-    }),
-  });
-
-  // Partner: common submission forms / technical response tables
-  for (const heading of ["开标分项一览表", "投标产品点对点应答表", "投标产品配置清单", "售后服务承诺"] as const) {
-    copySteps.push({
-      label: `Partner -> ${heading}`,
-      result: await copySection({
-        baseUrl,
-        token,
-        workspaceId,
-        sessionId,
-        targetDoc: uploadedDoc.name,
-        sourceInboxId: partnerUpload.inboxId,
-        sourceHeading: heading,
-        excludeSourceHeading: false,
-      }),
     });
-  }
-
-  if (preset === "full") {
-    for (const heading of [
-      "投标人资质证明文件",
-      "法定代表人授权书",
-      "法定代表人身份证明书",
-      "无重大违法记录声明",
-      "中小企业声明函",
-      "投标人主要业绩表",
-      "主要技术内容",
-    ] as const) {
-      copySteps.push({
-        label: `Partner -> ${heading}`,
-        result: await copySection({
-          baseUrl,
-          token,
-          workspaceId,
-          sessionId,
-          targetDoc: uploadedDoc.name,
-          sourceInboxId: partnerUpload.inboxId,
-          sourceHeading: heading,
-          excludeSourceHeading: false,
-        }),
-      });
-    }
-  }
-
-  for (const step of copySteps) {
-    report.push(`- ${step.label}: ok`);
+    report.push("- Tender -> 截止/开标时间地点: ok");
+  } catch (error) {
+    report.push(`- Tender -> 截止/开标时间地点: skipped (${error instanceof Error ? error.message : "failed"})`);
   }
   report.push("");
 
   const targetDocAbs = resolve(join(cwd, "documents", "sessions", sessionId, uploadedDoc.name));
 
-  report.push("## Fill bid tables (xlsx -> docx)");
-  const inboxRoot = resolve(join(cwd, ".opencode", "openwork", "inbox"));
-  const techInboxPath = resolve(join(inboxRoot, `sessions/${sessionId}/refs/technical/${basename(paths.techXlsx)}`));
-  const equipInboxPath = resolve(join(inboxRoot, `sessions/${sessionId}/refs/technical/${basename(paths.equipXlsx)}`));
-  const fillScript = resolve(join(cwd, ".opencode", "skills", "bid-drafting", "scripts", "fill_bid_tables_mvp.py"));
-  const fill = spawnSync(
-    "python3",
-    [
-      fillScript,
-      "--docx",
-      targetDocAbs,
-      "--tech-xlsx",
-      techInboxPath,
-      "--equip-xlsx",
-      equipInboxPath,
-      "--brand",
-      "新华三",
-      "--manufacturer",
-      "新华三技术有限公司",
-      "--origin",
-      "中国",
-      "--unit",
-      "台",
-      "--price-placeholder",
-      "详见报价文件",
-      "--spec-placeholder",
-      "详见开标分项一览表",
-    ],
-    { encoding: "utf8" },
-  );
-  if (fill.status !== 0) {
-    throw new Error(`fill_bid_tables_mvp.py failed: ${String(fill.stderr || fill.stdout || "").trim() || "unknown"}`);
-  }
-  report.push("```");
-  report.push(String(fill.stdout || "").trim());
-  report.push("```");
+  report.push("## Fill bid tables (module: bid/fill)");
+  const techUpload = uploads.find((u) => u.label.startsWith("Tech responses"));
+  const equipUpload = uploads.find((u) => u.label.startsWith("Equipment list"));
+  if (!techUpload || !equipUpload) throw new Error("Missing tech/equipment uploads");
+
+  const fill = (await runFillTables({
+    baseUrl,
+    token,
+    workspaceId,
+    sessionId,
+    targetDoc: uploadedDoc.name,
+    techXlsxInboxId: techUpload.inboxId,
+    equipXlsxInboxId: equipUpload.inboxId,
+    brand: "新华三",
+    manufacturer: "新华三技术有限公司",
+    origin: "中国",
+    unit: "台",
+    pricePlaceholder: "详见报价文件",
+    specPlaceholder: "详见开标分项一览表",
+  })) as { report?: { inboxPath?: string } };
+  report.push(`- Report: \`${fill?.report?.inboxPath ?? "(missing)"}\``);
   report.push("");
 
-  report.push("## QC gate (deterministic checks)");
-  const qcScript = resolve(join(cwd, ".opencode", "skills", "bid-drafting", "scripts", "qc_bid_mvp.py"));
-  const qc = spawnSync("python3", [qcScript, "--docx", targetDocAbs], { encoding: "utf8" });
-  report.push(`- Status: ${qc.status === 0 ? "PASS" : "FAIL"}`);
-  report.push("```");
-  report.push(String(qc.stdout || qc.stderr || "").trim());
-  report.push("```");
+  report.push("## QC gate (module: bid/qc)");
+  const qc = (await runQcGate({ baseUrl, token, workspaceId, sessionId, targetDoc: uploadedDoc.name })) as {
+    passed?: boolean;
+    report?: { inboxPath?: string };
+  };
+  report.push(`- Status: ${qc.passed ? "PASS" : "FAIL"}`);
+  report.push(`- Report: \`${qc?.report?.inboxPath ?? "(missing)"}\``);
+  report.push("");
+
+  report.push("## PDF preview (module: bid/preview-pdf)");
+  const preview = (await runPreviewPdf({ baseUrl, token, workspaceId, sessionId, targetDoc: uploadedDoc.name })) as {
+    pdf?: { inboxPath?: string };
+    report?: { inboxPath?: string };
+  };
+  report.push(`- PDF: \`${preview?.pdf?.inboxPath ?? "(missing)"}\``);
+  report.push(`- Report: \`${preview?.report?.inboxPath ?? "(missing)"}\``);
+  report.push("");
+
+  report.push("## Dedupe (module: bid/dedupe)");
+  const dedupe = (await runDedupe({
+    baseUrl,
+    token,
+    workspaceId,
+    sessionId,
+    targetDoc: uploadedDoc.name,
+    inboxIds: [partnerUpload.inboxId],
+    excludeTables: true,
+    simThreshold: 0.92,
+    excludeTitleRegex: ["开标", "一览表", "资质", "授权", "商务", "报价"],
+  })) as { report?: { inboxPath?: string } };
+  report.push(`- Report: \`${dedupe?.report?.inboxPath ?? "(missing)"}\``);
   report.push("");
 
   report.push("## Output");

@@ -115,6 +115,43 @@ Why:
 4. **Dedupe robustness**
    - Add perceptual hashing by default (ship Pillow in a controlled runtime) or implement a lightweight native hasher.
 
+## MVP UX: make it actually usable (not just a demo)
+
+The meeting notes emphasize that users don't want "chat that writes a lot"; they want fewer fatal errors,
+less manual copy/paste, and faster verification. The UX should therefore optimize for:
+
+1. **A single, stable target document** (the artifact the team will submit).
+2. **Deterministic modules** that produce auditable outputs (reports) and avoid side effects.
+3. **Fast review loops**: run a module → see what changed → decide next action.
+
+### Principles
+
+- **Target vs Reference separation**: the UI must make it obvious which file is being edited, and which files are just sources.
+- **No silent duplication**: tools should not spawn new “final-vX” documents unless the user explicitly asks.
+- **Reports are the interface**: every module writes a timestamped report to the session inbox, and the UI makes those reports one-click accessible (`@` + download).
+- **Gated automation**: start with module buttons; do not ship “one-click generate full bid” until each module has clear success criteria.
+
+### Recommended module-first flow (human-in-the-loop)
+
+1. **Pick target**: upload the blank template (主标空模版) and confirm it is the target.
+2. **Assemble forms**: copy baseline required forms into the target from a trusted historical/partner DOCX.
+3. **Fill tables**: fill point-to-point and equipment list tables from XLSX.
+4. **Dedupe**: compare target against 2-4 other bids (主标 + 伙伴标) for text/image risks.
+5. **QC gate**: run deterministic checks; only then allow the team to proceed to polishing.
+
+### Make the system feel “real” to users (pragmatic add-ons)
+
+- **Session hygiene**: provide “Archive other documents” so a session converges to one clean target.
+- **Reference library categories**: match how bid teams think (招标文件 / 模板 / 商务 / 技术 / 历史 / 合作方 / 图片).
+- **Preview mode**: allow opening a reference in OnlyOffice as view-only while keeping the target stable.
+- **Failure UX**: when a module fails, surface the report path in the error message so the user can immediately inspect logs and retry.
+
+### Known limitations (explicitly communicate)
+
+- OnlyOffice render ≠ Microsoft Word render. For final submission, always export and spot-check in Word.
+- DOCX section copy intentionally refuses footnotes/comments/charts/SmartArt/embedded objects to avoid corrupting output.
+- Image near-duplicate detection (dHash) depends on Pillow; without it, only exact image SHA256 matching is available.
+
 ## Notes on safety
 
 - Do not modify factual values to "look different".

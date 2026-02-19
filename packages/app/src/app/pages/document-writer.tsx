@@ -1,6 +1,6 @@
 import { For, Show, createEffect, createMemo, createResource, createSignal, onCleanup } from "solid-js";
 import type { Agent } from "@opencode-ai/sdk/v2/client";
-import { ArrowRight, AtSign, CheckCircle2, ChevronDown, Copy, Download, FileText, Folder, FolderArchive, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Trash2, X } from "lucide-solid";
+import { ArrowRight, AtSign, CheckCircle2, ChevronDown, Copy, Download, FileText, Folder, FolderArchive, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Search, Trash2, X } from "lucide-solid";
 import { useNavigate } from "@solidjs/router";
 
 import type { ComposerDraft, SlashCommandOption } from "../types";
@@ -116,7 +116,18 @@ export default function DocumentWriterView(props: SessionViewProps) {
     const response = await fetch(url, { ...init, headers });
     if (!response.ok) {
       const text = await response.text().catch(() => "");
-      throw new Error(text || `Request failed (${response.status})`);
+      try {
+        const parsed = JSON.parse(text) as { message?: unknown; details?: any } | null;
+        const message = parsed && typeof parsed.message === "string" ? parsed.message : "";
+        const reportPath =
+          parsed?.details?.report?.inboxPath && typeof parsed.details.report.inboxPath === "string"
+            ? parsed.details.report.inboxPath
+            : "";
+        const suffix = reportPath ? `\n\nReport: ${reportPath}` : "";
+        throw new Error((message || `Request failed (${response.status})`) + suffix);
+      } catch {
+        throw new Error(text || `Request failed (${response.status})`);
+      }
     }
     return await response.json();
   };
@@ -176,7 +187,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
   const [sectionCopyTargetQuery, setSectionCopyTargetQuery] = createSignal("");
 
   const [modulesExpanded, setModulesExpanded] = createSignal(true);
-  const [moduleModal, setModuleModal] = createSignal<null | "assemble" | "fill" | "qc">(null);
+  const [moduleModal, setModuleModal] = createSignal<null | "assemble" | "fill" | "dedupe" | "qc">(null);
   const [assembleSource, setAssembleSource] = createSignal<InboxItem | null>(null);
   const [assembleMatchMode, setAssembleMatchMode] = createSignal<"contains" | "exact" | "startswith">("contains");
   const [assembleForce, setAssembleForce] = createSignal(false);
@@ -193,6 +204,13 @@ export default function DocumentWriterView(props: SessionViewProps) {
   const [fillSpecPlaceholder, setFillSpecPlaceholder] = createSignal("详见开标分项一览表");
   const [fillBusy, setFillBusy] = createSignal(false);
   const [fillError, setFillError] = createSignal<string | null>(null);
+  const [dedupeSelected, setDedupeSelected] = createSignal<Set<string>>(new Set());
+  const [dedupeQuery, setDedupeQuery] = createSignal("");
+  const [dedupeExcludeTables, setDedupeExcludeTables] = createSignal(true);
+  const [dedupeSimThreshold, setDedupeSimThreshold] = createSignal(0.92);
+  const [dedupeExportMedia, setDedupeExportMedia] = createSignal(false);
+  const [dedupeBusy, setDedupeBusy] = createSignal(false);
+  const [dedupeError, setDedupeError] = createSignal<string | null>(null);
   const [qcBusy, setQcBusy] = createSignal(false);
   const [qcError, setQcError] = createSignal<string | null>(null);
   const [reportsExpanded, setReportsExpanded] = createSignal(false);
@@ -344,6 +362,80 @@ export default function DocumentWriterView(props: SessionViewProps) {
     for (const item of xlsxRefs()) map.set(item.id, item);
     return map;
   });
+
+  type DedupeCandidate =
+    | {
+        key: string;
+        kind: "doc";
+        name: string;
+        updatedAt: number;
+        sourceLabel: string;
+      }
+    | {
+        key: string;
+        kind: "inbox";
+        inboxId: string;
+        path: string;
+        updatedAt: number;
+        sourceLabel: string;
+      };
+
+  const dedupeCandidates = createMemo(() => {
+    const target = targetDoc();
+
+    const docCandidates: DedupeCandidate[] = (documentsList() ?? [])
+      .filter((doc) => doc.name !== target)
+      .filter((doc) => isDocxSectionCopySource(doc.name))
+      .map((doc) => ({
+        key: `doc:${doc.name}`,
+        kind: "doc" as const,
+        name: doc.name,
+        updatedAt: doc.updatedAt,
+        sourceLabel: "Session document",
+      }));
+
+    const inboxCandidates: DedupeCandidate[] = moduleSources().map((item) => {
+      const prefix = refsInboxPrefix();
+      const rootPrefix = prefix ? `${prefix}/` : "";
+      const remainder = rootPrefix && item.path.startsWith(rootPrefix) ? item.path.slice(rootPrefix.length) : item.path;
+      const categoryId = (remainder.split("/")[0] ?? "other").trim() || "other";
+      const categoryLabel = REF_CATEGORIES.find((c) => c.id === categoryId)?.label ?? "Reference";
+      return {
+        key: `inbox:${item.id}`,
+        kind: "inbox" as const,
+        inboxId: item.id,
+        path: item.path,
+        updatedAt: item.updatedAt,
+        sourceLabel: categoryLabel,
+      };
+    });
+
+    const combined = [...docCandidates, ...inboxCandidates];
+    combined.sort((a, b) => b.updatedAt - a.updatedAt);
+    return combined;
+  });
+
+  const filteredDedupeCandidates = createMemo(() => {
+    const query = dedupeQuery().trim().toLowerCase();
+    const items = dedupeCandidates();
+    if (!query) return items;
+    return items.filter((item) => {
+      const name =
+        item.kind === "doc"
+          ? item.name.split("/").pop() ?? item.name
+          : item.path.split("/").pop() ?? item.path;
+      return name.toLowerCase().includes(query) || item.sourceLabel.toLowerCase().includes(query);
+    });
+  });
+
+  const toggleDedupeSelection = (key: string) => {
+    setDedupeSelected((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
 
   const visibleReports = createMemo(() => {
     const items = reports() ?? [];
@@ -730,7 +822,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
     }
   };
 
-  const openModule = (key: "assemble" | "fill" | "qc") => {
+  const openModule = (key: "assemble" | "fill" | "dedupe" | "qc") => {
     if (!serverReady()) return;
     if (!targetDoc()) {
       setToastMessage("Select a target document first.");
@@ -738,11 +830,16 @@ export default function DocumentWriterView(props: SessionViewProps) {
     }
     setAssembleError(null);
     setFillError(null);
+    setDedupeError(null);
     setQcError(null);
 
     if (key === "assemble" && !assembleSource()) {
       const first = moduleSources()[0] ?? null;
       setAssembleSource(first);
+    }
+    if (key === "dedupe" && dedupeSelected().size === 0) {
+      const first = dedupeCandidates()[0];
+      if (first) setDedupeSelected(new Set([first.key]));
     }
     setModuleModal(key);
   };
@@ -751,6 +848,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
     setModuleModal(null);
     setAssembleError(null);
     setFillError(null);
+    setDedupeError(null);
     setQcError(null);
   };
 
@@ -840,6 +938,64 @@ export default function DocumentWriterView(props: SessionViewProps) {
     }
   };
 
+  const runDedupe = async () => {
+    const cfg = apiConfig();
+    const doc = targetDoc();
+    if (!cfg || !doc) return;
+    if (dedupeBusy()) return;
+
+    const selected = Array.from(dedupeSelected());
+    if (selected.length < 1) {
+      setDedupeError("Select at least one document to compare with the target.");
+      return;
+    }
+
+    setDedupeBusy(true);
+    setDedupeError(null);
+
+    try {
+      const query = new URLSearchParams();
+      query.set("session", cfg.sessionId);
+      query.set("doc", doc);
+      const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/bid/dedupe", query);
+
+      const docPaths: string[] = [];
+      const inboxIds: string[] = [];
+      for (const key of selected) {
+        if (key.startsWith("doc:")) docPaths.push(key.slice("doc:".length));
+        else if (key.startsWith("inbox:")) inboxIds.push(key.slice("inbox:".length));
+      }
+
+      const payload = {
+        docPaths,
+        inboxIds,
+        excludeTables: dedupeExcludeTables(),
+        simThreshold: dedupeSimThreshold(),
+        exportMedia: dedupeExportMedia(),
+      };
+
+      const result = (await fetchJson(url, cfg.token, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })) as { report?: { inboxPath?: string }; mediaZip?: { inboxPath?: string } };
+
+      const reportPath = typeof result?.report?.inboxPath === "string" ? result.report.inboxPath : "";
+      const mediaPath = typeof result?.mediaZip?.inboxPath === "string" ? result.mediaZip.inboxPath : "";
+      const hint = [reportPath ? "Dedupe report saved." : "Dedupe complete.", mediaPath ? "Media zip saved." : ""]
+        .filter(Boolean)
+        .join(" ");
+      setToastMessage(hint);
+      closeModule();
+      await refetchReports();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to run dedupe";
+      setDedupeError(message);
+    } finally {
+      setDedupeBusy(false);
+    }
+  };
+
   const runQc = async () => {
     const cfg = apiConfig();
     const doc = targetDoc();
@@ -884,6 +1040,8 @@ export default function DocumentWriterView(props: SessionViewProps) {
     setAssembleSource(null);
     setAssembleError(null);
     setFillError(null);
+    setDedupeSelected(new Set<string>());
+    setDedupeError(null);
     setQcError(null);
     setReportsExpanded(false);
   });
@@ -1311,6 +1469,16 @@ export default function DocumentWriterView(props: SessionViewProps) {
                     >
                       <FileText size={14} />
                       <span class="truncate">Fill tables (XLSX→DOCX)</span>
+                    </button>
+                    <button
+                      type="button"
+                      class="w-full rounded-lg border border-dls-border bg-dls-surface px-2 py-2 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover disabled:opacity-50 flex items-center gap-2"
+                      onClick={() => openModule("dedupe")}
+                      disabled={!serverReady() || !targetDoc() || isAgentRunning() || dedupeBusy()}
+                      title="Compare multiple DOCX files for duplicate text and images"
+                    >
+                      <Search size={14} />
+                      <span class="truncate">Dedupe (DOCX↔DOCX)</span>
                     </button>
                     <button
                       type="button"
@@ -2251,6 +2419,161 @@ export default function DocumentWriterView(props: SessionViewProps) {
               >
                 <Show when={!fillBusy()} fallback={"Working…"}>
                   Fill
+                </Show>
+              </button>
+            </div>
+          </div>
+        </div>
+      </Show>
+
+      <Show when={moduleModal() === "dedupe"}>
+        <div
+          class="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeModule();
+          }}
+        >
+          <div
+            class="w-full max-w-4xl rounded-2xl border border-dls-border bg-dls-surface shadow-2xl overflow-hidden"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div class="flex items-center justify-between px-4 py-3 border-b border-dls-border">
+              <div class="min-w-0">
+                <div class="text-sm font-semibold text-dls-text truncate">Dedupe</div>
+                <div class="mt-1 text-[11px] text-dls-secondary truncate">
+                  Target: {targetDoc() ?? "—"} (always included)
+                </div>
+              </div>
+              <button
+                type="button"
+                class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text"
+                onClick={closeModule}
+                aria-label="Close"
+                title="Close"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div class="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div class="min-w-0">
+                <div class="flex items-center justify-between">
+                  <div class="text-xs font-medium text-dls-text">Compare with</div>
+                  <div class="text-[11px] text-dls-secondary">{dedupeSelected().size} selected</div>
+                </div>
+                <div class="mt-2">
+                  <input
+                    type="text"
+                    value={dedupeQuery()}
+                    onInput={(event) => setDedupeQuery(event.currentTarget.value)}
+                    placeholder="Search documents…"
+                    class="w-full rounded-lg border border-dls-border bg-dls-surface px-3 py-2 text-xs text-dls-text placeholder:text-dls-secondary focus:outline-none focus:ring-2 focus:ring-dls-accent/40"
+                  />
+                </div>
+                <div class="mt-2 rounded-lg border border-dls-border overflow-hidden max-h-[420px] overflow-y-auto">
+                  <Show when={!refs.loading && !documents.loading} fallback={<div class="p-3 text-xs text-dls-secondary">Loading…</div>}>
+                    <Show
+                      when={filteredDedupeCandidates().length > 0}
+                      fallback={<div class="p-3 text-xs text-dls-secondary">No DOCX sources found.</div>}
+                    >
+                      <For each={filteredDedupeCandidates()}>
+                        {(item) => {
+                          const displayName = () =>
+                            item.kind === "doc"
+                              ? item.name.split("/").pop() ?? item.name
+                              : item.path.split("/").pop() ?? item.path;
+                          const selected = createMemo(() => dedupeSelected().has(item.key));
+                          return (
+                            <label
+                              class={`flex items-start gap-2 px-3 py-2 border-b border-dls-border/50 last:border-b-0 hover:bg-dls-hover cursor-pointer ${selected() ? "bg-dls-active" : ""
+                                }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={selected()}
+                                onChange={() => toggleDedupeSelection(item.key)}
+                                class="mt-0.5"
+                              />
+                              <div class="min-w-0 flex-1">
+                                <div class="text-xs text-dls-text truncate">{displayName()}</div>
+                                <div class="mt-1 text-[10px] text-dls-secondary truncate">{item.sourceLabel}</div>
+                              </div>
+                            </label>
+                          );
+                        }}
+                      </For>
+                    </Show>
+                  </Show>
+                </div>
+              </div>
+
+              <div class="min-w-0 space-y-4">
+                <div>
+                  <div class="text-xs font-medium text-dls-text">Settings</div>
+                  <div class="mt-2 text-[11px] text-dls-secondary">
+                    Finds duplicate text blocks (simhash + similarity) and duplicate images (SHA256 / dHash) across documents.
+                  </div>
+                </div>
+
+                <label class="flex items-center gap-2 text-xs text-dls-secondary">
+                  <input
+                    type="checkbox"
+                    checked={dedupeExcludeTables()}
+                    onChange={(event) => setDedupeExcludeTables(event.currentTarget.checked)}
+                  />
+                  Exclude tables (recommended to reduce form noise)
+                </label>
+
+                <div>
+                  <div class="text-xs font-medium text-dls-text">Similarity threshold</div>
+                  <div class="mt-2 flex items-center gap-2">
+                    <input
+                      type="number"
+                      min="0"
+                      max="1"
+                      step="0.01"
+                      value={dedupeSimThreshold()}
+                      onInput={(event) => setDedupeSimThreshold(Number(event.currentTarget.value))}
+                      class="w-28 rounded-lg border border-dls-border bg-dls-surface px-3 py-2 text-xs text-dls-text focus:outline-none focus:ring-2 focus:ring-dls-accent/40"
+                    />
+                    <div class="text-[11px] text-dls-secondary">Default 0.92. Lower = more matches.</div>
+                  </div>
+                </div>
+
+                <label class="flex items-center gap-2 text-xs text-dls-secondary">
+                  <input
+                    type="checkbox"
+                    checked={dedupeExportMedia()}
+                    onChange={(event) => setDedupeExportMedia(event.currentTarget.checked)}
+                  />
+                  Export media contact sheet (zip)
+                </label>
+
+                <Show when={dedupeError()}>
+                  <div class="rounded-lg border border-red-11/30 bg-red-3/20 px-3 py-2 text-xs text-red-11 whitespace-pre-wrap break-words">
+                    {dedupeError()}
+                  </div>
+                </Show>
+              </div>
+            </div>
+
+            <div class="px-4 py-3 border-t border-dls-border flex items-center justify-end gap-2">
+              <button
+                type="button"
+                class="rounded-lg border border-dls-border bg-dls-surface px-3 py-1.5 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover"
+                onClick={closeModule}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                class="rounded-lg border border-dls-border bg-dls-surface px-3 py-1.5 text-xs text-dls-text hover:bg-dls-hover disabled:opacity-50"
+                onClick={() => void runDedupe()}
+                disabled={dedupeBusy() || dedupeSelected().size < 1}
+                title={dedupeSelected().size < 1 ? "Select at least 1 document to compare" : "Run dedupe"}
+              >
+                <Show when={!dedupeBusy()} fallback={"Working…"}>
+                  Run dedupe
                 </Show>
               </button>
             </div>

@@ -193,6 +193,10 @@ function resolveBidQcScriptPath(workspacePath: string): string {
     return join(workspacePath, ".opencode", "skills", "bid-drafting", "scripts", "qc_bid_mvp.py");
 }
 
+function resolveBidDedupeScriptPath(workspacePath: string): string {
+    return join(workspacePath, ".opencode", "skills", "bid-dedupe", "scripts", "compare_bids.py");
+}
+
 function decodeInboxId(id: string): string {
     const raw = (id ?? "").trim();
     if (!raw) {
@@ -322,6 +326,31 @@ async function writeSessionReport({
     await ensureDir(dirname(absPath));
     const tmp = `${absPath}.tmp-${shortId()}`;
     await writeFile(tmp, content, "utf8");
+    await rename(tmp, absPath);
+    return { inboxId: encodeInboxId(relPath), inboxPath: relPath };
+}
+
+async function writeSessionArtifactFromFile({
+    workspace,
+    sessionId,
+    moduleId,
+    filename,
+    absSourcePath,
+}: {
+    workspace: WorkspaceInfo;
+    sessionId: string;
+    moduleId: string;
+    filename: string;
+    absSourcePath: string;
+}): Promise<{ inboxId: string; inboxPath: string }> {
+    const inboxRoot = resolveInboxDir(workspace.path);
+    const stamp = nowStampForFilename();
+    const safeName = (filename || "artifact").trim().replace(/[\\/]+/g, "-");
+    const relPath = `sessions/${sessionId}/reports/${moduleId}/${stamp}-${safeName}`;
+    const absPath = resolveDocumentPathSafe(inboxRoot, relPath);
+    await ensureDir(dirname(absPath));
+    const tmp = `${absPath}.tmp-${shortId()}`;
+    await copyFile(absSourcePath, tmp);
     await rename(tmp, absPath);
     return { inboxId: encodeInboxId(relPath), inboxPath: relPath };
 }
@@ -1188,6 +1217,207 @@ export function createDocumentRoutes(routes: unknown[]) {
             });
 
             return jsonResponse({ ok: true, passed, report, stdout, stderr });
+        },
+    });
+
+    routes.push({
+        method: "POST",
+        regex: /^\/w\/([^/]+)\/bid\/dedupe$/,
+        keys: ["id"],
+        auth: "client",
+        handler: async (ctx: RequestContext) => {
+            const workspaceId = ctx.params.id;
+            const sessionId = parseDocumentSessionId(ctx.url.searchParams.get("session"));
+            if (!sessionId) throw new ApiError(400, "invalid_request", "session is required");
+
+            const targetDoc = (ctx.url.searchParams.get("doc") ?? "").trim();
+            if (!targetDoc) throw new ApiError(400, "invalid_request", "doc is required");
+
+            const workspace = ctx.config.workspaces.find((w: WorkspaceInfo) => w.id === workspaceId);
+            if (!workspace) throw new ApiError(404, "not_found", "Workspace not found");
+
+            const docsDir = resolveDocumentsDir(workspace.path, sessionId);
+            const targetAbs = resolveDocumentPathSafe(docsDir, targetDoc);
+            if (!(await exists(targetAbs))) throw new ApiError(404, "not_found", "Target document not found");
+            const targetExt = extname(targetAbs).toLowerCase();
+            if (targetExt !== ".docx") {
+                throw new ApiError(400, "unsupported_target", "bid/dedupe currently supports .docx targets only.");
+            }
+
+            const scriptPath = resolveBidDedupeScriptPath(workspace.path);
+            if (!(await exists(scriptPath))) {
+                throw new ApiError(500, "missing_dependency", "compare_bids.py is missing in this workspace");
+            }
+
+            const body = (await ctx.request.json().catch(() => null)) as any;
+            if (!body || typeof body !== "object") {
+                throw new ApiError(400, "invalid_payload", "Expected JSON body");
+            }
+
+            const docPaths: string[] = Array.isArray(body.docPaths)
+                ? body.docPaths
+                    .map((v: unknown) => (typeof v === "string" ? v.trim().replace(/^\/+/, "") : ""))
+                    .filter(Boolean)
+                : [];
+
+            const inboxIds: string[] = Array.isArray(body.inboxIds)
+                ? body.inboxIds
+                    .map((v: unknown) => (typeof v === "string" ? v.trim() : ""))
+                    .filter(Boolean)
+                : [];
+
+            const excludeTables = Boolean(body.excludeTables);
+            const exportMedia = Boolean(body.exportMedia);
+
+            const simThresholdRaw = typeof body.simThreshold === "number" ? body.simThreshold : Number(body.simThreshold);
+            const simThreshold = Number.isFinite(simThresholdRaw) ? simThresholdRaw : undefined;
+            if (simThreshold !== undefined && (simThreshold < 0 || simThreshold > 1)) {
+                throw new ApiError(400, "invalid_request", "simThreshold must be between 0 and 1");
+            }
+
+            const normalizePositiveInt = (value: unknown): number | undefined => {
+                const parsed = typeof value === "number" ? value : Number(value);
+                if (!Number.isFinite(parsed)) return undefined;
+                const intValue = Math.trunc(parsed);
+                return intValue > 0 ? intValue : undefined;
+            };
+
+            const normalizeNonNegativeInt = (value: unknown): number | undefined => {
+                const parsed = typeof value === "number" ? value : Number(value);
+                if (!Number.isFinite(parsed)) return undefined;
+                const intValue = Math.trunc(parsed);
+                return intValue >= 0 ? intValue : undefined;
+            };
+
+            const exactMinChars = normalizePositiveInt(body.exactMinChars);
+            const minChars = normalizePositiveInt(body.minChars);
+            const simhashMaxDist = normalizeNonNegativeInt(body.simhashMaxDist);
+
+            const includeTitleRegex: string[] = Array.isArray(body.includeTitleRegex)
+                ? body.includeTitleRegex
+                    .map((v: unknown) => (typeof v === "string" ? v.trim() : ""))
+                    .filter(Boolean)
+                : [];
+            const excludeTitleRegex: string[] = Array.isArray(body.excludeTitleRegex)
+                ? body.excludeTitleRegex
+                    .map((v: unknown) => (typeof v === "string" ? v.trim() : ""))
+                    .filter(Boolean)
+                : [];
+
+            const compareAbs: string[] = [targetAbs];
+
+            for (const relPath of docPaths) {
+                if (!relPath || relPath === targetDoc) continue;
+                const abs = resolveDocumentPathSafe(docsDir, relPath);
+                if (!(await exists(abs))) continue;
+                compareAbs.push(await ensureDocxZipPath(workspace.path, abs));
+            }
+
+            for (const inboxId of inboxIds) {
+                const { absPath } = await resolveSessionInboxFilePath({
+                    workspace,
+                    sessionId,
+                    inboxId,
+                });
+                compareAbs.push(await ensureDocxZipPath(workspace.path, absPath));
+            }
+
+            const uniq: string[] = [];
+            const seen = new Set<string>();
+            for (const abs of compareAbs) {
+                const key = abs.trim();
+                if (!key) continue;
+                if (seen.has(key)) continue;
+                seen.add(key);
+                uniq.push(key);
+            }
+
+            if (uniq.length < 2) {
+                throw new ApiError(400, "invalid_request", "Select at least 2 DOCX documents to compare (target + 1 or more sources).");
+            }
+
+            const tmpDir = join(docsDir, ".tmp");
+            await ensureDir(tmpDir);
+
+            const tmpReport = join(tmpDir, `dedupe-${shortId()}.md`);
+            const tmpMediaDir = exportMedia ? join(tmpDir, `dedupe-media-${shortId()}`) : null;
+            const tmpMediaZip = exportMedia ? join(tmpDir, `dedupe-media-${shortId()}.zip`) : null;
+
+            if (tmpMediaDir) await ensureDir(tmpMediaDir);
+
+            const args: string[] = [scriptPath, ...uniq, "--out", tmpReport];
+            if (excludeTables) args.push("--exclude-tables");
+            if (simThreshold !== undefined) args.push("--sim-threshold", String(simThreshold));
+            if (exactMinChars !== undefined) args.push("--exact-min-chars", String(exactMinChars));
+            if (minChars !== undefined) args.push("--min-chars", String(minChars));
+            if (simhashMaxDist !== undefined) args.push("--simhash-max-dist", String(simhashMaxDist));
+            for (const value of includeTitleRegex) args.push("--include-title-regex", value);
+            for (const value of excludeTitleRegex) args.push("--exclude-title-regex", value);
+            if (tmpMediaDir) args.push("--media-dir", tmpMediaDir);
+
+            const result = spawnSync("python3", args, { encoding: "utf8", cwd: workspace.path });
+            const stdout = String(result.stdout || "").trim();
+            const stderr = String(result.stderr || "").trim();
+
+            let mediaZip: { inboxId: string; inboxPath: string } | null = null;
+            if (tmpMediaDir && tmpMediaZip) {
+                const zipResult = spawnSync("zip", ["-r", tmpMediaZip, "."], {
+                    cwd: tmpMediaDir,
+                    encoding: "utf8",
+                });
+                if (zipResult.status === 0 && (await exists(tmpMediaZip))) {
+                    mediaZip = await writeSessionArtifactFromFile({
+                        workspace,
+                        sessionId,
+                        moduleId: "dedupe",
+                        filename: "media.zip",
+                        absSourcePath: tmpMediaZip,
+                    });
+                }
+            }
+
+            let reportContent = "";
+            if (await exists(tmpReport)) {
+                reportContent = await readFile(tmpReport, "utf8");
+            } else {
+                reportContent = [
+                    "# Bid dedupe report",
+                    "",
+                    "Report generation failed; no markdown report was produced by compare_bids.py.",
+                    "",
+                ].join("\n");
+            }
+
+            if (mediaZip) {
+                reportContent = reportContent.replace(
+                    /- Contact sheet \(HTML\): `[^`]+`/g,
+                    `- Media contact sheet (download zip): \`${mediaZip.inboxPath}\``,
+                );
+                if (!/Media contact sheet/.test(reportContent)) {
+                    reportContent += `\n\n## Media exports\n\n- Media contact sheet (download zip): \`${mediaZip.inboxPath}\`\n`;
+                }
+            }
+
+            const report = await writeSessionReport({
+                workspace,
+                sessionId,
+                moduleId: "dedupe",
+                content: reportContent,
+            });
+
+            await rm(tmpReport, { force: true }).catch(() => undefined);
+            if (tmpMediaZip) await rm(tmpMediaZip, { force: true }).catch(() => undefined);
+            if (tmpMediaDir) await rm(tmpMediaDir, { recursive: true, force: true }).catch(() => undefined);
+
+            if (result.status !== 0) {
+                throw new ApiError(400, "dedupe_failed", stderr || stdout || "Failed to dedupe documents", {
+                    report,
+                    stdout,
+                    stderr,
+                });
+            }
+
+            return jsonResponse({ ok: true, report, mediaZip, stdout, stderr });
         },
     });
 

@@ -403,6 +403,13 @@ function buildDocumentQuery(docId: string, sessionId?: string | null): string {
     return query.toString();
 }
 
+function resolveOnlyOfficeLang(request: Request): string {
+    const raw = (request.headers.get("accept-language") ?? "").toLowerCase();
+    if (raw.includes("zh")) return "zh";
+    if (raw.includes("en")) return "en";
+    return "en";
+}
+
 function getCallbackUrl(host: string, port: number, workspaceId: string, docId: string, sessionId?: string | null): string {
     const baseUrl = resolveOnlyOfficePublicBaseUrl(host, port);
     return `${baseUrl}/w/${workspaceId}/document/callback?${buildDocumentQuery(docId, sessionId)}`;
@@ -1421,6 +1428,109 @@ export function createDocumentRoutes(routes: unknown[]) {
         },
     });
 
+    routes.push({
+        method: "POST",
+        regex: /^\/w\/([^/]+)\/bid\/preview-pdf$/,
+        keys: ["id"],
+        auth: "client",
+        handler: async (ctx: RequestContext) => {
+            const workspaceId = ctx.params.id;
+            const sessionId = parseDocumentSessionId(ctx.url.searchParams.get("session"));
+            if (!sessionId) throw new ApiError(400, "invalid_request", "session is required");
+
+            const targetDoc = (ctx.url.searchParams.get("doc") ?? "").trim();
+            if (!targetDoc) throw new ApiError(400, "invalid_request", "doc is required");
+
+            const workspace = ctx.config.workspaces.find((w: WorkspaceInfo) => w.id === workspaceId);
+            if (!workspace) throw new ApiError(404, "not_found", "Workspace not found");
+
+            const docsDir = resolveDocumentsDir(workspace.path, sessionId);
+            const targetAbs = resolveDocumentPathSafe(docsDir, targetDoc);
+            if (!(await exists(targetAbs))) throw new ApiError(404, "not_found", "Target document not found");
+
+            const targetExt = extname(targetAbs).toLowerCase();
+            if (targetExt !== ".docx") {
+                throw new ApiError(400, "unsupported_target", "bid/preview-pdf currently supports .docx targets only.");
+            }
+
+            const tmpDir = join(docsDir, ".tmp");
+            await ensureDir(tmpDir);
+            const outputDir = join(tmpDir, `preview-${shortId()}`);
+            await ensureDir(outputDir);
+
+            try {
+                const result = spawnSync(
+                    "soffice",
+                    [
+                        "--headless",
+                        "--nologo",
+                        "--nofirststartwizard",
+                        "--convert-to",
+                        "pdf",
+                        "--outdir",
+                        outputDir,
+                        targetAbs,
+                    ],
+                    { encoding: "utf8" },
+                );
+
+                if (result.error) {
+                    const message = result.error instanceof Error ? result.error.message : String(result.error);
+                    throw new ApiError(400, "preview_failed", `LibreOffice (soffice) failed: ${message}`);
+                }
+
+                const stdout = String(result.stdout || "").trim();
+                const stderr = String(result.stderr || "").trim();
+                if (result.status !== 0) {
+                    throw new ApiError(400, "preview_failed", stderr || stdout || "Failed to export PDF preview (LibreOffice).");
+                }
+
+                const expected = join(outputDir, `${basename(targetAbs, targetExt)}.pdf`);
+                let pdfAbs = expected;
+                if (!(await exists(pdfAbs))) {
+                    const entries = await readdir(outputDir, { withFileTypes: true });
+                    const found = entries.find((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".pdf"));
+                    if (!found) {
+                        throw new ApiError(400, "preview_failed", "LibreOffice did not produce a PDF output.");
+                    }
+                    pdfAbs = join(outputDir, found.name);
+                }
+
+                const pdf = await writeSessionArtifactFromFile({
+                    workspace,
+                    sessionId,
+                    moduleId: "preview",
+                    filename: `${basename(targetAbs, targetExt)}.pdf`,
+                    absSourcePath: pdfAbs,
+                });
+
+                const reportText = [
+                    `# PDF preview: ${basename(targetAbs)}`,
+                    "",
+                    `- session: \`${sessionId}\``,
+                    `- target: \`${targetDoc}\``,
+                    `- pdf: \`${pdf.inboxPath}\``,
+                    "",
+                    "## Notes",
+                    "",
+                    "- This preview is exported with LibreOffice (headless). Final submission should still be spot-checked in Microsoft Word.",
+                    "",
+                ].join("\n");
+
+                const report = await writeSessionReport({
+                    workspace,
+                    sessionId,
+                    moduleId: "preview",
+                    content: reportText,
+                });
+
+                return jsonResponse({ ok: true, pdf, report });
+            } finally {
+                await rm(outputDir, { recursive: true, force: true }).catch(() => undefined);
+            }
+        },
+    });
+
     // Get OnlyOffice Config
     routes.push({
         method: "GET",
@@ -1471,7 +1581,7 @@ export function createDocumentRoutes(routes: unknown[]) {
                         name: "AI User", // TODO: Get actual user name
                     },
                     mode: canEdit ? "edit" : "view",
-                    lang: "en",
+                    lang: resolveOnlyOfficeLang(ctx.request),
                     customization: {
                         autosave: canEdit,
                         forcesave: canEdit,

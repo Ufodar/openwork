@@ -187,7 +187,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
   const [sectionCopyTargetQuery, setSectionCopyTargetQuery] = createSignal("");
 
   const [modulesExpanded, setModulesExpanded] = createSignal(true);
-  const [moduleModal, setModuleModal] = createSignal<null | "assemble" | "fill" | "dedupe" | "qc">(null);
+  const [moduleModal, setModuleModal] = createSignal<null | "assemble" | "fill" | "dedupe" | "qc" | "preview">(null);
   const [assembleSource, setAssembleSource] = createSignal<InboxItem | null>(null);
   const [assembleMatchMode, setAssembleMatchMode] = createSignal<"contains" | "exact" | "startswith">("contains");
   const [assembleForce, setAssembleForce] = createSignal(false);
@@ -209,8 +209,12 @@ export default function DocumentWriterView(props: SessionViewProps) {
   const [dedupeExcludeTables, setDedupeExcludeTables] = createSignal(true);
   const [dedupeSimThreshold, setDedupeSimThreshold] = createSignal(0.92);
   const [dedupeExportMedia, setDedupeExportMedia] = createSignal(false);
+  const [dedupeIncludeTitles, setDedupeIncludeTitles] = createSignal("");
+  const [dedupeExcludeTitles, setDedupeExcludeTitles] = createSignal("");
   const [dedupeBusy, setDedupeBusy] = createSignal(false);
   const [dedupeError, setDedupeError] = createSignal<string | null>(null);
+  const [previewBusy, setPreviewBusy] = createSignal(false);
+  const [previewError, setPreviewError] = createSignal<string | null>(null);
   const [qcBusy, setQcBusy] = createSignal(false);
   const [qcError, setQcError] = createSignal<string | null>(null);
   const [reportsExpanded, setReportsExpanded] = createSignal(false);
@@ -822,7 +826,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
     }
   };
 
-  const openModule = (key: "assemble" | "fill" | "dedupe" | "qc") => {
+  const openModule = (key: "assemble" | "fill" | "dedupe" | "qc" | "preview") => {
     if (!serverReady()) return;
     if (!targetDoc()) {
       setToastMessage("Select a target document first.");
@@ -831,6 +835,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
     setAssembleError(null);
     setFillError(null);
     setDedupeError(null);
+    setPreviewError(null);
     setQcError(null);
 
     if (key === "assemble" && !assembleSource()) {
@@ -849,6 +854,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
     setAssembleError(null);
     setFillError(null);
     setDedupeError(null);
+    setPreviewError(null);
     setQcError(null);
   };
 
@@ -885,6 +891,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
       setConfigSeq((v) => v + 1);
       await refetchDocuments();
       await refetchReports();
+      setReportsExpanded(true);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to assemble bid forms";
       setAssembleError(message);
@@ -930,6 +937,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
       setConfigSeq((v) => v + 1);
       await refetchDocuments();
       await refetchReports();
+      setReportsExpanded(true);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to fill bid tables";
       setFillError(message);
@@ -954,6 +962,12 @@ export default function DocumentWriterView(props: SessionViewProps) {
     setDedupeError(null);
 
     try {
+      const parseRegexList = (raw: string) =>
+        raw
+          .split(/[\n,]+/)
+          .map((value) => value.trim())
+          .filter(Boolean);
+
       const query = new URLSearchParams();
       query.set("session", cfg.sessionId);
       query.set("doc", doc);
@@ -972,6 +986,8 @@ export default function DocumentWriterView(props: SessionViewProps) {
         excludeTables: dedupeExcludeTables(),
         simThreshold: dedupeSimThreshold(),
         exportMedia: dedupeExportMedia(),
+        includeTitleRegex: parseRegexList(dedupeIncludeTitles()),
+        excludeTitleRegex: parseRegexList(dedupeExcludeTitles()),
       };
 
       const result = (await fetchJson(url, cfg.token, {
@@ -988,6 +1004,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
       setToastMessage(hint);
       closeModule();
       await refetchReports();
+      setReportsExpanded(true);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to run dedupe";
       setDedupeError(message);
@@ -1014,11 +1031,42 @@ export default function DocumentWriterView(props: SessionViewProps) {
       setToastMessage(passed ? "QC PASS (report saved)." : "QC FAIL (report saved).");
       closeModule();
       await refetchReports();
+      setReportsExpanded(true);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to run QC";
       setQcError(message);
     } finally {
       setQcBusy(false);
+    }
+  };
+
+  const runPreviewPdf = async () => {
+    const cfg = apiConfig();
+    const doc = targetDoc();
+    if (!cfg || !doc) return;
+    if (previewBusy()) return;
+    setPreviewBusy(true);
+    setPreviewError(null);
+
+    try {
+      if (activeDoc() !== doc) {
+        setActiveDoc(doc);
+      }
+      const query = new URLSearchParams();
+      query.set("session", cfg.sessionId);
+      query.set("doc", doc);
+      const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/bid/preview-pdf", query);
+      const result = (await fetchJson(url, cfg.token, { method: "POST" })) as { pdf?: { inboxPath?: string }; report?: { inboxPath?: string } };
+      const pdfPath = typeof result?.pdf?.inboxPath === "string" ? result.pdf.inboxPath : "";
+      setToastMessage(pdfPath ? "PDF preview saved." : "PDF preview complete.");
+      closeModule();
+      await refetchReports();
+      setReportsExpanded(true);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to export PDF preview";
+      setPreviewError(message);
+    } finally {
+      setPreviewBusy(false);
     }
   };
 
@@ -1042,6 +1090,9 @@ export default function DocumentWriterView(props: SessionViewProps) {
     setFillError(null);
     setDedupeSelected(new Set<string>());
     setDedupeError(null);
+    setDedupeIncludeTitles("");
+    setDedupeExcludeTitles("");
+    setPreviewError(null);
     setQcError(null);
     setReportsExpanded(false);
   });
@@ -1483,6 +1534,16 @@ export default function DocumentWriterView(props: SessionViewProps) {
                     <button
                       type="button"
                       class="w-full rounded-lg border border-dls-border bg-dls-surface px-2 py-2 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover disabled:opacity-50 flex items-center gap-2"
+                      onClick={() => openModule("preview")}
+                      disabled={!serverReady() || !targetDoc() || previewBusy()}
+                      title="Export a PDF preview for Word-like review and printing"
+                    >
+                      <Download size={14} />
+                      <span class="truncate">PDF preview (DOCX→PDF)</span>
+                    </button>
+                    <button
+                      type="button"
+                      class="w-full rounded-lg border border-dls-border bg-dls-surface px-2 py-2 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover disabled:opacity-50 flex items-center gap-2"
                       onClick={() => openModule("qc")}
                       disabled={!serverReady() || !targetDoc() || qcBusy()}
                       title="Run deterministic QC gate on the target document"
@@ -1853,7 +1914,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
                   <div class="max-w-lg rounded-xl border border-dls-border bg-dls-surface/90 px-4 py-2 shadow-lg backdrop-blur">
                     <div class="text-xs text-dls-secondary">
                       <span class="font-medium text-dls-text">AI is editing…</span>{" "}
-                      View-only mode is enabled to prevent conflicts. The document will reload when the run finishes.
+                      You can keep scrolling/previewing, but editing is locked to prevent conflicts. The document will reload when the run finishes.
                     </div>
                   </div>
                 </div>
@@ -2549,6 +2610,65 @@ export default function DocumentWriterView(props: SessionViewProps) {
                   Export media contact sheet (zip)
                 </label>
 
+                <div class="rounded-lg border border-dls-border bg-dls-surface px-3 py-2">
+                  <div class="flex items-center justify-between gap-2">
+                    <div class="text-xs font-medium text-dls-text">Title filters (optional)</div>
+                    <div class="flex items-center gap-2">
+                      <button
+                        type="button"
+                        class="text-[11px] underline text-dls-secondary hover:text-dls-text"
+                        onClick={() => setDedupeIncludeTitles("技术|方案|实施|架构|服务|运维|安全|偏离")}
+                      >
+                        Tech preset
+                      </button>
+                      <button
+                        type="button"
+                        class="text-[11px] underline text-dls-secondary hover:text-dls-text"
+                        onClick={() =>
+                          setDedupeExcludeTitles("开标|一览表|分项|清单|点对点|授权|资质|证明|商务|报价|保证金|合同")
+                        }
+                      >
+                        Form preset
+                      </button>
+                      <button
+                        type="button"
+                        class="text-[11px] underline text-dls-secondary hover:text-dls-text"
+                        onClick={() => {
+                          setDedupeIncludeTitles("");
+                          setDedupeExcludeTitles("");
+                        }}
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  </div>
+                  <div class="mt-1 text-[11px] text-dls-secondary">
+                    Filters match detected heading titles. Separate multiple regex with newlines or commas.
+                  </div>
+                  <div class="mt-2 grid grid-cols-1 gap-2">
+                    <div>
+                      <div class="text-[11px] text-dls-secondary">Include</div>
+                      <textarea
+                        rows={2}
+                        value={dedupeIncludeTitles()}
+                        onInput={(event) => setDedupeIncludeTitles(event.currentTarget.value)}
+                        placeholder="e.g. 技术|方案"
+                        class="mt-1 w-full rounded-lg border border-dls-border bg-dls-surface px-3 py-2 text-xs text-dls-text placeholder:text-dls-secondary focus:outline-none focus:ring-2 focus:ring-dls-accent/40"
+                      />
+                    </div>
+                    <div>
+                      <div class="text-[11px] text-dls-secondary">Exclude</div>
+                      <textarea
+                        rows={2}
+                        value={dedupeExcludeTitles()}
+                        onInput={(event) => setDedupeExcludeTitles(event.currentTarget.value)}
+                        placeholder="e.g. 开标|商务"
+                        class="mt-1 w-full rounded-lg border border-dls-border bg-dls-surface px-3 py-2 text-xs text-dls-text placeholder:text-dls-secondary focus:outline-none focus:ring-2 focus:ring-dls-accent/40"
+                      />
+                    </div>
+                  </div>
+                </div>
+
                 <Show when={dedupeError()}>
                   <div class="rounded-lg border border-red-11/30 bg-red-3/20 px-3 py-2 text-xs text-red-11 whitespace-pre-wrap break-words">
                     {dedupeError()}
@@ -2574,6 +2694,69 @@ export default function DocumentWriterView(props: SessionViewProps) {
               >
                 <Show when={!dedupeBusy()} fallback={"Working…"}>
                   Run dedupe
+                </Show>
+              </button>
+            </div>
+          </div>
+        </div>
+      </Show>
+
+      <Show when={moduleModal() === "preview"}>
+        <div
+          class="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeModule();
+          }}
+        >
+          <div
+            class="w-full max-w-xl rounded-2xl border border-dls-border bg-dls-surface shadow-2xl overflow-hidden"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div class="flex items-center justify-between px-4 py-3 border-b border-dls-border">
+              <div class="min-w-0">
+                <div class="text-sm font-semibold text-dls-text truncate">PDF preview</div>
+                <div class="mt-1 text-[11px] text-dls-secondary truncate">
+                  Target: {targetDoc() ?? "—"}
+                </div>
+              </div>
+              <button
+                type="button"
+                class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text"
+                onClick={closeModule}
+                aria-label="Close"
+                title="Close"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div class="p-4 space-y-3">
+              <div class="text-xs text-dls-secondary">
+                Exports a PDF using LibreOffice (headless) and saves it to the session inbox for download/printing. This helps spot layout issues that OnlyOffice may render differently from Word.
+              </div>
+              <Show when={previewError()}>
+                <div class="rounded-lg border border-red-11/30 bg-red-3/20 px-3 py-2 text-xs text-red-11 whitespace-pre-wrap break-words">
+                  {previewError()}
+                </div>
+              </Show>
+            </div>
+
+            <div class="px-4 py-3 border-t border-dls-border flex items-center justify-end gap-2">
+              <button
+                type="button"
+                class="rounded-lg border border-dls-border bg-dls-surface px-3 py-1.5 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover"
+                onClick={closeModule}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                class="rounded-lg border border-dls-border bg-dls-surface px-3 py-1.5 text-xs text-dls-text hover:bg-dls-hover disabled:opacity-50"
+                onClick={() => void runPreviewPdf()}
+                disabled={previewBusy()}
+              >
+                <Show when={!previewBusy()} fallback={"Working…"}>
+                  Export PDF
                 </Show>
               </button>
             </div>

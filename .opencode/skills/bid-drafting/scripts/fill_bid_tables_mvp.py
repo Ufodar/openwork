@@ -492,6 +492,56 @@ def fill_docx_tables(
                 warnings.extend([f"开标一览表: {w}" for w in wns])
                 continue
 
+            # 售后服务承诺：清理重复/空白行，让表格更像“可交付的初稿”。
+            if header_norm[:2] == ["序号", "项目"] and len(header_norm) == 3:
+                data_rows = [_row_texts(tr) for tr in trs[1:]]
+                raw_rows = [r for r in data_rows if len(r) == 3 and any((c or "").strip() for c in r)]
+                if not raw_rows:
+                    warnings.append("Found 售后服务承诺 but table is empty; skipped.")
+                    continue
+
+                merged: list[tuple[str, str]] = []
+                last_item: str | None = None
+                for seq, item, content in raw_rows:
+                    item = re.sub(r"\s+", " ", (item or "").strip())
+                    content = re.sub(r"\s+", " ", (content or "").strip())
+                    if not (item or content):
+                        continue
+                    if item:
+                        last_item = item
+                        # Merge rows with the same item name.
+                        existing_idx = next((i for i, (it, _) in enumerate(merged) if it == item), None)
+                        if existing_idx is None:
+                            merged.append((item, content))
+                        else:
+                            prev_item, prev_content = merged[existing_idx]
+                            if content and content not in prev_content:
+                                joined = (prev_content.rstrip("；;") + "；" + content).strip("；;")
+                                merged[existing_idx] = (prev_item, joined)
+                        continue
+                    # No item: attach content to previous item row.
+                    if last_item and merged and content:
+                        prev_item, prev_content = merged[-1]
+                        if prev_item == last_item and content not in prev_content:
+                            joined = (prev_content.rstrip("；;") + "；" + content).strip("；;")
+                            merged[-1] = (prev_item, joined)
+
+                # Cap very long cells (keeps the table readable; details can live elsewhere).
+                normalized_rows: list[list[str]] = []
+                for idx, (item, content) in enumerate(merged, start=1):
+                    if len(content) > 400:
+                        content = content[:400].rstrip() + "…（详见售后服务章节）"
+                    normalized_rows.append([str(idx), item, content])
+
+                inserted, wns = _fill_table_replace_rows(
+                    tbl=tbl,
+                    header_cells=header_norm,
+                    new_rows=normalized_rows,
+                )
+                filled.append(f"售后服务承诺 (+{inserted} rows)")
+                warnings.extend([f"售后服务承诺: {w}" for w in wns])
+                continue
+
         tree.write(str(doc_xml_path), xml_declaration=True, encoding="UTF-8")
         zip_dir_to_docx(work_dir, docx_path)
     finally:

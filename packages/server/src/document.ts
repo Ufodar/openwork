@@ -7,6 +7,14 @@ import type { ServerConfig, WorkspaceInfo, Actor } from "./types.js";
 import { ApiError } from "./errors.js";
 import { ensureDir, exists, shortId } from "./utils.js";
 
+const DEFAULT_BID_FORMS_HEADINGS = [
+    "开标一览表",
+    "开标分项一览表",
+    "投标产品点对点应答表",
+    "投标产品配置清单",
+    "售后服务承诺",
+] as const;
+
 // Local types to avoid circular dependencies
 interface RequestContext {
     request: Request;
@@ -76,6 +84,12 @@ interface OnlyOfficeCallback {
     lastsave?: string;
     notmodified?: boolean;
 }
+
+type DocHeading = {
+    level: number;
+    text: string;
+    elementCount: number;
+};
 
 const WORD_EXTENSIONS = [
     ".doc",
@@ -171,6 +185,14 @@ function resolveDocxSectionCopyScriptPath(workspacePath: string): string {
     return join(workspacePath, ".opencode", "skills", "bid-drafting", "scripts", "copy_docx_section.py");
 }
 
+function resolveBidFillTablesScriptPath(workspacePath: string): string {
+    return join(workspacePath, ".opencode", "skills", "bid-drafting", "scripts", "fill_bid_tables_mvp.py");
+}
+
+function resolveBidQcScriptPath(workspacePath: string): string {
+    return join(workspacePath, ".opencode", "skills", "bid-drafting", "scripts", "qc_bid_mvp.py");
+}
+
 function decodeInboxId(id: string): string {
     const raw = (id ?? "").trim();
     if (!raw) {
@@ -181,6 +203,10 @@ function decodeInboxId(id: string): string {
     } catch {
         throw new ApiError(400, "invalid_inbox_file", "Inbox file id is invalid");
     }
+}
+
+function encodeInboxId(path: string): string {
+    return Buffer.from(path, "utf8").toString("base64url");
 }
 
 async function ensureDocxZipPath(workspacePath: string, inputPath: string): Promise<string> {
@@ -252,6 +278,52 @@ async function ensureDocxZipPath(workspacePath: string, inputPath: string): Prom
     } finally {
         await rm(tmpDir, { recursive: true, force: true }).catch(() => undefined);
     }
+}
+
+async function resolveSessionInboxFilePath({
+    workspace,
+    sessionId,
+    inboxId,
+}: {
+    workspace: WorkspaceInfo;
+    sessionId: string;
+    inboxId: string;
+}): Promise<{ absPath: string; relPath: string }> {
+    const inboxRoot = resolveInboxDir(workspace.path);
+    const decoded = decodeInboxId(inboxId);
+    const prefix = `sessions/${sessionId}/`;
+    if (!decoded.startsWith(prefix)) {
+        throw new ApiError(403, "forbidden", "Inbox file is not in this session");
+    }
+    const inboxAbs = resolveDocumentPathSafe(inboxRoot, decoded);
+    if (!(await exists(inboxAbs))) throw new ApiError(404, "not_found", "Inbox file not found");
+    return { absPath: inboxAbs, relPath: decoded };
+}
+
+function nowStampForFilename(): string {
+    return new Date().toISOString().replace(/[:.]/g, "-");
+}
+
+async function writeSessionReport({
+    workspace,
+    sessionId,
+    moduleId,
+    content,
+}: {
+    workspace: WorkspaceInfo;
+    sessionId: string;
+    moduleId: string;
+    content: string;
+}): Promise<{ inboxId: string; inboxPath: string }> {
+    const inboxRoot = resolveInboxDir(workspace.path);
+    const stamp = nowStampForFilename();
+    const relPath = `sessions/${sessionId}/reports/${moduleId}/${stamp}.md`;
+    const absPath = resolveDocumentPathSafe(inboxRoot, relPath);
+    await ensureDir(dirname(absPath));
+    const tmp = `${absPath}.tmp-${shortId()}`;
+    await writeFile(tmp, content, "utf8");
+    await rename(tmp, absPath);
+    return { inboxId: encodeInboxId(relPath), inboxPath: relPath };
 }
 
 function resolveDocumentPathSafe(docsDir: string, relPath: string): string {
@@ -695,6 +767,427 @@ export function createDocumentRoutes(routes: unknown[]) {
                 .map((line) => line.replace(/^warning:\s*/i, ""));
 
             return jsonResponse({ ok: true, stats, warnings });
+        },
+    });
+
+    // Assemble bid MVP modules (deterministic, report-driven)
+    // - assemble: copy baseline bid forms into the target (DOCX -> DOCX, format-preserving)
+    // - fill: fill pre-formatted tables from XLSX inputs (XLSX -> DOCX)
+    // - qc: quality-check the current target doc (gate + report)
+
+    routes.push({
+        method: "POST",
+        regex: /^\/w\/([^/]+)\/bid\/assemble$/,
+        keys: ["id"],
+        auth: "client",
+        handler: async (ctx: RequestContext) => {
+            const workspaceId = ctx.params.id;
+            const sessionId = parseDocumentSessionId(ctx.url.searchParams.get("session"));
+            if (!sessionId) throw new ApiError(400, "invalid_request", "session is required");
+
+            const targetDoc = (ctx.url.searchParams.get("doc") ?? "").trim();
+            if (!targetDoc) throw new ApiError(400, "invalid_request", "doc is required");
+
+            const workspace = ctx.config.workspaces.find((w: WorkspaceInfo) => w.id === workspaceId);
+            if (!workspace) throw new ApiError(404, "not_found", "Workspace not found");
+
+            const docsDir = resolveDocumentsDir(workspace.path, sessionId);
+            const targetAbs = resolveDocumentPathSafe(docsDir, targetDoc);
+            if (!(await exists(targetAbs))) throw new ApiError(404, "not_found", "Target document not found");
+            const targetExt = extname(targetAbs).toLowerCase();
+            if (targetExt !== ".docx") {
+                throw new ApiError(400, "unsupported_target", "bid/assemble currently supports .docx targets only.");
+            }
+
+            const body = (await ctx.request.json().catch(() => null)) as any;
+            if (!body || typeof body !== "object") {
+                throw new ApiError(400, "invalid_payload", "Expected JSON body");
+            }
+
+            const partnerInboxId = typeof body.partnerInboxId === "string" ? body.partnerInboxId.trim() : "";
+            const matchMode = typeof body.matchMode === "string" ? body.matchMode.trim().toLowerCase() : "contains";
+            const force = Boolean(body.force);
+            if (!["exact", "contains", "startswith"].includes(matchMode)) {
+                throw new ApiError(400, "invalid_request", "Invalid matchMode");
+            }
+            if (!partnerInboxId) {
+                throw new ApiError(400, "invalid_request", "partnerInboxId is required");
+            }
+
+            const scriptPath = resolveDocxSectionCopyScriptPath(workspace.path);
+            if (!(await exists(scriptPath))) {
+                throw new ApiError(500, "missing_dependency", "copy_docx_section.py is missing in this workspace");
+            }
+
+            const { absPath: partnerInboxAbs } = await resolveSessionInboxFilePath({
+                workspace,
+                sessionId,
+                inboxId: partnerInboxId,
+            });
+            const partnerAbs = await ensureDocxZipPath(workspace.path, partnerInboxAbs);
+
+            const listHeadings = (sourcePath: string) => {
+                const result = spawnSync(
+                    "python3",
+                    [scriptPath, "--source", sourcePath, "--list-headings", "--json"],
+                    { encoding: "utf8", cwd: workspace.path },
+                );
+                if (result.status !== 0) {
+                    const stderr = String(result.stderr || "").trim();
+                    const stdout = String(result.stdout || "").trim();
+                    throw new ApiError(400, "headings_failed", stderr || stdout || "Failed to list headings");
+                }
+                const stdout = String(result.stdout || "").trim();
+                let items: unknown;
+                try {
+                    items = JSON.parse(stdout) as unknown;
+                } catch {
+                    throw new ApiError(500, "headings_failed", "Failed to parse headings output");
+                }
+                if (!Array.isArray(items)) {
+                    throw new ApiError(500, "headings_failed", "Unexpected headings output");
+                }
+                return items as DocHeading[];
+            };
+
+            const findBestMatchIndex = (items: DocHeading[], needle: string) => {
+                const matches = items
+                    .map((item, idx) => ({ item, idx }))
+                    .filter(({ item }) => {
+                        const text = item.text ?? "";
+                        if (matchMode === "exact") return text === needle;
+                        if (matchMode === "contains") return text.includes(needle);
+                        return text.startsWith(needle);
+                    });
+                if (!matches.length) return null;
+                if (matches.length === 1) return 1;
+
+                // Prefer headings with the largest section size (TOC-like headings tend to have 0 elements).
+                matches.sort((a, b) => {
+                    const aCount = Number.isFinite(a.item.elementCount) ? a.item.elementCount : 0;
+                    const bCount = Number.isFinite(b.item.elementCount) ? b.item.elementCount : 0;
+                    if (aCount !== bCount) return bCount - aCount;
+                    // Tie-breaker: later in the document usually beats earlier (TOC tends to be early).
+                    return b.idx - a.idx;
+                });
+
+                const best = matches[0];
+                const bestText = best.item.text ?? "";
+                // Compute occurrence among matches in document order.
+                const ordered = matches.slice().sort((a, b) => a.idx - b.idx);
+                const occurrence = ordered.findIndex((m) => m.idx === best.idx && (m.item.text ?? "") === bestText) + 1;
+                return occurrence > 0 ? occurrence : 1;
+            };
+
+            const targetHeadings = listHeadings(targetAbs);
+            const partnerHeadings = listHeadings(partnerAbs);
+
+            const alreadyInTarget = (needle: string) => {
+                return targetHeadings.some((h) => {
+                    const text = (h.text ?? "").trim();
+                    if (!text) return false;
+                    if (matchMode === "exact") return text === needle;
+                    if (matchMode === "contains") return text.includes(needle);
+                    return text.startsWith(needle);
+                });
+            };
+
+            const tmpDir = join(docsDir, ".tmp");
+            await ensureDir(tmpDir);
+            const workAbs = join(tmpDir, `assemble-${shortId()}.docx`);
+            await copyFile(targetAbs, workAbs);
+
+            type StepResult = { heading: string; skipped?: boolean; stats?: { paragraphs: number; tables: number; images: number; styles: number } | null; warnings: string[]; };
+            const steps: StepResult[] = [];
+
+            try {
+                for (const heading of DEFAULT_BID_FORMS_HEADINGS) {
+                    if (!force && alreadyInTarget(heading)) {
+                        steps.push({ heading, skipped: true, warnings: [] });
+                        continue;
+                    }
+
+                    const sourceIdx = findBestMatchIndex(partnerHeadings, heading);
+                    if (!sourceIdx) {
+                        steps.push({ heading, skipped: true, warnings: ["Source heading not found"] });
+                        continue;
+                    }
+
+                    const stepOutput = join(tmpDir, `assemble-step-${shortId()}.docx`);
+                    const args = [
+                        scriptPath,
+                        "--source",
+                        partnerAbs,
+                        "--target",
+                        workAbs,
+                        "--output",
+                        stepOutput,
+                        "--source-heading",
+                        heading,
+                        "--match-mode",
+                        matchMode,
+                        "--source-heading-index",
+                        String(sourceIdx),
+                    ];
+                    const result = spawnSync("python3", args, { encoding: "utf8", cwd: workspace.path });
+                    if (result.status !== 0) {
+                        await rm(stepOutput, { force: true }).catch(() => undefined);
+                        const stderr = String(result.stderr || "").trim();
+                        const stdout = String(result.stdout || "").trim();
+                        throw new ApiError(400, "assemble_failed", stderr || stdout || `Failed to copy section '${heading}'`);
+                    }
+
+                    await rename(stepOutput, workAbs);
+
+                    const stdout = String(result.stdout || "").trim();
+                    const match = stdout.match(/Copied:\s*(\d+)\s+paragraphs,\s*(\d+)\s+tables,\s*(\d+)\s+images,\s*(\d+)\s+styles/i);
+                    const stats = match
+                        ? {
+                            paragraphs: Number(match[1]),
+                            tables: Number(match[2]),
+                            images: Number(match[3]),
+                            styles: Number(match[4]),
+                        }
+                        : null;
+
+                    const warnings = String(result.stderr || "")
+                        .split("\n")
+                        .map((line) => line.trim())
+                        .filter(Boolean)
+                        .filter((line) => line.toLowerCase().startsWith("warning:"))
+                        .map((line) => line.replace(/^warning:\s*/i, ""));
+
+                    steps.push({ heading, stats, warnings });
+                }
+
+                await rename(workAbs, targetAbs);
+            } catch (error) {
+                await rm(workAbs, { force: true }).catch(() => undefined);
+                throw error;
+            }
+
+            const reportLines: string[] = [];
+            reportLines.push(`# Assemble report: ${basename(targetAbs)}`);
+            reportLines.push("");
+            reportLines.push(`- session: \`${sessionId}\``);
+            reportLines.push(`- target: \`${targetDoc}\``);
+            reportLines.push(`- partner: \`${basename(partnerAbs)}\``);
+            reportLines.push(`- matchMode: \`${matchMode}\``);
+            reportLines.push(`- force: \`${force}\``);
+            reportLines.push("");
+            reportLines.push("## Steps");
+            for (const step of steps) {
+                if (step.skipped) {
+                    reportLines.push(`- ${step.heading}: skipped${step.warnings.length ? ` (${step.warnings.join("; ")})` : ""}`);
+                    continue;
+                }
+                const statText = step.stats
+                    ? ` (${step.stats.paragraphs}p, ${step.stats.tables}t, ${step.stats.images}i)`
+                    : "";
+                reportLines.push(`- ${step.heading}: inserted${statText}`);
+                for (const w of step.warnings) {
+                    reportLines.push(`  - warning: ${w}`);
+                }
+            }
+            reportLines.push("");
+
+            const report = await writeSessionReport({
+                workspace,
+                sessionId,
+                moduleId: "assemble",
+                content: reportLines.join("\n"),
+            });
+
+            return jsonResponse({
+                ok: true,
+                steps,
+                report,
+            });
+        },
+    });
+
+    routes.push({
+        method: "POST",
+        regex: /^\/w\/([^/]+)\/bid\/fill$/,
+        keys: ["id"],
+        auth: "client",
+        handler: async (ctx: RequestContext) => {
+            const workspaceId = ctx.params.id;
+            const sessionId = parseDocumentSessionId(ctx.url.searchParams.get("session"));
+            if (!sessionId) throw new ApiError(400, "invalid_request", "session is required");
+
+            const targetDoc = (ctx.url.searchParams.get("doc") ?? "").trim();
+            if (!targetDoc) throw new ApiError(400, "invalid_request", "doc is required");
+
+            const workspace = ctx.config.workspaces.find((w: WorkspaceInfo) => w.id === workspaceId);
+            if (!workspace) throw new ApiError(404, "not_found", "Workspace not found");
+
+            const docsDir = resolveDocumentsDir(workspace.path, sessionId);
+            const targetAbs = resolveDocumentPathSafe(docsDir, targetDoc);
+            if (!(await exists(targetAbs))) throw new ApiError(404, "not_found", "Target document not found");
+            const targetExt = extname(targetAbs).toLowerCase();
+            if (targetExt !== ".docx") {
+                throw new ApiError(400, "unsupported_target", "bid/fill currently supports .docx targets only.");
+            }
+
+            const scriptPath = resolveBidFillTablesScriptPath(workspace.path);
+            if (!(await exists(scriptPath))) {
+                throw new ApiError(500, "missing_dependency", "fill_bid_tables_mvp.py is missing in this workspace");
+            }
+
+            const body = (await ctx.request.json().catch(() => null)) as any;
+            if (!body || typeof body !== "object") {
+                throw new ApiError(400, "invalid_payload", "Expected JSON body");
+            }
+
+            const techXlsxInboxId = typeof body.techXlsxInboxId === "string" ? body.techXlsxInboxId.trim() : "";
+            const equipXlsxInboxId = typeof body.equipXlsxInboxId === "string" ? body.equipXlsxInboxId.trim() : "";
+            const brand = typeof body.brand === "string" ? body.brand.trim() : "";
+            const manufacturer = typeof body.manufacturer === "string" ? body.manufacturer.trim() : "";
+            const origin = typeof body.origin === "string" ? body.origin.trim() : "";
+            const unit = typeof body.unit === "string" ? body.unit.trim() : "";
+            const pricePlaceholder = typeof body.pricePlaceholder === "string" ? body.pricePlaceholder.trim() : "";
+            const specPlaceholder = typeof body.specPlaceholder === "string" ? body.specPlaceholder.trim() : "";
+
+            const args = [scriptPath, "--docx"];
+
+            const tmpDir = join(docsDir, ".tmp");
+            await ensureDir(tmpDir);
+            const tmpOutput = join(tmpDir, `fill-${shortId()}.docx`);
+            await copyFile(targetAbs, tmpOutput);
+
+            let techAbs: string | null = null;
+            let equipAbs: string | null = null;
+            try {
+                if (techXlsxInboxId) {
+                    const { absPath } = await resolveSessionInboxFilePath({
+                        workspace,
+                        sessionId,
+                        inboxId: techXlsxInboxId,
+                    });
+                    techAbs = absPath;
+                }
+                if (equipXlsxInboxId) {
+                    const { absPath } = await resolveSessionInboxFilePath({
+                        workspace,
+                        sessionId,
+                        inboxId: equipXlsxInboxId,
+                    });
+                    equipAbs = absPath;
+                }
+
+                args.push(tmpOutput);
+                if (techAbs) {
+                    args.push("--tech-xlsx", techAbs);
+                }
+                if (equipAbs) {
+                    args.push("--equip-xlsx", equipAbs);
+                }
+                if (brand) args.push("--brand", brand);
+                if (manufacturer) args.push("--manufacturer", manufacturer);
+                if (origin) args.push("--origin", origin);
+                if (unit) args.push("--unit", unit);
+                if (pricePlaceholder) args.push("--price-placeholder", pricePlaceholder);
+                if (specPlaceholder) args.push("--spec-placeholder", specPlaceholder);
+
+                const result = spawnSync("python3", args, { encoding: "utf8", cwd: workspace.path });
+                const stdout = String(result.stdout || "").trim();
+                const stderr = String(result.stderr || "").trim();
+
+                const reportText = [
+                    `# Fill tables report: ${basename(targetAbs)}`,
+                    "",
+                    `- session: \`${sessionId}\``,
+                    `- target: \`${targetDoc}\``,
+                    `- techXlsx: \`${techAbs ? basename(techAbs) : "—"}\``,
+                    `- equipXlsx: \`${equipAbs ? basename(equipAbs) : "—"}\``,
+                    "",
+                    "## Output",
+                    "",
+                    "```",
+                    stdout || "(no stdout)",
+                    stderr ? `\n\n[stderr]\n${stderr}` : "",
+                    "```",
+                    "",
+                ].join("\n");
+
+                const report = await writeSessionReport({
+                    workspace,
+                    sessionId,
+                    moduleId: "fill",
+                    content: reportText,
+                });
+
+                if (result.status !== 0) {
+                    await rm(tmpOutput, { force: true }).catch(() => undefined);
+                    throw new ApiError(400, "fill_failed", stderr || stdout || "Failed to fill bid tables", { report });
+                }
+
+                await rename(tmpOutput, targetAbs);
+                return jsonResponse({ ok: true, report, stdout, stderr });
+            } catch (error) {
+                await rm(tmpOutput, { force: true }).catch(() => undefined);
+                throw error;
+            }
+        },
+    });
+
+    routes.push({
+        method: "POST",
+        regex: /^\/w\/([^/]+)\/bid\/qc$/,
+        keys: ["id"],
+        auth: "client",
+        handler: async (ctx: RequestContext) => {
+            const workspaceId = ctx.params.id;
+            const sessionId = parseDocumentSessionId(ctx.url.searchParams.get("session"));
+            if (!sessionId) throw new ApiError(400, "invalid_request", "session is required");
+
+            const targetDoc = (ctx.url.searchParams.get("doc") ?? "").trim();
+            if (!targetDoc) throw new ApiError(400, "invalid_request", "doc is required");
+
+            const workspace = ctx.config.workspaces.find((w: WorkspaceInfo) => w.id === workspaceId);
+            if (!workspace) throw new ApiError(404, "not_found", "Workspace not found");
+
+            const docsDir = resolveDocumentsDir(workspace.path, sessionId);
+            const targetAbs = resolveDocumentPathSafe(docsDir, targetDoc);
+            if (!(await exists(targetAbs))) throw new ApiError(404, "not_found", "Target document not found");
+            const targetExt = extname(targetAbs).toLowerCase();
+            if (targetExt !== ".docx") {
+                throw new ApiError(400, "unsupported_target", "bid/qc currently supports .docx targets only.");
+            }
+
+            const scriptPath = resolveBidQcScriptPath(workspace.path);
+            if (!(await exists(scriptPath))) {
+                throw new ApiError(500, "missing_dependency", "qc_bid_mvp.py is missing in this workspace");
+            }
+
+            const result = spawnSync("python3", [scriptPath, "--docx", targetAbs], { encoding: "utf8", cwd: workspace.path });
+            const stdout = String(result.stdout || "").trim();
+            const stderr = String(result.stderr || "").trim();
+            const passed = result.status === 0;
+
+            const reportText = [
+                `# QC report: ${basename(targetAbs)}`,
+                "",
+                `- session: \`${sessionId}\``,
+                `- target: \`${targetDoc}\``,
+                `- result: **${passed ? "PASS" : "FAIL"}**`,
+                "",
+                "## Output",
+                "",
+                stdout || "(no stdout)",
+                stderr ? `\n\n[stderr]\n${stderr}` : "",
+                "",
+            ].join("\n");
+
+            const report = await writeSessionReport({
+                workspace,
+                sessionId,
+                moduleId: "qc",
+                content: reportText,
+            });
+
+            return jsonResponse({ ok: true, passed, report, stdout, stderr });
         },
     });
 

@@ -1,6 +1,6 @@
 import { For, Show, createEffect, createMemo, createResource, createSignal, onCleanup } from "solid-js";
 import type { Agent } from "@opencode-ai/sdk/v2/client";
-import { ArrowRight, AtSign, ChevronDown, Copy, Download, FileText, Folder, FolderArchive, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Trash2, X } from "lucide-solid";
+import { ArrowRight, AtSign, CheckCircle2, ChevronDown, Copy, Download, FileText, Folder, FolderArchive, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Trash2, X } from "lucide-solid";
 import { useNavigate } from "@solidjs/router";
 
 import type { ComposerDraft, SlashCommandOption } from "../types";
@@ -175,6 +175,28 @@ export default function DocumentWriterView(props: SessionViewProps) {
   const [sectionCopySourceQuery, setSectionCopySourceQuery] = createSignal("");
   const [sectionCopyTargetQuery, setSectionCopyTargetQuery] = createSignal("");
 
+  const [modulesExpanded, setModulesExpanded] = createSignal(true);
+  const [moduleModal, setModuleModal] = createSignal<null | "assemble" | "fill" | "qc">(null);
+  const [assembleSource, setAssembleSource] = createSignal<InboxItem | null>(null);
+  const [assembleMatchMode, setAssembleMatchMode] = createSignal<"contains" | "exact" | "startswith">("contains");
+  const [assembleForce, setAssembleForce] = createSignal(false);
+  const [assembleBusy, setAssembleBusy] = createSignal(false);
+  const [assembleError, setAssembleError] = createSignal<string | null>(null);
+  const [assembleQuery, setAssembleQuery] = createSignal("");
+  const [fillTechXlsx, setFillTechXlsx] = createSignal<string>("");
+  const [fillEquipXlsx, setFillEquipXlsx] = createSignal<string>("");
+  const [fillBrand, setFillBrand] = createSignal("新华三");
+  const [fillManufacturer, setFillManufacturer] = createSignal("新华三技术有限公司");
+  const [fillOrigin, setFillOrigin] = createSignal("中国");
+  const [fillUnit, setFillUnit] = createSignal("台");
+  const [fillPricePlaceholder, setFillPricePlaceholder] = createSignal("详见报价文件");
+  const [fillSpecPlaceholder, setFillSpecPlaceholder] = createSignal("详见开标分项一览表");
+  const [fillBusy, setFillBusy] = createSignal(false);
+  const [fillError, setFillError] = createSignal<string | null>(null);
+  const [qcBusy, setQcBusy] = createSignal(false);
+  const [qcError, setQcError] = createSignal<string | null>(null);
+  const [reportsExpanded, setReportsExpanded] = createSignal(false);
+
   const [documents, { refetch: refetchDocuments }] = createResource(apiConfig, async (cfg) => {
     if (!cfg) return [] as DocumentItem[];
     const query = new URLSearchParams();
@@ -234,6 +256,35 @@ export default function DocumentWriterView(props: SessionViewProps) {
     return Array.isArray(data.items) ? (data.items as InboxItem[]) : [];
   });
 
+  const reportsInboxPrefix = createMemo(() => {
+    const id = sessionId();
+    if (!id) return "";
+    return `sessions/${id}/reports`;
+  });
+
+  const reportsWorkspaceRoot = createMemo(() => {
+    const prefix = reportsInboxPrefix();
+    if (!prefix) return "";
+    return `.opencode/openwork/inbox/${prefix}`;
+  });
+
+  const reportsFetchInput = createMemo(() => {
+    const client = props.openworkServerClient;
+    const w = workspaceId();
+    const prefix = reportsInboxPrefix();
+    if (!client || !w || !prefix) return null;
+    if (props.openworkServerStatus !== "connected") return null;
+    return { client, workspaceId: w, prefix };
+  });
+
+  const [reports, { refetch: refetchReports }] = createResource(reportsFetchInput, async (input) => {
+    if (!input) return [] as InboxItem[];
+    const data = await input.client.listInbox(input.workspaceId, { prefix: input.prefix });
+    const items = Array.isArray(data.items) ? (data.items as InboxItem[]) : [];
+    items.sort((a, b) => b.updatedAt - a.updatedAt);
+    return items;
+  });
+
   const refsByCategory = createMemo(() => {
     const items = refs() ?? [];
     const prefix = refsInboxPrefix();
@@ -257,6 +308,49 @@ export default function DocumentWriterView(props: SessionViewProps) {
     return result;
   });
 
+  const moduleSources = createMemo(() => {
+    const byCategory = refsByCategory();
+    const pool: InboxItem[] = [];
+    for (const key of ["partners", "history", "templates", "tender", "other"] as const) {
+      pool.push(...(byCategory[key] ?? []));
+    }
+    const seen = new Set<string>();
+    return pool
+      .filter((item) => {
+        if (seen.has(item.id)) return false;
+        seen.add(item.id);
+        return true;
+      })
+      .filter((item) => isDocxSectionCopySource(item.path));
+  });
+
+  const filteredModuleSources = createMemo(() => {
+    const query = assembleQuery().trim().toLowerCase();
+    const items = moduleSources();
+    if (!query) return items;
+    return items.filter((item) => (item.path.split("/").pop() ?? item.path).toLowerCase().includes(query));
+  });
+
+  const xlsxRefs = createMemo(() => {
+    const items = refs() ?? [];
+    return items.filter((item) => {
+      const ext = getFileExtension(item.path);
+      return ext === ".xlsx" || ext === ".xlsm";
+    });
+  });
+
+  const xlsxRefsById = createMemo(() => {
+    const map = new Map<string, InboxItem>();
+    for (const item of xlsxRefs()) map.set(item.id, item);
+    return map;
+  });
+
+  const visibleReports = createMemo(() => {
+    const items = reports() ?? [];
+    if (reportsExpanded()) return items;
+    return items.slice(0, 6);
+  });
+
   const formatBytes = (bytes: number) => {
     if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
     const units = ["B", "KB", "MB", "GB"];
@@ -268,6 +362,27 @@ export default function DocumentWriterView(props: SessionViewProps) {
     }
     const shown = idx === 0 ? String(Math.trunc(value)) : value.toFixed(value >= 10 ? 1 : 2);
     return `${shown} ${units[idx]}`;
+  };
+
+  const downloadInboxFile = async (item: InboxItem, onError: (message: string) => void) => {
+    const client = props.openworkServerClient;
+    const w = workspaceId();
+    if (!client || !w) return;
+    try {
+      const result = await client.downloadInbox(w, item.id);
+      const blob = new Blob([result.data], { type: result.contentType ?? "application/octet-stream" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = result.filename ?? item.path.split("/").pop() ?? "download";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to download file";
+      onError(message);
+    }
   };
 
   const toggleRefsCategory = (categoryId: string) => {
@@ -615,6 +730,142 @@ export default function DocumentWriterView(props: SessionViewProps) {
     }
   };
 
+  const openModule = (key: "assemble" | "fill" | "qc") => {
+    if (!serverReady()) return;
+    if (!targetDoc()) {
+      setToastMessage("Select a target document first.");
+      return;
+    }
+    setAssembleError(null);
+    setFillError(null);
+    setQcError(null);
+
+    if (key === "assemble" && !assembleSource()) {
+      const first = moduleSources()[0] ?? null;
+      setAssembleSource(first);
+    }
+    setModuleModal(key);
+  };
+
+  const closeModule = () => {
+    setModuleModal(null);
+    setAssembleError(null);
+    setFillError(null);
+    setQcError(null);
+  };
+
+  const runAssemble = async () => {
+    const cfg = apiConfig();
+    const doc = targetDoc();
+    const source = assembleSource();
+    if (!cfg || !doc || !source) return;
+    if (assembleBusy()) return;
+    setAssembleBusy(true);
+    setAssembleError(null);
+
+    try {
+      if (activeDoc() !== doc) {
+        setActiveDoc(doc);
+      }
+      const query = new URLSearchParams();
+      query.set("session", cfg.sessionId);
+      query.set("doc", doc);
+      const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/bid/assemble", query);
+      const payload = {
+        partnerInboxId: source.id,
+        matchMode: assembleMatchMode(),
+        force: assembleForce(),
+      };
+      const result = (await fetchJson(url, cfg.token, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })) as { steps?: unknown[]; report?: { inboxId?: string; inboxPath?: string } };
+      const reportPath = typeof result?.report?.inboxPath === "string" ? result.report.inboxPath : "";
+      setToastMessage(reportPath ? "Assemble complete (report saved)." : "Assemble complete.");
+      closeModule();
+      setConfigSeq((v) => v + 1);
+      await refetchDocuments();
+      await refetchReports();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to assemble bid forms";
+      setAssembleError(message);
+    } finally {
+      setAssembleBusy(false);
+    }
+  };
+
+  const runFill = async () => {
+    const cfg = apiConfig();
+    const doc = targetDoc();
+    if (!cfg || !doc) return;
+    if (fillBusy()) return;
+    setFillBusy(true);
+    setFillError(null);
+
+    try {
+      if (activeDoc() !== doc) {
+        setActiveDoc(doc);
+      }
+      const query = new URLSearchParams();
+      query.set("session", cfg.sessionId);
+      query.set("doc", doc);
+      const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/bid/fill", query);
+      const payload = {
+        techXlsxInboxId: fillTechXlsx().trim() || undefined,
+        equipXlsxInboxId: fillEquipXlsx().trim() || undefined,
+        brand: fillBrand(),
+        manufacturer: fillManufacturer(),
+        origin: fillOrigin(),
+        unit: fillUnit(),
+        pricePlaceholder: fillPricePlaceholder(),
+        specPlaceholder: fillSpecPlaceholder(),
+      };
+      const result = (await fetchJson(url, cfg.token, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })) as { report?: { inboxId?: string; inboxPath?: string } };
+      const reportPath = typeof result?.report?.inboxPath === "string" ? result.report.inboxPath : "";
+      setToastMessage(reportPath ? "Fill complete (report saved)." : "Fill complete.");
+      closeModule();
+      setConfigSeq((v) => v + 1);
+      await refetchDocuments();
+      await refetchReports();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to fill bid tables";
+      setFillError(message);
+    } finally {
+      setFillBusy(false);
+    }
+  };
+
+  const runQc = async () => {
+    const cfg = apiConfig();
+    const doc = targetDoc();
+    if (!cfg || !doc) return;
+    if (qcBusy()) return;
+    setQcBusy(true);
+    setQcError(null);
+
+    try {
+      const query = new URLSearchParams();
+      query.set("session", cfg.sessionId);
+      query.set("doc", doc);
+      const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/bid/qc", query);
+      const result = (await fetchJson(url, cfg.token, { method: "POST" })) as { passed?: boolean; report?: { inboxPath?: string } };
+      const passed = Boolean(result?.passed);
+      setToastMessage(passed ? "QC PASS (report saved)." : "QC FAIL (report saved).");
+      closeModule();
+      await refetchReports();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to run QC";
+      setQcError(message);
+    } finally {
+      setQcBusy(false);
+    }
+  };
+
   const activeDocPath = createMemo(() => {
     const doc = targetDoc();
     if (!doc) return "";
@@ -629,6 +880,12 @@ export default function DocumentWriterView(props: SessionViewProps) {
     sessionId();
     setTargetDoc(null);
     setActiveDoc(null);
+    setModuleModal(null);
+    setAssembleSource(null);
+    setAssembleError(null);
+    setFillError(null);
+    setQcError(null);
+    setReportsExpanded(false);
   });
 
   createEffect(() => {
@@ -1010,6 +1267,141 @@ export default function DocumentWriterView(props: SessionViewProps) {
 
           <Show when={!documentsCollapsed()}>
             <div class="mt-3 pt-3 border-t border-dls-border">
+              <div class="px-2">
+                <div class="flex items-center justify-between">
+                  <button
+                    type="button"
+                    class="flex items-center gap-2 min-w-0 text-left flex-1 hover:text-dls-text text-dls-secondary"
+                    onClick={() => setModulesExpanded((v) => !v)}
+                    aria-expanded={modulesExpanded()}
+                  >
+                    <ChevronDown size={14} class={`shrink-0 transition-transform ${modulesExpanded() ? "rotate-180" : ""}`} />
+                    <span class="text-[10px] uppercase tracking-wider text-dls-secondary">Modules</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="p-1.5 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
+                    onClick={() => void refetchReports()}
+                    disabled={!serverReady() || reports.loading}
+                    title="Refresh reports"
+                    aria-label="Refresh reports"
+                  >
+                    <RefreshCw size={14} class={reports.loading ? "animate-spin" : ""} />
+                  </button>
+                </div>
+
+                <Show when={modulesExpanded()}>
+                  <div class="mt-2 grid grid-cols-1 gap-2">
+                    <button
+                      type="button"
+                      class="w-full rounded-lg border border-dls-border bg-dls-surface px-2 py-2 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover disabled:opacity-50 flex items-center gap-2"
+                      onClick={() => openModule("assemble")}
+                      disabled={!serverReady() || !targetDoc() || isAgentRunning()}
+                      title="Copy baseline bid forms into the target document"
+                    >
+                      <Copy size={14} />
+                      <span class="truncate">Assemble forms (DOCX→DOCX)</span>
+                    </button>
+                    <button
+                      type="button"
+                      class="w-full rounded-lg border border-dls-border bg-dls-surface px-2 py-2 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover disabled:opacity-50 flex items-center gap-2"
+                      onClick={() => openModule("fill")}
+                      disabled={!serverReady() || !targetDoc() || isAgentRunning()}
+                      title="Fill pre-formatted tables from XLSX inputs"
+                    >
+                      <FileText size={14} />
+                      <span class="truncate">Fill tables (XLSX→DOCX)</span>
+                    </button>
+                    <button
+                      type="button"
+                      class="w-full rounded-lg border border-dls-border bg-dls-surface px-2 py-2 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover disabled:opacity-50 flex items-center gap-2"
+                      onClick={() => openModule("qc")}
+                      disabled={!serverReady() || !targetDoc() || qcBusy()}
+                      title="Run deterministic QC gate on the target document"
+                    >
+                      <CheckCircle2 size={14} />
+                      <span class="truncate">QC gate</span>
+                    </button>
+                  </div>
+
+                  <Show when={reportsWorkspaceRoot()}>
+                    <button
+                      type="button"
+                      class="mt-2 w-full rounded-md border border-dls-border bg-dls-surface px-2 py-1 text-[11px] text-dls-secondary hover:text-dls-text hover:bg-dls-hover flex items-center gap-2"
+                      onClick={() => insertRefInPrompt(reportsWorkspaceRoot() + "/")}
+                      title="Insert reports directory into the prompt"
+                    >
+                      <Folder size={14} />
+                      <span class="truncate">{reportsWorkspaceRoot()}/</span>
+                      <span class="ml-auto text-[10px] text-dls-secondary flex items-center gap-1">
+                        <AtSign size={12} />
+                        Use
+                      </span>
+                    </button>
+                  </Show>
+
+                  <Show when={visibleReports().length > 0}>
+                    <div class="mt-2 rounded-lg border border-dls-border bg-dls-surface overflow-hidden">
+                      <div class="flex items-center justify-between px-2 py-1.5">
+                        <button
+                          type="button"
+                          class="flex items-center gap-2 min-w-0 text-left flex-1 hover:text-dls-text text-dls-secondary"
+                          onClick={() => setReportsExpanded((v) => !v)}
+                          aria-expanded={reportsExpanded()}
+                        >
+                          <ChevronDown
+                            size={14}
+                            class={`shrink-0 transition-transform ${reportsExpanded() ? "rotate-180" : ""}`}
+                          />
+                          <span class="truncate text-[12px]">Reports</span>
+                          <span class="ml-auto text-[10px] text-dls-secondary">{(reports() ?? []).length}</span>
+                        </button>
+                      </div>
+                      <div class="px-2 pb-2 space-y-1">
+                        <For each={visibleReports()}>
+                          {(item) => {
+                            const workspacePath = () => `.opencode/openwork/inbox/${item.path}`;
+                            const name = () => item.path.split("/").slice(-2).join("/");
+                            return (
+                              <div class="flex items-center gap-2 rounded-md px-2 py-1 hover:bg-dls-hover">
+                                <FileText size={14} class="text-dls-secondary shrink-0" />
+                                <button
+                                  type="button"
+                                  class="min-w-0 flex-1 text-left"
+                                  onClick={() => insertRefInPrompt(workspacePath())}
+                                  title={workspacePath()}
+                                >
+                                  <div class="text-[12px] text-dls-text truncate">{name()}</div>
+                                  <div class="text-[10px] text-dls-secondary">{formatBytes(item.size)}</div>
+                                </button>
+                                <button
+                                  type="button"
+                                  class="p-1.5 rounded hover:bg-dls-active text-dls-secondary hover:text-dls-text"
+                                  onClick={() => insertRefInPrompt(workspacePath())}
+                                  title="Use in prompt"
+                                  aria-label="Use in prompt"
+                                >
+                                  <AtSign size={14} />
+                                </button>
+                                <button
+                                  type="button"
+                                  class="p-1.5 rounded hover:bg-dls-active text-dls-secondary hover:text-dls-text"
+                                  onClick={() => void downloadInboxFile(item, (msg) => setToastMessage(msg))}
+                                  title="Download"
+                                  aria-label="Download"
+                                >
+                                  <Download size={14} />
+                                </button>
+                              </div>
+                            );
+                          }}
+                        </For>
+                      </div>
+                    </div>
+                  </Show>
+                </Show>
+              </div>
+
               <div class="flex items-center justify-between px-2">
                 <div class="text-[10px] uppercase tracking-wider text-dls-secondary">Reference materials</div>
                 <button
@@ -1571,6 +1963,357 @@ export default function DocumentWriterView(props: SessionViewProps) {
               >
                 <Show when={!sectionCopyBusy()} fallback={"Working…"}>
                   Insert
+                </Show>
+              </button>
+            </div>
+          </div>
+        </div>
+      </Show>
+
+      <Show when={moduleModal() === "assemble"}>
+        <div
+          class="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeModule();
+          }}
+        >
+          <div
+            class="w-full max-w-4xl rounded-2xl border border-dls-border bg-dls-surface shadow-2xl overflow-hidden"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div class="flex items-center justify-between px-4 py-3 border-b border-dls-border">
+              <div class="min-w-0">
+                <div class="text-sm font-semibold text-dls-text truncate">Assemble forms</div>
+                <div class="mt-1 text-[11px] text-dls-secondary truncate">
+                  Target: {targetDoc() ?? "—"}
+                </div>
+              </div>
+              <button
+                type="button"
+                class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text"
+                onClick={closeModule}
+                aria-label="Close"
+                title="Close"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div class="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div class="min-w-0">
+                <div class="text-xs font-medium text-dls-text">Source document</div>
+                <div class="mt-2">
+                  <input
+                    type="text"
+                    value={assembleQuery()}
+                    onInput={(event) => setAssembleQuery(event.currentTarget.value)}
+                    placeholder="Search DOCX sources…"
+                    class="w-full rounded-lg border border-dls-border bg-dls-surface px-3 py-2 text-xs text-dls-text placeholder:text-dls-secondary focus:outline-none focus:ring-2 focus:ring-dls-accent/40"
+                  />
+                </div>
+                <div class="mt-2 rounded-lg border border-dls-border overflow-hidden max-h-[360px] overflow-y-auto">
+                  <Show when={!refs.loading} fallback={<div class="p-3 text-xs text-dls-secondary">Loading…</div>}>
+                    <Show when={filteredModuleSources().length > 0} fallback={<div class="p-3 text-xs text-dls-secondary">No DOCX sources found.</div>}>
+                      <For each={filteredModuleSources()}>
+                        {(item) => {
+                          const selected = createMemo(() => assembleSource()?.id === item.id);
+                          const name = () => item.path.split("/").pop() ?? item.path;
+                          return (
+                            <button
+                              type="button"
+                              class={`w-full text-left px-3 py-2 border-b border-dls-border/50 last:border-b-0 hover:bg-dls-hover ${selected() ? "bg-dls-active" : ""}`}
+                              onClick={() => setAssembleSource(item)}
+                              title={item.path}
+                            >
+                              <div class="flex items-start gap-2">
+                                <FileText size={14} class="shrink-0 text-dls-secondary mt-0.5" />
+                                <div class="min-w-0 flex-1">
+                                  <div class="text-xs text-dls-text truncate">{name()}</div>
+                                  <div class="mt-1 text-[10px] text-dls-secondary">{formatBytes(item.size)}</div>
+                                </div>
+                              </div>
+                            </button>
+                          );
+                        }}
+                      </For>
+                    </Show>
+                  </Show>
+                </div>
+              </div>
+
+              <div class="min-w-0 space-y-4">
+                <div>
+                  <div class="text-xs font-medium text-dls-text">Match mode</div>
+                  <div class="mt-2">
+                    <select
+                      class="w-full rounded-lg border border-dls-border bg-dls-surface px-3 py-2 text-xs text-dls-text focus:outline-none focus:ring-2 focus:ring-dls-accent/40"
+                      value={assembleMatchMode()}
+                      onChange={(event) => setAssembleMatchMode(event.currentTarget.value as any)}
+                    >
+                      <option value="contains">contains (recommended)</option>
+                      <option value="exact">exact</option>
+                      <option value="startswith">startsWith</option>
+                    </select>
+                  </div>
+                  <div class="mt-2 text-[11px] text-dls-secondary">
+                    Copies baseline forms (开标一览表/开标分项一览表/点对点/配置清单/售后服务承诺) into the target.
+                  </div>
+                </div>
+
+                <label class="flex items-center gap-2 text-xs text-dls-secondary">
+                  <input
+                    type="checkbox"
+                    checked={assembleForce()}
+                    onChange={(event) => setAssembleForce(event.currentTarget.checked)}
+                  />
+                  Force insert even if target already contains the heading
+                </label>
+
+                <Show when={assembleError()}>
+                  <div class="rounded-lg border border-red-11/30 bg-red-3/20 px-3 py-2 text-xs text-red-11 whitespace-pre-wrap break-words">
+                    {assembleError()}
+                  </div>
+                </Show>
+              </div>
+            </div>
+
+            <div class="px-4 py-3 border-t border-dls-border flex items-center justify-end gap-2">
+              <button
+                type="button"
+                class="rounded-lg border border-dls-border bg-dls-surface px-3 py-1.5 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover"
+                onClick={closeModule}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                class="rounded-lg border border-dls-border bg-dls-surface px-3 py-1.5 text-xs text-dls-text hover:bg-dls-hover disabled:opacity-50"
+                onClick={() => void runAssemble()}
+                disabled={assembleBusy() || !assembleSource()}
+                title={!assembleSource() ? "Select a source document" : "Assemble"}
+              >
+                <Show when={!assembleBusy()} fallback={"Working…"}>
+                  Assemble
+                </Show>
+              </button>
+            </div>
+          </div>
+        </div>
+      </Show>
+
+      <Show when={moduleModal() === "fill"}>
+        <div
+          class="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeModule();
+          }}
+        >
+          <div
+            class="w-full max-w-3xl rounded-2xl border border-dls-border bg-dls-surface shadow-2xl overflow-hidden"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div class="flex items-center justify-between px-4 py-3 border-b border-dls-border">
+              <div class="min-w-0">
+                <div class="text-sm font-semibold text-dls-text truncate">Fill tables</div>
+                <div class="mt-1 text-[11px] text-dls-secondary truncate">
+                  Target: {targetDoc() ?? "—"}
+                </div>
+              </div>
+              <button
+                type="button"
+                class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text"
+                onClick={closeModule}
+                aria-label="Close"
+                title="Close"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div class="p-4 space-y-4">
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <div class="text-xs font-medium text-dls-text">Tech response XLSX (optional)</div>
+                  <select
+                    class="mt-2 w-full rounded-lg border border-dls-border bg-dls-surface px-3 py-2 text-xs text-dls-text focus:outline-none focus:ring-2 focus:ring-dls-accent/40"
+                    value={fillTechXlsx()}
+                    onChange={(event) => setFillTechXlsx(event.currentTarget.value)}
+                  >
+                    <option value="">—</option>
+                    <For each={xlsxRefs()}>
+                      {(item) => (
+                        <option value={item.id}>
+                          {item.path.split("/").pop() ?? item.path}
+                        </option>
+                      )}
+                    </For>
+                  </select>
+                </div>
+                <div>
+                  <div class="text-xs font-medium text-dls-text">Equipment list XLSX (optional)</div>
+                  <select
+                    class="mt-2 w-full rounded-lg border border-dls-border bg-dls-surface px-3 py-2 text-xs text-dls-text focus:outline-none focus:ring-2 focus:ring-dls-accent/40"
+                    value={fillEquipXlsx()}
+                    onChange={(event) => setFillEquipXlsx(event.currentTarget.value)}
+                  >
+                    <option value="">—</option>
+                    <For each={xlsxRefs()}>
+                      {(item) => (
+                        <option value={item.id}>
+                          {item.path.split("/").pop() ?? item.path}
+                        </option>
+                      )}
+                    </For>
+                  </select>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <div class="text-xs font-medium text-dls-text">Brand</div>
+                  <input
+                    type="text"
+                    value={fillBrand()}
+                    onInput={(event) => setFillBrand(event.currentTarget.value)}
+                    class="mt-2 w-full rounded-lg border border-dls-border bg-dls-surface px-3 py-2 text-xs text-dls-text focus:outline-none focus:ring-2 focus:ring-dls-accent/40"
+                  />
+                </div>
+                <div>
+                  <div class="text-xs font-medium text-dls-text">Manufacturer</div>
+                  <input
+                    type="text"
+                    value={fillManufacturer()}
+                    onInput={(event) => setFillManufacturer(event.currentTarget.value)}
+                    class="mt-2 w-full rounded-lg border border-dls-border bg-dls-surface px-3 py-2 text-xs text-dls-text focus:outline-none focus:ring-2 focus:ring-dls-accent/40"
+                  />
+                </div>
+                <div>
+                  <div class="text-xs font-medium text-dls-text">Origin</div>
+                  <input
+                    type="text"
+                    value={fillOrigin()}
+                    onInput={(event) => setFillOrigin(event.currentTarget.value)}
+                    class="mt-2 w-full rounded-lg border border-dls-border bg-dls-surface px-3 py-2 text-xs text-dls-text focus:outline-none focus:ring-2 focus:ring-dls-accent/40"
+                  />
+                </div>
+                <div>
+                  <div class="text-xs font-medium text-dls-text">Unit</div>
+                  <input
+                    type="text"
+                    value={fillUnit()}
+                    onInput={(event) => setFillUnit(event.currentTarget.value)}
+                    class="mt-2 w-full rounded-lg border border-dls-border bg-dls-surface px-3 py-2 text-xs text-dls-text focus:outline-none focus:ring-2 focus:ring-dls-accent/40"
+                  />
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <div class="text-xs font-medium text-dls-text">Price placeholder</div>
+                  <input
+                    type="text"
+                    value={fillPricePlaceholder()}
+                    onInput={(event) => setFillPricePlaceholder(event.currentTarget.value)}
+                    class="mt-2 w-full rounded-lg border border-dls-border bg-dls-surface px-3 py-2 text-xs text-dls-text focus:outline-none focus:ring-2 focus:ring-dls-accent/40"
+                  />
+                </div>
+                <div>
+                  <div class="text-xs font-medium text-dls-text">Spec placeholder</div>
+                  <input
+                    type="text"
+                    value={fillSpecPlaceholder()}
+                    onInput={(event) => setFillSpecPlaceholder(event.currentTarget.value)}
+                    class="mt-2 w-full rounded-lg border border-dls-border bg-dls-surface px-3 py-2 text-xs text-dls-text focus:outline-none focus:ring-2 focus:ring-dls-accent/40"
+                  />
+                </div>
+              </div>
+
+              <Show when={fillError()}>
+                <div class="rounded-lg border border-red-11/30 bg-red-3/20 px-3 py-2 text-xs text-red-11 whitespace-pre-wrap break-words">
+                  {fillError()}
+                </div>
+              </Show>
+            </div>
+
+            <div class="px-4 py-3 border-t border-dls-border flex items-center justify-end gap-2">
+              <button
+                type="button"
+                class="rounded-lg border border-dls-border bg-dls-surface px-3 py-1.5 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover"
+                onClick={closeModule}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                class="rounded-lg border border-dls-border bg-dls-surface px-3 py-1.5 text-xs text-dls-text hover:bg-dls-hover disabled:opacity-50"
+                onClick={() => void runFill()}
+                disabled={fillBusy()}
+              >
+                <Show when={!fillBusy()} fallback={"Working…"}>
+                  Fill
+                </Show>
+              </button>
+            </div>
+          </div>
+        </div>
+      </Show>
+
+      <Show when={moduleModal() === "qc"}>
+        <div
+          class="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeModule();
+          }}
+        >
+          <div
+            class="w-full max-w-xl rounded-2xl border border-dls-border bg-dls-surface shadow-2xl overflow-hidden"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div class="flex items-center justify-between px-4 py-3 border-b border-dls-border">
+              <div class="min-w-0">
+                <div class="text-sm font-semibold text-dls-text truncate">QC gate</div>
+                <div class="mt-1 text-[11px] text-dls-secondary truncate">
+                  Target: {targetDoc() ?? "—"}
+                </div>
+              </div>
+              <button
+                type="button"
+                class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text"
+                onClick={closeModule}
+                aria-label="Close"
+                title="Close"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div class="p-4 space-y-3">
+              <div class="text-xs text-dls-secondary">
+                Runs deterministic checks (missing core forms, empty critical cells, unresolved &lt;&lt;TBD&gt;&gt; placeholders). Saves a report to the session inbox.
+              </div>
+              <Show when={qcError()}>
+                <div class="rounded-lg border border-red-11/30 bg-red-3/20 px-3 py-2 text-xs text-red-11 whitespace-pre-wrap break-words">
+                  {qcError()}
+                </div>
+              </Show>
+            </div>
+
+            <div class="px-4 py-3 border-t border-dls-border flex items-center justify-end gap-2">
+              <button
+                type="button"
+                class="rounded-lg border border-dls-border bg-dls-surface px-3 py-1.5 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover"
+                onClick={closeModule}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                class="rounded-lg border border-dls-border bg-dls-surface px-3 py-1.5 text-xs text-dls-text hover:bg-dls-hover disabled:opacity-50"
+                onClick={() => void runQc()}
+                disabled={qcBusy()}
+              >
+                <Show when={!qcBusy()} fallback={"Working…"}>
+                  Run QC
                 </Show>
               </button>
             </div>

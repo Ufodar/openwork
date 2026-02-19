@@ -181,10 +181,10 @@ def _normalize_tech_rows(rows: list[list[str]]) -> list[list[str]]:
     for row in rows:
         row = list(row) + [""] * (5 - len(row))
         seq = (row[0] or "").strip()
-        req = (row[1] or "").strip()
-        ans = (row[2] or "").strip()
-        dev = (row[3] or "").strip()
-        proof = (row[4] or "").strip()
+        req = re.sub(r"\s+", " ", (row[1] or "").strip())
+        ans = re.sub(r"\s+", " ", (row[2] or "").strip())
+        dev = re.sub(r"\s+", " ", (row[3] or "").strip())
+        proof = re.sub(r"\s+", " ", (row[4] or "").strip())
         if not (seq or req or ans or dev or proof):
             continue
         if not seq:
@@ -203,11 +203,11 @@ def _normalize_equipment_rows(rows: list[list[str]]) -> list[list[str]]:
     while i < len(rows):
         row = list(rows[i]) + [""] * (6 - len(rows[i]))
         seq = (row[0] or "").strip()
-        name = (row[1] or "").strip()
-        model = (row[2] or "").strip()
-        desc = (row[3] or "").strip()
+        name = re.sub(r"\s+", " ", (row[1] or "").strip())
+        model = re.sub(r"\s+", " ", (row[2] or "").strip())
+        desc = re.sub(r"\s+", " ", (row[3] or "").strip())
         qty = (row[4] or "").strip()
-        remark = (row[5] or "").strip()
+        remark = re.sub(r"\s+", " ", (row[5] or "").strip())
 
         if name.startswith("Site_") or name in {"总计", "合计"}:
             i += 1
@@ -217,11 +217,11 @@ def _normalize_equipment_rows(rows: list[list[str]]) -> list[list[str]]:
         if is_name_row and i + 1 < len(rows):
             nxt = list(rows[i + 1]) + [""] * (6 - len(rows[i + 1]))
             nxt_seq = (nxt[0] or "").strip()
-            nxt_name = (nxt[1] or "").strip()
-            nxt_model = (nxt[2] or "").strip()
-            nxt_desc = (nxt[3] or "").strip()
+            nxt_name = re.sub(r"\s+", " ", (nxt[1] or "").strip())
+            nxt_model = re.sub(r"\s+", " ", (nxt[2] or "").strip())
+            nxt_desc = re.sub(r"\s+", " ", (nxt[3] or "").strip())
             nxt_qty = (nxt[4] or "").strip()
-            nxt_remark = (nxt[5] or "").strip()
+            nxt_remark = re.sub(r"\s+", " ", (nxt[5] or "").strip())
 
             is_detail_row = (not nxt_seq and not nxt_name) and bool(nxt_model or nxt_desc or nxt_qty or nxt_remark)
             if is_detail_row:
@@ -392,7 +392,13 @@ def fill_docx_tables(
                     if len(_row_cells(tr)) == len(header_norm)
                 )
                 seq_start = 2 if keep_platform else 1
-                new_rows = [[str(i), r[1], r[2], r[3]] for i, r in enumerate(equip_rows, start=seq_start)]
+                new_rows: list[list[str]] = []
+                for i, r in enumerate(equip_rows, start=seq_start):
+                    detail = (r[3] or "").strip()
+                    # Keep the table readable: avoid dumping huge spec blobs into a summary list.
+                    if len(detail) > 200:
+                        detail = "详见技术应答表"
+                    new_rows.append([str(i), r[1], r[2], detail])
                 inserted, wns = _fill_table_replace_rows(
                     tbl=tbl,
                     header_cells=header_norm,
@@ -453,7 +459,11 @@ def fill_docx_tables(
                     new_rows=out_rows,
                     keep_first_data_row_if_contains="无线网络可视交互平台",
                     kept_row_updates={
+                        2: brand,
                         3: spec_placeholder,
+                        4: manufacturer,
+                        5: origin,
+                        6: "详见技术应答表",
                         7: price_placeholder,
                         8: "1",
                         9: "套",
@@ -470,7 +480,9 @@ def fill_docx_tables(
                     tbl=tbl,
                     header_cells=header_norm,
                     updates={
+                        2: brand,  # 品牌
                         3: spec_placeholder,  # 规格型号
+                        4: manufacturer,  # 制造商
                         5: price_placeholder,  # 单价
                         7: price_placeholder,  # 投标总价
                     },

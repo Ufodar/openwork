@@ -289,7 +289,17 @@ def _extract_special_facts(full_text: str) -> dict[str, list[Candidate]]:
             label="履约保证金",
             locator="regex:performanceBond:amount",
             text=text,
-            pattern=r"收取履约保证金金额\s*[:：]\s*(?P<val>[^，。；;]{1,80})",
+            pattern=r"收取履约保证金金额\s*[:：]\s*(?P<val>[^，。；;]{1,120}?)(?=履约担保期限|$)",
+        ),
+    )
+    add(
+        "performanceBond",
+        _regex_candidate(
+            key="performanceBond",
+            label="履约保证金",
+            locator="regex:performanceBond:attachedPercent",
+            text=text,
+            pattern=r"(?P<val>(?:合同(?:总额|金额)[^，。；;]{0,10})?\d{1,3}\s*%)\s*的?\s*履约保证金",
         ),
     )
     add(
@@ -299,7 +309,7 @@ def _extract_special_facts(full_text: str) -> dict[str, list[Candidate]]:
             label="履约保证金",
             locator="regex:performanceBond:percent",
             text=text,
-            pattern=r"履约保证金[^。]{0,80}?(?P<val>合同(?:总额|金额)[^。]{0,20}?\d{1,3}\s*%|\d{1,3}\s*%)",
+            pattern=r"履约保证金(?:金额)?(?:为|：)?\s*(?P<val>(?:合同(?:总额|金额)[^，。]{0,20})?\d{1,3}\s*%)",
         ),
     )
 
@@ -387,7 +397,16 @@ def _score_candidate(key: str, candidate: Candidate, aliases: list[str]) -> int:
     elif key == "performanceBond":
         if re.search(r"\d", value) and any(unit in value for unit in ["%", "元", "万"]):
             score += 30
+        # Prefer short, declarative values like "合同总额10%" over long clauses.
+        if len(value) <= 20:
+            score += 40
+        if "%" in value:
+            score += 20
         if "是否" in value or "是 否" in value or "是否收取" in value:
+            score -= 200
+        if any(token in value for token in ["履约担保期限", "分期履行", "风险处置", "到货", "安装", "验收"]):
+            score -= 200
+        if len(value) > 60:
             score -= 200
     elif key == "payment":
         if any(word in value for word in ["支付", "付款", "结算"]):

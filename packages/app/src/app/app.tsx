@@ -2113,7 +2113,38 @@ export default function App() {
     return next;
   };
 
-  const [openworkSessionPrefsById, setOpenworkSessionPrefsById] = createSignal<Record<string, OpenworkSessionPrefs>>({});
+  const OPENWORK_SESSION_PREFS_LOCAL_STORAGE_KEY = "openwork.sessionPrefs.v1";
+
+  const readLocalOpenworkSessionPrefs = (): Record<string, OpenworkSessionPrefs> => {
+    if (typeof window === "undefined") return {};
+    try {
+      const raw = window.localStorage.getItem(OPENWORK_SESSION_PREFS_LOCAL_STORAGE_KEY);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw) as unknown;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+      const sessionsValue = (parsed as any).sessions;
+      const sessions =
+        sessionsValue && typeof sessionsValue === "object" && !Array.isArray(sessionsValue)
+          ? (sessionsValue as Record<string, unknown>)
+          : (parsed as Record<string, unknown>);
+      return parseOpenworkSessionPrefs({ sessions } as Record<string, unknown>);
+    } catch {
+      return {};
+    }
+  };
+
+  const writeLocalOpenworkSessionPrefs = (prefs: Record<string, OpenworkSessionPrefs>) => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(OPENWORK_SESSION_PREFS_LOCAL_STORAGE_KEY, JSON.stringify(prefs));
+    } catch {
+      // ignore
+    }
+  };
+
+  const [openworkSessionPrefsById, setOpenworkSessionPrefsById] = createSignal<Record<string, OpenworkSessionPrefs>>(
+    readLocalOpenworkSessionPrefs(),
+  );
   const [openworkSessionPrefsLoaded, setOpenworkSessionPrefsLoaded] = createSignal(false);
   const [openworkSessionPrefsWorkspaceId, setOpenworkSessionPrefsWorkspaceId] = createSignal<string | null>(null);
   let openworkSessionPrefsLoadPromise: Promise<void> | null = null;
@@ -2237,9 +2268,7 @@ export default function App() {
     }
 
     if (!canRead) {
-      setOpenworkSessionPrefsById({});
       setOpenworkSessionPrefsWorkspaceId(workspaceId);
-      setOpenworkSessionPrefsLoaded(true);
       return;
     }
 
@@ -2253,16 +2282,14 @@ export default function App() {
         const config = await openworkClient.getConfig(workspaceId);
         if ((openworkServerWorkspaceId() ?? "").trim() !== workspaceId) return;
         const openwork = config.openwork && typeof config.openwork === "object" ? (config.openwork as Record<string, unknown>) : {};
-        setOpenworkSessionPrefsById(parseOpenworkSessionPrefs(openwork));
+        const prefs = parseOpenworkSessionPrefs(openwork);
+        setOpenworkSessionPrefsById(prefs);
         setOpenworkSessionPrefsWorkspaceId(workspaceId);
+        setOpenworkSessionPrefsLoaded(true);
+        writeLocalOpenworkSessionPrefs(prefs);
       } catch {
         if ((openworkServerWorkspaceId() ?? "").trim() !== workspaceId) return;
-        setOpenworkSessionPrefsById({});
         setOpenworkSessionPrefsWorkspaceId(workspaceId);
-      } finally {
-        if ((openworkServerWorkspaceId() ?? "").trim() === workspaceId) {
-          setOpenworkSessionPrefsLoaded(true);
-        }
       }
     })();
 
@@ -2280,6 +2307,20 @@ export default function App() {
     const id = sessionId.trim();
     if (!id) return;
     if (view !== "document-writer") return;
+
+    const localBase = openworkSessionPrefsById();
+    const localExisting = localBase[id] ?? null;
+    if (localExisting?.view !== view) {
+      const localNext = {
+        ...(localBase ?? {}),
+        [id]: {
+          ...(localExisting ?? {}),
+          view,
+        },
+      } satisfies Record<string, OpenworkSessionPrefs>;
+      setOpenworkSessionPrefsById(localNext);
+      writeLocalOpenworkSessionPrefs(localNext);
+    }
 
     const openworkClient = openworkServerClient();
     const caps = resolvedOpenworkCapabilities();
@@ -2324,6 +2365,7 @@ export default function App() {
     setOpenworkSessionPrefsById(nextPrefs);
     setOpenworkSessionPrefsWorkspaceId(workspaceId);
     setOpenworkSessionPrefsLoaded(true);
+    writeLocalOpenworkSessionPrefs(nextPrefs);
 
     await openworkClient.patchConfig(workspaceId, {
       openwork: {
@@ -2338,6 +2380,31 @@ export default function App() {
 
     const normalized = agent?.trim() ?? "";
     const nextAgent = normalized ? normalized : null;
+
+    const localBase = openworkSessionPrefsById();
+    const localExisting = localBase[id] ?? null;
+    const localExistingAgent = normalizeStoredAgent(localExisting?.agent) ?? null;
+    if (localExistingAgent !== nextAgent) {
+      const localNext: Record<string, OpenworkSessionPrefs> = {
+        ...(localBase ?? {}),
+        [id]: {
+          ...(localExisting ?? {}),
+        },
+      };
+      if (nextAgent) {
+        localNext[id].agent = nextAgent;
+      } else {
+        delete localNext[id].agent;
+      }
+
+      // Clean up empty prefs objects
+      if (!Object.keys(localNext[id]).length) {
+        delete localNext[id];
+      }
+
+      setOpenworkSessionPrefsById(localNext);
+      writeLocalOpenworkSessionPrefs(localNext);
+    }
 
     const openworkClient = openworkServerClient();
     const caps = resolvedOpenworkCapabilities();
@@ -2354,13 +2421,20 @@ export default function App() {
     }
     if (!workspaceId) return;
 
-    try {
-      await ensureOpenworkSessionPrefsLoaded();
-    } catch {
-      // ignore
+    let basePrefs: Record<string, OpenworkSessionPrefs> | null = null;
+    if (openworkSessionPrefsLoaded() && openworkSessionPrefsWorkspaceId() === workspaceId) {
+      basePrefs = openworkSessionPrefsById();
+    } else {
+      try {
+        const config = await openworkClient.getConfig(workspaceId);
+        const openwork =
+          config.openwork && typeof config.openwork === "object" ? (config.openwork as Record<string, unknown>) : {};
+        basePrefs = parseOpenworkSessionPrefs(openwork);
+      } catch {
+        return;
+      }
     }
 
-    const basePrefs = openworkSessionPrefsById();
     const existing = basePrefs[id] ?? null;
     const existingAgent = normalizeStoredAgent(existing?.agent) ?? null;
     if (existingAgent === nextAgent) return;
@@ -2385,6 +2459,7 @@ export default function App() {
     setOpenworkSessionPrefsById(nextPrefs);
     setOpenworkSessionPrefsWorkspaceId(workspaceId);
     setOpenworkSessionPrefsLoaded(true);
+    writeLocalOpenworkSessionPrefs(nextPrefs);
 
     await openworkClient.patchConfig(workspaceId, {
       openwork: {
@@ -2397,14 +2472,6 @@ export default function App() {
     const sessionId = activeSessionId();
     if (!sessionId) return;
     const agent = sessionAgentById()[sessionId] ?? null;
-    const openworkClient = openworkServerClient();
-    const caps = resolvedOpenworkCapabilities();
-    const canReadWrite =
-      openworkServerStatus() === "connected" &&
-      Boolean(openworkClient) &&
-      (caps?.config?.read ?? false) &&
-      (caps?.config?.write ?? false);
-    if (!canReadWrite) return;
     persistSessionPreferredAgent(sessionId, agent).catch(() => undefined);
   });
 
@@ -2412,15 +2479,6 @@ export default function App() {
     if (currentView() !== "document-writer") return;
     const sessionId = activeSessionId();
     if (!sessionId) return;
-    const openworkClient = openworkServerClient();
-    const caps = resolvedOpenworkCapabilities();
-    const canReadWrite =
-      openworkServerStatus() === "connected" &&
-      Boolean(openworkClient) &&
-      Boolean((openworkServerWorkspaceId() ?? "").trim()) &&
-      (caps?.config?.read ?? false) &&
-      (caps?.config?.write ?? false);
-    if (!canReadWrite) return;
     persistSessionPreferredView(sessionId, "document-writer").catch(() => undefined);
   });
 
@@ -2486,7 +2544,7 @@ export default function App() {
     const workspaceId = (openworkServerWorkspaceId() ?? "").trim();
     setOpenworkSessionPrefsWorkspaceId(workspaceId || null);
     setOpenworkSessionPrefsLoaded(false);
-    setOpenworkSessionPrefsById({});
+    setOpenworkSessionPrefsById(readLocalOpenworkSessionPrefs());
 
     if (!workspaceId) return;
     void ensureOpenworkSessionPrefsLoaded().catch(() => undefined);

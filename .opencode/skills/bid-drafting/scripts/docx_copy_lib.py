@@ -25,7 +25,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 from xml.etree import ElementTree as ET
 
-from defusedxml import ElementTree as DET
+try:
+    from defusedxml import ElementTree as DET  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover
+    # `defusedxml` is optional in many environments. Fall back to stdlib so the
+    # script runs out-of-the-box; install `defusedxml` for hardened XML parsing.
+    from xml.etree import ElementTree as DET  # type: ignore
 
 # ---------------------------------------------------------------------------
 # XML namespaces used in OOXML Word documents

@@ -14,7 +14,7 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 
 type DevHeadlessWebState = {
@@ -29,11 +29,30 @@ type WorkspaceListResponse = {
 
 const cwd = process.cwd();
 
-const DEFAULT_DATASET_ROOT =
-  "/Users/storm/Pictures/untitled folder/标书文件/智能员工资料/tzsd项目伙伴";
-const DEFAULT_TEMPLATE_PATH = "/Users/storm/Pictures/主标空模版.docx";
+const DEFAULT_DATASET_ROOT_CANDIDATES = [
+  "/Users/storm/Pictures/untitled folder/标书文件/智能员工资料/tzsd项目伙伴",
+  "/Users/storm/Pictures/untitled folder/标书agent开发相关文件/智能员工资料/tzsd项目伙伴",
+];
+
+const DEFAULT_TEMPLATE_PATH_CANDIDATES = ["/Users/storm/Pictures/主标空模版.docx"];
 
 type AutotestPreset = "forms" | "full";
+
+const pathExists = async (value: string): Promise<boolean> => {
+  try {
+    await stat(value);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const resolveFirstExisting = async (candidates: string[]): Promise<string | null> => {
+  for (const candidate of candidates) {
+    if (await pathExists(candidate)) return candidate;
+  }
+  return null;
+};
 
 const readDevState = async (): Promise<DevHeadlessWebState | null> => {
   const statePath = join(cwd, "tmp", "dev-headless-web.state.json");
@@ -296,8 +315,29 @@ const run = async () => {
   }
 
   const sessionId = `ses_autotest_tzsd_${Date.now().toString(36)}`;
-  const datasetRoot = DEFAULT_DATASET_ROOT;
-  const templatePath = DEFAULT_TEMPLATE_PATH;
+  const datasetRootOverride = (process.env.BID_AUTOTEST_DATASET_ROOT ?? "").trim();
+  const templateOverride = (process.env.BID_AUTOTEST_TEMPLATE_PATH ?? "").trim();
+
+  const datasetRoot =
+    datasetRootOverride ||
+    (await resolveFirstExisting(DEFAULT_DATASET_ROOT_CANDIDATES)) ||
+    DEFAULT_DATASET_ROOT_CANDIDATES[0];
+
+  const templatePath =
+    templateOverride ||
+    (await resolveFirstExisting(DEFAULT_TEMPLATE_PATH_CANDIDATES)) ||
+    DEFAULT_TEMPLATE_PATH_CANDIDATES[0];
+
+  if (!(await pathExists(datasetRoot))) {
+    throw new Error(
+      `Dataset root not found: ${datasetRoot}\nSet BID_AUTOTEST_DATASET_ROOT to override.`,
+    );
+  }
+  if (!(await pathExists(templatePath))) {
+    throw new Error(
+      `Template not found: ${templatePath}\nSet BID_AUTOTEST_TEMPLATE_PATH to override.`,
+    );
+  }
 
   const paths = {
     tenderDoc: join(datasetRoot, "招标文件1000万无线网络升级改造A326招标文件（政）最终版.doc"),

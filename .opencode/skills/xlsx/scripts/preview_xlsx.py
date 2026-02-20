@@ -22,7 +22,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import defusedxml.ElementTree as ET
+try:
+    import defusedxml.ElementTree as ET  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover
+    # `defusedxml` is optional in many environments. Fall back to stdlib so the
+    # script runs out-of-the-box; install `defusedxml` for hardened XML parsing.
+    import xml.etree.ElementTree as ET  # type: ignore
 
 
 NS_MAIN = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"

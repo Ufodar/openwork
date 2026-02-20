@@ -20,7 +20,12 @@ from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-import defusedxml.ElementTree as DET
+try:
+    import defusedxml.ElementTree as DET  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover
+    # `defusedxml` is optional in many environments. Fall back to stdlib so the
+    # script runs out-of-the-box; install `defusedxml` for hardened XML parsing.
+    import xml.etree.ElementTree as DET  # type: ignore
 
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 

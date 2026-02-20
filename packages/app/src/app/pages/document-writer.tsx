@@ -1507,23 +1507,40 @@ export default function DocumentWriterView(props: SessionViewProps) {
                       <div class="mt-1">
                         <For each={otherDocsList()}>
                           {(doc) => (
-                            <button
-                              class={`w-full rounded flex items-center mb-1 transition-colors ${documentsCollapsed() ? "justify-center p-2" : "text-left p-2 gap-2"
-                                } ${activeDoc() === doc.name
-                                  ? "bg-dls-hover text-dls-text"
-                                  : "text-dls-secondary hover:bg-dls-surface"
+                            <div
+                              class={`w-full rounded flex items-center mb-1 transition-colors ${activeDoc() === doc.name
+                                ? "bg-dls-hover text-dls-text"
+                                : "text-dls-secondary hover:bg-dls-surface"
                                 }`}
-                              onClick={() => {
-                                setTargetDoc(doc.name);
-                                setActiveDoc(doc.name);
-                              }}
-                              title={documentsCollapsed() ? doc.name : undefined}
                             >
-                              <FileText size={16} />
+                              <button
+                                type="button"
+                                class={`flex-1 flex items-center transition-colors ${documentsCollapsed() ? "justify-center p-2" : "text-left p-2 gap-2"
+                                  }`}
+                                onClick={() => setActiveDoc(doc.name)}
+                                title={documentsCollapsed() ? doc.name : undefined}
+                              >
+                                <FileText size={16} />
+                                <Show when={!documentsCollapsed()}>
+                                  <span class="truncate">{doc.name}</span>
+                                </Show>
+                              </button>
                               <Show when={!documentsCollapsed()}>
-                                <span class="truncate">{doc.name}</span>
+                                <button
+                                  type="button"
+                                  class="p-2 rounded hover:bg-dls-active text-dls-secondary hover:text-dls-text"
+                                  onClick={() => {
+                                    setTargetDoc(doc.name);
+                                    setActiveDoc(doc.name);
+                                    setConfigSeq((v) => v + 1);
+                                  }}
+                                  title="Set as target"
+                                  aria-label={`Set ${doc.name} as target`}
+                                >
+                                  <ArrowRight size={16} />
+                                </button>
                               </Show>
-                            </button>
+                            </div>
                           )}
                         </For>
                       </div>

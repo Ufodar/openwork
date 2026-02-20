@@ -189,6 +189,10 @@ function resolveBidFillTablesScriptPath(workspacePath: string): string {
     return join(workspacePath, ".opencode", "skills", "bid-drafting", "scripts", "fill_bid_tables_mvp.py");
 }
 
+function resolveBidTenderFactsScriptPath(workspacePath: string): string {
+    return join(workspacePath, ".opencode", "skills", "bid-drafting", "scripts", "tender_facts_mvp.py");
+}
+
 function resolveBidQcScriptPath(workspacePath: string): string {
     return join(workspacePath, ".opencode", "skills", "bid-drafting", "scripts", "qc_bid_mvp.py");
 }
@@ -809,6 +813,7 @@ export function createDocumentRoutes(routes: unknown[]) {
     // Assemble bid MVP modules (deterministic, report-driven)
     // - assemble: copy baseline bid forms into the target (DOCX -> DOCX, format-preserving)
     // - fill: fill pre-formatted tables from XLSX inputs (XLSX -> DOCX)
+    // - facts: extract "hard facts" from the tender and (optionally) fill the template (DOCX -> DOCX + JSON + report)
     // - qc: quality-check the current target doc (gate + report)
 
     routes.push({
@@ -886,7 +891,9 @@ export function createDocumentRoutes(routes: unknown[]) {
                 return items as DocHeading[];
             };
 
-            const findBestMatchIndex = (items: DocHeading[], needle: string) => {
+            type HeadingMatch = { occurrence: number; item: DocHeading };
+
+            const findBestMatch = (items: DocHeading[], needle: string): HeadingMatch | null => {
                 const matches = items
                     .map((item, idx) => ({ item, idx }))
                     .filter(({ item }) => {
@@ -896,7 +903,7 @@ export function createDocumentRoutes(routes: unknown[]) {
                         return text.startsWith(needle);
                     });
                 if (!matches.length) return null;
-                if (matches.length === 1) return 1;
+                if (matches.length === 1) return { occurrence: 1, item: matches[0].item };
 
                 // Prefer headings with the largest section size (TOC-like headings tend to have 0 elements).
                 matches.sort((a, b) => {
@@ -912,21 +919,11 @@ export function createDocumentRoutes(routes: unknown[]) {
                 // Compute occurrence among matches in document order.
                 const ordered = matches.slice().sort((a, b) => a.idx - b.idx);
                 const occurrence = ordered.findIndex((m) => m.idx === best.idx && (m.item.text ?? "") === bestText) + 1;
-                return occurrence > 0 ? occurrence : 1;
+                return { occurrence: occurrence > 0 ? occurrence : 1, item: best.item };
             };
 
             const targetHeadings = listHeadings(targetAbs);
             const partnerHeadings = listHeadings(partnerAbs);
-
-            const alreadyInTarget = (needle: string) => {
-                return targetHeadings.some((h) => {
-                    const text = (h.text ?? "").trim();
-                    if (!text) return false;
-                    if (matchMode === "exact") return text === needle;
-                    if (matchMode === "contains") return text.includes(needle);
-                    return text.startsWith(needle);
-                });
-            };
 
             const tmpDir = join(docsDir, ".tmp");
             await ensureDir(tmpDir);
@@ -938,13 +935,17 @@ export function createDocumentRoutes(routes: unknown[]) {
 
             try {
                 for (const heading of DEFAULT_BID_FORMS_HEADINGS) {
-                    if (!force && alreadyInTarget(heading)) {
-                        steps.push({ heading, skipped: true, warnings: [] });
+                    const targetMatch = findBestMatch(targetHeadings, heading);
+                    const targetElementCount = targetMatch && Number.isFinite(targetMatch.item.elementCount)
+                        ? Math.max(0, Math.trunc(targetMatch.item.elementCount ?? 0))
+                        : 0;
+                    if (!force && targetMatch && targetElementCount > 0) {
+                        steps.push({ heading, skipped: true, warnings: ["Target section appears non-empty"] });
                         continue;
                     }
 
-                    const sourceIdx = findBestMatchIndex(partnerHeadings, heading);
-                    if (!sourceIdx) {
+                    const sourceMatch = findBestMatch(partnerHeadings, heading);
+                    if (!sourceMatch) {
                         steps.push({ heading, skipped: true, warnings: ["Source heading not found"] });
                         continue;
                     }
@@ -963,8 +964,17 @@ export function createDocumentRoutes(routes: unknown[]) {
                         "--match-mode",
                         matchMode,
                         "--source-heading-index",
-                        String(sourceIdx),
+                        String(sourceMatch.occurrence),
                     ];
+                    if (targetMatch) {
+                        args.push(
+                            "--target-heading",
+                            heading,
+                            "--target-heading-index",
+                            String(targetMatch.occurrence),
+                            "--exclude-source-heading",
+                        );
+                    }
                     const result = spawnSync("python3", args, { encoding: "utf8", cwd: workspace.path });
                     if (result.status !== 0) {
                         await rm(stepOutput, { force: true }).catch(() => undefined);
@@ -1170,6 +1180,136 @@ export function createDocumentRoutes(routes: unknown[]) {
 
     routes.push({
         method: "POST",
+        regex: /^\/w\/([^/]+)\/bid\/facts$/,
+        keys: ["id"],
+        auth: "client",
+        handler: async (ctx: RequestContext) => {
+            const workspaceId = ctx.params.id;
+            const sessionId = parseDocumentSessionId(ctx.url.searchParams.get("session"));
+            if (!sessionId) throw new ApiError(400, "invalid_request", "session is required");
+
+            const targetDoc = (ctx.url.searchParams.get("doc") ?? "").trim();
+            if (!targetDoc) throw new ApiError(400, "invalid_request", "doc is required");
+
+            const workspace = ctx.config.workspaces.find((w: WorkspaceInfo) => w.id === workspaceId);
+            if (!workspace) throw new ApiError(404, "not_found", "Workspace not found");
+
+            const docsDir = resolveDocumentsDir(workspace.path, sessionId);
+            const targetAbs = resolveDocumentPathSafe(docsDir, targetDoc);
+            if (!(await exists(targetAbs))) throw new ApiError(404, "not_found", "Target document not found");
+            const targetExt = extname(targetAbs).toLowerCase();
+            if (targetExt !== ".docx") {
+                throw new ApiError(400, "unsupported_target", "bid/facts currently supports .docx targets only.");
+            }
+
+            const scriptPath = resolveBidTenderFactsScriptPath(workspace.path);
+            if (!(await exists(scriptPath))) {
+                throw new ApiError(500, "missing_dependency", "tender_facts_mvp.py is missing in this workspace");
+            }
+
+            const body = (await ctx.request.json().catch(() => null)) as any;
+            if (!body || typeof body !== "object") {
+                throw new ApiError(400, "invalid_payload", "Expected JSON body");
+            }
+
+            const tenderInboxId = typeof body.tenderInboxId === "string" ? body.tenderInboxId.trim() : "";
+            const applyToTarget = body.applyToTarget === undefined ? true : Boolean(body.applyToTarget);
+            const force = Boolean(body.force);
+            const ensureProjectInfoBlock = body.ensureProjectInfoBlock === undefined ? true : Boolean(body.ensureProjectInfoBlock);
+            if (!tenderInboxId) throw new ApiError(400, "invalid_request", "tenderInboxId is required");
+
+            const { absPath: tenderAbs } = await resolveSessionInboxFilePath({
+                workspace,
+                sessionId,
+                inboxId: tenderInboxId,
+            });
+            const tenderDocxAbs = await ensureDocxZipPath(workspace.path, tenderAbs);
+
+            const bidDir = join(docsDir, ".bid");
+            await ensureDir(bidDir);
+            const factsAbs = join(bidDir, "facts.json");
+
+            const tmpDir = join(docsDir, ".tmp");
+            await ensureDir(tmpDir);
+            const tmpTarget = join(tmpDir, `facts-${shortId()}.docx`);
+            const tmpFacts = join(tmpDir, `facts-${shortId()}.json`);
+            const tmpReport = join(tmpDir, `facts-${shortId()}.md`);
+
+            if (applyToTarget) {
+                await copyFile(targetAbs, tmpTarget);
+            }
+
+            const args = [
+                scriptPath,
+                "--tender-docx",
+                tenderDocxAbs,
+                "--out-facts",
+                tmpFacts,
+                "--out-report",
+                tmpReport,
+            ];
+            if (applyToTarget) {
+                args.push("--target-docx", tmpTarget);
+            }
+            if (force) {
+                args.push("--force");
+            }
+            if (applyToTarget && ensureProjectInfoBlock) {
+                args.push("--insert-block");
+            }
+
+            const result = spawnSync("python3", args, { encoding: "utf8", cwd: workspace.path });
+            const stdout = String(result.stdout || "").trim();
+            const stderr = String(result.stderr || "").trim();
+            if (result.status !== 0) {
+                await rm(tmpTarget, { force: true }).catch(() => undefined);
+                await rm(tmpFacts, { force: true }).catch(() => undefined);
+                await rm(tmpReport, { force: true }).catch(() => undefined);
+                throw new ApiError(400, "facts_failed", stderr || stdout || "Failed to extract tender facts", { stdout, stderr });
+            }
+
+            if (applyToTarget) {
+                await rename(tmpTarget, targetAbs);
+            }
+
+            await rename(tmpFacts, factsAbs);
+
+            const facts = await writeSessionArtifactFromFile({
+                workspace,
+                sessionId,
+                moduleId: "facts",
+                filename: "facts.json",
+                absSourcePath: factsAbs,
+            });
+
+            let reportContent = "";
+            if (await exists(tmpReport)) {
+                reportContent = await readFile(tmpReport, "utf8");
+            } else {
+                reportContent = [
+                    `# Tender facts report: ${basename(tenderDocxAbs)}`,
+                    "",
+                    "- No report content produced by tender_facts_mvp.py.",
+                    "",
+                ].join("\n");
+            }
+            reportContent += `\n\n## Artifacts\n\n- facts.json: \`${facts.inboxPath}\`\n`;
+
+            const report = await writeSessionReport({
+                workspace,
+                sessionId,
+                moduleId: "facts",
+                content: reportContent,
+            });
+
+            await rm(tmpReport, { force: true }).catch(() => undefined);
+
+            return jsonResponse({ ok: true, report, facts, stdout, stderr });
+        },
+    });
+
+    routes.push({
+        method: "POST",
         regex: /^\/w\/([^/]+)\/bid\/qc$/,
         keys: ["id"],
         auth: "client",
@@ -1197,7 +1337,14 @@ export function createDocumentRoutes(routes: unknown[]) {
                 throw new ApiError(500, "missing_dependency", "qc_bid_mvp.py is missing in this workspace");
             }
 
-            const result = spawnSync("python3", [scriptPath, "--docx", targetAbs], { encoding: "utf8", cwd: workspace.path });
+            const factsAbs = join(docsDir, ".bid", "facts.json");
+            const args = [scriptPath, "--docx", targetAbs];
+            const hasFacts = await exists(factsAbs);
+            if (hasFacts) {
+                args.push("--facts", factsAbs);
+            }
+
+            const result = spawnSync("python3", args, { encoding: "utf8", cwd: workspace.path });
             const stdout = String(result.stdout || "").trim();
             const stderr = String(result.stderr || "").trim();
             const passed = result.status === 0;
@@ -1207,6 +1354,7 @@ export function createDocumentRoutes(routes: unknown[]) {
                 "",
                 `- session: \`${sessionId}\``,
                 `- target: \`${targetDoc}\``,
+                `- facts: \`${hasFacts ? ".bid/facts.json" : "—"}\``,
                 `- result: **${passed ? "PASS" : "FAIL"}**`,
                 "",
                 "## Output",

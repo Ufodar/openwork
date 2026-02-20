@@ -169,6 +169,31 @@ const runAssembleForms = async (input: {
   });
 };
 
+const runTenderFacts = async (input: {
+  baseUrl: string;
+  token: string;
+  workspaceId: string;
+  sessionId: string;
+  targetDoc: string;
+  tenderInboxId: string;
+  applyToTarget?: boolean;
+  force?: boolean;
+}) => {
+  const url = new URL(`/w/${encodeURIComponent(input.workspaceId)}/bid/facts`, input.baseUrl);
+  url.searchParams.set("session", input.sessionId);
+  url.searchParams.set("doc", input.targetDoc);
+  const payload = {
+    tenderInboxId: input.tenderInboxId,
+    applyToTarget: input.applyToTarget === undefined ? true : Boolean(input.applyToTarget),
+    force: Boolean(input.force),
+  };
+  return await fetchJson(url.toString(), input.token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+};
+
 const runFillTables = async (input: {
   baseUrl: string;
   token: string;
@@ -324,6 +349,22 @@ const run = async () => {
   const tenderUpload = uploads.find((u) => u.label.startsWith("Tender"));
   const partnerUpload = uploads.find((u) => u.label.startsWith("Partner"));
   if (!tenderUpload || !partnerUpload) throw new Error("Missing tender/partner uploads");
+
+  report.push("## Tender facts (module: bid/facts)");
+  const facts = (await runTenderFacts({
+    baseUrl,
+    token,
+    workspaceId,
+    sessionId,
+    targetDoc: uploadedDoc.name,
+    tenderInboxId: tenderUpload.inboxId,
+    applyToTarget: true,
+    force: false,
+  })) as { report?: { inboxPath?: string }; facts?: { inboxPath?: string } };
+  report.push(`- Source: \`${tenderUpload.dest}\``);
+  report.push(`- facts.json: \`${facts?.facts?.inboxPath ?? "(missing)"}\``);
+  report.push(`- Report: \`${facts?.report?.inboxPath ?? "(missing)"}\``);
+  report.push("");
 
   report.push("## Assemble forms (module: bid/assemble)");
   const assemble = (await runAssembleForms({

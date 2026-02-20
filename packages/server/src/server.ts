@@ -766,7 +766,7 @@ function resolveOutboxEnabled(): boolean {
   return ["1", "true", "yes", "on"].includes(raw);
 }
 
-function resolveInboxMaxBytes(): number {
+export function resolveInboxMaxBytes(): number {
   // Keep this aligned with `startServer()`'s Bun `maxRequestBodySize` so
   // clients can upload large reference libraries without hitting surprise
   // limits in the app layer.

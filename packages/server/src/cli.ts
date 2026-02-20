@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { parseCliArgs, printHelp, resolveServerConfig } from "./config.js";
-import { createServerLogger, startServer } from "./server.js";
+import { createServerLogger, resolveInboxMaxBytes, startServer } from "./server.js";
 import pkg from "../package.json" with { type: "json" };
 
 const args = parseCliArgs(process.argv.slice(2));
@@ -22,6 +22,7 @@ const server = startServer(config);
 
 const url = `http://${config.host}:${server.port}`;
 logger.log("info", `OpenWork server listening on ${url}`);
+logger.log("info", `Inbox upload limit: ~${Math.round(resolveInboxMaxBytes() / 1_000_000)}MB (OPENWORK_INBOX_MAX_BYTES)`);
 
 if (config.tokenSource === "generated") {
   logger.log("info", `Client token: ${config.token}`);

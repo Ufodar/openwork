@@ -187,13 +187,19 @@ export default function DocumentWriterView(props: SessionViewProps) {
   const [sectionCopyTargetQuery, setSectionCopyTargetQuery] = createSignal("");
 
   const [modulesExpanded, setModulesExpanded] = createSignal(true);
-  const [moduleModal, setModuleModal] = createSignal<null | "assemble" | "fill" | "dedupe" | "qc" | "preview">(null);
+  const [moduleModal, setModuleModal] = createSignal<null | "assemble" | "facts" | "fill" | "dedupe" | "qc" | "preview">(null);
   const [assembleSource, setAssembleSource] = createSignal<InboxItem | null>(null);
   const [assembleMatchMode, setAssembleMatchMode] = createSignal<"contains" | "exact" | "startswith">("contains");
   const [assembleForce, setAssembleForce] = createSignal(false);
   const [assembleBusy, setAssembleBusy] = createSignal(false);
   const [assembleError, setAssembleError] = createSignal<string | null>(null);
   const [assembleQuery, setAssembleQuery] = createSignal("");
+  const [factsTenderSource, setFactsTenderSource] = createSignal<InboxItem | null>(null);
+  const [factsApplyToTarget, setFactsApplyToTarget] = createSignal(true);
+  const [factsForce, setFactsForce] = createSignal(false);
+  const [factsInsertBlock, setFactsInsertBlock] = createSignal(true);
+  const [factsBusy, setFactsBusy] = createSignal(false);
+  const [factsError, setFactsError] = createSignal<string | null>(null);
   const [fillTechXlsx, setFillTechXlsx] = createSignal<string>("");
   const [fillEquipXlsx, setFillEquipXlsx] = createSignal<string>("");
   const [fillBrand, setFillBrand] = createSignal("新华三");
@@ -344,6 +350,11 @@ export default function DocumentWriterView(props: SessionViewProps) {
         return true;
       })
       .filter((item) => isDocxSectionCopySource(item.path));
+  });
+
+  const tenderSources = createMemo(() => {
+    const byCategory = refsByCategory();
+    return (byCategory.tender ?? []).filter((item) => isDocxSectionCopySource(item.path));
   });
 
   const filteredModuleSources = createMemo(() => {
@@ -826,13 +837,14 @@ export default function DocumentWriterView(props: SessionViewProps) {
     }
   };
 
-  const openModule = (key: "assemble" | "fill" | "dedupe" | "qc" | "preview") => {
+  const openModule = (key: "assemble" | "facts" | "fill" | "dedupe" | "qc" | "preview") => {
     if (!serverReady()) return;
     if (!targetDoc()) {
       setToastMessage("Select a target document first.");
       return;
     }
     setAssembleError(null);
+    setFactsError(null);
     setFillError(null);
     setDedupeError(null);
     setPreviewError(null);
@@ -841,6 +853,10 @@ export default function DocumentWriterView(props: SessionViewProps) {
     if (key === "assemble" && !assembleSource()) {
       const first = moduleSources()[0] ?? null;
       setAssembleSource(first);
+    }
+    if (key === "facts" && !factsTenderSource()) {
+      const first = tenderSources()[0] ?? null;
+      setFactsTenderSource(first);
     }
     if (key === "dedupe" && dedupeSelected().size === 0) {
       const first = dedupeCandidates()[0];
@@ -852,6 +868,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
   const closeModule = () => {
     setModuleModal(null);
     setAssembleError(null);
+    setFactsError(null);
     setFillError(null);
     setDedupeError(null);
     setPreviewError(null);
@@ -943,6 +960,49 @@ export default function DocumentWriterView(props: SessionViewProps) {
       setFillError(message);
     } finally {
       setFillBusy(false);
+    }
+  };
+
+  const runFacts = async () => {
+    const cfg = apiConfig();
+    const doc = targetDoc();
+    const tender = factsTenderSource();
+    if (!cfg || !doc || !tender) return;
+    if (factsBusy()) return;
+    setFactsBusy(true);
+    setFactsError(null);
+
+    try {
+      if (activeDoc() !== doc) {
+        setActiveDoc(doc);
+      }
+      const query = new URLSearchParams();
+      query.set("session", cfg.sessionId);
+      query.set("doc", doc);
+      const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/bid/facts", query);
+      const payload = {
+        tenderInboxId: tender.id,
+        applyToTarget: factsApplyToTarget(),
+        force: factsForce(),
+        ensureProjectInfoBlock: factsInsertBlock(),
+      };
+      const result = (await fetchJson(url, cfg.token, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })) as { report?: { inboxId?: string; inboxPath?: string } };
+      const reportPath = typeof result?.report?.inboxPath === "string" ? result.report.inboxPath : "";
+      setToastMessage(reportPath ? "Facts complete (report saved)." : "Facts complete.");
+      closeModule();
+      setConfigSeq((v) => v + 1);
+      await refetchDocuments();
+      await refetchReports();
+      setReportsExpanded(true);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to extract tender facts";
+      setFactsError(message);
+    } finally {
+      setFactsBusy(false);
     }
   };
 
@@ -1510,6 +1570,16 @@ export default function DocumentWriterView(props: SessionViewProps) {
                     >
                       <Copy size={14} />
                       <span class="truncate">Assemble forms (DOCX→DOCX)</span>
+                    </button>
+                    <button
+                      type="button"
+                      class="w-full rounded-lg border border-dls-border bg-dls-surface px-2 py-2 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover disabled:opacity-50 flex items-center gap-2"
+                      onClick={() => openModule("facts")}
+                      disabled={!serverReady() || !targetDoc() || isAgentRunning() || factsBusy()}
+                      title="Extract key facts from the tender and fill the project info table"
+                    >
+                      <ArrowRight size={14} />
+                      <span class="truncate">Tender facts (DOCX→DOCX)</span>
                     </button>
                     <button
                       type="button"
@@ -2295,7 +2365,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
                     checked={assembleForce()}
                     onChange={(event) => setAssembleForce(event.currentTarget.checked)}
                   />
-                  Force insert even if target already contains the heading
+                  Force insert even if the target section appears non-empty
                 </label>
 
                 <Show when={assembleError()}>
@@ -2323,6 +2393,142 @@ export default function DocumentWriterView(props: SessionViewProps) {
               >
                 <Show when={!assembleBusy()} fallback={"Working…"}>
                   Assemble
+                </Show>
+              </button>
+            </div>
+          </div>
+        </div>
+      </Show>
+
+      <Show when={moduleModal() === "facts"}>
+        <div
+          class="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeModule();
+          }}
+        >
+          <div
+            class="w-full max-w-3xl rounded-2xl border border-dls-border bg-dls-surface shadow-2xl overflow-hidden"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div class="flex items-center justify-between px-4 py-3 border-b border-dls-border">
+              <div class="min-w-0">
+                <div class="text-sm font-semibold text-dls-text truncate">Tender facts</div>
+                <div class="mt-1 text-[11px] text-dls-secondary truncate">
+                  Target: {targetDoc() ?? "—"}
+                </div>
+              </div>
+              <button
+                type="button"
+                class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text"
+                onClick={closeModule}
+                aria-label="Close"
+                title="Close"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div class="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div class="min-w-0">
+                <div class="text-xs font-medium text-dls-text">Tender document (source of truth)</div>
+                <div class="mt-2 rounded-lg border border-dls-border overflow-hidden max-h-[360px] overflow-y-auto">
+                  <Show when={!refs.loading} fallback={<div class="p-3 text-xs text-dls-secondary">Loading…</div>}>
+                    <Show
+                      when={tenderSources().length > 0}
+                      fallback={<div class="p-3 text-xs text-dls-secondary">Upload the tender file to 招标文件.</div>}
+                    >
+                      <For each={tenderSources()}>
+                        {(item) => {
+                          const selected = createMemo(() => factsTenderSource()?.id === item.id);
+                          const name = () => item.path.split("/").pop() ?? item.path;
+                          return (
+                            <button
+                              type="button"
+                              class={`w-full text-left px-3 py-2 border-b border-dls-border/50 last:border-b-0 hover:bg-dls-hover ${selected() ? "bg-dls-active" : ""
+                                }`}
+                              onClick={() => setFactsTenderSource(item)}
+                              title={item.path}
+                            >
+                              <div class="flex items-start gap-2">
+                                <FileText size={14} class="shrink-0 text-dls-secondary mt-0.5" />
+                                <div class="min-w-0 flex-1">
+                                  <div class="text-xs text-dls-text truncate">{name()}</div>
+                                  <div class="mt-1 text-[10px] text-dls-secondary">{formatBytes(item.size)}</div>
+                                </div>
+                              </div>
+                            </button>
+                          );
+                        }}
+                      </For>
+                    </Show>
+                  </Show>
+                </div>
+              </div>
+
+              <div class="min-w-0 space-y-4">
+                <div>
+                  <div class="text-xs font-medium text-dls-text">What it does</div>
+                  <div class="mt-2 text-[11px] text-dls-secondary">
+                    Extracts project name/code, deadlines, amounts, and other hard facts from the tender file, then fills the project info table in your template (optional).
+                    Saves a facts.json + markdown report to Reports.
+                  </div>
+                </div>
+
+                <label class="flex items-center gap-2 text-xs text-dls-secondary">
+                  <input
+                    type="checkbox"
+                    checked={factsApplyToTarget()}
+                    onChange={(event) => setFactsApplyToTarget(event.currentTarget.checked)}
+                  />
+                  Apply to target (fill project info table)
+                </label>
+
+                <label class="flex items-center gap-2 text-xs text-dls-secondary">
+                  <input
+                    type="checkbox"
+                    checked={factsForce()}
+                    onChange={(event) => setFactsForce(event.currentTarget.checked)}
+                    disabled={!factsApplyToTarget()}
+                  />
+                  Force overwrite existing values
+                </label>
+
+                <label class="flex items-center gap-2 text-xs text-dls-secondary">
+                  <input
+                    type="checkbox"
+                    checked={factsInsertBlock()}
+                    onChange={(event) => setFactsInsertBlock(event.currentTarget.checked)}
+                    disabled={!factsApplyToTarget()}
+                  />
+                  Insert a filled project info block if the template has no placeholders
+                </label>
+
+                <Show when={factsError()}>
+                  <div class="rounded-lg border border-red-11/30 bg-red-3/20 px-3 py-2 text-xs text-red-11 whitespace-pre-wrap break-words">
+                    {factsError()}
+                  </div>
+                </Show>
+              </div>
+            </div>
+
+            <div class="px-4 py-3 border-t border-dls-border flex items-center justify-end gap-2">
+              <button
+                type="button"
+                class="rounded-lg border border-dls-border bg-dls-surface px-3 py-1.5 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover"
+                onClick={closeModule}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                class="rounded-lg border border-dls-border bg-dls-surface px-3 py-1.5 text-xs text-dls-text hover:bg-dls-hover disabled:opacity-50"
+                onClick={() => void runFacts()}
+                disabled={factsBusy() || !factsTenderSource()}
+                title={!factsTenderSource() ? "Select a tender document" : "Run facts extraction"}
+              >
+                <Show when={!factsBusy()} fallback={"Working…"}>
+                  Run facts
                 </Show>
               </button>
             </div>

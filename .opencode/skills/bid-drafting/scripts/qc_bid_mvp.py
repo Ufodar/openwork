@@ -15,7 +15,9 @@ from __future__ import annotations
 import argparse
 import re
 import zipfile
+import json
 from dataclasses import dataclass
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import defusedxml.ElementTree as DET
@@ -53,21 +55,138 @@ class TableStats:
     empty_counts: dict[str, int]
 
 
-def qc_docx(docx_path: Path) -> tuple[list[str], list[str], list[TableStats]]:
+def _norm_text(text: str) -> str:
+    return re.sub(r"\s+", "", (text or "").strip())
+
+
+def _extract_fact_values(payload: object) -> dict[str, str]:
+    if not isinstance(payload, dict):
+        return {}
+    facts = payload.get("facts")
+    if not isinstance(facts, dict):
+        return {}
+    out: dict[str, str] = {}
+    for key in [
+        "projectName",
+        "projectCode",
+        "budget",
+        "agency",
+        "deadline",
+        "openPlace",
+        "delivery",
+        "validity",
+        "bidBond",
+        "performanceBond",
+        "payment",
+    ]:
+        entry = facts.get(key)
+        if not isinstance(entry, dict):
+            continue
+        value = entry.get("value")
+        if isinstance(value, str) and value.strip():
+            out[key] = value.strip()
+    return out
+
+
+def qc_docx(docx_path: Path, facts_payload: object | None) -> tuple[list[str], list[str], list[TableStats], list[str]]:
     failures: list[str] = []
     warnings: list[str] = []
     stats: list[TableStats] = []
+    facts_lines: list[str] = []
 
     with zipfile.ZipFile(docx_path) as zf:
         xml = zf.read("word/document.xml")
     root = DET.fromstring(xml)
     body = root.find(w("body"))
     if body is None:
-        return (["Missing w:body"], [], [])
+        return (["Missing w:body"], [], [], [])
 
     full_text = _cell_text(body)
-    if re.search(r"<<\\s*TBD\\s*:", full_text, flags=re.IGNORECASE):
+    full_text_norm = _norm_text(full_text)
+    if re.search(r"<<\s*TBD\s*:", full_text, flags=re.IGNORECASE):
         failures.append("Found unresolved placeholders like <<TBD: ...>>")
+
+    fact_values = _extract_fact_values(facts_payload)
+    if fact_values:
+        facts_lines.append("## FACTS CHECK")
+        facts_lines.append("")
+        facts_lines.append(f"- facts loaded: `{len(fact_values)}` fields")
+        facts_lines.append("")
+
+        def require_contains(label: str, value: str) -> None:
+            needle = _norm_text(value)
+            ok = bool(needle) and needle in full_text_norm
+            facts_lines.append(f"- {label}: {'OK' if ok else 'NOT FOUND'}")
+            if not ok:
+                failures.append(f"Facts mismatch: {label} not found in target doc")
+
+        def warn_contains(label: str, value: str) -> None:
+            needle = _norm_text(value)
+            ok = bool(needle) and needle in full_text_norm
+            facts_lines.append(f"- {label}: {'OK' if ok else 'NOT FOUND'}")
+            if not ok:
+                warnings.append(f"Facts mismatch (warning): {label} not found in target doc")
+
+        if "projectName" in fact_values:
+            require_contains("项目名称", fact_values["projectName"])
+        else:
+            facts_lines.append("- 项目名称: MISSING (facts.json)")
+            warnings.append("Facts missing: 项目名称 (facts.json)")
+
+        if "projectCode" in fact_values:
+            require_contains("项目编号", fact_values["projectCode"])
+        else:
+            facts_lines.append("- 项目编号: MISSING (facts.json)")
+            warnings.append("Facts missing: 项目编号 (facts.json)")
+
+        if "deadline" in fact_values:
+            deadline = fact_values["deadline"]
+            # Prefer checking date portion to avoid formatting differences.
+            m = re.search(r"(\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)", deadline)
+            if m:
+                date_part = _norm_text(m.group(1))
+                ok = date_part in full_text_norm
+                facts_lines.append(f"- 投标截止/开标时间(日期): {'OK' if ok else 'NOT FOUND'}")
+                if not ok:
+                    failures.append("Facts mismatch: 投标截止/开标时间 (date) not found in target doc")
+
+                # Best-effort stale check.
+                m2 = re.search(r"(?P<y>\d{4})\s*年\s*(?P<m>\d{1,2})\s*月\s*(?P<d>\d{1,2})\s*日", deadline)
+                if m2:
+                    try:
+                        y = int(m2.group("y"))
+                        mo = int(m2.group("m"))
+                        da = int(m2.group("d"))
+                        parsed_date = date(y, mo, da)
+                        if parsed_date < datetime.now().date():
+                            warnings.append(f"Deadline appears to be in the past: {deadline}")
+                    except Exception:
+                        pass
+            else:
+                warn_contains("投标截止/开标时间", deadline)
+        else:
+            facts_lines.append("- 投标截止/开标时间: MISSING (facts.json)")
+            warnings.append("Facts missing: 投标截止/开标时间 (facts.json)")
+
+        # Remaining fields are useful but less strict for MVP.
+        if "budget" in fact_values:
+            warn_contains("预算金额", fact_values["budget"])
+        if "agency" in fact_values:
+            warn_contains("采购代理机构", fact_values["agency"])
+        if "openPlace" in fact_values:
+            warn_contains("开标地点", fact_values["openPlace"])
+        if "delivery" in fact_values:
+            warn_contains("交货期/工期", fact_values["delivery"])
+        if "validity" in fact_values:
+            warn_contains("投标有效期", fact_values["validity"])
+        if "bidBond" in fact_values:
+            warn_contains("投标保证金", fact_values["bidBond"])
+        if "performanceBond" in fact_values:
+            warn_contains("履约保证金", fact_values["performanceBond"])
+        if "payment" in fact_values:
+            warn_contains("付款方式", fact_values["payment"])
+
+        facts_lines.append("")
 
     # Basic heading duplication check (heuristic; may false-positive if TOC exists).
     for key in ["开标一览表", "开标分项一览表", "投标产品点对点应答表", "投标产品配置清单"]:
@@ -213,19 +332,29 @@ def qc_docx(docx_path: Path) -> tuple[list[str], list[str], list[TableStats]]:
         if not ok:
             failures.append(f"Missing required table: {key}")
 
-    return (failures, warnings, stats)
+    return (failures, warnings, stats, facts_lines)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="QC for bid MVP DOCX output")
     parser.add_argument("--docx", required=True, help="DOCX to check")
+    parser.add_argument("--facts", help="Optional facts JSON (from Tender facts module)")
     args = parser.parse_args()
 
     docx_path = Path(args.docx)
     if not docx_path.is_file() or docx_path.suffix.lower() != ".docx":
         raise SystemExit(f"--docx must be an existing .docx file: {docx_path}")
 
-    failures, warnings, stats = qc_docx(docx_path)
+    facts_payload: object | None = None
+    if args.facts:
+        facts_path = Path(args.facts)
+        if facts_path.is_file():
+            try:
+                facts_payload = json.loads(facts_path.read_text("utf-8"))
+            except Exception:
+                facts_payload = None
+
+    failures, warnings, stats, facts_lines = qc_docx(docx_path, facts_payload)
 
     print(f"# QC report: {docx_path.name}\n")
     if failures:
@@ -238,6 +367,8 @@ def main() -> int:
         for w in warnings:
             print(f"- {w}")
         print("")
+    if facts_lines:
+        print("\n".join(facts_lines))
     print("## TABLES")
     for s in stats:
         print(f"- {s.name}: rows={s.rows} empty={s.empty_counts}")

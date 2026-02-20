@@ -284,7 +284,15 @@ export default function App() {
   const [baseUrl, setBaseUrl] = createSignal("http://127.0.0.1:4096");
   const [clientDirectory, setClientDirectory] = createSignal("");
 
-  const [openworkServerSettings, setOpenworkServerSettings] = createSignal<OpenworkServerSettings>({});
+  const getInitialOpenworkServerSettings = (): OpenworkServerSettings => {
+    if (typeof window === "undefined") return {};
+    hydrateOpenworkServerSettingsFromEnv();
+    return readOpenworkServerSettings();
+  };
+
+  const [openworkServerSettings, setOpenworkServerSettings] = createSignal<OpenworkServerSettings>(
+    getInitialOpenworkServerSettings(),
+  );
   const [openworkServerUrl, setOpenworkServerUrl] = createSignal("");
   const [openworkServerStatus, setOpenworkServerStatus] = createSignal<OpenworkServerStatus>("disconnected");
   const [openworkServerCapabilities, setOpenworkServerCapabilities] = createSignal<OpenworkServerCapabilities | null>(null);

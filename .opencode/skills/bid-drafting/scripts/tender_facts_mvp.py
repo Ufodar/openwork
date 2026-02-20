@@ -590,6 +590,7 @@ def apply_facts_to_target(
     skipped: list[str] = []
 
     dirty = False
+    saw_placeholder_slot = False
 
     # 1) Prefer filling a key/value table if we can reliably detect one.
     if best_tbl is not None and best_score >= 3:
@@ -603,6 +604,7 @@ def apply_facts_to_target(
             key = label_to_key.get(ln)
             if not key:
                 continue
+            saw_placeholder_slot = True
             value = facts.get(key, {}).get("value")
             if not isinstance(value, str) or not value.strip():
                 continue
@@ -634,6 +636,7 @@ def apply_facts_to_target(
             m = pattern.match(raw)
             if not m:
                 continue
+            saw_placeholder_slot = True
             current = _squeeze_ws(m.group("val") or "")
             if current and not _is_placeholder_text(current) and not force:
                 if key not in skipped and key not in updated:
@@ -650,7 +653,7 @@ def apply_facts_to_target(
     # 3) Final fallback: insert a small, filled "项目基本信息" block at the top
     # if the template doesn't contain placeholders. This makes the module visibly useful
     # while keeping edits minimal and deterministic.
-    if insert_block and not dirty:
+    if insert_block and not dirty and not saw_placeholder_slot:
         ordered_keys = [
             "projectName",
             "projectCode",

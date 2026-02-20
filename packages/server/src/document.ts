@@ -1215,7 +1215,7 @@ export function createDocumentRoutes(routes: unknown[]) {
             const tenderInboxId = typeof body.tenderInboxId === "string" ? body.tenderInboxId.trim() : "";
             const applyToTarget = body.applyToTarget === undefined ? true : Boolean(body.applyToTarget);
             const force = Boolean(body.force);
-            const ensureProjectInfoBlock = body.ensureProjectInfoBlock === undefined ? true : Boolean(body.ensureProjectInfoBlock);
+            const ensureProjectInfoBlock = body.ensureProjectInfoBlock === undefined ? false : Boolean(body.ensureProjectInfoBlock);
             if (!tenderInboxId) throw new ApiError(400, "invalid_request", "tenderInboxId is required");
 
             const { absPath: tenderAbs } = await resolveSessionInboxFilePath({

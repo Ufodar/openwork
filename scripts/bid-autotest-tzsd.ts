@@ -197,6 +197,7 @@ const runTenderFacts = async (input: {
   tenderInboxId: string;
   applyToTarget?: boolean;
   force?: boolean;
+  ensureProjectInfoBlock?: boolean;
 }) => {
   const url = new URL(`/w/${encodeURIComponent(input.workspaceId)}/bid/facts`, input.baseUrl);
   url.searchParams.set("session", input.sessionId);
@@ -205,6 +206,7 @@ const runTenderFacts = async (input: {
     tenderInboxId: input.tenderInboxId,
     applyToTarget: input.applyToTarget === undefined ? true : Boolean(input.applyToTarget),
     force: Boolean(input.force),
+    ensureProjectInfoBlock: input.ensureProjectInfoBlock === undefined ? false : Boolean(input.ensureProjectInfoBlock),
   };
   return await fetchJson(url.toString(), input.token, {
     method: "POST",
@@ -390,22 +392,6 @@ const run = async () => {
   const partnerUpload = uploads.find((u) => u.label.startsWith("Partner"));
   if (!tenderUpload || !partnerUpload) throw new Error("Missing tender/partner uploads");
 
-  report.push("## Tender facts (module: bid/facts)");
-  const facts = (await runTenderFacts({
-    baseUrl,
-    token,
-    workspaceId,
-    sessionId,
-    targetDoc: uploadedDoc.name,
-    tenderInboxId: tenderUpload.inboxId,
-    applyToTarget: true,
-    force: false,
-  })) as { report?: { inboxPath?: string }; facts?: { inboxPath?: string } };
-  report.push(`- Source: \`${tenderUpload.dest}\``);
-  report.push(`- facts.json: \`${facts?.facts?.inboxPath ?? "(missing)"}\``);
-  report.push(`- Report: \`${facts?.report?.inboxPath ?? "(missing)"}\``);
-  report.push("");
-
   report.push("## Assemble forms (module: bid/assemble)");
   const assemble = (await runAssembleForms({
     baseUrl,
@@ -419,6 +405,23 @@ const run = async () => {
   })) as { report?: { inboxPath?: string } };
   report.push(`- Source: \`${partnerUpload.dest}\``);
   report.push(`- Report: \`${assemble?.report?.inboxPath ?? "(missing)"}\``);
+  report.push("");
+
+  report.push("## Tender facts (module: bid/facts)");
+  const facts = (await runTenderFacts({
+    baseUrl,
+    token,
+    workspaceId,
+    sessionId,
+    targetDoc: uploadedDoc.name,
+    tenderInboxId: tenderUpload.inboxId,
+    applyToTarget: true,
+    force: false,
+    ensureProjectInfoBlock: false,
+  })) as { report?: { inboxPath?: string }; facts?: { inboxPath?: string } };
+  report.push(`- Source: \`${tenderUpload.dest}\``);
+  report.push(`- facts.json: \`${facts?.facts?.inboxPath ?? "(missing)"}\``);
+  report.push(`- Report: \`${facts?.report?.inboxPath ?? "(missing)"}\``);
   report.push("");
 
   // Optional: pull a single tender section into the target for human reference.

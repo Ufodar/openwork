@@ -197,7 +197,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
   const [factsTenderSource, setFactsTenderSource] = createSignal<InboxItem | null>(null);
   const [factsApplyToTarget, setFactsApplyToTarget] = createSignal(true);
   const [factsForce, setFactsForce] = createSignal(false);
-  const [factsInsertBlock, setFactsInsertBlock] = createSignal(true);
+  const [factsInsertBlock, setFactsInsertBlock] = createSignal(false);
   const [factsBusy, setFactsBusy] = createSignal(false);
   const [factsError, setFactsError] = createSignal<string | null>(null);
   const [fillTechXlsx, setFillTechXlsx] = createSignal<string>("");
@@ -1594,6 +1594,16 @@ export default function DocumentWriterView(props: SessionViewProps) {
                     <button
                       type="button"
                       class="w-full rounded-lg border border-dls-border bg-dls-surface px-2 py-2 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover disabled:opacity-50 flex items-center gap-2"
+                      onClick={() => openModule("qc")}
+                      disabled={!serverReady() || !targetDoc() || qcBusy()}
+                      title="Run deterministic QC gate on the target document"
+                    >
+                      <CheckCircle2 size={14} />
+                      <span class="truncate">QC gate</span>
+                    </button>
+                    <button
+                      type="button"
+                      class="w-full rounded-lg border border-dls-border bg-dls-surface px-2 py-2 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover disabled:opacity-50 flex items-center gap-2"
                       onClick={() => openModule("dedupe")}
                       disabled={!serverReady() || !targetDoc() || isAgentRunning() || dedupeBusy()}
                       title="Compare multiple DOCX files for duplicate text and images"
@@ -1610,16 +1620,6 @@ export default function DocumentWriterView(props: SessionViewProps) {
                     >
                       <Download size={14} />
                       <span class="truncate">PDF preview (DOCX→PDF)</span>
-                    </button>
-                    <button
-                      type="button"
-                      class="w-full rounded-lg border border-dls-border bg-dls-surface px-2 py-2 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover disabled:opacity-50 flex items-center gap-2"
-                      onClick={() => openModule("qc")}
-                      disabled={!serverReady() || !targetDoc() || qcBusy()}
-                      title="Run deterministic QC gate on the target document"
-                    >
-                      <CheckCircle2 size={14} />
-                      <span class="truncate">QC gate</span>
                     </button>
                   </div>
 
@@ -2501,7 +2501,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
                     onChange={(event) => setFactsInsertBlock(event.currentTarget.checked)}
                     disabled={!factsApplyToTarget()}
                   />
-                  Insert a filled project info block if the template has no placeholders
+                  Insert a filled project info block if the template has no placeholders (not recommended)
                 </label>
 
                 <Show when={factsError()}>

@@ -61,6 +61,14 @@ def main() -> None:
                         help="How to match heading text (default: contains)")
     parser.add_argument("--exclude-source-heading", action="store_true",
                         help="Copy section content without the source heading paragraph")
+    parser.add_argument("--page-break-before", action="store_true",
+                        help="Insert a page break before the inserted content when appropriate")
+    parser.add_argument("--max-paragraphs", type=int,
+                        help="Abort if the copied section exceeds this number of paragraphs")
+    parser.add_argument("--max-tables", type=int,
+                        help="Abort if the copied section exceeds this number of tables")
+    parser.add_argument("--max-body-elements", type=int,
+                        help="Abort if the copied section spans this many body elements (paragraphs/tables)")
     args = parser.parse_args()
 
     if args.list_headings:
@@ -102,6 +110,10 @@ def main() -> None:
             source_heading_index=args.source_heading_index,
             target_heading_index=args.target_heading_index,
             exclude_source_heading=args.exclude_source_heading,
+            page_break_before=bool(args.page_break_before),
+            max_paragraphs=args.max_paragraphs,
+            max_tables=args.max_tables,
+            max_body_elements=args.max_body_elements,
         )
     except FileNotFoundError as e:
         print(f"ERROR: File not found: {e}", file=sys.stderr)

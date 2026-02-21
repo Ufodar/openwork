@@ -79,6 +79,17 @@ FACT_SPECS: dict[str, dict[str, object]] = {
     "payment": {"label": "付款方式", "aliases": ["付款方式", "付款方式摘要", "付款方式（摘要）"]},
 }
 
+# Common bid template anchors where we prefer to insert the "project info" block.
+# This is intentionally small and deterministic; when anchors are missing we fall back
+# to inserting near the start of the document body.
+PROJECT_INFO_INSERT_ANCHORS = (
+    "开标一览表",
+    "开标分项一览表",
+    "投标产品点对点应答表",
+    "投标产品配置清单",
+    "售后服务承诺",
+)
+
 
 def _match_quality(label_norm: str, aliases: list[str]) -> int:
     """
@@ -545,6 +556,110 @@ def _is_placeholder_text(text: str) -> bool:
     return value in {"-", "—", "— —"}
 
 
+def _make_run(text: str, *, bold: bool = False) -> ET.Element:
+    r = ET.Element(w("r"))
+    if bold:
+        rpr = ET.Element(w("rPr"))
+        rpr.append(ET.Element(w("b")))
+        r.append(rpr)
+    t = ET.Element(w("t"))
+    t.text = text
+    r.append(t)
+    return r
+
+
+def _make_para(text: str, *, bold: bool = False) -> ET.Element:
+    p = ET.Element(w("p"))
+    p.append(_make_run(text, bold=bold))
+    return p
+
+
+def _make_cell(text: str, *, bold: bool = False) -> ET.Element:
+    tc = ET.Element(w("tc"))
+    tc.append(_make_para(text, bold=bold))
+    return tc
+
+
+def _find_insert_index(body) -> int:
+    children = list(body)
+    end = len(children)
+    if end and children[-1].tag == w("sectPr"):
+        end -= 1
+
+    anchors = {_norm(a) for a in PROJECT_INFO_INSERT_ANCHORS}
+    for idx, child in enumerate(children[:end]):
+        if child.tag != w("p"):
+            continue
+        raw = _squeeze_ws(_cell_text(child))
+        if not raw:
+            continue
+        if _norm(raw) in anchors:
+            return idx
+
+    # Fallback: insert after leading empty/bookmark paragraphs.
+    idx = 0
+    while idx < end:
+        child = children[idx]
+        if child.tag != w("p"):
+            break
+        if _squeeze_ws(_cell_text(child)):
+            break
+        idx += 1
+    return idx
+
+
+def _is_project_info_heading(text: str) -> bool:
+    normalized = _norm(text)
+    return bool(normalized) and ("项目基本信息" in normalized) and ("自动提取" in normalized)
+
+
+def _is_project_info_table(tbl: ET.Element) -> bool:
+    trs = list(tbl.findall(w("tr")))
+    if not trs:
+        return False
+    tcs = list(trs[0].findall(w("tc")))
+    if len(tcs) < 2:
+        return False
+    left = _norm(_cell_text(tcs[0]))
+    right = _norm(_cell_text(tcs[1]))
+    return left == _norm("项目属性") and right == _norm("内容")
+
+
+def _build_project_info_table(lines: list[str]) -> ET.Element:
+    # Render a compact, two-column table (more professional than raw paragraphs).
+    tbl = ET.Element(w("tbl"))
+
+    tbl_pr = ET.Element(w("tblPr"))
+    tbl_borders = ET.Element(w("tblBorders"))
+    for side in ["top", "left", "bottom", "right", "insideH", "insideV"]:
+        border = ET.Element(w(side))
+        border.set(w("val"), "single")
+        border.set(w("sz"), "4")
+        border.set(w("space"), "0")
+        border.set(w("color"), "auto")
+        tbl_borders.append(border)
+    tbl_pr.append(tbl_borders)
+    tbl.append(tbl_pr)
+
+    # Header row
+    tr0 = ET.Element(w("tr"))
+    tr0.append(_make_cell("项目属性", bold=True))
+    tr0.append(_make_cell("内容", bold=True))
+    tbl.append(tr0)
+
+    for line in lines:
+        if "：" in line:
+            label, val = line.split("：", 1)
+        else:
+            label, val = line, ""
+        tr = ET.Element(w("tr"))
+        tr.append(_make_cell(label.strip(), bold=True))
+        tr.append(_make_cell(val.strip(), bold=False))
+        tbl.append(tr)
+
+    return tbl
+
+
 def apply_facts_to_target(
     target_docx: Path,
     facts: dict[str, dict[str, object]],
@@ -557,6 +672,30 @@ def apply_facts_to_target(
     Returns (updated_fields, skipped_fields).
     """
     root, body = _parse_docx_body(target_docx)
+    children = list(body)
+
+    existing_block_heading: ET.Element | None = None
+    existing_block_heading_idx: int | None = None
+    existing_block_table: ET.Element | None = None
+    existing_block_table_idx: int | None = None
+    for idx, child in enumerate(children):
+        if child.tag != w("p"):
+            continue
+        raw = _squeeze_ws(_cell_text(child))
+        if not raw:
+            continue
+        if not _is_project_info_heading(raw):
+            continue
+        existing_block_heading = child
+        existing_block_heading_idx = idx
+        for j in range(idx + 1, min(idx + 12, len(children))):
+            if children[j].tag != w("tbl"):
+                continue
+            if _is_project_info_table(children[j]):
+                existing_block_table = children[j]
+                existing_block_table_idx = j
+                break
+        break
 
     label_to_key: dict[str, str] = {}
     for key, spec in FACT_SPECS.items():
@@ -571,7 +710,10 @@ def apply_facts_to_target(
     best_tbl = None
     best_score = 0
     for tbl in tbls:
-        score = 0
+        # Use *unique* fact keys to score a candidate key/value table.
+        # (A table that repeats "项目名称" multiple times should not outscore
+        # a real project-info table with diverse fields.)
+        found_keys: set[str] = set()
         trs = list(tbl.findall(w("tr")))
         for tr in trs:
             tcs = list(tr.findall(w("tc")))
@@ -580,8 +722,10 @@ def apply_facts_to_target(
             ln = _norm(_cell_text(tcs[0]))
             if not ln:
                 continue
-            if ln in label_to_key:
-                score += 1
+            key = label_to_key.get(ln)
+            if key:
+                found_keys.add(key)
+        score = len(found_keys)
         if score > best_score:
             best_score = score
             best_tbl = tbl
@@ -650,10 +794,20 @@ def apply_facts_to_target(
             break
 
     inserted_block = False
-    # 3) Final fallback: insert a small, filled "项目基本信息" block at the top
-    # if the template doesn't contain placeholders. This makes the module visibly useful
-    # while keeping edits minimal and deterministic.
-    if insert_block and not dirty and not saw_placeholder_slot:
+    # Only suppress auto-block insertion when we have strong evidence the template
+    # already contains a real project-info key/value table (diverse fields).
+    has_dedicated_kv_table = best_tbl is not None and best_score >= 4
+
+    # 3) Ensure a filled "项目基本信息（自动提取）" block exists.
+    #
+    # This is intentionally *not* tied to placeholder detection. In real bids the
+    # template (or copied partner forms) may already contain hardcoded values,
+    # which would otherwise cause us to skip insertion and hide the extracted facts.
+    #
+    # To avoid cluttering professional templates that already provide a dedicated
+    # project-info key/value table, we only insert the block when such a table is
+    # not detected. If the auto block already exists, we update it in-place.
+    if insert_block:
         ordered_keys = [
             "projectName",
             "projectCode",
@@ -668,6 +822,7 @@ def apply_facts_to_target(
             "payment",
         ]
 
+        block_keys: list[str] = []
         lines: list[str] = []
         for key in ordered_keys:
             value = facts.get(key, {}).get("value")
@@ -675,37 +830,58 @@ def apply_facts_to_target(
                 continue
             label = str(FACT_SPECS.get(key, {}).get("label", key))
             lines.append(f"{label}：{_squeeze_ws(value)}")
-            if key not in updated:
-                updated.append(key)
+            block_keys.append(key)
 
         if lines:
-            block: list[ET.Element] = []
-            block.append(ET.Element(w("p")))
-            # Heading-ish line
-            p0 = ET.Element(w("p"))
-            r0 = ET.Element(w("r"))
-            t0 = ET.Element(w("t"))
-            t0.text = "项目基本信息（自动提取）"
-            r0.append(t0)
-            p0.append(r0)
-            block.append(p0)
-            block.append(ET.Element(w("p")))
-            for line in lines:
-                p = ET.Element(w("p"))
-                r = ET.Element(w("r"))
-                t = ET.Element(w("t"))
-                t.text = line
-                r.append(t)
-                p.append(r)
-                block.append(p)
-            block.append(ET.Element(w("p")))
+            tbl = _build_project_info_table(lines)
+            applied_block = False
 
-            # Insert before all existing content (but keep final sectPr at end).
-            insert_at = 0
-            for elem in reversed(block):
-                body.insert(insert_at, elem)
-            dirty = True
-            inserted_block = True
+            if existing_block_heading is not None:
+                # Update existing auto block.
+                raw_heading = _squeeze_ws(_cell_text(existing_block_heading))
+                if raw_heading != "项目基本信息（自动提取）":
+                    _replace_p_text(existing_block_heading, "项目基本信息（自动提取）")
+                    dirty = True
+                    applied_block = True
+
+                if existing_block_table is not None:
+                    # Replace the existing table in-place.
+                    try:
+                        idx = list(body).index(existing_block_table)
+                    except ValueError:
+                        idx = None
+                    if idx is not None:
+                        body.remove(existing_block_table)
+                        body.insert(idx, tbl)
+                        dirty = True
+                        applied_block = True
+                else:
+                    insert_at = (existing_block_heading_idx + 1) if existing_block_heading_idx is not None else _find_insert_index(body)
+                    body.insert(insert_at, ET.Element(w("p")))
+                    body.insert(insert_at + 1, tbl)
+                    body.insert(insert_at + 2, ET.Element(w("p")))
+                    dirty = True
+                    applied_block = True
+
+            elif not has_dedicated_kv_table:
+                insert_at = _find_insert_index(body)
+                block: list[ET.Element] = [
+                    ET.Element(w("p")),
+                    _make_para("项目基本信息（自动提取）", bold=True),
+                    ET.Element(w("p")),
+                    tbl,
+                    ET.Element(w("p")),
+                ]
+                for elem in reversed(block):
+                    body.insert(insert_at, elem)
+                dirty = True
+                inserted_block = True
+                applied_block = True
+
+            if applied_block:
+                for key in block_keys:
+                    if key not in updated:
+                        updated.append(key)
 
     if dirty:
         # Write back document.xml
@@ -768,11 +944,20 @@ def render_report(
             for k in updated:
                 lines.append(f"  - {FACT_SPECS[k]['label']}")
             if skipped:
-                lines.append(f"- Skipped (already filled): {len(skipped)} fields")
-                for k in skipped:
-                    lines.append(f"  - {FACT_SPECS[k]['label']}")
+                skipped_and_filled = [k for k in skipped if k in updated]
+                skipped_only = [k for k in skipped if k not in updated]
+
+                if skipped_only:
+                    lines.append(f"- Skipped (already filled): {len(skipped_only)} fields")
+                    for k in skipped_only:
+                        lines.append(f"  - {FACT_SPECS[k]['label']}")
+
+                if skipped_and_filled and inserted_block:
+                    lines.append(f"- Skipped overwrite in template slots (also included in auto block): {len(skipped_and_filled)} fields")
+                    for k in skipped_and_filled:
+                        lines.append(f"  - {FACT_SPECS[k]['label']}")
         if inserted_block:
-            lines.append("- Inserted a filled project info block at the top (template had no placeholders).")
+            lines.append("- Inserted a filled project info block into the template.")
         lines.append("")
 
     if warnings:

@@ -197,7 +197,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
   const [factsTenderSource, setFactsTenderSource] = createSignal<InboxItem | null>(null);
   const [factsApplyToTarget, setFactsApplyToTarget] = createSignal(true);
   const [factsForce, setFactsForce] = createSignal(false);
-  const [factsInsertBlock, setFactsInsertBlock] = createSignal(false);
+  const [factsInsertBlock, setFactsInsertBlock] = createSignal(true);
   const [factsBusy, setFactsBusy] = createSignal(false);
   const [factsError, setFactsError] = createSignal<string | null>(null);
   const [fillTechXlsx, setFillTechXlsx] = createSignal<string>("");
@@ -2518,7 +2518,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
                     onChange={(event) => setFactsInsertBlock(event.currentTarget.checked)}
                     disabled={!factsApplyToTarget()}
                   />
-                  Insert a filled project info block if the template has no placeholders (not recommended)
+                  Insert a filled project info block if the template has no placeholders (recommended)
                 </label>
 
                 <Show when={factsError()}>

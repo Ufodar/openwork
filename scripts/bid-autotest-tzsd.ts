@@ -206,7 +206,7 @@ const runTenderFacts = async (input: {
     tenderInboxId: input.tenderInboxId,
     applyToTarget: input.applyToTarget === undefined ? true : Boolean(input.applyToTarget),
     force: Boolean(input.force),
-    ensureProjectInfoBlock: input.ensureProjectInfoBlock === undefined ? false : Boolean(input.ensureProjectInfoBlock),
+    ensureProjectInfoBlock: input.ensureProjectInfoBlock === undefined ? true : Boolean(input.ensureProjectInfoBlock),
   };
   return await fetchJson(url.toString(), input.token, {
     method: "POST",
@@ -417,7 +417,7 @@ const run = async () => {
     tenderInboxId: tenderUpload.inboxId,
     applyToTarget: true,
     force: false,
-    ensureProjectInfoBlock: false,
+    ensureProjectInfoBlock: true,
   })) as { report?: { inboxPath?: string }; facts?: { inboxPath?: string } };
   report.push(`- Source: \`${tenderUpload.dest}\``);
   report.push(`- facts.json: \`${facts?.facts?.inboxPath ?? "(missing)"}\``);

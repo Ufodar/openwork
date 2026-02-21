@@ -766,7 +766,11 @@ def copy_section(source_path: str, target_path: str, output_path: str,
                  match_mode: str = "contains",
                  source_heading_index: Optional[int] = None,
                  target_heading_index: Optional[int] = None,
-                 exclude_source_heading: bool = False) -> CopyResult:
+                 exclude_source_heading: bool = False,
+                 page_break_before: bool = False,
+                 max_paragraphs: Optional[int] = None,
+                 max_tables: Optional[int] = None,
+                 max_body_elements: Optional[int] = None) -> CopyResult:
     """Copy a section from source DOCX to target DOCX.
 
     Args:
@@ -780,6 +784,12 @@ def copy_section(source_path: str, target_path: str, output_path: str,
         target_heading_index: 1-based index for disambiguating target heading matches.
         match_mode: 'exact', 'contains', or 'startswith'
         exclude_source_heading: If true, copy section content without the source heading paragraph.
+        page_break_before: If true, insert a page break paragraph before the inserted content when
+                           there's already visible content before the insertion point.
+        max_paragraphs: Abort if the copied section contains more than this many paragraphs.
+        max_tables: Abort if the copied section contains more than this many tables.
+        max_body_elements: Abort if the section spans more than this many top-level body elements
+                           (paragraphs/tables). This helps catch heading-boundary mistakes.
 
     Returns:
         CopyResult with counts and warnings.
@@ -791,7 +801,8 @@ def copy_section(source_path: str, target_path: str, output_path: str,
         return _copy_section_impl(source_zip, source_path, target_path, output_path,
                                   source_heading, target_heading, match_mode, result,
                                   source_heading_index, target_heading_index,
-                                  exclude_source_heading)
+                                  exclude_source_heading, page_break_before,
+                                  max_paragraphs, max_tables, max_body_elements)
 
 
 def _copy_section_impl(source_zip: zipfile.ZipFile, source_path: str,
@@ -800,7 +811,11 @@ def _copy_section_impl(source_zip: zipfile.ZipFile, source_path: str,
                        match_mode: str, result: CopyResult,
                        source_heading_index: Optional[int],
                        target_heading_index: Optional[int],
-                       exclude_source_heading: bool) -> CopyResult:
+                       exclude_source_heading: bool,
+                       page_break_before: bool,
+                       max_paragraphs: Optional[int],
+                       max_tables: Optional[int],
+                       max_body_elements: Optional[int]) -> CopyResult:
     """Internal implementation of copy_section with source_zip already open."""
     source_doc_xml = source_zip.read("word/document.xml")
     source_root = DET.fromstring(source_doc_xml)
@@ -866,6 +881,24 @@ def _copy_section_impl(source_zip: zipfile.ZipFile, source_path: str,
             result.paragraphs += 1
         elif elem.tag == W_TAG_TBL:
             result.tables += 1
+
+    # Guardrails: prevent accidental "copy the rest of the document" explosions.
+    body_span = max(0, bounds.end - bounds.start)
+    if max_body_elements is not None and body_span > max_body_elements:
+        raise ValueError(
+            f"Refusing to copy '{source_heading}': section spans {body_span} body elements "
+            f"(limit {max_body_elements}). This likely indicates a heading boundary detection issue."
+        )
+    if max_paragraphs is not None and result.paragraphs > max_paragraphs:
+        raise ValueError(
+            f"Refusing to copy '{source_heading}': section has {result.paragraphs} paragraphs "
+            f"(limit {max_paragraphs})."
+        )
+    if max_tables is not None and result.tables > max_tables:
+        raise ValueError(
+            f"Refusing to copy '{source_heading}': section has {result.tables} tables "
+            f"(limit {max_tables})."
+        )
 
     # --- Scan dependencies ---
     deps = _scan_dependencies(section_elements)
@@ -996,6 +1029,36 @@ def _copy_section_impl(source_zip: zipfile.ZipFile, source_path: str,
             else:
                 result.warnings.append(
                     f"Target heading '{target_heading}' not found. Appending at end.")
+
+        def _has_visible_content_before(index: int) -> bool:
+            for child in target_children[: max(0, index)]:
+                if child.tag == W_TAG_TBL:
+                    return True
+                if child.tag == W_TAG_P and _node_text(child).strip():
+                    return True
+            return False
+
+        def _is_page_break_para(p: ET.Element) -> bool:
+            if p.tag != W_TAG_P:
+                return False
+            for br in p.iter(f"{{{NS['w']}}}br"):
+                btype = br.get(f"{{{NS['w']}}}type") or br.get("w:type") or ""
+                if btype == "page":
+                    return True
+            return False
+
+        def _make_page_break_para() -> ET.Element:
+            p = ET.Element(W_TAG_P)
+            r = ET.SubElement(p, f"{{{NS['w']}}}r")
+            br = ET.SubElement(r, f"{{{NS['w']}}}br")
+            br.set(f"{{{NS['w']}}}type", "page")
+            return p
+
+        if page_break_before and _has_visible_content_before(insert_index):
+            prev = target_children[insert_index - 1] if insert_index - 1 >= 0 else None
+            if not (prev is not None and _is_page_break_para(prev)):
+                target_body.insert(insert_index, _make_page_break_para())
+                insert_index += 1
 
         # --- Insert elements into target body ---
         for i, elem in enumerate(copied_elements):

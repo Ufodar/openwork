@@ -96,6 +96,13 @@ def _set_cell_text(tc: ET.Element, text: str) -> None:
     template_pPr = copy.deepcopy(template_p.find(w("pPr"))) if template_p is not None and template_p.find(w("pPr")) is not None else None
     template_rPr = copy.deepcopy(template_r.find(w("rPr"))) if template_r is not None and template_r.find(w("rPr")) is not None else None
 
+    # Many bid templates use highlight to mark "needs manual fill" fields.
+    # When we programmatically fill a cell, remove highlight markers so the
+    # output looks like a real deliverable draft.
+    if template_rPr is not None:
+        for hl in list(template_rPr.findall(w("highlight"))):
+            template_rPr.remove(hl)
+
     for child in list(tc):
         if tcPr is not None and child is tcPr:
             continue
@@ -403,7 +410,9 @@ def fill_docx_tables(
                     detail = (r[3] or "").strip()
                     # Keep the table readable: avoid dumping huge spec blobs into a summary list.
                     if len(detail) > 200:
-                        detail = "详见技术应答表"
+                        detail = detail[:200].rstrip() + "…"
+                    if not detail:
+                        detail = "按招标文件要求提供，技术应答表逐条响应。"
                     new_rows.append([str(i), r[1], r[2], detail])
                 inserted, wns = _fill_table_replace_rows(
                     tbl=tbl,
@@ -412,7 +421,7 @@ def fill_docx_tables(
                     keep_first_data_row_if_contains="无线网络可视交互平台",
                     kept_row_updates={
                         2: spec_placeholder,
-                        3: "详见技术应答表",
+                        3: "按招标文件要求提供，技术应答表逐条响应。",
                     },
                 )
                 filled.append(f"投标产品配置清单 (+{inserted} rows)")
@@ -469,7 +478,7 @@ def fill_docx_tables(
                         3: spec_placeholder,
                         4: manufacturer,
                         5: origin,
-                        6: "详见技术应答表",
+                        6: "按招标文件要求提供，技术应答表逐条响应。",
                         7: price_placeholder,
                         8: "1",
                         9: "套",
@@ -535,6 +544,8 @@ def fill_docx_tables(
                 # Cap very long cells (keeps the table readable; details can live elsewhere).
                 normalized_rows: list[list[str]] = []
                 for idx, (item, content) in enumerate(merged, start=1):
+                    if not content:
+                        content = "无"
                     if len(content) > 400:
                         content = content[:400].rstrip() + "…（详见售后服务章节）"
                     normalized_rows.append([str(idx), item, content])

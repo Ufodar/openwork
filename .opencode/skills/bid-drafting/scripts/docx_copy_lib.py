@@ -186,6 +186,16 @@ def _strip_duplicate_leading_heading(section_elements: List[ET.Element]) -> bool
     return True
 
 
+def _strip_highlights(element: ET.Element) -> int:
+    """Remove run highlight markers (w:highlight) from an element tree."""
+    removed = 0
+    for rpr in element.iter(f"{{{NS['w']}}}rPr"):
+        for hl in list(rpr.findall("w:highlight", NS)):
+            rpr.remove(hl)
+            removed += 1
+    return removed
+
+
 # ---------------------------------------------------------------------------
 # Data structures
 # ---------------------------------------------------------------------------
@@ -1005,10 +1015,16 @@ def _copy_section_impl(source_zip: zipfile.ZipFile, source_path: str,
 
         # --- Deep copy and remap elements ---
         copied_elements: List[ET.Element] = []
+        stripped_highlights = 0
         for elem in section_elements:
             new_elem = copy.deepcopy(elem)
             _remap_element(new_elem, rel_map, num_map, bm_map)
+            stripped_highlights += _strip_highlights(new_elem)
             copied_elements.append(new_elem)
+        if stripped_highlights:
+            result.warnings.append(
+                f"Stripped {stripped_highlights} highlight markers (w:highlight) from copied content."
+            )
 
         # --- Find insertion point in target ---
         target_headings = list_headings(target_path)

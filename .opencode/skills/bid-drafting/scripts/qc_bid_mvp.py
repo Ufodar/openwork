@@ -63,6 +63,56 @@ class TableStats:
 def _norm_text(text: str) -> str:
     return re.sub(r"\s+", "", (text or "").strip())
 
+_PLACEHOLDER_EXACT = {
+    "详见报价文件",
+    "详见开标分项一览表",
+    "详见技术应答表",
+    "详见投标文件",
+    "见报价文件",
+    "见投标文件",
+    "见技术应答表",
+    "待定",
+    "待确认",
+    "未填写",
+    "未填",
+    "-",
+    "—",
+    "——",
+    "--",
+}
+
+
+def _is_placeholder(value: str) -> bool:
+    v = (value or "").strip()
+    if not v:
+        return True
+    if re.search(r"<<\s*TBD\s*:", v, flags=re.IGNORECASE):
+        return True
+    if v in _PLACEHOLDER_EXACT:
+        return True
+    # Treat short "see ..." directives as placeholders, but allow longer
+    # explanatory content that happens to contain cross-references.
+    if (v.startswith("详见") or v.startswith("见")) and len(v) <= 32:
+        return True
+    if re.fullmatch(r"[-—_]+", v):
+        return True
+    return False
+
+
+def _has_digits(value: str) -> bool:
+    return bool(re.search(r"\d", (value or "")))
+
+
+def _collect_highlights(node) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for hl in node.iter(w("highlight")):
+        val = hl.get(w("val")) or hl.get("w:val") or ""
+        val = (val or "").strip().lower()
+        if not val or val in {"none", "auto"}:
+            continue
+        counts[val] = counts.get(val, 0) + 1
+    return counts
+
 
 def _extract_fact_values(payload: object) -> dict[str, str]:
     if not isinstance(payload, dict):
@@ -110,6 +160,17 @@ def qc_docx(docx_path: Path, facts_payload: object | None) -> tuple[list[str], l
     full_text_norm = _norm_text(full_text)
     if re.search(r"<<\s*TBD\s*:", full_text, flags=re.IGNORECASE):
         failures.append("Found unresolved placeholders like <<TBD: ...>>")
+    if "详见报价文件" in full_text:
+        failures.append("Found placeholder text '详见报价文件' in target doc")
+
+    highlight_counts = _collect_highlights(body)
+    if highlight_counts:
+        counts_str = ", ".join([f"{k}:{v}" for k, v in sorted(highlight_counts.items())])
+        # In bid templates, highlight (especially red) almost always means "needs manual fill".
+        if "red" in highlight_counts:
+            failures.append(f"Found highlighted text (likely unfilled fields): {counts_str}")
+        else:
+            warnings.append(f"Found highlighted text: {counts_str}")
 
     fact_values = _extract_fact_values(facts_payload)
     if fact_values:
@@ -194,7 +255,7 @@ def qc_docx(docx_path: Path, facts_payload: object | None) -> tuple[list[str], l
         facts_lines.append("")
 
     # Basic heading duplication check (heuristic; may false-positive if TOC exists).
-    for key in ["开标一览表", "开标分项一览表", "投标产品点对点应答表", "投标产品配置清单"]:
+    for key in ["开标一览表", "开标分项一览表", "投标产品点对点应答表", "投标产品配置清单", "售后服务承诺"]:
         # Count paragraph-level occurrences to avoid false positives (e.g. notes that mention a form name).
         para_count = 0
         for p in body.findall(w("p")):
@@ -202,7 +263,16 @@ def qc_docx(docx_path: Path, facts_payload: object | None) -> tuple[list[str], l
             if txt == key:
                 para_count += 1
         if para_count > 1:
-            warnings.append(f"Heading '{key}' appears {para_count} times (possible duplication).")
+            failures.append(f"Heading '{key}' appears {para_count} times (duplication).")
+
+    auto_block_title = "项目基本信息（自动提取）"
+    auto_block_count = 0
+    for p in body.findall(w("p")):
+        txt = (_cell_text(p) or "").strip()
+        if txt == auto_block_title:
+            auto_block_count += 1
+    if auto_block_count > 1:
+        failures.append(f"Auto-extracted facts block appears {auto_block_count} times (duplication).")
 
     tables = body.findall(w("tbl"))
     found = {
@@ -238,11 +308,21 @@ def qc_docx(docx_path: Path, facts_payload: object | None) -> tuple[list[str], l
             if not first:
                 failures.append("开标一览表 missing a valid data row.")
                 continue
-            empty_spec = 1 if not first[3].strip() else 0
-            empty_price = 1 if not first[5].strip() else 0
-            empty_total = 1 if not first[7].strip() else 0
-            if empty_spec or empty_price or empty_total:
-                failures.append("开标一览表 has empty critical cells (规格型号/单价/投标总价).")
+            raw_spec = (first[3] or "").strip()
+            empty_spec = 1 if _is_placeholder(raw_spec) else 0
+            empty_price = 1 if _is_placeholder(first[5]) else 0
+            empty_total = 1 if _is_placeholder(first[7]) else 0
+
+            # 规格型号 in the summary table is sometimes a cross-reference (e.g. "详见开标分项一览表").
+            # Treat placeholders as warnings; truly empty remains a failure.
+            if not raw_spec:
+                failures.append("开标一览表 is missing 规格型号.")
+            elif _is_placeholder(raw_spec):
+                warnings.append("开标一览表 规格型号 appears to be a placeholder; verify before submission.")
+            if empty_price or not _has_digits(first[5]):
+                failures.append("开标一览表 has placeholder/non-numeric 单价.")
+            if empty_total or not _has_digits(first[7]):
+                failures.append("开标一览表 has placeholder/non-numeric 投标总价.")
             stats.append(
                 TableStats(
                     name="开标一览表",
@@ -263,6 +343,30 @@ def qc_docx(docx_path: Path, facts_payload: object | None) -> tuple[list[str], l
             rows = [r for r in data_rows if len(r) == 11 and any((c or "").strip() for c in r)]
             if len(rows) < 5:
                 failures.append(f"开标分项一览表 row count too small: {len(rows)}")
+
+            empty_spec_rows = 0
+            placeholder_spec_rows = 0
+            placeholder_price_rows = 0
+            placeholder_total_rows = 0
+            for r in rows:
+                spec = (r[3] or "").strip()
+                if not spec:
+                    empty_spec_rows += 1
+                elif _is_placeholder(spec):
+                    placeholder_spec_rows += 1
+                if _is_placeholder(r[7]) or not _has_digits(r[7]):
+                    placeholder_price_rows += 1
+                if _is_placeholder(r[10]) or not _has_digits(r[10]):
+                    placeholder_total_rows += 1
+
+            if empty_spec_rows:
+                failures.append(f"开标分项一览表 has empty 规格型号 rows: {empty_spec_rows}")
+            if placeholder_spec_rows:
+                warnings.append(f"开标分项一览表 has placeholder 规格型号 rows: {placeholder_spec_rows}")
+            if placeholder_price_rows:
+                failures.append(f"开标分项一览表 has placeholder/non-numeric 单价 rows: {placeholder_price_rows}")
+            if placeholder_total_rows:
+                failures.append(f"开标分项一览表 has placeholder/non-numeric 总价 rows: {placeholder_total_rows}")
             stats.append(
                 TableStats(
                     name="开标分项一览表",
@@ -285,6 +389,12 @@ def qc_docx(docx_path: Path, facts_payload: object | None) -> tuple[list[str], l
             rows = [r for r in data_rows if len(r) >= 5 and any((c or "").strip() for c in r)]
             if len(rows) < 5:
                 failures.append(f"投标产品点对点应答表 row count too small: {len(rows)}")
+            placeholder_answers = 0
+            for r in rows:
+                if _is_placeholder(r[2]):
+                    placeholder_answers += 1
+            if placeholder_answers:
+                failures.append(f"投标产品点对点应答表 has placeholder/empty 投标应答 rows: {placeholder_answers}")
             stats.append(
                 TableStats(
                     name="投标产品点对点应答表",
@@ -305,6 +415,12 @@ def qc_docx(docx_path: Path, facts_payload: object | None) -> tuple[list[str], l
             rows = [r for r in data_rows if len(r) == 4 and any((c or "").strip() for c in r)]
             if len(rows) < 5:
                 failures.append(f"投标产品配置清单 row count too small: {len(rows)}")
+            placeholder_details = 0
+            for r in rows:
+                if _is_placeholder(r[3]):
+                    placeholder_details += 1
+            if placeholder_details:
+                failures.append(f"投标产品配置清单 has placeholder/empty 详细配置及技术标准 rows: {placeholder_details}")
             stats.append(
                 TableStats(
                     name="投标产品配置清单",
@@ -324,6 +440,12 @@ def qc_docx(docx_path: Path, facts_payload: object | None) -> tuple[list[str], l
             rows = [r for r in data_rows if len(r) == 3 and any((c or "").strip() for c in r)]
             if not rows:
                 failures.append("售后服务承诺 table is empty.")
+            placeholder_service = 0
+            for r in rows:
+                if _is_placeholder(r[2]):
+                    placeholder_service += 1
+            if placeholder_service:
+                failures.append(f"售后服务承诺 has placeholder/empty 承诺内容 rows: {placeholder_service}")
             stats.append(
                 TableStats(
                     name="售后服务承诺",

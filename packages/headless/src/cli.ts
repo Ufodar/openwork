@@ -4755,7 +4755,11 @@ async function runStart(args: ParsedArgs) {
         approvalTimeoutMs,
         readOnly,
         corsOrigins: corsOrigins.length ? corsOrigins : ["*"],
-        opencodeBaseUrl: opencodeConnectUrl,
+        // The OpenWork server talks to OpenCode locally. Using LAN IPs here can
+        // break on hosts where the "first" non-internal interface is not
+        // reachable (e.g. Docker/VPN interfaces on macOS). Remote clients access
+        // OpenCode through OpenWork's `/opencode` proxy anyway.
+        opencodeBaseUrl,
         opencodeDirectory: resolvedWorkspace,
         opencodeUsername,
         opencodePassword,
@@ -4786,7 +4790,7 @@ async function runStart(args: ParsedArgs) {
         hostToken: openworkHostToken,
         expectedVersion: openworkServerBinary.expectedVersion,
         expectedWorkspace: resolvedWorkspace,
-        expectedOpencodeBaseUrl: opencodeConnectUrl,
+        expectedOpencodeBaseUrl: opencodeBaseUrl,
         expectedOpencodeDirectory: resolvedWorkspace,
         expectedOpencodeUsername: opencodeUsername,
         expectedOpencodePassword: opencodePassword,

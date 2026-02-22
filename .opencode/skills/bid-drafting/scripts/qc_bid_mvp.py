@@ -19,6 +19,7 @@ import json
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
+from typing import Literal
 
 try:
     import defusedxml.ElementTree as DET  # type: ignore
@@ -143,11 +144,17 @@ def _extract_fact_values(payload: object) -> dict[str, str]:
     return out
 
 
-def qc_docx(docx_path: Path, facts_payload: object | None) -> tuple[list[str], list[str], list[TableStats], list[str]]:
+QcMode = Literal["draft", "submit"]
+
+
+def qc_docx(
+    docx_path: Path, facts_payload: object | None, mode: QcMode = "draft"
+) -> tuple[list[str], list[str], list[TableStats], list[str]]:
     failures: list[str] = []
     warnings: list[str] = []
     stats: list[TableStats] = []
     facts_lines: list[str] = []
+    strict = mode == "submit"
 
     with zipfile.ZipFile(docx_path) as zf:
         xml = zf.read("word/document.xml")
@@ -161,14 +168,16 @@ def qc_docx(docx_path: Path, facts_payload: object | None) -> tuple[list[str], l
     if re.search(r"<<\s*TBD\s*:", full_text, flags=re.IGNORECASE):
         failures.append("Found unresolved placeholders like <<TBD: ...>>")
     if "详见报价文件" in full_text:
-        failures.append("Found placeholder text '详见报价文件' in target doc")
+        msg = "Found placeholder text '详见报价文件' in target doc"
+        (failures if strict else warnings).append(msg)
 
     highlight_counts = _collect_highlights(body)
     if highlight_counts:
         counts_str = ", ".join([f"{k}:{v}" for k, v in sorted(highlight_counts.items())])
         # In bid templates, highlight (especially red) almost always means "needs manual fill".
         if "red" in highlight_counts:
-            failures.append(f"Found highlighted text (likely unfilled fields): {counts_str}")
+            msg = f"Found highlighted text (likely unfilled fields): {counts_str}"
+            (failures if strict else warnings).append(msg)
         else:
             warnings.append(f"Found highlighted text: {counts_str}")
 
@@ -320,9 +329,11 @@ def qc_docx(docx_path: Path, facts_payload: object | None) -> tuple[list[str], l
             elif _is_placeholder(raw_spec):
                 warnings.append("开标一览表 规格型号 appears to be a placeholder; verify before submission.")
             if empty_price or not _has_digits(first[5]):
-                failures.append("开标一览表 has placeholder/non-numeric 单价.")
+                msg = "开标一览表 has placeholder/non-numeric 单价."
+                (failures if strict else warnings).append(msg)
             if empty_total or not _has_digits(first[7]):
-                failures.append("开标一览表 has placeholder/non-numeric 投标总价.")
+                msg = "开标一览表 has placeholder/non-numeric 投标总价."
+                (failures if strict else warnings).append(msg)
             stats.append(
                 TableStats(
                     name="开标一览表",
@@ -360,13 +371,16 @@ def qc_docx(docx_path: Path, facts_payload: object | None) -> tuple[list[str], l
                     placeholder_total_rows += 1
 
             if empty_spec_rows:
-                failures.append(f"开标分项一览表 has empty 规格型号 rows: {empty_spec_rows}")
+                msg = f"开标分项一览表 has empty 规格型号 rows: {empty_spec_rows}"
+                (failures if strict else warnings).append(msg)
             if placeholder_spec_rows:
                 warnings.append(f"开标分项一览表 has placeholder 规格型号 rows: {placeholder_spec_rows}")
             if placeholder_price_rows:
-                failures.append(f"开标分项一览表 has placeholder/non-numeric 单价 rows: {placeholder_price_rows}")
+                msg = f"开标分项一览表 has placeholder/non-numeric 单价 rows: {placeholder_price_rows}"
+                (failures if strict else warnings).append(msg)
             if placeholder_total_rows:
-                failures.append(f"开标分项一览表 has placeholder/non-numeric 总价 rows: {placeholder_total_rows}")
+                msg = f"开标分项一览表 has placeholder/non-numeric 总价 rows: {placeholder_total_rows}"
+                (failures if strict else warnings).append(msg)
             stats.append(
                 TableStats(
                     name="开标分项一览表",
@@ -394,7 +408,8 @@ def qc_docx(docx_path: Path, facts_payload: object | None) -> tuple[list[str], l
                 if _is_placeholder(r[2]):
                     placeholder_answers += 1
             if placeholder_answers:
-                failures.append(f"投标产品点对点应答表 has placeholder/empty 投标应答 rows: {placeholder_answers}")
+                msg = f"投标产品点对点应答表 has placeholder/empty 投标应答 rows: {placeholder_answers}"
+                (failures if strict else warnings).append(msg)
             stats.append(
                 TableStats(
                     name="投标产品点对点应答表",
@@ -420,7 +435,8 @@ def qc_docx(docx_path: Path, facts_payload: object | None) -> tuple[list[str], l
                 if _is_placeholder(r[3]):
                     placeholder_details += 1
             if placeholder_details:
-                failures.append(f"投标产品配置清单 has placeholder/empty 详细配置及技术标准 rows: {placeholder_details}")
+                msg = f"投标产品配置清单 has placeholder/empty 详细配置及技术标准 rows: {placeholder_details}"
+                (failures if strict else warnings).append(msg)
             stats.append(
                 TableStats(
                     name="投标产品配置清单",
@@ -445,7 +461,8 @@ def qc_docx(docx_path: Path, facts_payload: object | None) -> tuple[list[str], l
                 if _is_placeholder(r[2]):
                     placeholder_service += 1
             if placeholder_service:
-                failures.append(f"售后服务承诺 has placeholder/empty 承诺内容 rows: {placeholder_service}")
+                msg = f"售后服务承诺 has placeholder/empty 承诺内容 rows: {placeholder_service}"
+                (failures if strict else warnings).append(msg)
             stats.append(
                 TableStats(
                     name="售后服务承诺",
@@ -466,6 +483,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="QC for bid MVP DOCX output")
     parser.add_argument("--docx", required=True, help="DOCX to check")
     parser.add_argument("--facts", help="Optional facts JSON (from Tender facts module)")
+    parser.add_argument(
+        "--mode",
+        choices=["draft", "submit"],
+        default="draft",
+        help="QC strictness. draft=warnings for incomplete pricing/answers; submit=strict failures (default: draft).",
+    )
     args = parser.parse_args()
 
     docx_path = Path(args.docx)
@@ -481,9 +504,12 @@ def main() -> int:
             except Exception:
                 facts_payload = None
 
-    failures, warnings, stats, facts_lines = qc_docx(docx_path, facts_payload)
+    failures, warnings, stats, facts_lines = qc_docx(docx_path, facts_payload, args.mode)
 
     print(f"# QC report: {docx_path.name}\n")
+    print(f"- mode: **{args.mode}**\n")
+    if args.mode == "draft":
+        print("> Draft mode is meant for iterative work. Switch to submit mode before final export.\n")
     if failures:
         print("## FAILURES")
         for f in failures:

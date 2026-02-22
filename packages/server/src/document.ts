@@ -1315,24 +1315,30 @@ export function createDocumentRoutes(routes: unknown[]) {
         },
     });
 
-    routes.push({
-        method: "POST",
-        regex: /^\/w\/([^/]+)\/bid\/qc$/,
-        keys: ["id"],
-        auth: "client",
-        handler: async (ctx: RequestContext) => {
-            const workspaceId = ctx.params.id;
-            const sessionId = parseDocumentSessionId(ctx.url.searchParams.get("session"));
-            if (!sessionId) throw new ApiError(400, "invalid_request", "session is required");
+	    routes.push({
+	        method: "POST",
+	        regex: /^\/w\/([^/]+)\/bid\/qc$/,
+	        keys: ["id"],
+	        auth: "client",
+	        handler: async (ctx: RequestContext) => {
+	            const workspaceId = ctx.params.id;
+	            const sessionId = parseDocumentSessionId(ctx.url.searchParams.get("session"));
+	            if (!sessionId) throw new ApiError(400, "invalid_request", "session is required");
 
-            const targetDoc = (ctx.url.searchParams.get("doc") ?? "").trim();
-            if (!targetDoc) throw new ApiError(400, "invalid_request", "doc is required");
+	            const targetDoc = (ctx.url.searchParams.get("doc") ?? "").trim();
+	            if (!targetDoc) throw new ApiError(400, "invalid_request", "doc is required");
 
-            const workspace = ctx.config.workspaces.find((w: WorkspaceInfo) => w.id === workspaceId);
-            if (!workspace) throw new ApiError(404, "not_found", "Workspace not found");
+	            const body = (await ctx.request.json().catch(() => null)) as any;
+	            const requestedMode =
+	                (typeof ctx.url.searchParams.get("mode") === "string" ? (ctx.url.searchParams.get("mode") ?? "") : "").trim() ||
+	                (typeof body?.mode === "string" ? body.mode.trim() : "");
+	            const mode = requestedMode === "submit" ? "submit" : "draft";
 
-            const docsDir = resolveDocumentsDir(workspace.path, sessionId);
-            const targetAbs = resolveDocumentPathSafe(docsDir, targetDoc);
+	            const workspace = ctx.config.workspaces.find((w: WorkspaceInfo) => w.id === workspaceId);
+	            if (!workspace) throw new ApiError(404, "not_found", "Workspace not found");
+
+	            const docsDir = resolveDocumentsDir(workspace.path, sessionId);
+	            const targetAbs = resolveDocumentPathSafe(docsDir, targetDoc);
             if (!(await exists(targetAbs))) throw new ApiError(404, "not_found", "Target document not found");
             const targetExt = extname(targetAbs).toLowerCase();
             if (targetExt !== ".docx") {
@@ -1344,43 +1350,45 @@ export function createDocumentRoutes(routes: unknown[]) {
                 throw new ApiError(500, "missing_dependency", "qc_bid_mvp.py is missing in this workspace");
             }
 
-            const factsAbs = join(docsDir, ".bid", "facts.json");
-            const args = [scriptPath, "--docx", targetAbs];
-            const hasFacts = await exists(factsAbs);
-            if (hasFacts) {
-                args.push("--facts", factsAbs);
-            }
+	            const factsAbs = join(docsDir, ".bid", "facts.json");
+	            const args = [scriptPath, "--docx", targetAbs];
+	            args.push("--mode", mode);
+	            const hasFacts = await exists(factsAbs);
+	            if (hasFacts) {
+	                args.push("--facts", factsAbs);
+	            }
 
             const result = spawnSync("python3", args, { encoding: "utf8", cwd: workspace.path });
             const stdout = String(result.stdout || "").trim();
             const stderr = String(result.stderr || "").trim();
             const passed = result.status === 0;
 
-            const reportText = [
-                `# QC report: ${basename(targetAbs)}`,
-                "",
-                `- session: \`${sessionId}\``,
-                `- target: \`${targetDoc}\``,
-                `- facts: \`${hasFacts ? ".bid/facts.json" : "—"}\``,
-                `- result: **${passed ? "PASS" : "FAIL"}**`,
-                "",
-                "## Output",
-                "",
+	            const reportText = [
+	                `# QC report: ${basename(targetAbs)}`,
+	                "",
+	                `- session: \`${sessionId}\``,
+	                `- target: \`${targetDoc}\``,
+	                `- mode: \`${mode}\``,
+	                `- facts: \`${hasFacts ? ".bid/facts.json" : "—"}\``,
+	                `- result: **${passed ? "PASS" : "FAIL"}**`,
+	                "",
+	                "## Output",
+	                "",
                 stdout || "(no stdout)",
                 stderr ? `\n\n[stderr]\n${stderr}` : "",
                 "",
             ].join("\n");
 
-            const report = await writeSessionReport({
-                workspace,
-                sessionId,
-                moduleId: "qc",
-                content: reportText,
-            });
+	            const report = await writeSessionReport({
+	                workspace,
+	                sessionId,
+	                moduleId: "qc",
+	                content: reportText,
+	            });
 
-            return jsonResponse({ ok: true, passed, report, stdout, stderr });
-        },
-    });
+	            return jsonResponse({ ok: true, passed, mode, report, stdout, stderr });
+	        },
+	    });
 
     routes.push({
         method: "POST",

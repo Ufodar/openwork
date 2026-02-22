@@ -223,6 +223,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
   const [previewError, setPreviewError] = createSignal<string | null>(null);
   const [qcBusy, setQcBusy] = createSignal(false);
   const [qcError, setQcError] = createSignal<string | null>(null);
+  const [qcMode, setQcMode] = createSignal<"draft" | "submit">("draft");
   const [reportsExpanded, setReportsExpanded] = createSignal(false);
 
   const [documents, { refetch: refetchDocuments }] = createResource(apiConfig, async (cfg) => {
@@ -1085,10 +1086,12 @@ export default function DocumentWriterView(props: SessionViewProps) {
       const query = new URLSearchParams();
       query.set("session", cfg.sessionId);
       query.set("doc", doc);
+      query.set("mode", qcMode());
       const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/bid/qc", query);
       const result = (await fetchJson(url, cfg.token, { method: "POST" })) as { passed?: boolean; report?: { inboxPath?: string } };
       const passed = Boolean(result?.passed);
-      setToastMessage(passed ? "QC PASS (report saved)." : "QC FAIL (report saved).");
+      const label = qcMode() === "submit" ? "submit" : "draft";
+      setToastMessage(passed ? `QC PASS (${label}, report saved).` : `QC FAIL (${label}, report saved).`);
       closeModule();
       await refetchReports();
       setReportsExpanded(true);
@@ -3019,6 +3022,26 @@ export default function DocumentWriterView(props: SessionViewProps) {
             <div class="p-4 space-y-3">
               <div class="text-xs text-dls-secondary">
                 Runs deterministic checks (missing core forms, empty critical cells, unresolved &lt;&lt;TBD&gt;&gt; placeholders). Saves a report to the session inbox.
+              </div>
+              <div class="grid grid-cols-1 gap-2 rounded-xl border border-dls-border bg-dls-surface p-3">
+                <div class="flex items-center justify-between gap-3">
+                  <div class="min-w-0">
+                    <div class="text-xs font-semibold text-dls-text truncate">Mode</div>
+                    <div class="mt-1 text-[11px] text-dls-secondary">
+                      Draft mode is for iteration; Submit mode is strict for final export.
+                    </div>
+                  </div>
+                  <select
+                    value={qcMode()}
+                    onChange={(event) => setQcMode(event.currentTarget.value === "submit" ? "submit" : "draft")}
+                    class="shrink-0 rounded-lg border border-dls-border bg-dls-surface px-3 py-1.5 text-xs text-dls-text focus:outline-none focus:ring-2 focus:ring-dls-accent/40"
+                    aria-label="QC mode"
+                    title="QC strictness mode"
+                  >
+                    <option value="draft">Draft</option>
+                    <option value="submit">Submit</option>
+                  </select>
+                </div>
               </div>
               <Show when={qcError()}>
                 <div class="rounded-lg border border-red-11/30 bg-red-3/20 px-3 py-2 text-xs text-red-11 whitespace-pre-wrap break-words">

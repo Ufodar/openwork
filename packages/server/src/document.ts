@@ -845,14 +845,15 @@ export function createDocumentRoutes(routes: unknown[]) {
                 throw new ApiError(400, "invalid_payload", "Expected JSON body");
             }
 
-            const partnerInboxId = typeof body.partnerInboxId === "string" ? body.partnerInboxId.trim() : "";
-            const matchMode = typeof body.matchMode === "string" ? body.matchMode.trim().toLowerCase() : "contains";
-            const force = Boolean(body.force);
-            if (!["exact", "contains", "startswith"].includes(matchMode)) {
-                throw new ApiError(400, "invalid_request", "Invalid matchMode");
-            }
-            if (!partnerInboxId) {
-                throw new ApiError(400, "invalid_request", "partnerInboxId is required");
+	            const partnerInboxId = typeof body.partnerInboxId === "string" ? body.partnerInboxId.trim() : "";
+	            const matchMode = typeof body.matchMode === "string" ? body.matchMode.trim().toLowerCase() : "contains";
+	            const force = Boolean(body.force);
+	            const seedTarget = Boolean(body.seedTarget);
+	            if (!["exact", "contains", "startswith"].includes(matchMode)) {
+	                throw new ApiError(400, "invalid_request", "Invalid matchMode");
+	            }
+	            if (!partnerInboxId) {
+	                throw new ApiError(400, "invalid_request", "partnerInboxId is required");
             }
 
             const scriptPath = resolveDocxSectionCopyScriptPath(workspace.path);
@@ -922,13 +923,24 @@ export function createDocumentRoutes(routes: unknown[]) {
                 return { occurrence: occurrence > 0 ? occurrence : 1, item: best.item };
             };
 
-            const targetHeadings = listHeadings(targetAbs);
-            const partnerHeadings = listHeadings(partnerAbs);
+	            const partnerHeadings = listHeadings(partnerAbs);
 
-            const tmpDir = join(docsDir, ".tmp");
-            await ensureDir(tmpDir);
-            const workAbs = join(tmpDir, `assemble-${shortId()}.docx`);
-            await copyFile(targetAbs, workAbs);
+	            const tmpDir = join(docsDir, ".tmp");
+	            await ensureDir(tmpDir);
+	            const workAbs = join(tmpDir, `assemble-${shortId()}.docx`);
+	            let seedSnapshotRel: string | null = null;
+	            if (seedTarget) {
+	                const historyDir = join(docsDir, ".history");
+	                await ensureDir(historyDir);
+	                const snapshotName = `${basename(targetAbs, ".docx")}-seed-${new Date().toISOString().replace(/[:.]/g, "-")}.docx`;
+	                const snapshotAbs = join(historyDir, snapshotName);
+	                await copyFile(targetAbs, snapshotAbs);
+	                seedSnapshotRel = `.history/${snapshotName}`;
+	                await copyFile(partnerAbs, workAbs);
+	            } else {
+	                await copyFile(targetAbs, workAbs);
+	            }
+	            const targetHeadings = listHeadings(workAbs);
 
             type StepResult = { heading: string; skipped?: boolean; stats?: { paragraphs: number; tables: number; images: number; styles: number } | null; warnings: string[]; };
             const steps: StepResult[] = [];
@@ -1024,11 +1036,13 @@ export function createDocumentRoutes(routes: unknown[]) {
             reportLines.push("");
             reportLines.push(`- session: \`${sessionId}\``);
             reportLines.push(`- target: \`${targetDoc}\``);
-            reportLines.push(`- partner: \`${basename(partnerAbs)}\``);
-            reportLines.push(`- matchMode: \`${matchMode}\``);
-            reportLines.push(`- force: \`${force}\``);
-            reportLines.push("");
-            reportLines.push("## Steps");
+	            reportLines.push(`- partner: \`${basename(partnerAbs)}\``);
+	            reportLines.push(`- matchMode: \`${matchMode}\``);
+	            reportLines.push(`- force: \`${force}\``);
+	            reportLines.push(`- seedTarget: \`${seedTarget}\``);
+	            if (seedSnapshotRel) reportLines.push(`- seedSnapshot: \`${seedSnapshotRel}\``);
+	            reportLines.push("");
+	            reportLines.push("## Steps");
             for (const step of steps) {
                 if (step.skipped) {
                     reportLines.push(`- ${step.heading}: skipped${step.warnings.length ? ` (${step.warnings.join("; ")})` : ""}`);

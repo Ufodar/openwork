@@ -191,6 +191,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
   const [assembleSource, setAssembleSource] = createSignal<InboxItem | null>(null);
   const [assembleMatchMode, setAssembleMatchMode] = createSignal<"contains" | "exact" | "startswith">("contains");
   const [assembleForce, setAssembleForce] = createSignal(false);
+  const [assembleSeedTarget, setAssembleSeedTarget] = createSignal(false);
   const [assembleBusy, setAssembleBusy] = createSignal(false);
   const [assembleError, setAssembleError] = createSignal<string | null>(null);
   const [assembleQuery, setAssembleQuery] = createSignal("");
@@ -893,10 +894,17 @@ export default function DocumentWriterView(props: SessionViewProps) {
       query.set("session", cfg.sessionId);
       query.set("doc", doc);
       const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/bid/assemble", query);
+      if (assembleSeedTarget()) {
+        const ok = window.confirm(
+          "This will overwrite the target document by seeding it with the selected source. A hidden snapshot will be saved for rollback.\n\nContinue?",
+        );
+        if (!ok) return;
+      }
       const payload = {
         partnerInboxId: source.id,
         matchMode: assembleMatchMode(),
         force: assembleForce(),
+        seedTarget: assembleSeedTarget(),
       };
       const result = (await fetchJson(url, cfg.token, {
         method: "POST",
@@ -2386,6 +2394,20 @@ export default function DocumentWriterView(props: SessionViewProps) {
                     onChange={(event) => setAssembleForce(event.currentTarget.checked)}
                   />
                   Force insert even if the target section appears non-empty
+                </label>
+
+                <label class="flex items-start gap-2 text-xs text-dls-secondary">
+                  <input
+                    type="checkbox"
+                    checked={assembleSeedTarget()}
+                    onChange={(event) => setAssembleSeedTarget(event.currentTarget.checked)}
+                  />
+                  <span class="min-w-0">
+                    Seed target from source (overwrite target first)
+                    <div class="mt-1 text-[11px] text-dls-secondary">
+                      Recommended when your target template is blank or lacks a professional skeleton. A hidden snapshot is saved for rollback.
+                    </div>
+                  </span>
                 </label>
 
                 <Show when={assembleError()}>

@@ -81,11 +81,11 @@ HEADING_STYLE_HINTS = ("heading", "title", "标题", "Heading", "Title", "TOC")
 
 HEADING_TEXT_PATTERNS: List[Tuple[re.Pattern, int]] = [
     # 第X部分 → level 1
-    (re.compile(r"^\s*第[一二三四五六七八九十百千\d]+部分(?:\s*.+)?$"), 1),
+    (re.compile(r"^\s*第[一二三四五六七八九十百千\d]+部分(?:\s*.*)?$"), 1),
     # 第X章 → level 1
-    (re.compile(r"^\s*第[一二三四五六七八九十百千\d]+章(?:\s*.+)?$"), 1),
+    (re.compile(r"^\s*第[一二三四五六七八九十百千\d]+章(?:\s*.*)?$"), 1),
     # 第X节 → level 2
-    (re.compile(r"^\s*第[一二三四五六七八九十百千\d]+节(?:\s*.+)?$"), 2),
+    (re.compile(r"^\s*第[一二三四五六七八九十百千\d]+节(?:\s*.*)?$"), 2),
     # 一、 / 二. → level 2
     (re.compile(r"^\s*[一二三四五六七八九十]+[、.]\s*.+$"), 2),
     # （一） / (1) → level 3
@@ -97,6 +97,83 @@ HEADING_TEXT_PATTERNS: List[Tuple[re.Pattern, int]] = [
     # (so "2025年..." won't match by capturing only "202").
     (re.compile(r"^\s*(\d{1,3}(?:\.\d{1,3})*)(?!\d)(?:\s*[\-—.、．]?\s*)\S.+$"), -1),  # -1 = dynamic
 ]
+
+KNOWN_LITERAL_HEADINGS = {
+    # Bid form anchors (MVP)
+    "开标一览表",
+    "开标分项一览表",
+    "投标产品点对点应答表",
+    "投标产品配置清单",
+    "售后服务承诺",
+}
+
+
+@dataclass
+class _StyleInfo:
+    name: Optional[str] = None
+    based_on: Optional[str] = None
+    outline_lvl: Optional[int] = None  # 0-based
+
+
+def _parse_styles(z: zipfile.ZipFile) -> Dict[str, _StyleInfo]:
+    """Parse word/styles.xml for paragraph styles (id -> name/basedOn/outlineLvl)."""
+    try:
+        styles_xml = z.read("word/styles.xml")
+    except KeyError:
+        return {}
+
+    try:
+        root = DET.fromstring(styles_xml)
+    except Exception:
+        return {}
+
+    styles: Dict[str, _StyleInfo] = {}
+    for style in root.findall("w:style", NS):
+        style_type = style.get(f"{{{NS['w']}}}type")
+        if style_type != "paragraph":
+            continue
+        style_id = style.get(f"{{{NS['w']}}}styleId")
+        if not style_id:
+            continue
+
+        info = _StyleInfo()
+        name_el = style.find("w:name", NS)
+        if name_el is not None:
+            info.name = name_el.get(f"{{{NS['w']}}}val")
+        based_el = style.find("w:basedOn", NS)
+        if based_el is not None:
+            info.based_on = based_el.get(f"{{{NS['w']}}}val")
+        ppr = style.find("w:pPr", NS)
+        if ppr is not None:
+            outline_el = ppr.find("w:outlineLvl", NS)
+            if outline_el is not None:
+                raw = outline_el.get(f"{{{NS['w']}}}val")
+                try:
+                    info.outline_lvl = int(raw) if raw is not None else None
+                except ValueError:
+                    info.outline_lvl = None
+
+        styles[style_id] = info
+
+    return styles
+
+
+def _resolve_outline_level(style_id: Optional[str], styles: Dict[str, _StyleInfo]) -> Optional[int]:
+    if not style_id:
+        return None
+    seen: Set[str] = set()
+    current: Optional[str] = style_id
+    for _ in range(16):
+        if not current or current in seen:
+            return None
+        seen.add(current)
+        info = styles.get(current)
+        if not info:
+            return None
+        if info.outline_lvl is not None:
+            return info.outline_lvl
+        current = info.based_on
+    return None
 
 
 def _node_text(node: ET.Element) -> str:
@@ -158,6 +235,9 @@ def _heading_level(text: str, style_val: Optional[str]) -> Optional[int]:
                 number_part = m.group(1)
                 return number_part.count(".") + 1
             return level
+
+    if stripped in KNOWN_LITERAL_HEADINGS:
+        return 1
 
     return None
 
@@ -240,6 +320,7 @@ def list_headings(docx_path: str) -> List[HeadingInfo]:
     """List all headings in a DOCX file with their levels and element counts."""
     with zipfile.ZipFile(docx_path) as z:
         doc_xml = z.read("word/document.xml")
+        styles = _parse_styles(z)
 
     root = DET.fromstring(doc_xml)
     body = root.find("w:body", NS)
@@ -253,8 +334,10 @@ def list_headings(docx_path: str) -> List[HeadingInfo]:
         tag = child.tag
         if tag == W_TAG_P:
             text = _node_text(child)
-            style = _paragraph_style_val(child)
-            level = _heading_level(text, style)
+            style_id = _paragraph_style_val(child)
+            outline_lvl = _resolve_outline_level(style_id, styles)
+            style_name = styles.get(style_id).name if style_id and style_id in styles else style_id
+            level = (outline_lvl + 1) if outline_lvl is not None else _heading_level(text, style_name)
             if level is not None:
                 headings.append(HeadingInfo(level=level, text=text.strip(), element_count=0, index=i))
         # Tables and other elements are not headings

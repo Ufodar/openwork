@@ -552,6 +552,14 @@ async function proxyOpencodeRequest(input: {
   headers.delete("x-openwork-client-id");
   headers.delete("host");
   headers.delete("origin");
+  headers.delete("connection");
+  headers.delete("keep-alive");
+  headers.delete("proxy-authenticate");
+  headers.delete("proxy-authorization");
+  headers.delete("te");
+  headers.delete("trailers");
+  headers.delete("transfer-encoding");
+  headers.delete("upgrade");
 
   const directory = workspace ? resolveOpencodeDirectory(workspace) : null;
   if (directory && !headers.has("x-opencode-directory")) {
@@ -565,13 +573,28 @@ async function proxyOpencodeRequest(input: {
 
   const method = input.request.method.toUpperCase();
   const body = method === "GET" || method === "HEAD" ? undefined : input.request.body;
-  const response = await fetch(targetUrl, {
-    method,
-    headers,
-    body,
-  });
-
-  return response;
+  const timeoutController = new AbortController();
+  const timeoutId = setTimeout(() => timeoutController.abort(new Error("OpenCode proxy timeout")), 10_000);
+  const signal = AbortSignal.any([input.request.signal, timeoutController.signal]);
+  try {
+    return await fetch(targetUrl, { method, headers, body, signal });
+  } catch (error) {
+    const isTimeout = timeoutController.signal.aborted;
+    throw new ApiError(
+      isTimeout ? 504 : 503,
+      isTimeout ? "opencode_timeout" : "opencode_unreachable",
+      isTimeout ? "OpenCode did not respond in time" : "OpenCode is not reachable on this host",
+      {
+        baseUrl,
+        targetUrl,
+        proxyPath,
+        method,
+        error: error instanceof Error ? error.message : String(error),
+      },
+    );
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 function resolveOwpenbotBaseUrl(): string {
@@ -596,16 +619,26 @@ async function proxyOwpenbotRequest(input: {
   headers.delete("x-openwork-client-id");
   headers.delete("host");
   headers.delete("origin");
+  headers.delete("connection");
+  headers.delete("keep-alive");
+  headers.delete("proxy-authenticate");
+  headers.delete("proxy-authorization");
+  headers.delete("te");
+  headers.delete("trailers");
+  headers.delete("transfer-encoding");
+  headers.delete("upgrade");
 
   const method = input.request.method.toUpperCase();
   const body = method === "GET" || method === "HEAD" ? undefined : input.request.body;
   try {
-    const response = await fetch(targetUrl, {
-      method,
-      headers,
-      body,
-    });
-    return response;
+    const timeoutController = new AbortController();
+    const timeoutId = setTimeout(() => timeoutController.abort(new Error("Owpenbot proxy timeout")), 10_000);
+    const signal = AbortSignal.any([input.request.signal, timeoutController.signal]);
+    try {
+      return await fetch(targetUrl, { method, headers, body, signal });
+    } finally {
+      clearTimeout(timeoutId);
+    }
   } catch (error) {
     const port = parseInteger(process.env.OWPENBOT_HEALTH_PORT);
     throw new ApiError(503, "owpenbot_unreachable", "Owpenbot is not reachable on this host", {

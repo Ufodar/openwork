@@ -322,11 +322,10 @@ def qc_docx(
                 msg = f"Form heading '{prev_text}' is immediately followed by a page break (heading/content split)."
                 (failures if strict else warnings).append(msg)
 
-        if nxt is not None and getattr(nxt, "tag", None) == w("p"):
-            nxt_text = (_cell_text(nxt) or "").strip()
-            if nxt_text in form_headings:
-                msg = f"Page break directly before form heading '{nxt_text}' (possible blank page)."
-                (failures if strict else warnings).append(msg)
+        # Note: a page break immediately *before* a form heading is often intentional
+        # (start each form on a new page). We avoid warning on this pattern because
+        # it would be noisy and not actionable. We only flag stronger signals like
+        # consecutive page breaks or heading/content splits.
 
     auto_block_title = "项目基本信息（自动提取）"
     auto_block_count = 0

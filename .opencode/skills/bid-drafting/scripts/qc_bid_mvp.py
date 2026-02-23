@@ -115,6 +115,23 @@ def _collect_highlights(node) -> dict[str, int]:
     return counts
 
 
+def _is_page_break_para(p) -> bool:
+    if getattr(p, "tag", None) != w("p"):
+        return False
+    has_page_break = False
+    for br in p.iter(w("br")):
+        btype = br.get(w("type")) or br.get("w:type") or ""
+        if (btype or "").strip() == "page":
+            has_page_break = True
+            break
+    if not has_page_break:
+        return False
+    # Only treat *empty* page-break paragraphs as structural breaks. A paragraph
+    # that happens to contain a page break + visible text is not necessarily a
+    # blank page indicator.
+    return not (_cell_text(p) or "").strip()
+
+
 def _extract_fact_values(payload: object) -> dict[str, str]:
     if not isinstance(payload, dict):
         return {}
@@ -264,7 +281,8 @@ def qc_docx(
         facts_lines.append("")
 
     # Basic heading duplication check (heuristic; may false-positive if TOC exists).
-    for key in ["开标一览表", "开标分项一览表", "投标产品点对点应答表", "投标产品配置清单", "售后服务承诺"]:
+    form_headings = ["开标一览表", "开标分项一览表", "投标产品点对点应答表", "投标产品配置清单", "售后服务承诺"]
+    for key in form_headings:
         # Count paragraph-level occurrences to avoid false positives (e.g. notes that mention a form name).
         para_count = 0
         for p in body.findall(w("p")):
@@ -273,6 +291,42 @@ def qc_docx(
                 para_count += 1
         if para_count > 1:
             failures.append(f"Heading '{key}' appears {para_count} times (duplication).")
+
+    # Blank-page / pagination sanity checks.
+    #
+    # We can't do true layout pagination deterministically from raw OOXML, but
+    # there are some strong signals we can catch:
+    # - consecutive page breaks (usually an empty page)
+    # - a form heading immediately followed by an empty page-break paragraph
+    #   (heading/content split; looks unprofessional and confuses reviewers)
+    children = list(body)
+    for i, child in enumerate(children):
+        if not _is_page_break_para(child):
+            continue
+        prev = children[i - 1] if i - 1 >= 0 else None
+        nxt = children[i + 1] if i + 1 < len(children) else None
+
+        if prev is not None and _is_page_break_para(prev):
+            msg = "Found consecutive page breaks (possible blank page)."
+            (failures if strict else warnings).append(msg)
+            continue
+
+        if nxt is not None and _is_page_break_para(nxt):
+            msg = "Found consecutive page breaks (possible blank page)."
+            (failures if strict else warnings).append(msg)
+            continue
+
+        if prev is not None and getattr(prev, "tag", None) == w("p"):
+            prev_text = (_cell_text(prev) or "").strip()
+            if prev_text in form_headings:
+                msg = f"Form heading '{prev_text}' is immediately followed by a page break (heading/content split)."
+                (failures if strict else warnings).append(msg)
+
+        if nxt is not None and getattr(nxt, "tag", None) == w("p"):
+            nxt_text = (_cell_text(nxt) or "").strip()
+            if nxt_text in form_headings:
+                msg = f"Page break directly before form heading '{nxt_text}' (possible blank page)."
+                (failures if strict else warnings).append(msg)
 
     auto_block_title = "项目基本信息（自动提取）"
     auto_block_count = 0
@@ -404,11 +458,18 @@ def qc_docx(
             if len(rows) < 5:
                 failures.append(f"投标产品点对点应答表 row count too small: {len(rows)}")
             placeholder_answers = 0
+            placeholder_proof = 0
             for r in rows:
                 if _is_placeholder(r[2]):
                     placeholder_answers += 1
+                # 证明材料页码（如存在）通常提交前必须补齐；draft 先提示，submit 直接卡住。
+                if len(r) >= 5 and _is_placeholder(r[4]):
+                    placeholder_proof += 1
             if placeholder_answers:
                 msg = f"投标产品点对点应答表 has placeholder/empty 投标应答 rows: {placeholder_answers}"
+                (failures if strict else warnings).append(msg)
+            if placeholder_proof:
+                msg = f"投标产品点对点应答表 证明材料页码 empty/placeholder rows: {placeholder_proof}"
                 (failures if strict else warnings).append(msg)
             stats.append(
                 TableStats(
@@ -419,6 +480,7 @@ def qc_docx(
                         "招标要求": count_empty(rows, 1),
                         "投标应答": count_empty(rows, 2),
                         "偏离说明": count_empty(rows, 3),
+                        "证明材料页码": count_empty(rows, 4) if len(header) >= 5 else 0,
                     },
                 )
             )

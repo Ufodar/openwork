@@ -379,8 +379,25 @@ function jsonResponse(data: unknown, status = 200) {
     });
 }
 
-function getOnlyOfficeUrl(): string {
-    return process.env.ONLYOFFICE_URL || "http://localhost:8080";
+function getOnlyOfficeUrl(request?: Request): string {
+    const override = (process.env.ONLYOFFICE_URL ?? "").trim();
+    if (override) return override.replace(/\/+$/, "");
+
+    const origin = (request?.headers.get("origin") ?? "").trim();
+    const host = (request?.headers.get("host") ?? "").trim();
+    const candidate = origin || (host ? `http://${host}` : "");
+    if (candidate) {
+        try {
+            const url = new URL(candidate);
+            const protocol = url.protocol || "http:";
+            const hostname = url.hostname;
+            if (hostname) return `${protocol}//${hostname}:8080`;
+        } catch {
+            // ignore and fall back
+        }
+    }
+
+    return "http://localhost:8080";
 }
 
 function getOnlyOfficeJwtSecret(): string {
@@ -1772,7 +1789,7 @@ export function createDocumentRoutes(routes: unknown[]) {
                 config.token = token;
             }
 
-            return jsonResponse({ documentServerUrl: getOnlyOfficeUrl(), config });
+            return jsonResponse({ documentServerUrl: getOnlyOfficeUrl(ctx.request), config });
         },
     });
 

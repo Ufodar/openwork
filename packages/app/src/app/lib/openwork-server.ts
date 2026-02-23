@@ -814,8 +814,10 @@ export function createOpenworkServerClient(options: { baseUrl: string; token?: s
   const hostToken = options.hostToken;
 
   const timeouts = {
-    health: 3_000,
-    capabilities: 6_000,
+    // Keep these generous to avoid UI flapping during heavy server-side work (Python tools, file IO).
+    // The server health endpoint itself is fast, but the event loop can be busy.
+    health: 10_000,
+    capabilities: 10_000,
     listWorkspaces: 8_000,
     activateWorkspace: 10_000,
     deleteWorkspace: 10_000,

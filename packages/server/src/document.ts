@@ -994,7 +994,6 @@ export function createDocumentRoutes(routes: unknown[]) {
                         matchMode,
                         "--source-heading-index",
                         String(sourceMatch.occurrence),
-                        "--page-break-before",
                         "--max-paragraphs",
                         "300",
                         "--max-tables",
@@ -1010,6 +1009,12 @@ export function createDocumentRoutes(routes: unknown[]) {
                             String(targetMatch.occurrence),
                             "--exclude-source-heading",
                         );
+                    } else {
+                        // When appending a missing section to the end of the document, start it on a
+                        // new page if there's already visible content. For insertions under an
+                        // existing target heading we *don't* do this, otherwise we'd end up
+                        // splitting the heading from its content (blank/heading-only pages).
+                        args.push("--page-break-before");
                     }
                     const result = spawnSync("python3", args, { encoding: "utf8", cwd: workspace.path });
                     if (result.status !== 0) {

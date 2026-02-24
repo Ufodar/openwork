@@ -1,9 +1,10 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import type { Agent } from "@opencode-ai/sdk/v2/client";
 import fuzzysort from "fuzzysort";
-import { ArrowUp, AtSign, Check, ChevronDown, File as FileIcon, Paperclip, Terminal, X, Zap } from "lucide-solid";
+import { ArrowUp, AtSign, Check, ChevronDown, File as FileIcon, Paperclip, Square, Terminal, X, Zap } from "lucide-solid";
 
 import type { ComposerAttachment, ComposerDraft, ComposerPart, PromptMode, SlashCommandOption } from "../../types";
+import { perfNow, recordPerfLog } from "../../lib/perf-log";
 
 type MentionOption = {
   id: string;
@@ -21,8 +22,11 @@ type MentionGroup = {
 
 type ComposerProps = {
   prompt: string;
+  developerMode: boolean;
   busy: boolean;
+  isStreaming: boolean;
   onSend: (draft: ComposerDraft) => void;
+  onStop: () => void;
   onDraftChange: (draft: ComposerDraft) => void;
   selectedModelLabel: string;
   onModelClick: () => void;
@@ -47,7 +51,10 @@ type ComposerProps = {
   searchFiles: (query: string) => Promise<string[]>;
   isRemoteWorkspace: boolean;
   isSandboxWorkspace: boolean;
-  onUploadInboxFiles?: (files: File[]) => void | Promise<void>;
+  onUploadInboxFiles?: (
+    files: File[],
+    options?: { notify?: boolean },
+  ) => void | Promise<Array<{ name: string; path: string }> | void>;
   attachmentsEnabled: boolean;
   attachmentsDisabledReason: string | null;
   listCommands: () => Promise<SlashCommandOption[]>;
@@ -59,8 +66,76 @@ const IMAGE_COMPRESS_QUALITY = 0.82;
 const IMAGE_COMPRESS_TARGET_BYTES = 1_500_000;
 const ACCEPTED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
 const ACCEPTED_FILE_TYPES = [...ACCEPTED_IMAGE_TYPES, "application/pdf"];
+const FILE_URL_RE = /^file:\/\//i;
+const HTTP_URL_RE = /^https?:\/\//i;
+const WINDOWS_PATH_RE = /^[a-zA-Z]:\\/;
+const UNC_PATH_RE = /^\\\\/;
 
 const isImageMime = (mime: string) => ACCEPTED_IMAGE_TYPES.includes(mime);
+const isSupportedAttachmentType = (mime: string) => ACCEPTED_FILE_TYPES.includes(mime);
+
+const escapeMarkdownLabel = (value: string) =>
+  value
+    .replace(/\\/g, "\\\\")
+    .replace(/\[/g, "\\[")
+    .replace(/\]/g, "\\]");
+
+const normalizeLinkTarget = (value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  if (FILE_URL_RE.test(trimmed) || HTTP_URL_RE.test(trimmed)) {
+    return encodeURI(trimmed);
+  }
+  if (WINDOWS_PATH_RE.test(trimmed)) {
+    return `file:///${encodeURI(trimmed.replace(/\\/g, "/"))}`;
+  }
+  if (UNC_PATH_RE.test(trimmed)) {
+    const normalized = trimmed.replace(/\\/g, "/").replace(/^\/+/, "");
+    return `file://${encodeURI(normalized)}`;
+  }
+  if (trimmed.startsWith("/")) {
+    return `file://${encodeURI(trimmed)}`;
+  }
+  return "";
+};
+
+const parseClipboardLinks = (clipboard: DataTransfer) => {
+  const values = [
+    clipboard.getData("text/uri-list") ?? "",
+    clipboard.getData("text/plain") ?? "",
+    clipboard.getData("text") ?? "",
+  ];
+  const links: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    const lines = value
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith("#"));
+    for (const line of lines) {
+      const target = normalizeLinkTarget(line);
+      if (!target || seen.has(target)) continue;
+      seen.add(target);
+      links.push(target);
+    }
+  }
+  return links;
+};
+
+const inboxPathToLink = (path: string) => {
+  const normalized = path.trim().replace(/\\/g, "/").replace(/^\.\/+/, "").replace(/^\/+/, "");
+  if (!normalized) return "";
+  if (normalized.startsWith(".opencode/openwork/inbox/")) {
+    return normalized;
+  }
+  return `.opencode/openwork/inbox/${normalized}`;
+};
+
+const formatLinks = (links: Array<{ name: string; target: string }>) =>
+  links
+    .filter((entry) => entry.target)
+    .map((entry) => `[${escapeMarkdownLabel(entry.name || "file")}](${entry.target})`)
+    .join("\n");
 
 const fileToDataUrl = (file: File) =>
   new Promise<string>((resolve, reject) => {
@@ -129,6 +204,9 @@ const compressImageFile = async (file: File): Promise<File> => {
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
 const normalizeText = (value: string) => value.replace(/\u00a0/g, " ");
+const RECENT_EMIT_TTL_MS = 30_000;
+const MAX_RECENT_EMITS = 400;
+const DRAFT_FLUSH_DEBOUNCE_MS = 140;
 
 const MODEL_VARIANT_OPTIONS = [
   { value: "none", label: "None" },
@@ -374,7 +452,15 @@ export default function Composer(props: ComposerProps) {
   let mentionSearchRun = 0;
   let suppressPromptSync = false;
   let pasteCounter = 0;
+  let draftScheduledAt = 0;
+  let lastInputAt = 0;
   const pasteTextById = new Map<string, string>();
+  const objectUrls = new Set<string>();
+  const createObjectUrl = (file: File) => {
+    const url = URL.createObjectURL(file);
+    objectUrls.add(url);
+    return url;
+  };
   // Track IME composition state so we can combine it with keyCode === 229 to
   // reliably suppress Enter during CJK input across Chrome, Safari, and WebKit.
   let imeComposing = false;
@@ -385,6 +471,7 @@ export default function Composer(props: ComposerProps) {
   const [agentLoaded, setAgentLoaded] = createSignal(false);
   const [searchResults, setSearchResults] = createSignal<string[]>([]);
   const [attachments, setAttachments] = createSignal<ComposerAttachment[]>([]);
+  const [draftText, setDraftText] = createSignal(normalizeText(props.prompt));
   const [mode, setMode] = createSignal<PromptMode>("prompt");
   const [historySnapshot, setHistorySnapshot] = createSignal<ComposerDraft | null>(null);
   const [historyIndex, setHistoryIndex] = createSignal({ prompt: -1, shell: -1 });
@@ -393,6 +480,14 @@ export default function Composer(props: ComposerProps) {
   const [showInboxUploadAction, setShowInboxUploadAction] = createSignal(false);
   const activeVariant = createMemo(() => props.modelVariant ?? "none");
   const attachmentsDisabled = createMemo(() => !props.attachmentsEnabled);
+  const hasDraftContent = createMemo(() => draftText().trim().length > 0 || attachments().length > 0);
+
+  onCleanup(() => {
+    for (const url of objectUrls) {
+      URL.revokeObjectURL(url);
+    }
+    objectUrls.clear();
+  });
 
   const createPasteSpan = (part: Extract<ComposerPart, { type: "paste" }>) => {
     pasteTextById.set(part.id, part.text);
@@ -501,9 +596,32 @@ export default function Composer(props: ComposerProps) {
     setMentionIndex(0);
   });
 
-  // Track recent emits to distinguish echoes from external updates
-  const recentEmits = new Set<string>();
-  recentEmits.add(props.prompt); // Initialize with current prop
+  // Track recent emits to distinguish echoes from external updates.
+  // Keep a bounded, time-windowed set so stale echoes cannot win races.
+  const recentEmits = new Map<string, number>();
+  const rememberRecentEmit = (value: string) => {
+    const now = Date.now();
+    if (recentEmits.has(value)) {
+      recentEmits.delete(value);
+    }
+    recentEmits.set(value, now);
+
+    for (const [key, timestamp] of recentEmits) {
+      if (now - timestamp <= RECENT_EMIT_TTL_MS) break;
+      recentEmits.delete(key);
+    }
+
+    while (recentEmits.size > MAX_RECENT_EMITS) {
+      const oldest = recentEmits.keys().next();
+      if (oldest.done) break;
+      recentEmits.delete(oldest.value);
+    }
+  };
+
+  const resetRecentEmits = (value: string) => {
+    recentEmits.clear();
+    rememberRecentEmit(value);
+  };
 
   // Sync from props: ignore echoes of what we just sent
   createEffect(() => {
@@ -518,8 +636,8 @@ export default function Composer(props: ComposerProps) {
       // If we've converged (parent matches local), we can clean up the set to save memory,
       // but keeping a few items is cheap and safer for race conditions.
       if (value === current) {
-        recentEmits.clear();
-        recentEmits.add(value);
+        resetRecentEmits(value);
+        setDraftText(value);
       }
       return;
     }
@@ -539,7 +657,8 @@ export default function Composer(props: ComposerProps) {
     }
     if (value === current) {
       // Even if it matches current, make sure it's tracked as a valid base state
-      recentEmits.add(value);
+      rememberRecentEmit(value);
+      setDraftText(value);
       return;
     }
 
@@ -547,13 +666,13 @@ export default function Composer(props: ComposerProps) {
     if (value.startsWith("!") && mode() === "prompt") {
       setMode("shell");
       setEditorText(value.slice(1).trimStart());
-      recentEmits.add(value);
+      rememberRecentEmit(value);
       emitDraftChange();
       queueMicrotask(() => focusEditorEnd());
       return;
     }
 
-    recentEmits.add(value); // It's now the new baseline
+    rememberRecentEmit(value); // It's now the new baseline
     setEditorText(value);
     if (!value) {
       setAttachments([]);
@@ -568,49 +687,38 @@ export default function Composer(props: ComposerProps) {
     queueMicrotask(() => focusEditorEnd());
   });
 
-  const syncHeight = () => {
-    if (!editorRef) return;
-    editorRef.style.height = "auto";
-    const baseHeight = 24;
-    const scrollHeight = editorRef.scrollHeight || baseHeight;
-    const nextHeight = Math.min(Math.max(scrollHeight, baseHeight), 160);
-    editorRef.style.height = `${nextHeight}px`;
-    editorRef.style.overflowY = editorRef.scrollHeight > 160 ? "auto" : "hidden";
-  };
-
   let emitTimer: number | null = null;
   const emitDraftChange = () => {
     if (!editorRef) return;
-    syncHeight();
+    draftScheduledAt = perfNow();
 
     if (emitTimer) window.clearTimeout(emitTimer);
     emitTimer = window.setTimeout(() => {
       flushDraftChange();
-    }, 50);
+    }, DRAFT_FLUSH_DEBOUNCE_MS);
   };
 
   const flushDraftChange = () => {
+    const flushStartedAt = perfNow();
+    const queuedMs = draftScheduledAt > 0 ? Math.round((flushStartedAt - draftScheduledAt) * 100) / 100 : null;
     if (emitTimer) {
       window.clearTimeout(emitTimer);
       emitTimer = null;
     }
     if (!editorRef) return;
+    const buildStartedAt = perfNow();
     const parts = buildPartsFromEditor(editorRef, pasteTextById);
+    const buildMs = Math.round((perfNow() - buildStartedAt) * 100) / 100;
+    const serializeStartedAt = perfNow();
     const text = normalizeText(partsToText(parts));
-
-    recentEmits.add(text); // Track that we sent this, expect an echo later
-
-    // Limit Set size to prevent memory leak (though unlikely to grow huge)
-    if (recentEmits.size > 20) {
-      const it = recentEmits.values();
-      const first = it.next();
-      if (!first.done) {
-        recentEmits.delete(first.value);
-      }
-    }
-
     const resolvedText = normalizeText(partsToResolvedText(parts));
+    const serializeMs = Math.round((perfNow() - serializeStartedAt) * 100) / 100;
+    setDraftText(text);
+
+    rememberRecentEmit(text); // Track that we sent this, expect an echo later
+
     suppressPromptSync = true;
+    const draftChangeStartedAt = perfNow();
     props.onDraftChange({
       mode: mode(),
       parts,
@@ -618,9 +726,62 @@ export default function Composer(props: ComposerProps) {
       text,
       resolvedText,
     });
+    const draftChangeMs = Math.round((perfNow() - draftChangeStartedAt) * 100) / 100;
+    const totalMs = Math.round((perfNow() - flushStartedAt) * 100) / 100;
+    if (
+      props.developerMode &&
+      ((queuedMs !== null && queuedMs >= 90) || buildMs >= 8 || serializeMs >= 8 || draftChangeMs >= 8 || totalMs >= 12 || text.length >= 2_500)
+    ) {
+      recordPerfLog(true, "session.input", "draft-flush", {
+        queuedMs,
+        buildMs,
+        serializeMs,
+        draftChangeMs,
+        totalMs,
+        chars: text.length,
+        parts: parts.length,
+        mode: mode(),
+      });
+    }
+    draftScheduledAt = 0;
     queueMicrotask(() => {
       suppressPromptSync = false;
     });
+  };
+
+  const handleEditorInput = () => {
+    const startedAt = perfNow();
+    const currentText = normalizeText(editorRef?.innerText ?? "");
+    const mentionStartedAt = perfNow();
+    if (mentionOpen() || currentText.includes("@")) {
+      updateMentionQuery(currentText);
+    } else {
+      setMentionOpen(false);
+      setMentionQuery("");
+    }
+    const mentionMs = Math.round((perfNow() - mentionStartedAt) * 100) / 100;
+    const slashStartedAt = perfNow();
+    updateSlashQuery(currentText);
+    const slashMs = Math.round((perfNow() - slashStartedAt) * 100) / 100;
+    setDraftText(currentText);
+    emitDraftChange();
+
+    const totalMs = Math.round((perfNow() - startedAt) * 100) / 100;
+    const now = Date.now();
+    const sincePrevInputMs = lastInputAt > 0 ? now - lastInputAt : null;
+    lastInputAt = now;
+
+    if (props.developerMode && (totalMs >= 8 || mentionMs >= 4 || slashMs >= 4)) {
+      recordPerfLog(true, "session.input", "keystroke", {
+        totalMs,
+        mentionMs,
+        slashMs,
+        sincePrevInputMs,
+        chars: editorRef?.innerText.length ?? 0,
+        mentionOpen: mentionOpen(),
+        slashOpen: slashOpen(),
+      });
+    }
   };
 
   const focusEditorEnd = () => {
@@ -657,15 +818,15 @@ export default function Composer(props: ComposerProps) {
     if (selection) {
       restoreSelectionOffsets(editorRef, selection);
     }
-    syncHeight();
   };
 
   const setEditorText = (value: string) => {
     if (!editorRef) return;
+    setDraftText(normalizeText(value));
     renderParts(value ? [{ type: "text", text: value }] : [], false);
   };
 
-  const updateMentionQuery = () => {
+  const updateMentionQuery = (currentText?: string) => {
     if (!editorRef) return;
     if (mode() === "shell") {
       setMentionOpen(false);
@@ -678,7 +839,7 @@ export default function Composer(props: ComposerProps) {
       setMentionQuery("");
       return;
     }
-    const text = normalizeText(partsToText(buildPartsFromEditor(editorRef, pasteTextById)));
+    const text = currentText ?? normalizeText(editorRef.innerText);
     const before = text.slice(0, offsets.start);
     const match = before.match(/@(\S*)$/);
     if (!match) {
@@ -690,14 +851,14 @@ export default function Composer(props: ComposerProps) {
     setMentionOpen(true);
   };
 
-  const updateSlashQuery = () => {
+  const updateSlashQuery = (currentText?: string) => {
     if (!editorRef) return;
     if (mode() === "shell") {
       setSlashOpen(false);
       setSlashQuery("");
       return;
     }
-    const text = normalizeText(partsToText(buildPartsFromEditor(editorRef, pasteTextById)));
+    const text = currentText ?? normalizeText(editorRef.innerText);
     // Only trigger when the entire input matches /command (no spaces, starts with /)
     const slashMatch = text.match(/^\/(\S*)$/);
     if (!slashMatch) {
@@ -767,7 +928,6 @@ export default function Composer(props: ComposerProps) {
     queueMicrotask(() => {
       suppressPromptSync = false;
     });
-    syncHeight();
     requestAnimationFrame(() => {
       editorRef!.focus();
       const selection = window.getSelection();
@@ -827,6 +987,7 @@ export default function Composer(props: ComposerProps) {
     if (!draft) return;
     setMode(draft.mode);
     renderParts(draft.parts, false);
+    setDraftText(draft.text);
     setAttachments(draft.attachments ?? []);
     props.onDraftChange(draft);
   };
@@ -906,7 +1067,7 @@ export default function Composer(props: ComposerProps) {
     }
     const next: ComposerAttachment[] = [];
     for (const file of files) {
-      if (!ACCEPTED_FILE_TYPES.includes(file.type)) {
+      if (!isSupportedAttachmentType(file.type)) {
         props.onToast(`${file.name} is not a supported attachment type.`);
         continue;
       }
@@ -1020,6 +1181,53 @@ export default function Composer(props: ComposerProps) {
     emitDraftChange();
   };
 
+  const insertUnsupportedFileLinks = async (files: File[], clipboardLinks: string[]) => {
+    const fallbackLinks = () =>
+      files.map((file, index) => ({
+        name: file.name || `file-${index + 1}`,
+        target: clipboardLinks[index] || createObjectUrl(file),
+      }));
+
+    if (props.isSandboxWorkspace && props.onUploadInboxFiles) {
+      const uploaded = await Promise.resolve(props.onUploadInboxFiles(files, { notify: false }));
+      if (Array.isArray(uploaded) && uploaded.length) {
+        const links = uploaded
+          .map((item, index) => {
+            const target = inboxPathToLink(item.path ?? "");
+            const fallbackName = files[index]?.name || `file-${index + 1}`;
+            const name = item.name?.trim() || fallbackName;
+            return { name, target };
+          })
+          .filter((entry) => entry.target);
+        const text = formatLinks(links);
+        if (text) {
+          insertPlainTextAtSelection(text);
+          updateMentionQuery();
+          updateSlashQuery();
+          emitDraftChange();
+          props.onToast(
+            links.length === 1
+              ? `Uploaded ${links[0].name} to inbox and inserted a link.`
+              : `Uploaded ${links.length} files to inbox and inserted links.`,
+          );
+          return;
+        }
+      }
+      props.onToast("Couldn't upload to inbox. Inserted local links instead.");
+    }
+
+    const text = formatLinks(fallbackLinks());
+    if (!text) {
+      props.onToast("Unsupported attachment type.");
+      return;
+    }
+    insertPlainTextAtSelection(text);
+    updateMentionQuery();
+    updateSlashQuery();
+    emitDraftChange();
+    props.onToast("Inserted links for unsupported files.");
+  };
+
   const handlePaste = (event: ClipboardEvent) => {
     if (!event.clipboardData) return;
     const clipboard = event.clipboardData;
@@ -1031,24 +1239,27 @@ export default function Composer(props: ComposerProps) {
     const allFiles = files.length ? files : itemFiles;
     if (allFiles.length) {
       event.preventDefault();
-      const hasSupported = allFiles.some((file) => ACCEPTED_FILE_TYPES.includes(file.type));
-      if (!hasSupported) {
-        props.onToast("Unsupported attachment type.");
-        return;
+      const supported = allFiles.filter((file) => isSupportedAttachmentType(file.type));
+      const unsupported = allFiles.filter((file) => !isSupportedAttachmentType(file.type));
+      if (supported.length) {
+        void addAttachments(supported);
       }
-      void addAttachments(allFiles);
+      if (unsupported.length) {
+        const links = parseClipboardLinks(clipboard);
+        void insertUnsupportedFileLinks(unsupported, links);
+      }
       return;
     }
 
     const plainForCheck = clipboard.getData("text/plain") ?? "";
     const trimmedForCheck = plainForCheck.trim();
-    if (trimmedForCheck && props.isSandboxWorkspace) {
+    if (trimmedForCheck && (props.isSandboxWorkspace || props.isRemoteWorkspace)) {
       const hasFileUrl = /file:\/\//i.test(trimmedForCheck);
       const hasAbsolutePosix = /(^|\s)\/(Users|home|var|etc|opt|tmp|private|Volumes|Applications)\//.test(trimmedForCheck);
       const hasAbsoluteWindows = /(^|\s)[a-zA-Z]:\\/.test(trimmedForCheck);
       if (hasFileUrl || hasAbsolutePosix || hasAbsoluteWindows) {
         props.onToast(
-          "Sandboxes can't access local file paths. Upload the file to the worker inbox instead."
+          "This is a remote worker. Sandboxes are remote too. To share files with it, upload them to the Inbox in the sidebar.",
         );
         setShowInboxUploadAction(Boolean(props.onUploadInboxFiles));
       }
@@ -1309,8 +1520,15 @@ export default function Composer(props: ComposerProps) {
     onCleanup(() => window.removeEventListener("openwork:focusPrompt", handler));
   });
 
+  onCleanup(() => {
+    if (emitTimer !== null) {
+      window.clearTimeout(emitTimer);
+      emitTimer = null;
+    }
+  });
+
   return (
-    <div class="px-4 pb-4 pt-0 bg-dls-surface sticky bottom-0 z-20">
+    <div class="px-4 pb-4 pt-0 bg-dls-surface sticky bottom-0 z-20" style={{ contain: "layout style" }}>
       <div class="max-w-3xl mx-auto">
         <div
           class={`bg-dls-surface border border-dls-border rounded-2xl overflow-visible transition-all relative group/input ${mentionOpen() || slashOpen() ? "rounded-t-none border-t-transparent shadow-none" : "shadow-xl"
@@ -1384,7 +1602,7 @@ export default function Composer(props: ComposerProps) {
           {/* Slash command popup */}
           <Show when={slashOpen()}>
             <div class="absolute bottom-full left-[-1px] right-[-1px] z-30">
-              <div class="rounded-t-3xl border border-dls-border border-b-0 bg-dls-surface shadow-xl overflow-hidden">
+              <div class="rounded-t-3xl border border-dls-border border-b-0 bg-dls-surface overflow-hidden">
                 <div class="p-2 bg-dls-surface max-h-64 overflow-y-auto" onMouseDown={(event: MouseEvent) => event.preventDefault()}>
                   <Show
                     when={slashFiltered().length}
@@ -1504,7 +1722,7 @@ export default function Composer(props: ComposerProps) {
                   </Show>
 
                   <div class="relative">
-                    <Show when={!props.prompt.trim() && !attachments().length}>
+                    <Show when={!hasDraftContent()}>
                       <div class="absolute left-0 top-0 text-dls-secondary text-sm leading-relaxed pointer-events-none">
                         Ask OpenWork...
                       </div>
@@ -1514,15 +1732,11 @@ export default function Composer(props: ComposerProps) {
                       contentEditable={true}
                       role="textbox"
                       aria-multiline="true"
-                      onInput={() => {
-                        updateMentionQuery();
-                        updateSlashQuery();
-                        emitDraftChange();
-                      }}
+                      onInput={handleEditorInput}
                       onKeyDown={handleKeyDown}
                       onPaste={handlePaste}
                       onClick={handleEditorClick}
-                      class="bg-transparent border-none p-0 pb-8 pr-4 text-dls-text focus:ring-0 text-sm leading-relaxed resize-none min-h-[24px] outline-none relative z-10"
+                      class="bg-transparent border-none p-0 pb-8 pr-4 text-dls-text focus:ring-0 text-sm leading-relaxed resize-none min-h-[24px] max-h-40 overflow-y-auto outline-none relative z-10"
                     />
 
                     <div class="mt-3 flex items-center justify-between px-2 pb-2">
@@ -1707,18 +1921,32 @@ export default function Composer(props: ComposerProps) {
                         </div>
                       </div>
                       <div class="flex items-center gap-3 text-dls-secondary">
-                        <button
-                          type="button"
-                          disabled={!props.prompt.trim() && !attachments().length}
-                          onClick={sendDraft}
-                          class={`p-1.5 rounded-full ${!props.prompt.trim() && !attachments().length
-                            ? "bg-dls-active text-dls-secondary"
-                            : "bg-dls-accent text-white"
-                            }`}
-                          title="Send"
+                        <Show
+                          when={props.isStreaming}
+                          fallback={
+                            <button
+                              type="button"
+                              disabled={!hasDraftContent()}
+                              onClick={sendDraft}
+                              class={`p-1.5 rounded-full transition-colors ${!hasDraftContent()
+                                ? "bg-dls-active text-dls-secondary"
+                                : "bg-dls-accent text-white"
+                                }`}
+                              title="Send"
+                            >
+                              <ArrowUp size={18} />
+                            </button>
+                          }
                         >
-                          <ArrowUp size={18} />
-                        </button>
+                          <button
+                            type="button"
+                            onClick={() => props.onStop()}
+                            class="p-1.5 rounded-full bg-gray-12 text-gray-1 hover:bg-gray-11 transition-colors"
+                            title="Stop"
+                          >
+                            <Square size={14} fill="currentColor" />
+                          </button>
+                        </Show>
                       </div>
                     </div>
                   </div>

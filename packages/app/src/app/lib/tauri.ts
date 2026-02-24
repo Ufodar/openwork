@@ -5,7 +5,7 @@ import { validateMcpServerName } from "../mcp";
 
 export type EngineInfo = {
   running: boolean;
-  runtime: "direct" | "openwrk";
+  runtime: "direct" | "openwork-orchestrator";
   baseUrl: string | null;
   projectDir: string | null;
   hostname: string | null;
@@ -32,32 +32,32 @@ export type OpenworkServerInfo = {
   lastStderr: string | null;
 };
 
-export type OpenwrkDaemonState = {
+export type OrchestratorDaemonState = {
   pid: number;
   port: number;
   baseUrl: string;
   startedAt: number;
 };
 
-export type OpenwrkOpencodeState = {
+export type OrchestratorOpencodeState = {
   pid: number;
   port: number;
   baseUrl: string;
   startedAt: number;
 };
 
-export type OpenwrkBinaryInfo = {
+export type OrchestratorBinaryInfo = {
   path: string;
   source: string;
   expectedVersion?: string | null;
   actualVersion?: string | null;
 };
 
-export type OpenwrkBinaryState = {
-  opencode?: OpenwrkBinaryInfo | null;
+export type OrchestratorBinaryState = {
+  opencode?: OrchestratorBinaryInfo | null;
 };
 
-export type OpenwrkSidecarInfo = {
+export type OrchestratorSidecarInfo = {
   dir?: string | null;
   baseUrl?: string | null;
   manifestUrl?: string | null;
@@ -67,7 +67,7 @@ export type OpenwrkSidecarInfo = {
   allowExternal?: boolean | null;
 };
 
-export type OpenwrkWorkspace = {
+export type OrchestratorWorkspace = {
   id: string;
   name: string;
   path: string;
@@ -78,17 +78,17 @@ export type OpenwrkWorkspace = {
   lastUsedAt?: number | null;
 };
 
-export type OpenwrkStatus = {
+export type OrchestratorStatus = {
   running: boolean;
   dataDir: string;
-  daemon: OpenwrkDaemonState | null;
-  opencode: OpenwrkOpencodeState | null;
+  daemon: OrchestratorDaemonState | null;
+  opencode: OrchestratorOpencodeState | null;
   cliVersion?: string | null;
-  sidecar?: OpenwrkSidecarInfo | null;
-  binaries?: OpenwrkBinaryState | null;
+  sidecar?: OrchestratorSidecarInfo | null;
+  binaries?: OrchestratorBinaryState | null;
   activeId: string | null;
   workspaceCount: number;
-  workspaces: OpenwrkWorkspace[];
+  workspaces: OrchestratorWorkspace[];
   lastError: string | null;
 };
 
@@ -138,11 +138,17 @@ export type WorkspaceExportSummary = {
 
 export async function engineStart(
   projectDir: string,
-  options?: { preferSidecar?: boolean; runtime?: "direct" | "openwrk"; workspacePaths?: string[] },
+  options?: {
+    preferSidecar?: boolean;
+    runtime?: "direct" | "openwork-orchestrator";
+    workspacePaths?: string[];
+    opencodeBinPath?: string | null;
+  },
 ): Promise<EngineInfo> {
   return invoke<EngineInfo>("engine_start", {
     projectDir,
     preferSidecar: options?.preferSidecar ?? false,
+    opencodeBinPath: options?.opencodeBinPath ?? null,
     runtime: options?.runtime ?? null,
     workspacePaths: options?.workspacePaths ?? null,
   });
@@ -358,22 +364,22 @@ export async function engineStop(): Promise<EngineInfo> {
   return invoke<EngineInfo>("engine_stop");
 }
 
-export async function openwrkStatus(): Promise<OpenwrkStatus> {
-  return invoke<OpenwrkStatus>("openwrk_status");
+export async function orchestratorStatus(): Promise<OrchestratorStatus> {
+  return invoke<OrchestratorStatus>("orchestrator_status");
 }
 
-export async function openwrkWorkspaceActivate(input: {
+export async function orchestratorWorkspaceActivate(input: {
   workspacePath: string;
   name?: string | null;
-}): Promise<OpenwrkWorkspace> {
-  return invoke<OpenwrkWorkspace>("openwrk_workspace_activate", {
+}): Promise<OrchestratorWorkspace> {
+  return invoke<OrchestratorWorkspace>("orchestrator_workspace_activate", {
     workspacePath: input.workspacePath,
     name: input.name ?? null,
   });
 }
 
-export async function openwrkInstanceDispose(workspacePath: string): Promise<boolean> {
-  return invoke<boolean>("openwrk_instance_dispose", { workspacePath });
+export async function orchestratorInstanceDispose(workspacePath: string): Promise<boolean> {
+  return invoke<boolean>("orchestrator_instance_dispose", { workspacePath });
 }
 
 export type AppBuildInfo = {
@@ -386,7 +392,7 @@ export async function appBuildInfo(): Promise<AppBuildInfo> {
   return invoke<AppBuildInfo>("app_build_info");
 }
 
-export type OpenwrkDetachedHost = {
+export type OrchestratorDetachedHost = {
   openworkUrl: string;
   token: string;
   hostToken: string;
@@ -396,12 +402,12 @@ export type OpenwrkDetachedHost = {
   sandboxContainerName?: string | null;
 };
 
-export async function openwrkStartDetached(input: {
+export async function orchestratorStartDetached(input: {
   workspacePath: string;
   sandboxBackend?: "none" | "docker" | null;
   runId?: string | null;
-}): Promise<OpenwrkDetachedHost> {
-  return invoke<OpenwrkDetachedHost>("openwrk_start_detached", {
+}): Promise<OrchestratorDetachedHost> {
+  return invoke<OrchestratorDetachedHost>("orchestrator_start_detached", {
     workspacePath: input.workspacePath,
     sandboxBackend: input.sandboxBackend ?? null,
     runId: input.runId ?? null,
@@ -416,6 +422,20 @@ export type SandboxDoctorResult = {
   clientVersion?: string | null;
   serverVersion?: string | null;
   error?: string | null;
+  debug?: {
+    candidates: string[];
+    selectedBin?: string | null;
+    versionCommand?: {
+      status: number;
+      stdout: string;
+      stderr: string;
+    } | null;
+    infoCommand?: {
+      status: number;
+      stdout: string;
+      stderr: string;
+    } | null;
+  } | null;
 };
 
 export async function sandboxDoctor(): Promise<SandboxDoctorResult> {
@@ -424,6 +444,16 @@ export async function sandboxDoctor(): Promise<SandboxDoctorResult> {
 
 export async function sandboxStop(containerName: string): Promise<ExecResult> {
   return invoke<ExecResult>("sandbox_stop", { containerName });
+}
+
+export type OpenworkDockerCleanupResult = {
+  candidates: string[];
+  removed: string[];
+  errors: string[];
+};
+
+export async function sandboxCleanupOpenworkContainers(): Promise<OpenworkDockerCleanupResult> {
+  return invoke<OpenworkDockerCleanupResult>("sandbox_cleanup_openwork_containers");
 }
 
 export async function openworkServerInfo(): Promise<OpenworkServerInfo> {
@@ -436,9 +466,11 @@ export async function engineInfo(): Promise<EngineInfo> {
 
 export async function engineDoctor(options?: {
   preferSidecar?: boolean;
+  opencodeBinPath?: string | null;
 }): Promise<EngineDoctorResult> {
   return invoke<EngineDoctorResult>("engine_doctor", {
     preferSidecar: options?.preferSidecar ?? false,
+    opencodeBinPath: options?.opencodeBinPath ?? null,
   });
 }
 
@@ -646,31 +678,31 @@ export async function schedulerDeleteJob(name: string, scopeRoot?: string): Prom
   return invoke<ScheduledJob>("scheduler_delete_job", { name, scopeRoot });
 }
 
-// Owpenbot types
-export type OwpenbotIdentityItem = {
+// OpenCodeRouter types
+export type OpenCodeRouterIdentityItem = {
   id: string;
   enabled: boolean;
   running?: boolean;
 };
 
-export type OwpenbotChannelStatus = {
-  items: OwpenbotIdentityItem[];
+export type OpenCodeRouterChannelStatus = {
+  items: OpenCodeRouterIdentityItem[];
 };
 
-export type OwpenbotStatus = {
+export type OpenCodeRouterStatus = {
   running: boolean;
   config: string;
   healthPort?: number | null;
-  telegram: OwpenbotChannelStatus;
-  slack: OwpenbotChannelStatus;
+  telegram: OpenCodeRouterChannelStatus;
+  slack: OpenCodeRouterChannelStatus;
   opencode: { url: string; directory?: string };
 };
 
-export type OwpenbotStatusResult =
-  | { ok: true; status: OwpenbotStatus }
+export type OpenCodeRouterStatusResult =
+  | { ok: true; status: OpenCodeRouterStatus }
   | { ok: false; error: string };
 
-export type OwpenbotInfo = {
+export type OpenCodeRouterInfo = {
   running: boolean;
   version: string | null;
   workspacePath: string | null;
@@ -680,31 +712,31 @@ export type OwpenbotInfo = {
   lastStderr: string | null;
 };
 
-// Owpenbot functions - call Tauri commands that wrap owpenbot CLI
-export async function getOwpenbotStatus(): Promise<OwpenbotStatus | null> {
+// OpenCodeRouter functions - call Tauri commands that wrap opencodeRouter CLI
+export async function getOpenCodeRouterStatus(): Promise<OpenCodeRouterStatus | null> {
   try {
-    return await invoke<OwpenbotStatus>("owpenbot_status");
+    return await invoke<OpenCodeRouterStatus>("opencodeRouter_status");
   } catch {
     return null;
   }
 }
 
-export async function getOwpenbotStatusDetailed(): Promise<OwpenbotStatusResult> {
+export async function getOpenCodeRouterStatusDetailed(): Promise<OpenCodeRouterStatusResult> {
   try {
-    const status = await invoke<OwpenbotStatus>("owpenbot_status");
+    const status = await invoke<OpenCodeRouterStatus>("opencodeRouter_status");
     return { ok: true, status };
   } catch (error) {
     return { ok: false, error: String(error) };
   }
 }
 
-export async function owpenbotInfo(): Promise<OwpenbotInfo> {
-  return invoke<OwpenbotInfo>("owpenbot_info");
+export async function opencodeRouterInfo(): Promise<OpenCodeRouterInfo> {
+  return invoke<OpenCodeRouterInfo>("opencodeRouter_info");
 }
 
-export async function getOwpenbotGroupsEnabled(): Promise<boolean | null> {
+export async function getOpenCodeRouterGroupsEnabled(): Promise<boolean | null> {
   try {
-    const status = await getOwpenbotStatus();
+    const status = await getOpenCodeRouterStatus();
     const healthPort = status?.healthPort ?? 3005;
     const response = await (isTauriRuntime() ? tauriFetch : fetch)(`http://127.0.0.1:${healthPort}/config/groups`, {
       method: "GET",
@@ -720,9 +752,9 @@ export async function getOwpenbotGroupsEnabled(): Promise<boolean | null> {
   }
 }
 
-export async function setOwpenbotGroupsEnabled(enabled: boolean): Promise<ExecResult> {
+export async function setOpenCodeRouterGroupsEnabled(enabled: boolean): Promise<ExecResult> {
   try {
-    const status = await getOwpenbotStatus();
+    const status = await getOpenCodeRouterStatus();
     const healthPort = status?.healthPort ?? 3005;
     const response = await (isTauriRuntime() ? tauriFetch : fetch)(`http://127.0.0.1:${healthPort}/config/groups`, {
       method: "POST",
@@ -737,6 +769,23 @@ export async function setOwpenbotGroupsEnabled(enabled: boolean): Promise<ExecRe
   } catch (e) {
     return { ok: false, status: 1, stdout: "", stderr: String(e) };
   }
+}
+
+export async function opencodeDbMigrate(input: {
+  projectDir: string;
+  preferSidecar?: boolean;
+  opencodeBinPath?: string | null;
+}): Promise<ExecResult> {
+  const safeProjectDir = input.projectDir.trim();
+  if (!safeProjectDir) {
+    throw new Error("project_dir is required");
+  }
+
+  return invoke<ExecResult>("opencode_db_migrate", {
+    projectDir: safeProjectDir,
+    preferSidecar: input.preferSidecar ?? false,
+    opencodeBinPath: input.opencodeBinPath ?? null,
+  });
 }
 
 export async function opencodeMcpAuth(
@@ -756,18 +805,18 @@ export async function opencodeMcpAuth(
   });
 }
 
-export async function owpenbotStop(): Promise<OwpenbotInfo> {
-  return invoke<OwpenbotInfo>("owpenbot_stop");
+export async function opencodeRouterStop(): Promise<OpenCodeRouterInfo> {
+  return invoke<OpenCodeRouterInfo>("opencodeRouter_stop");
 }
 
-export async function owpenbotStart(options: {
+export async function opencodeRouterStart(options: {
   workspacePath: string;
   opencodeUrl?: string;
   opencodeUsername?: string;
   opencodePassword?: string;
   healthPort?: number;
-}): Promise<OwpenbotInfo> {
-  return invoke<OwpenbotInfo>("owpenbot_start", {
+}): Promise<OpenCodeRouterInfo> {
+  return invoke<OpenCodeRouterInfo>("opencodeRouter_start", {
     workspacePath: options.workspacePath,
     opencodeUrl: options.opencodeUrl ?? null,
     opencodeUsername: options.opencodeUsername ?? null,
@@ -776,15 +825,15 @@ export async function owpenbotStart(options: {
   });
 }
 
-export async function owpenbotRestart(options: {
+export async function opencodeRouterRestart(options: {
   workspacePath: string;
   opencodeUrl?: string;
   opencodeUsername?: string;
   opencodePassword?: string;
   healthPort?: number;
-}): Promise<OwpenbotInfo> {
-  await owpenbotStop();
-  return owpenbotStart(options);
+}): Promise<OpenCodeRouterInfo> {
+  await opencodeRouterStop();
+  return opencodeRouterStart(options);
 }
 
 /**

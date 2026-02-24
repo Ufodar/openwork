@@ -17,37 +17,49 @@ import type {
   View,
 } from "../types";
 import type { McpDirectoryInfo } from "../constants";
-import { formatRelativeTime, isTauriRuntime, normalizeDirectoryPath } from "../utils";
-import { buildOpenworkWorkspaceBaseUrl, createOpenworkServerClient } from "../lib/openwork-server";
+import {
+  formatRelativeTime,
+  getWorkspaceTaskLoadErrorDisplay,
+  isTauriRuntime,
+  normalizeDirectoryPath,
+} from "../utils";
+import {
+  buildOpenworkConnectInviteUrl,
+  buildOpenworkWorkspaceBaseUrl,
+  createOpenworkServerClient,
+} from "../lib/openwork-server";
 import type {
   OpenworkAuditEntry,
+  OpenworkSoulHeartbeatEntry,
+  OpenworkSoulStatus,
   OpenworkServerClient,
   OpenworkServerCapabilities,
   OpenworkServerDiagnostics,
   OpenworkServerSettings,
   OpenworkServerStatus,
 } from "../lib/openwork-server";
-import type { EngineInfo, OpenwrkStatus, OpenworkServerInfo, OwpenbotInfo, WorkspaceInfo } from "../lib/tauri";
+import type { EngineInfo, OrchestratorStatus, OpenworkServerInfo, OpenCodeRouterInfo, WorkspaceInfo } from "../lib/tauri";
 
 import Button from "../components/button";
-import McpView from "./mcp";
-import PluginsView from "./plugins";
+import ExtensionsView from "./extensions";
 import ScheduledTasksView from "./scheduled";
+import SoulView from "./soul";
 import ConfigView from "./config";
 import SettingsView from "./settings";
 import SkillsView from "./skills";
 import IdentitiesView from "./identities";
 import AgentsView from "./agents";
 import StatusBar from "../components/status-bar";
-import ProviderAuthModal from "../components/provider-auth-modal";
+import ProviderAuthModal, { type ProviderOAuthStartResult } from "../components/provider-auth-modal";
 import ShareWorkspaceModal from "../components/share-workspace-modal";
 import {
   Bot,
   Box,
   ChevronDown,
   ChevronRight,
-  Cpu,
+  Circle,
   History,
+  HeartPulse,
   Loader2,
   MessageCircle,
   MoreHorizontal,
@@ -70,7 +82,8 @@ export type DashboardViewProps = {
   providerAuthMethods: Record<string, { type: "oauth" | "api"; label: string }[]>;
   openProviderAuthModal: () => Promise<void>;
   closeProviderAuthModal: () => void;
-  startProviderAuth: (providerId?: string) => Promise<string>;
+  startProviderAuth: (providerId?: string) => Promise<ProviderOAuthStartResult>;
+  completeProviderAuthOAuth: (providerId: string, methodIndex: number, code?: string) => Promise<string | void>;
   submitProviderApiKey: (providerId: string, apiKey: string) => Promise<string | void>;
   view: View;
   setView: (view: View, sessionId?: string) => void;
@@ -101,8 +114,8 @@ export type DashboardViewProps = {
   opencodeConnectStatus: OpencodeConnectStatus | null;
   engineInfo: EngineInfo | null;
   engineDoctorVersion: string | null;
-  openwrkStatus: OpenwrkStatus | null;
-  owpenbotInfo: OwpenbotInfo | null;
+  orchestratorStatus: OrchestratorStatus | null;
+  opencodeRouterInfo: OpenCodeRouterInfo | null;
   updateOpenworkServerSettings: (next: OpenworkServerSettings) => void;
   resetOpenworkServerSettings: () => void;
   testOpenworkServerConnection: (next: OpenworkServerSettings) => Promise<boolean>;
@@ -136,11 +149,20 @@ export type DashboardViewProps = {
   scheduledJobs: ScheduledJob[];
   scheduledJobsSource: "local" | "remote";
   scheduledJobsSourceReady: boolean;
+  schedulerPluginInstalled: boolean;
   scheduledJobsStatus: string | null;
   scheduledJobsBusy: boolean;
   scheduledJobsUpdatedAt: number | null;
   refreshScheduledJobs: (options?: { force?: boolean }) => void;
   deleteScheduledJob: (name: string) => Promise<void> | void;
+  soulStatusByWorkspaceId: Record<string, OpenworkSoulStatus | null>;
+  activeSoulStatus: OpenworkSoulStatus | null;
+  activeSoulHeartbeats: OpenworkSoulHeartbeatEntry[];
+  soulStatusBusy: boolean;
+  soulHeartbeatsBusy: boolean;
+  soulError: string | null;
+  refreshSoulData: (options?: { force?: boolean }) => void;
+  runSoulPrompt: (prompt: string) => void;
   activeWorkspaceRoot: string;
   refreshSkills: (options?: { force?: boolean }) => void;
   refreshHubSkills: (options?: { force?: boolean }) => void;
@@ -238,10 +260,12 @@ export type DashboardViewProps = {
   downloadUpdate: () => void;
   installUpdateAndRestart: () => void;
   anyActiveRuns: boolean;
-  engineSource: "path" | "sidecar";
-  setEngineSource: (value: "path" | "sidecar") => void;
-  engineRuntime: "direct" | "openwrk";
-  setEngineRuntime: (value: "direct" | "openwrk") => void;
+  engineSource: "path" | "sidecar" | "custom";
+  setEngineSource: (value: "path" | "sidecar" | "custom") => void;
+  engineCustomBinPath: string;
+  setEngineCustomBinPath: (value: string) => void;
+  engineRuntime: "direct" | "openwork-orchestrator";
+  setEngineRuntime: (value: "direct" | "openwork-orchestrator") => void;
   isWindows: boolean;
   toggleDeveloperMode: () => void;
   developerMode: boolean;
@@ -254,9 +278,17 @@ export type DashboardViewProps = {
   workspaceDebugEvents: unknown;
   clearWorkspaceDebugEvents: () => void;
   safeStringify: (value: unknown) => string;
+  repairOpencodeMigration: () => void;
+  migrationRepairBusy: boolean;
+  migrationRepairResult: { ok: boolean; message: string } | null;
+  migrationRepairAvailable: boolean;
+  migrationRepairUnavailableReason: string | null;
   repairOpencodeCache: () => void;
   cacheRepairBusy: boolean;
   cacheRepairResult: string | null;
+  cleanupOpenworkDockerContainers: () => void;
+  dockerCleanupBusy: boolean;
+  dockerCleanupResult: string | null;
   notionStatus: "disconnected" | "connecting" | "connected" | "error";
   notionStatusDetail: string | null;
   notionError: string | null;
@@ -269,16 +301,18 @@ export default function DashboardView(props: DashboardViewProps) {
     switch (props.tab) {
       case "scheduled":
         return "Automations";
+      case "soul":
+        return "Soul";
       case "skills":
         return "Skills";
       case "plugins":
-        return "Plugins";
+        return "Extensions";
       case "mcp":
-        return "Apps";
+        return "Extensions";
       case "identities":
-        return "Identities";
+        return "Messaging";
       case "config":
-        return "Config";
+        return "Advanced";
       case "agents":
         return "Agent Hub";
       case "settings":
@@ -296,26 +330,24 @@ export default function DashboardView(props: DashboardViewProps) {
     "Worker";
   const workspaceKindLabel = (workspace: WorkspaceInfo) =>
     workspace.workspaceType === "remote"
-      ? workspace.sandboxContainerName?.trim()
+      ? workspace.sandboxBackend === "docker" ||
+        Boolean(workspace.sandboxRunId?.trim()) ||
+        Boolean(workspace.sandboxContainerName?.trim())
         ? "Sandbox"
         : "Remote"
       : "Local";
 
   const openSessionFromList = (workspaceId: string, sessionId: string, sessionTitle?: string | null) => {
-    // For same-workspace clicks, just select the session without workspace activation
+    // Route-driven selection: navigate first and let the route effect own selectSession.
     if (workspaceId === props.activeWorkspaceId) {
-      void props.selectSession(sessionId);
       void props.openSessionInPreferredView(sessionId, { title: sessionTitle ?? null });
       return;
     }
     // For different workspace, activate workspace first
-    window.setTimeout(() => {
-      void (async () => {
-        await Promise.resolve(props.activateWorkspace(workspaceId));
-        void props.selectSession(sessionId);
-        void props.openSessionInPreferredView(sessionId, { title: sessionTitle ?? null });
-      })();
-    }, 0);
+    void (async () => {
+      await Promise.resolve(props.activateWorkspace(workspaceId));
+      void props.openSessionInPreferredView(sessionId, { title: sessionTitle ?? null });
+    })();
   };
 
   const createTaskInWorkspace = (workspaceId: string) => {
@@ -336,7 +368,7 @@ export default function DashboardView(props: DashboardViewProps) {
   const [lastRefreshedTab, setLastRefreshedTab] = createSignal<string | null>(null);
   const [refreshInProgress, setRefreshInProgress] = createSignal(false);
   const [providerAuthActionBusy, setProviderAuthActionBusy] = createSignal(false);
-  const MAX_SESSIONS_PREVIEW = 3;
+  const MAX_SESSIONS_PREVIEW = 6;
   const COLLAPSED_SESSIONS_PREVIEW = 1;
   const [expandedWorkspaceIds, setExpandedWorkspaceIds] = createSignal<Set<string>>(
     new Set()
@@ -423,11 +455,23 @@ export default function DashboardView(props: DashboardViewProps) {
     onCleanup(() => window.removeEventListener("click", closeMenu));
   });
 
-  const handleProviderAuthSelect = async (providerId: string) => {
+  const handleProviderAuthSelect = async (providerId: string): Promise<ProviderOAuthStartResult> => {
+    if (providerAuthActionBusy()) {
+      throw new Error("Provider auth is already in progress.");
+    }
+    setProviderAuthActionBusy(true);
+    try {
+      return await props.startProviderAuth(providerId);
+    } finally {
+      setProviderAuthActionBusy(false);
+    }
+  };
+
+  const handleProviderAuthOAuth = async (providerId: string, methodIndex: number, code?: string) => {
     if (providerAuthActionBusy()) return;
     setProviderAuthActionBusy(true);
     try {
-      await props.startProviderAuth(providerId);
+      await props.completeProviderAuthOAuth(providerId, methodIndex, code);
       props.closeProviderAuthModal();
     } catch {
       // Errors are surfaced in the modal.
@@ -473,14 +517,14 @@ export default function DashboardView(props: DashboardViewProps) {
         if (currentTab === "skills" && !cancelled) {
           await props.refreshSkills();
         }
-        if (currentTab === "plugins" && !cancelled) {
-          await props.refreshPlugins();
-        }
-        if (currentTab === "mcp" && !cancelled) {
-          await props.refreshMcpServers();
+        if ((currentTab === "plugins" || currentTab === "mcp") && !cancelled) {
+          await Promise.all([props.refreshPlugins(), props.refreshMcpServers()]);
         }
         if (currentTab === "scheduled" && !cancelled) {
           await props.refreshScheduledJobs();
+        }
+        if (currentTab === "soul" && !cancelled) {
+          await props.refreshSoulData();
         }
       } catch {
         // Ignore errors during navigation
@@ -499,8 +543,15 @@ export default function DashboardView(props: DashboardViewProps) {
     });
   });
 
+  const soulModeEnabled = createMemo(() => {
+    const status = props.soulStatusByWorkspaceId[props.activeWorkspaceId];
+    return Boolean(status?.enabled ?? props.activeSoulStatus?.enabled);
+  });
+
+  const soulNavIconClass = () => (soulModeEnabled() ? "soul-nav-icon-active" : "");
+
   const navItem = (t: DashboardTab, label: any, icon: any) => {
-    const active = () => props.tab === t;
+    const active = () => props.tab === t || (t === "mcp" && props.tab === "plugins");
     return (
       <button
         class={`w-full h-10 flex items-center gap-3 px-3 rounded-lg text-sm font-medium transition-colors ${
@@ -522,8 +573,25 @@ export default function DashboardView(props: DashboardViewProps) {
   };
 
   const openConfig = () => {
-    props.setTab("config");
+    props.setTab(props.developerMode ? "config" : "identities");
   };
+
+  const openSoulForWorkspace = (workspaceId?: string) => {
+    const id = (workspaceId ?? props.activeWorkspaceId).trim();
+    if (!id) return;
+    void (async () => {
+      if (id !== props.activeWorkspaceId) {
+        await Promise.resolve(props.activateWorkspace(id));
+      }
+      props.setTab("soul");
+    })();
+  };
+
+  createEffect(() => {
+    if (props.developerMode) return;
+    if (props.tab !== "config") return;
+    props.setTab("identities");
+  });
 
   const shareWorkspace = createMemo(() => {
     const id = shareWorkspaceId();
@@ -609,7 +677,18 @@ export default function DashboardView(props: DashboardViewProps) {
         : null;
       const url = mountedUrl || hostUrl;
       const token = props.openworkServerHostInfo?.clientToken?.trim() || "";
+      const inviteUrl = buildOpenworkConnectInviteUrl({
+        workspaceUrl: url,
+        token,
+      });
       return [
+        {
+          label: "OpenWork invite link",
+          value: inviteUrl,
+          secret: true,
+          placeholder: !isTauriRuntime() ? "Desktop app required" : "Starting server...",
+          hint: "One link that prefills worker URL and token.",
+        },
         {
           label: "OpenWork worker URL",
           value: url,
@@ -639,7 +718,17 @@ export default function DashboardView(props: DashboardViewProps) {
         ws.openworkToken?.trim() ||
         props.openworkServerSettings.token?.trim() ||
         "";
+      const inviteUrl = buildOpenworkConnectInviteUrl({
+        workspaceUrl: url,
+        token,
+      });
       return [
+        {
+          label: "OpenWork invite link",
+          value: inviteUrl,
+          secret: true,
+          hint: "One link that prefills worker URL and token.",
+        },
         {
           label: "OpenWork worker URL",
           value: url,
@@ -648,7 +737,7 @@ export default function DashboardView(props: DashboardViewProps) {
           label: "Access token",
           value: token,
           secret: true,
-          placeholder: token ? undefined : "Set token in Config",
+          placeholder: token ? undefined : "Set token in Advanced",
           hint: "This token grants access to the worker on that host.",
         },
       ];
@@ -693,13 +782,70 @@ export default function DashboardView(props: DashboardViewProps) {
     return state === "available" || state === "downloading" || state === "ready";
   });
 
+  const updateDownloadPercent = createMemo<number | null>(() => {
+    const total = props.updateStatus?.totalBytes;
+    if (total == null || total <= 0) return null;
+    const downloaded = props.updateStatus?.downloadedBytes ?? 0;
+    const clamped = Math.max(0, Math.min(1, downloaded / total));
+    return Math.floor(clamped * 100);
+  });
+
   const updatePillLabel = createMemo(() => {
     const state = props.updateStatus?.state;
     if (state === "ready") {
-      return props.anyActiveRuns ? "Update ready" : "Restart";
+      return props.anyActiveRuns ? "Update ready" : "Install update";
     }
-    if (state === "downloading") return "Downloading";
+    if (state === "downloading") {
+      const percent = updateDownloadPercent();
+      return percent == null ? "Downloading" : `Downloading ${percent}%`;
+    }
     return "Update available";
+  });
+
+  const updatePillButtonTone = createMemo(() => {
+    const state = props.updateStatus?.state;
+    if (state === "ready") {
+      return props.anyActiveRuns
+        ? "text-amber-11 hover:text-amber-11 hover:bg-amber-3/30"
+        : "text-green-11 hover:text-green-11 hover:bg-green-3/30";
+    }
+    if (state === "downloading") {
+      return "text-blue-11 hover:text-blue-11 hover:bg-blue-3/30";
+    }
+    return "text-dls-secondary hover:text-emerald-11 hover:bg-emerald-3/25";
+  });
+
+  const updatePillBorderTone = createMemo(() => {
+    const state = props.updateStatus?.state;
+    if (state === "ready") {
+      return props.anyActiveRuns ? "border-amber-7/35" : "border-green-7/35";
+    }
+    if (state === "downloading") {
+      return "border-blue-7/35";
+    }
+    return "border-dls-border";
+  });
+
+  const updatePillDotTone = createMemo(() => {
+    const state = props.updateStatus?.state;
+    if (state === "ready") {
+      return props.anyActiveRuns ? "text-amber-10 fill-amber-10" : "text-green-10 fill-green-10";
+    }
+    if (state === "downloading") {
+      return "text-blue-10";
+    }
+    return "text-emerald-10 fill-emerald-10";
+  });
+
+  const updatePillVersionTone = createMemo(() => {
+    const state = props.updateStatus?.state;
+    if (state === "ready") {
+      return props.anyActiveRuns ? "text-amber-11/75" : "text-green-11/75";
+    }
+    if (state === "downloading") {
+      return "text-blue-11/75";
+    }
+    return "text-dls-secondary";
   });
 
   const updatePillTitle = createMemo(() => {
@@ -730,7 +876,7 @@ export default function DashboardView(props: DashboardViewProps) {
           <Show when={showUpdatePill()}>
             <button
               type="button"
-              class="mb-3 w-full flex h-9 items-center gap-2 rounded-xl border border-dls-border bg-dls-hover px-3 text-xs text-dls-secondary shadow-sm transition-colors hover:bg-dls-active hover:text-dls-text"
+              class={`group mb-3 w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(var(--dls-accent-rgb),0.2)] ${updatePillButtonTone()}`}
               onClick={handleUpdatePillClick}
               title={updatePillTitle()}
               aria-label={updatePillTitle()}
@@ -738,26 +884,22 @@ export default function DashboardView(props: DashboardViewProps) {
               <Show
                 when={props.updateStatus?.state === "downloading"}
                 fallback={
-                  <span
-                    class={`w-2 h-2 rounded-full ${
-                      props.updateStatus?.state === "ready" ? "bg-green-9" : "bg-amber-9"
-                    }`}
+                  <Circle
+                    size={8}
+                    class={`${updatePillDotTone()} shrink-0 ${props.updateStatus?.state === "available" ? "group-hover:animate-pulse" : ""}`}
                   />
                 }
               >
-                <Loader2 size={14} class="animate-spin text-dls-secondary" />
+                <Loader2 size={13} class={`animate-spin shrink-0 ${updatePillDotTone()}`} />
               </Show>
-              <span class="text-[11px] font-medium text-dls-text">{updatePillLabel()}</span>
+              <span class="flex-1 text-left">{updatePillLabel()}</span>
               <Show when={props.updateStatus?.version}>
                 {(version) => (
-                  <span class="ml-auto text-[11px] text-dls-secondary font-mono">v{version()}</span>
+                  <span class={`ml-auto font-mono text-[10px] ${updatePillVersionTone()}`}>v{version()}</span>
                 )}
               </Show>
             </button>
           </Show>
-          <div class="flex items-center text-[11px] font-bold text-dls-secondary uppercase px-3 mb-3 pt-2 tracking-tight">
-            <span>Tasks</span>
-          </div>
 
           <div class="space-y-3 mb-3">
             <For each={props.workspaceSessionGroups}>
@@ -765,6 +907,9 @@ export default function DashboardView(props: DashboardViewProps) {
                 const workspace = () => group.workspace;
                 const isConnecting = () => props.connectingWorkspaceId === workspace().id;
                 const isMenuOpen = () => workspaceMenuId() === workspace().id;
+                const taskLoadError = () => getWorkspaceTaskLoadErrorDisplay(workspace(), group.error);
+                const soulStatus = () => props.soulStatusByWorkspaceId[workspace().id] ?? null;
+                const soulEnabled = () => Boolean(soulStatus()?.enabled);
 
                 return (
                   <div class="space-y-1">
@@ -803,8 +948,14 @@ export default function DashboardView(props: DashboardViewProps) {
                         </button>
                         <div class="min-w-0 flex-1">
                           <div class="text-sm font-medium truncate">{workspaceLabel(workspace())}</div>
-                          <div class="text-[11px] text-dls-secondary">
-                            {workspaceKindLabel(workspace())}
+                          <div class="text-[11px] text-dls-secondary flex items-center gap-1.5">
+                            <span>{workspaceKindLabel(workspace())}</span>
+                            <Show when={soulEnabled()}>
+                              <span class="inline-flex items-center gap-1 rounded-full border border-rose-7/40 bg-rose-3/40 px-1.5 py-0.5 text-[10px] text-rose-11">
+                                <HeartPulse size={10} />
+                                Soul
+                              </span>
+                            </Show>
                           </div>
                         </div>
                         <Show when={group.status === "loading"}>
@@ -812,10 +963,14 @@ export default function DashboardView(props: DashboardViewProps) {
                         </Show>
                         <Show when={group.status === "error"}>
                           <span
-                            class="text-[10px] px-2 py-0.5 rounded-full border border-red-7/50 text-red-11 bg-red-3/30"
-                            title={group.error ?? "Failed to load tasks"}
+                            class={`text-[10px] px-2 py-0.5 rounded-full border ${
+                              taskLoadError().tone === "offline"
+                                ? "border-amber-7/50 text-amber-11 bg-amber-3/30"
+                                : "border-red-7/50 text-red-11 bg-red-3/30"
+                            }`}
+                            title={taskLoadError().title}
                           >
-                            Error
+                            {taskLoadError().label}
                           </span>
                         </Show>
                         {/* Session count intentionally hidden (not a useful signal and it can crowd the header actions). */}
@@ -875,6 +1030,16 @@ export default function DashboardView(props: DashboardViewProps) {
                             }}
                           >
                             Share...
+                          </button>
+                          <button
+                            type="button"
+                            class="w-full text-left px-2 py-1.5 text-sm rounded-md hover:bg-dls-hover"
+                            onClick={() => {
+                              openSoulForWorkspace(workspace().id);
+                              setWorkspaceMenuId(null);
+                            }}
+                          >
+                            {soulEnabled() ? "Soul settings" : "Enable soul"}
                           </button>
                           <Show when={workspace().workspaceType === "remote"}>
                             <button
@@ -972,10 +1137,14 @@ export default function DashboardView(props: DashboardViewProps) {
                               fallback={
                                 <Show when={group.status === "error"}>
                                   <div
-                                    class="w-full px-3 py-2 text-xs text-red-11 ml-2 text-left rounded-lg bg-red-3/20 border border-red-7/40"
-                                    title={group.error ?? "Failed to load tasks"}
+                                    class={`w-full px-3 py-2 text-xs ml-2 text-left rounded-lg border ${
+                                      taskLoadError().tone === "offline"
+                                        ? "text-amber-11 bg-amber-3/20 border-amber-7/40"
+                                        : "text-red-11 bg-red-3/20 border-red-7/40"
+                                    }`}
+                                    title={taskLoadError().title}
                                   >
-                                    Failed to load tasks
+                                    {taskLoadError().message}
                                   </div>
                                 </Show>
                               }
@@ -1106,7 +1275,7 @@ export default function DashboardView(props: DashboardViewProps) {
             <Show when={showUpdatePill()}>
               <button
                 type="button"
-                class="md:hidden flex h-8 items-center gap-2 rounded-full border border-dls-border bg-dls-hover px-3 text-xs text-dls-secondary shadow-sm transition-colors hover:bg-dls-active hover:text-dls-text"
+                class={`md:hidden flex items-center gap-1.5 rounded-full border bg-dls-surface px-2.5 py-1 text-xs font-medium shadow-sm transition-colors active:scale-[0.99] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(var(--dls-accent-rgb),0.2)] ${updatePillBorderTone()} ${updatePillButtonTone()}`}
                 onClick={handleUpdatePillClick}
                 title={updatePillTitle()}
                 aria-label={updatePillTitle()}
@@ -1114,19 +1283,18 @@ export default function DashboardView(props: DashboardViewProps) {
                 <Show
                   when={props.updateStatus?.state === "downloading"}
                   fallback={
-                    <span
-                      class={`w-2 h-2 rounded-full ${
-                        props.updateStatus?.state === "ready" ? "bg-green-9" : "bg-amber-9"
-                      }`}
+                    <Circle
+                      size={8}
+                      class={`${updatePillDotTone()} shrink-0 ${props.updateStatus?.state === "available" ? "animate-pulse" : ""}`}
                     />
                   }
                 >
-                  <Loader2 size={14} class="animate-spin text-dls-secondary" />
+                  <Loader2 size={13} class={`animate-spin shrink-0 ${updatePillDotTone()}`} />
                 </Show>
-                <span class="text-[11px] font-medium text-dls-text">{updatePillLabel()}</span>
+                <span class="text-[11px]">{updatePillLabel()}</span>
                 <Show when={props.updateStatus?.version}>
                   {(version) => (
-                    <span class="hidden sm:inline text-[11px] text-dls-secondary font-mono">v{version()}</span>
+                    <span class={`hidden sm:inline font-mono text-[10px] ${updatePillVersionTone()}`}>v{version()}</span>
                   )}
                 </Show>
               </button>
@@ -1134,6 +1302,12 @@ export default function DashboardView(props: DashboardViewProps) {
             <div class="px-3 py-1.5 rounded-xl bg-dls-hover text-xs text-dls-secondary font-medium">
               {props.activeWorkspaceDisplay.name}
             </div>
+            <Show when={props.activeSoulStatus?.enabled}>
+              <div class="inline-flex items-center gap-1 rounded-full border border-rose-7/40 bg-rose-3/40 px-2 py-1 text-[11px] text-rose-11">
+                <HeartPulse size={11} />
+                Soul on
+              </div>
+            </Show>
             <h1 class="text-lg font-medium">{title()}</h1>
             <Show when={props.developerMode}>
               <span class="text-xs text-dls-secondary">{props.headerStatus}</span>
@@ -1162,6 +1336,26 @@ export default function DashboardView(props: DashboardViewProps) {
                 createSessionAndOpen={props.createSessionAndOpen}
                 setPrompt={props.setPrompt}
                 newTaskDisabled={props.newTaskDisabled}
+                schedulerInstalled={props.schedulerPluginInstalled}
+                canEditPlugins={props.canEditPlugins}
+                addPlugin={props.addPlugin}
+                reloadWorkspaceEngine={props.reloadWorkspaceEngine}
+                reloadBusy={props.reloadBusy}
+                canReloadWorkspace={props.canReloadWorkspace}
+              />
+            </Match>
+            <Match when={props.tab === "soul"}>
+              <SoulView
+                workspaceName={props.activeWorkspaceDisplay.name}
+                workspaceRoot={props.activeWorkspaceRoot}
+                status={props.activeSoulStatus}
+                heartbeats={props.activeSoulHeartbeats}
+                loading={props.soulStatusBusy}
+                loadingHeartbeats={props.soulHeartbeatsBusy}
+                error={props.soulError}
+                newTaskDisabled={props.newTaskDisabled}
+                refresh={props.refreshSoulData}
+                runSoulPrompt={props.runSoulPrompt}
               />
             </Match>
             <Match when={props.tab === "skills"}>
@@ -1189,10 +1383,27 @@ export default function DashboardView(props: DashboardViewProps) {
               />
             </Match>
 
-            <Match when={props.tab === "plugins"}>
-              <PluginsView
+            <Match when={props.tab === "plugins" || props.tab === "mcp"}>
+              <ExtensionsView
+                initialSection={props.tab === "plugins" ? "plugins" : "mcp"}
+                setDashboardTab={props.setTab}
                 busy={props.busy}
                 activeWorkspaceRoot={props.activeWorkspaceRoot}
+                refreshMcpServers={props.refreshMcpServers}
+                mcpServers={props.mcpServers}
+                mcpStatus={props.mcpStatus}
+                mcpLastUpdatedAt={props.mcpLastUpdatedAt}
+                mcpStatuses={props.mcpStatuses}
+                mcpConnectingName={props.mcpConnectingName}
+                selectedMcp={props.selectedMcp}
+                setSelectedMcp={props.setSelectedMcp}
+                quickConnect={props.quickConnect}
+                connectMcp={props.connectMcp}
+                logoutMcpAuth={props.logoutMcpAuth}
+                removeMcp={props.removeMcp}
+                showMcpReloadBanner={props.showMcpReloadBanner}
+                reloadBlocked={props.mcpReloadBlocked}
+                reloadMcpEngine={props.reloadMcpEngine}
                 canEditPlugins={props.canEditPlugins}
                 canUseGlobalScope={props.canUseGlobalPluginScope}
                 accessHint={props.pluginsAccessHint}
@@ -1212,27 +1423,6 @@ export default function DashboardView(props: DashboardViewProps) {
               />
             </Match>
 
-            <Match when={props.tab === "mcp"}>
-              <McpView
-                busy={props.busy}
-                activeWorkspaceRoot={props.activeWorkspaceRoot}
-                mcpServers={props.mcpServers}
-                mcpStatus={props.mcpStatus}
-                mcpLastUpdatedAt={props.mcpLastUpdatedAt}
-                mcpStatuses={props.mcpStatuses}
-                mcpConnectingName={props.mcpConnectingName}
-                selectedMcp={props.selectedMcp}
-                setSelectedMcp={props.setSelectedMcp}
-                quickConnect={props.quickConnect}
-                connectMcp={props.connectMcp}
-                logoutMcpAuth={props.logoutMcpAuth}
-                removeMcp={props.removeMcp}
-                showMcpReloadBanner={props.showMcpReloadBanner}
-                reloadBlocked={props.mcpReloadBlocked}
-                reloadMcpEngine={props.reloadMcpEngine}
-              />
-            </Match>
-
             <Match when={props.tab === "identities"}>
               <IdentitiesView
                 busy={props.busy}
@@ -1247,7 +1437,7 @@ export default function DashboardView(props: DashboardViewProps) {
               />
             </Match>
 
-            <Match when={props.tab === "config"}>
+            <Match when={props.tab === "config" && props.developerMode}>
               <ConfigView
                 busy={props.busy}
                 clientConnected={props.clientConnected}
@@ -1306,14 +1496,16 @@ export default function DashboardView(props: DashboardViewProps) {
                   openworkAuditError={props.openworkAuditError}
                   opencodeConnectStatus={props.opencodeConnectStatus}
                   engineInfo={props.engineInfo}
-                  openwrkStatus={props.openwrkStatus}
-                  owpenbotInfo={props.owpenbotInfo}
+                  orchestratorStatus={props.orchestratorStatus}
+                  opencodeRouterInfo={props.opencodeRouterInfo}
                   engineDoctorVersion={props.engineDoctorVersion}
                   developerMode={props.developerMode}
                   toggleDeveloperMode={props.toggleDeveloperMode}
                   stopHost={props.stopHost}
                   engineSource={props.engineSource}
                   setEngineSource={props.setEngineSource}
+                  engineCustomBinPath={props.engineCustomBinPath}
+                  setEngineCustomBinPath={props.setEngineCustomBinPath}
                   engineRuntime={props.engineRuntime}
                   setEngineRuntime={props.setEngineRuntime}
                   isWindows={props.isWindows}
@@ -1347,9 +1539,17 @@ export default function DashboardView(props: DashboardViewProps) {
                   workspaceDebugEvents={props.workspaceDebugEvents}
                   clearWorkspaceDebugEvents={props.clearWorkspaceDebugEvents}
                   safeStringify={props.safeStringify}
+                  repairOpencodeMigration={props.repairOpencodeMigration}
+                  migrationRepairBusy={props.migrationRepairBusy}
+                  migrationRepairResult={props.migrationRepairResult}
+                  migrationRepairAvailable={props.migrationRepairAvailable}
+                  migrationRepairUnavailableReason={props.migrationRepairUnavailableReason}
                   repairOpencodeCache={props.repairOpencodeCache}
                   cacheRepairBusy={props.cacheRepairBusy}
                   cacheRepairResult={props.cacheRepairResult}
+                  cleanupOpenworkDockerContainers={props.cleanupOpenworkDockerContainers}
+                  dockerCleanupBusy={props.dockerCleanupBusy}
+                  dockerCleanupResult={props.dockerCleanupResult}
                   notionStatus={props.notionStatus}
                   notionStatusDetail={props.notionStatusDetail}
                   notionError={props.notionError}
@@ -1404,6 +1604,7 @@ export default function DashboardView(props: DashboardViewProps) {
           authMethods={props.providerAuthMethods}
           onSelect={handleProviderAuthSelect}
           onSubmitApiKey={handleProviderAuthApiKey}
+          onSubmitOAuth={handleProviderAuthOAuth}
           onClose={props.closeProviderAuthModal}
         />
 
@@ -1440,7 +1641,7 @@ export default function DashboardView(props: DashboardViewProps) {
           mcpStatuses={props.mcpStatuses}
         />
         <nav class="md:hidden border-t border-dls-border bg-dls-surface">
-          <div class="mx-auto max-w-5xl px-4 py-3 grid grid-cols-7 gap-2">
+          <div class={`mx-auto max-w-5xl px-4 py-3 grid gap-2 ${props.developerMode ? "grid-cols-7" : "grid-cols-6"}`}>
             <button
               class={`flex flex-col items-center gap-1 text-xs ${
                 props.tab === "agents" ? "text-gray-12" : "text-gray-10"
@@ -1461,6 +1662,15 @@ export default function DashboardView(props: DashboardViewProps) {
             </button>
             <button
               class={`flex flex-col items-center gap-1 text-xs ${
+                props.tab === "soul" ? "text-gray-12" : "text-gray-10"
+              }`}
+              onClick={() => props.setTab("soul")}
+            >
+              <HeartPulse size={18} class={soulNavIconClass()} />
+              Soul
+            </button>
+            <button
+              class={`flex flex-col items-center gap-1 text-xs ${
                 props.tab === "skills" ? "text-gray-12" : "text-gray-10"
               }`}
               onClick={() => props.setTab("skills")}
@@ -1470,21 +1680,12 @@ export default function DashboardView(props: DashboardViewProps) {
             </button>
             <button
               class={`flex flex-col items-center gap-1 text-xs ${
-                props.tab === "plugins" ? "text-gray-12" : "text-gray-10"
-              }`}
-              onClick={() => props.setTab("plugins")}
-            >
-              <Cpu size={18} />
-              Plugins
-            </button>
-            <button
-              class={`flex flex-col items-center gap-1 text-xs ${
-                props.tab === "mcp" ? "text-gray-12" : "text-gray-10"
+                props.tab === "mcp" || props.tab === "plugins" ? "text-gray-12" : "text-gray-10"
               }`}
               onClick={() => props.setTab("mcp")}
             >
               <Box size={18} />
-              Apps
+              Extensions
             </button>
             <button
               class={`flex flex-col items-center gap-1 text-xs ${
@@ -1495,15 +1696,17 @@ export default function DashboardView(props: DashboardViewProps) {
               <MessageCircle size={18} />
               IDs
             </button>
-            <button
-              class={`flex flex-col items-center gap-1 text-xs ${
-                props.tab === "config" ? "text-gray-12" : "text-gray-10"
-              }`}
-              onClick={() => props.setTab("config")}
-            >
-              <SlidersHorizontal size={18} />
-              Config
-            </button>
+            <Show when={props.developerMode}>
+              <button
+                class={`flex flex-col items-center gap-1 text-xs ${
+                  props.tab === "config" ? "text-gray-12" : "text-gray-10"
+                }`}
+                onClick={() => props.setTab("config")}
+              >
+                <SlidersHorizontal size={18} />
+                Advanced
+              </button>
+            </Show>
           </div>
         </nav>
       </main>
@@ -1512,11 +1715,11 @@ export default function DashboardView(props: DashboardViewProps) {
         <div class="space-y-1 pt-2">
           {navItem("agents", "Agents", <Bot size={18} />)}
           {navItem("scheduled", "Automations", <History size={18} />)}
+          {navItem("soul", "Soul", <HeartPulse size={18} class={soulNavIconClass()} />)}
           {navItem("skills", "Skills", <Zap size={18} />)}
-          {navItem("plugins", "Plugins", <Cpu size={18} />)}
-          {navItem("mcp", "Apps", <Box size={18} />)}
-          {navItem("identities", "Identities", <MessageCircle size={18} />)}
-          {navItem("config", "Config", <SlidersHorizontal size={18} />)}
+          {navItem("mcp", "Extensions", <Box size={18} />)}
+          {navItem("identities", "Messaging", <MessageCircle size={18} />)}
+          <Show when={props.developerMode}>{navItem("config", "Advanced", <SlidersHorizontal size={18} />)}</Show>
         </div>
       </aside>
     </div>

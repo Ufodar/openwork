@@ -3,7 +3,7 @@ import { For, Match, Show, Switch, createEffect, createMemo, createSignal, onMou
 import { formatBytes, formatRelativeTime, isTauriRuntime } from "../utils";
 
 import Button from "../components/button";
-import { HardDrive, MessageCircle, PlugZap, RefreshCcw, Shield, Smartphone, X } from "lucide-solid";
+import { CircleAlert, HardDrive, MessageCircle, PlugZap, RefreshCcw, Smartphone, X, Zap } from "lucide-solid";
 import type { OpencodeConnectStatus, ProviderListItem, SettingsTab, StartupPreference } from "../types";
 import type {
   OpenworkAuditEntry,
@@ -14,17 +14,19 @@ import type {
 } from "../lib/openwork-server";
 import type {
   EngineInfo,
-  OpenwrkBinaryInfo,
-  OpenwrkStatus,
+  OrchestratorBinaryInfo,
+  OrchestratorStatus,
   OpenworkServerInfo,
   AppBuildInfo,
-  OwpenbotInfo,
+  OpenCodeRouterInfo,
 } from "../lib/tauri";
 import {
   appBuildInfo,
-  owpenbotRestart,
-  owpenbotStop,
+  opencodeRouterRestart,
+  opencodeRouterStop,
+  pickFile,
 } from "../lib/tauri";
+import { currentLocale, t } from "../../i18n";
 
 export type SettingsViewProps = {
   startupPreference: StartupPreference | null;
@@ -50,15 +52,17 @@ export type SettingsViewProps = {
   openworkAuditError: string | null;
   opencodeConnectStatus: OpencodeConnectStatus | null;
   engineInfo: EngineInfo | null;
-  openwrkStatus: OpenwrkStatus | null;
-  owpenbotInfo: OwpenbotInfo | null;
+  orchestratorStatus: OrchestratorStatus | null;
+  opencodeRouterInfo: OpenCodeRouterInfo | null;
   developerMode: boolean;
   toggleDeveloperMode: () => void;
   stopHost: () => void;
-  engineSource: "path" | "sidecar";
-  setEngineSource: (value: "path" | "sidecar") => void;
-  engineRuntime: "direct" | "openwrk";
-  setEngineRuntime: (value: "direct" | "openwrk") => void;
+  engineSource: "path" | "sidecar" | "custom";
+  setEngineSource: (value: "path" | "sidecar" | "custom") => void;
+  engineCustomBinPath: string;
+  setEngineCustomBinPath: (value: string) => void;
+  engineRuntime: "direct" | "openwork-orchestrator";
+  setEngineRuntime: (value: "direct" | "openwork-orchestrator") => void;
   isWindows: boolean;
   defaultModelLabel: string;
   defaultModelRef: string;
@@ -99,9 +103,17 @@ export type SettingsViewProps = {
   workspaceDebugEvents: unknown;
   clearWorkspaceDebugEvents: () => void;
   safeStringify: (value: unknown) => string;
+  repairOpencodeMigration: () => void;
+  migrationRepairBusy: boolean;
+  migrationRepairResult: { ok: boolean; message: string } | null;
+  migrationRepairAvailable: boolean;
+  migrationRepairUnavailableReason: string | null;
   repairOpencodeCache: () => void;
   cacheRepairBusy: boolean;
   cacheRepairResult: string | null;
+  cleanupOpenworkDockerContainers: () => void;
+  dockerCleanupBusy: boolean;
+  dockerCleanupResult: string | null;
   notionStatus: "disconnected" | "connecting" | "connected" | "error";
   notionStatusDetail: string | null;
   notionError: string | null;
@@ -110,10 +122,10 @@ export type SettingsViewProps = {
   engineDoctorVersion: string | null;
 };
 
-// Owpenbot Settings Component
+// OpenCodeRouter Settings Component
 //
 // Messaging identities + routing are managed in the Identities tab.
-export function OwpenbotSettings(_props: {
+export function OpenCodeRouterSettings(_props: {
   busy: boolean;
   openworkServerStatus: OpenworkServerStatus;
   openworkServerUrl: string;
@@ -137,6 +149,22 @@ export function OwpenbotSettings(_props: {
 
 
 export default function SettingsView(props: SettingsViewProps) {
+  const translate = (key: string) => t(key, currentLocale());
+  const engineCustomBinPathLabel = () => props.engineCustomBinPath.trim() || "No binary selected.";
+
+  const handlePickEngineBinary = async () => {
+    if (!isTauriRuntime()) return;
+    try {
+      const selected = await pickFile({ title: "Select OpenCode binary" });
+      const path = Array.isArray(selected) ? selected[0] : selected;
+      const trimmed = (path ?? "").trim();
+      if (!trimmed) return;
+      props.setEngineCustomBinPath(trimmed);
+      props.setEngineSource("custom");
+    } catch {
+      // ignore
+    }
+  };
   const [buildInfo, setBuildInfo] = createSignal<AppBuildInfo | null>(null);
   const updateState = () => props.updateStatus?.state ?? "idle";
   const updateNotes = () => props.updateStatus?.notes ?? null;
@@ -146,6 +174,14 @@ export default function SettingsView(props: SettingsViewProps) {
   const updateDownloadedBytes = () => props.updateStatus?.downloadedBytes ?? null;
   const updateTotalBytes = () => props.updateStatus?.totalBytes ?? null;
   const updateErrorMessage = () => props.updateStatus?.message ?? null;
+
+  const updateDownloadPercent = createMemo<number | null>(() => {
+    const total = updateTotalBytes();
+    if (total == null || total <= 0) return null;
+    const downloaded = updateDownloadedBytes() ?? 0;
+    const clamped = Math.max(0, Math.min(1, downloaded / total));
+    return Math.floor(clamped * 100);
+  });
 
   const isMacToolbar = createMemo(() => {
     if (props.isWindows) return false;
@@ -195,9 +231,9 @@ export default function SettingsView(props: SettingsViewProps) {
     }
     if (state === "downloading") {
       const downloaded = updateDownloadedBytes() ?? 0;
-      const total = updateTotalBytes();
-      const progress = total != null ? `${formatBytes(downloaded)} / ${formatBytes(total)}` : formatBytes(downloaded);
-      return `Downloading ${progress}`;
+      const percent = updateDownloadPercent();
+      if (percent != null) return `Downloading ${percent}%`;
+      return `Downloading ${formatBytes(downloaded)}`;
     }
     if (state === "checking") {
       return "Checking for updates";
@@ -206,6 +242,22 @@ export default function SettingsView(props: SettingsViewProps) {
       return "Update check failed";
     }
     return "Up to date";
+  });
+
+  const updateToolbarTitle = createMemo(() => {
+    const state = updateState();
+    const version = updateVersion();
+    if (state !== "downloading") return updateToolbarLabel();
+
+    const downloaded = updateDownloadedBytes() ?? 0;
+    const total = updateTotalBytes();
+    const percent = updateDownloadPercent();
+
+    if (total != null && percent != null) {
+      return `Downloading ${formatBytes(downloaded)} / ${formatBytes(total)} (${percent}%)${version ? ` · v${version}` : ""}`;
+    }
+
+    return `Downloading ${formatBytes(downloaded)}${version ? ` · v${version}` : ""}`;
   });
 
   const updateToolbarActionLabel = createMemo(() => {
@@ -269,6 +321,21 @@ export default function SettingsView(props: SettingsViewProps) {
   const [openworkReconnectError, setOpenworkReconnectError] = createSignal<string | null>(null);
   const providerConnectedCount = createMemo(() => (props.providerConnectedIds ?? []).length);
   const providerAvailableCount = createMemo(() => (props.providers ?? []).length);
+  const connectedProviderNames = createMemo(() => {
+    const connectedIds = props.providerConnectedIds ?? [];
+    if (!connectedIds.length) return [] as string[];
+
+    const providersById = new Map((props.providers ?? []).map((provider) => [provider.id, provider]));
+    const names = connectedIds
+      .map((id) => {
+        const provider = providersById.get(id);
+        const label = provider?.name?.trim() || provider?.id?.trim() || id.trim();
+        return label;
+      })
+      .filter((name) => name.length > 0);
+
+    return Array.from(new Set(names));
+  });
   const providerStatusLabel = createMemo(() => {
     if (!providerAvailableCount()) return "Unavailable";
     if (!providerConnectedCount()) return "Not connected";
@@ -372,68 +439,68 @@ export default function SettingsView(props: SettingsViewProps) {
     return formatRelativeTime(at);
   });
 
-  const owpenbotStatusLabel = createMemo(() => {
+  const opencodeRouterStatusLabel = createMemo(() => {
     if (!isTauriRuntime()) return "Unavailable";
-    return props.owpenbotInfo?.running ? "Running" : "Offline";
+    return props.opencodeRouterInfo?.running ? "Running" : "Offline";
   });
 
-  const owpenbotStatusStyle = createMemo(() => {
+  const opencodeRouterStatusStyle = createMemo(() => {
     if (!isTauriRuntime()) return "bg-gray-4/60 text-gray-11 border-gray-7/50";
-    return props.owpenbotInfo?.running
+    return props.opencodeRouterInfo?.running
       ? "bg-green-7/10 text-green-11 border-green-7/20"
       : "bg-gray-4/60 text-gray-11 border-gray-7/50";
   });
 
-  const [owpenbotRestarting, setOwpenbotRestarting] = createSignal(false);
-  const [owpenbotRestartError, setOwpenbotRestartError] = createSignal<string | null>(null);
+  const [opencodeRouterRestarting, setOpenCodeRouterRestarting] = createSignal(false);
+  const [opencodeRouterRestartError, setOpenCodeRouterRestartError] = createSignal<string | null>(null);
 
-  const handleOwpenbotRestart = async () => {
-    if (owpenbotRestarting()) return;
-    const workspacePath = props.owpenbotInfo?.workspacePath?.trim() || props.engineInfo?.projectDir?.trim();
-    const opencodeUrl = props.owpenbotInfo?.opencodeUrl?.trim() || props.engineInfo?.baseUrl?.trim();
+  const handleOpenCodeRouterRestart = async () => {
+    if (opencodeRouterRestarting()) return;
+    const workspacePath = props.opencodeRouterInfo?.workspacePath?.trim() || props.engineInfo?.projectDir?.trim();
+    const opencodeUrl = props.opencodeRouterInfo?.opencodeUrl?.trim() || props.engineInfo?.baseUrl?.trim();
     const opencodeUsername = props.engineInfo?.opencodeUsername?.trim() || undefined;
     const opencodePassword = props.engineInfo?.opencodePassword?.trim() || undefined;
     if (!workspacePath) {
-      setOwpenbotRestartError("No worker path available");
+      setOpenCodeRouterRestartError("No worker path available");
       return;
     }
-    setOwpenbotRestarting(true);
-    setOwpenbotRestartError(null);
+    setOpenCodeRouterRestarting(true);
+    setOpenCodeRouterRestartError(null);
     try {
-      await owpenbotRestart({
+      await opencodeRouterRestart({
         workspacePath,
         opencodeUrl: opencodeUrl || undefined,
         opencodeUsername,
         opencodePassword,
       });
     } catch (e) {
-      setOwpenbotRestartError(e instanceof Error ? e.message : String(e));
+      setOpenCodeRouterRestartError(e instanceof Error ? e.message : String(e));
     } finally {
-      setOwpenbotRestarting(false);
+      setOpenCodeRouterRestarting(false);
     }
   };
 
-  const handleOwpenbotStop = async () => {
-    if (owpenbotRestarting()) return;
-    setOwpenbotRestarting(true);
-    setOwpenbotRestartError(null);
+  const handleOpenCodeRouterStop = async () => {
+    if (opencodeRouterRestarting()) return;
+    setOpenCodeRouterRestarting(true);
+    setOpenCodeRouterRestartError(null);
     try {
-      await owpenbotStop();
+      await opencodeRouterStop();
     } catch (e) {
-      setOwpenbotRestartError(e instanceof Error ? e.message : String(e));
+      setOpenCodeRouterRestartError(e instanceof Error ? e.message : String(e));
     } finally {
-      setOwpenbotRestarting(false);
+      setOpenCodeRouterRestarting(false);
     }
   };
 
-  const openwrkStatusLabel = createMemo(() => {
-    if (!props.openwrkStatus) return "Unavailable";
-    return props.openwrkStatus.running ? "Running" : "Offline";
+  const orchestratorStatusLabel = createMemo(() => {
+    if (!props.orchestratorStatus) return "Unavailable";
+    return props.orchestratorStatus.running ? "Running" : "Offline";
   });
 
-  const openwrkStatusStyle = createMemo(() => {
-    if (!props.openwrkStatus) return "bg-gray-4/60 text-gray-11 border-gray-7/50";
-    return props.openwrkStatus.running
+  const orchestratorStatusStyle = createMemo(() => {
+    if (!props.orchestratorStatus) return "bg-gray-4/60 text-gray-11 border-gray-7/50";
+    return props.orchestratorStatus.running
       ? "bg-green-7/10 text-green-11 border-green-7/20"
       : "bg-gray-4/60 text-gray-11 border-gray-7/50";
   });
@@ -527,30 +594,30 @@ export default function SettingsView(props: SettingsViewProps) {
     return props.openworkServerHostInfo.lastStderr?.trim() || "No stderr captured yet.";
   };
 
-  const owpenbotStdout = () => {
+  const opencodeRouterStdout = () => {
     if (!isTauriRuntime()) return "Available in the desktop app.";
-    return props.owpenbotInfo?.lastStdout?.trim() || "No stdout captured yet.";
+    return props.opencodeRouterInfo?.lastStdout?.trim() || "No stdout captured yet.";
   };
 
-  const owpenbotStderr = () => {
+  const opencodeRouterStderr = () => {
     if (!isTauriRuntime()) return "Available in the desktop app.";
-    return props.owpenbotInfo?.lastStderr?.trim() || "No stderr captured yet.";
+    return props.opencodeRouterInfo?.lastStderr?.trim() || "No stderr captured yet.";
   };
 
-  const formatOpenwrkBinary = (binary?: OpenwrkBinaryInfo | null) => {
+  const formatOrchestratorBinary = (binary?: OrchestratorBinaryInfo | null) => {
     if (!binary) return "Binary unavailable";
     const version = binary.actualVersion || binary.expectedVersion || "unknown";
     return `${binary.source} · ${version}`;
   };
 
-  const formatOpenwrkBinaryVersion = (binary?: OpenwrkBinaryInfo | null) => {
+  const formatOrchestratorBinaryVersion = (binary?: OrchestratorBinaryInfo | null) => {
     if (!binary) return "—";
     return binary.actualVersion || binary.expectedVersion || "—";
   };
 
-  const openwrkBinaryPath = () => props.openwrkStatus?.binaries?.opencode?.path ?? "—";
-  const openwrkSidecarSummary = () => {
-    const info = props.openwrkStatus?.sidecar;
+  const orchestratorBinaryPath = () => props.orchestratorStatus?.binaries?.opencode?.path ?? "—";
+  const orchestratorSidecarSummary = () => {
+    const info = props.orchestratorStatus?.sidecar;
     if (!info) return "Sidecar config unavailable";
     const source = info.source ?? "auto";
     const target = info.target ?? "unknown";
@@ -564,13 +631,13 @@ export default function SettingsView(props: SettingsViewProps) {
     return sha.length > 12 ? sha.slice(0, 12) : sha;
   };
   const opencodeVersionLabel = () => {
-    const fromOpenwrk = formatOpenwrkBinaryVersion(props.openwrkStatus?.binaries?.opencode ?? null);
-    if (fromOpenwrk !== "—") return fromOpenwrk;
+    const binary = props.orchestratorStatus?.binaries?.opencode ?? null;
+    if (binary) return formatOrchestratorBinary(binary);
     return props.engineDoctorVersion ?? "—";
   };
   const openworkServerVersionLabel = () => props.openworkServerDiagnostics?.version ?? "—";
-  const owpenbotVersionLabel = () => props.owpenbotInfo?.version ?? "—";
-  const openwrkVersionLabel = () => props.openwrkStatus?.cliVersion ?? "—";
+  const opencodeRouterVersionLabel = () => props.opencodeRouterInfo?.version ?? "—";
+  const orchestratorVersionLabel = () => props.orchestratorStatus?.cliVersion ?? "—";
 
   onMount(() => {
     if (!isTauriRuntime()) return;
@@ -581,6 +648,11 @@ export default function SettingsView(props: SettingsViewProps) {
     if (!uptimeMs) return "—";
     return formatRelativeTime(Date.now() - uptimeMs);
   };
+
+  const compactOutlineActionClass =
+    "inline-flex items-center gap-1.5 rounded-md border border-dls-border bg-dls-surface px-3 py-1.5 text-xs font-medium text-dls-secondary shadow-sm transition-colors duration-150 hover:bg-dls-hover hover:text-dls-text focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(var(--dls-accent-rgb),0.25)] disabled:cursor-not-allowed disabled:opacity-60";
+  const compactDangerActionClass =
+    "inline-flex items-center gap-1.5 rounded-md border border-red-7/35 bg-red-3/25 px-3 py-1.5 text-xs font-medium text-red-11 transition-colors duration-150 hover:border-red-7/50 hover:bg-red-3/45 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-7/35 disabled:cursor-not-allowed disabled:opacity-60";
 
   return (
     <section class="space-y-6">
@@ -605,17 +677,17 @@ export default function SettingsView(props: SettingsViewProps) {
           <div class="flex flex-wrap items-center gap-2">
             <div
               class={`text-xs px-2 py-1 rounded-full border flex items-center gap-2 ${updateToolbarTone()}`}
-              title={updateToolbarLabel()}
+              title={updateToolbarTitle()}
             >
               <Show when={updateToolbarSpinning()}>
                 <RefreshCcw size={12} class="animate-spin" />
               </Show>
-              <span>{updateToolbarLabel()}</span>
+              <span class="tabular-nums whitespace-nowrap">{updateToolbarLabel()}</span>
             </div>
             <Show when={updateToolbarActionLabel()}>
               <Button
                 variant="outline"
-                class="text-xs h-8 py-0 px-3"
+                class="text-xs h-8 py-0 px-3 rounded-full border-gray-6/60 bg-gray-1/70 hover:bg-gray-2/70"
                 onClick={handleUpdateToolbarAction}
                 disabled={updateToolbarDisabled()}
                 title={updateState() === "ready" && props.anyActiveRuns ? "Stop active runs to update" : ""}
@@ -630,50 +702,14 @@ export default function SettingsView(props: SettingsViewProps) {
       <Switch>
         <Match when={activeTab() === "general"}>
           <div class="space-y-6">
-            <div class="bg-gray-2/30 border border-gray-6/50 rounded-2xl p-5 space-y-3">
-              <div class="text-sm font-medium text-gray-12">Connection</div>
-              <div class="text-xs text-gray-10">{props.headerStatus}</div>
-              <div class="text-xs text-gray-7 font-mono">{props.baseUrl}</div>
-              <div class="pt-2 flex flex-wrap gap-2">
-                <Button variant="secondary" onClick={props.toggleDeveloperMode}>
-                  <Shield size={16} />
-                  {props.developerMode ? "Disable Developer Mode" : "Enable Developer Mode"}
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={handleReconnectOpenworkServer}
-                  disabled={props.busy || props.openworkReconnectBusy || !props.openworkServerUrl.trim()}
-                >
-                  <RefreshCcw size={14} class={props.openworkReconnectBusy ? "animate-spin" : ""} />
-                  {props.openworkReconnectBusy ? "Reconnecting..." : "Reconnect server"}
-                </Button>
-                <Show when={isLocalEngineRunning()}>
-                  <Button variant="danger" onClick={props.stopHost} disabled={props.busy}>
-                    Stop local server
-                  </Button>
-                </Show>
-                <Show when={!isLocalEngineRunning() && props.openworkServerStatus === "connected"}>
-                  <Button variant="outline" onClick={props.stopHost} disabled={props.busy}>
-                    Disconnect server
-                  </Button>
-                </Show>
-              </div>
-              <Show when={openworkReconnectStatus()}>
-                {(value) => <div class="text-xs text-gray-9">{value()}</div>}
-              </Show>
-              <Show when={openworkReconnectError()}>
-                {(value) => <div class="text-xs text-red-11">{value()}</div>}
-              </Show>
-            </div>
-
-            <div class="bg-gray-2/30 border border-gray-6/50 rounded-2xl p-5 space-y-4">
+            <div class="bg-gray-2/30 border border-gray-7/60 rounded-2xl p-5 space-y-4">
               <div class="flex items-start justify-between gap-4">
                 <div>
                   <div class="flex items-center gap-2">
                     <PlugZap size={16} class="text-gray-11" />
                     <div class="text-sm font-medium text-gray-12">Providers</div>
                   </div>
-                  <div class="text-xs text-gray-10 mt-1">Connect services for models and tools.</div>
+                  <div class="text-xs text-gray-9 mt-1">Connect services for models and tools.</div>
                 </div>
                 <div class={`text-xs px-2 py-1 rounded-full border ${providerStatusStyle()}`}>
                   {providerStatusLabel()}
@@ -688,8 +724,20 @@ export default function SettingsView(props: SettingsViewProps) {
                 >
                   {props.providerAuthBusy ? "Loading providers..." : "Connect provider"}
                 </Button>
-                <div class="text-xs text-gray-9">{providerSummary()}</div>
+                <div class="text-xs text-gray-10">{providerSummary()}</div>
               </div>
+
+              <Show when={connectedProviderNames().length > 0}>
+                <div class="flex flex-wrap items-center gap-2">
+                  <For each={connectedProviderNames()}>
+                    {(name) => (
+                      <span class="rounded-full border border-green-7/30 bg-green-3/40 px-2 py-1 text-[11px] font-medium text-green-12">
+                        {name}
+                      </span>
+                    )}
+                  </For>
+                </div>
+              </Show>
 
               <Show when={providerConnectError()}>
                 <div class="rounded-xl border border-red-7/30 bg-red-1/40 px-3 py-2 text-xs text-red-11">
@@ -697,15 +745,15 @@ export default function SettingsView(props: SettingsViewProps) {
                 </div>
               </Show>
 
-              <div class="text-[11px] text-gray-8">
-                API keys are stored locally by OpenCode. Use <span class="font-mono">/models</span> to pick a default.
+              <div class="text-[11px] text-gray-9">
+                API keys are stored locally by OpenCode. Set your default model in the <span class="font-medium">Model</span> tab.
               </div>
             </div>
 
-            <div class="bg-gray-2/30 border border-gray-6/50 rounded-2xl p-5 space-y-4">
+            <div class="bg-gray-2/30 border border-gray-7/60 rounded-2xl p-5 space-y-4">
               <div>
                 <div class="text-sm font-medium text-gray-12">Appearance</div>
-                <div class="text-xs text-gray-10">Match the system or force light/dark mode.</div>
+                <div class="text-xs text-gray-9">Match the system or force light/dark mode.</div>
               </div>
 
               <div class="flex flex-wrap gap-2">
@@ -735,7 +783,7 @@ export default function SettingsView(props: SettingsViewProps) {
                 </Button>
               </div>
 
-              <div class="text-xs text-gray-7">
+              <div class="text-xs text-gray-8">
                 System mode follows your OS preference automatically.
               </div>
             </div>
@@ -800,6 +848,113 @@ export default function SettingsView(props: SettingsViewProps) {
 
         <Match when={activeTab() === "advanced"}>
           <div class="space-y-6">
+            <div class="bg-gray-2/30 border border-gray-7/60 rounded-2xl p-5 space-y-3">
+              <div class="text-sm font-medium text-gray-12">Developer mode</div>
+              <div class="text-xs text-gray-9">
+                Enables debug tools, diagnostics, and the Developer tab.
+              </div>
+              <div class="pt-1 flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  class={`${compactOutlineActionClass} ${
+                    props.developerMode
+                      ? "border-blue-7/35 bg-blue-3/20 text-blue-11 hover:bg-blue-3/35 hover:text-blue-11"
+                      : ""
+                  }`}
+                  onClick={props.toggleDeveloperMode}
+                >
+                  <Zap size={14} class={props.developerMode ? "text-blue-10" : "text-dls-secondary"} />
+                  {props.developerMode ? "Disable Developer Mode" : "Enable Developer Mode"}
+                </button>
+                <div class="text-xs text-gray-10">
+                  {props.developerMode ? "Developer panel enabled." : "Enable this to access the Developer panel."}
+                </div>
+              </div>
+            </div>
+
+            <div class="bg-gray-2/30 border border-gray-7/60 rounded-2xl p-5 space-y-3">
+              <div class="text-sm font-medium text-gray-12">Connection</div>
+              <div class="text-xs text-gray-9">{props.headerStatus}</div>
+              <div class="text-xs text-gray-8 font-mono">{props.baseUrl}</div>
+              <div class="pt-2 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  class={compactOutlineActionClass}
+                  onClick={handleReconnectOpenworkServer}
+                  disabled={props.busy || props.openworkReconnectBusy || !props.openworkServerUrl.trim()}
+                >
+                  <RefreshCcw size={14} class={`text-dls-secondary ${props.openworkReconnectBusy ? "animate-spin" : ""}`} />
+                  {props.openworkReconnectBusy ? "Reconnecting..." : "Reconnect server"}
+                </button>
+                <Show when={isLocalEngineRunning()}>
+                  <button
+                    type="button"
+                    class={compactDangerActionClass}
+                    onClick={props.stopHost}
+                    disabled={props.busy}
+                  >
+                    <CircleAlert size={14} />
+                    Stop local server
+                  </button>
+                </Show>
+                <Show when={!isLocalEngineRunning() && props.openworkServerStatus === "connected"}>
+                  <button
+                    type="button"
+                    class={compactOutlineActionClass}
+                    onClick={props.stopHost}
+                    disabled={props.busy}
+                  >
+                    Disconnect server
+                  </button>
+                </Show>
+              </div>
+              <Show when={openworkReconnectStatus()}>
+                {(value) => <div class="text-xs text-gray-10">{value()}</div>}
+              </Show>
+              <Show when={openworkReconnectError()}>
+                {(value) => <div class="text-xs text-red-11">{value()}</div>}
+              </Show>
+            </div>
+
+            <div class="bg-gray-2/30 border border-gray-7/60 rounded-2xl p-5 space-y-4">
+              <div>
+                <div class="text-sm font-medium text-gray-12">{translate("settings.migration_recovery_label")}</div>
+                <div class="text-xs text-gray-9">{translate("settings.migration_recovery_hint")}</div>
+              </div>
+              <div class="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="secondary"
+                  class="text-xs h-8 py-0 px-3"
+                  onClick={props.repairOpencodeMigration}
+                  disabled={props.busy || props.migrationRepairBusy || !props.migrationRepairAvailable}
+                  title={props.migrationRepairUnavailableReason ?? ""}
+                >
+                  {props.migrationRepairBusy
+                    ? translate("settings.fixing_migration")
+                    : translate("settings.fix_migration")}
+                </Button>
+              </div>
+              <Show when={props.migrationRepairUnavailableReason}>
+                {(reason) => <div class="text-xs text-amber-11">{reason()}</div>}
+              </Show>
+              <Show when={props.migrationRepairBusy}>
+                <div class="text-xs text-gray-10">{translate("status.repairing_migration")}</div>
+              </Show>
+              <Show when={props.migrationRepairResult}>
+                {(result) => (
+                  <div
+                    class={`rounded-xl border px-3 py-2 text-xs ${
+                      result().ok
+                        ? "border-green-7/30 bg-green-2/30 text-green-12"
+                        : "border-red-7/30 bg-red-2/30 text-red-12"
+                    }`}
+                  >
+                    {result().message}
+                  </div>
+                )}
+              </Show>
+            </div>
+
             <div class="bg-gray-2/30 border border-gray-6/50 rounded-2xl p-5 space-y-3">
               <div class="flex items-start justify-between gap-4">
                 <div>
@@ -818,14 +973,14 @@ export default function SettingsView(props: SettingsViewProps) {
                       <>
                         <div class="flex items-center justify-between bg-gray-1 p-3 rounded-xl border border-gray-6">
                           <div class="space-y-0.5">
-                            <div class="text-sm text-gray-12">Automatic checks</div>
-                            <div class="text-xs text-gray-7">Once per day (quiet)</div>
+                            <div class="text-sm text-gray-12">Background checks</div>
+                            <div class="text-xs text-gray-7">OpenWork always checks on launch. Also checks once per day (quiet).</div>
                           </div>
                           <button
-                            class={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                            class={`min-w-[70px] px-4 py-1.5 rounded-full text-xs font-medium border shadow-[inset_0_1px_0_rgba(255,255,255,0.5)] transition-colors ${
                               props.updateAutoCheck
-                                ? "bg-gray-12/10 text-gray-12 border-gray-6/20"
-                                : "text-gray-10 border-gray-6 hover:text-gray-12"
+                                ? "bg-gray-12/12 text-gray-12 border-gray-6/30"
+                                : "bg-gray-1/70 text-gray-10 border-gray-6/60 hover:text-gray-12 hover:bg-gray-2/70"
                             }`}
                             onClick={props.toggleUpdateAutoCheck}
                           >
@@ -839,10 +994,10 @@ export default function SettingsView(props: SettingsViewProps) {
                             <div class="text-xs text-gray-7">Download updates automatically (prompts to restart)</div>
                           </div>
                           <button
-                            class={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                            class={`min-w-[70px] px-4 py-1.5 rounded-full text-xs font-medium border shadow-[inset_0_1px_0_rgba(255,255,255,0.5)] transition-colors ${
                               props.updateAutoDownload
-                                ? "bg-gray-12/10 text-gray-12 border-gray-6/20"
-                                : "text-gray-10 border-gray-6 hover:text-gray-12"
+                                ? "bg-gray-12/12 text-gray-12 border-gray-6/30"
+                                : "bg-gray-1/70 text-gray-10 border-gray-6/60 hover:text-gray-12 hover:bg-gray-2/70"
                             }`}
                             onClick={props.toggleUpdateAutoDownload}
                           >
@@ -886,7 +1041,7 @@ export default function SettingsView(props: SettingsViewProps) {
                           <div class="flex items-center gap-2">
                             <Button
                               variant="outline"
-                              class="text-xs h-8 py-0 px-3"
+                              class="text-xs h-9 py-0 px-4 rounded-full border-gray-6/60 bg-gray-1/70 hover:bg-gray-2/70"
                               onClick={props.checkForUpdates}
                               disabled={props.busy || updateState() === "checking" || updateState() === "downloading"}
                             >
@@ -896,7 +1051,7 @@ export default function SettingsView(props: SettingsViewProps) {
                             <Show when={updateState() === "available"}>
                               <Button
                                 variant="secondary"
-                                class="text-xs h-8 py-0 px-3"
+                                class="text-xs h-9 py-0 px-4 rounded-full"
                                 onClick={props.downloadUpdate}
                                 disabled={props.busy || updateState() === "downloading"}
                               >
@@ -907,7 +1062,7 @@ export default function SettingsView(props: SettingsViewProps) {
                             <Show when={updateState() === "ready"}>
                               <Button
                                 variant="secondary"
-                                class="text-xs h-8 py-0 px-3"
+                                class="text-xs h-9 py-0 px-4 rounded-full"
                                 onClick={props.installUpdateAndRestart}
                                 disabled={props.busy || props.anyActiveRuns}
                                 title={props.anyActiveRuns ? "Stop active runs to update" : ""}
@@ -938,37 +1093,6 @@ export default function SettingsView(props: SettingsViewProps) {
               </Show>
             </div>
 
-            <div class="bg-gray-2/30 border border-gray-6/50 rounded-2xl p-5 space-y-3">
-              <div class="text-sm font-medium text-gray-12">Startup</div>
-
-              <div class="flex items-center justify-between bg-gray-1 p-3 rounded-xl border border-gray-6">
-                <div class="flex items-center gap-3">
-                  <div
-                    class={`p-2 rounded-lg ${
-                      isLocalPreference() ? "bg-indigo-7/10 text-indigo-11" : "bg-green-7/10 text-green-11"
-                    }`}
-                  >
-                    <Show when={isLocalPreference()} fallback={<Smartphone size={18} />}>
-                      <HardDrive size={18} />
-                    </Show>
-                  </div>
-                  <span class="text-sm font-medium text-gray-12">{startupLabel()}</span>
-                </div>
-                <Button variant="outline" class="text-xs h-8 py-0 px-3" onClick={props.stopHost} disabled={props.busy}>
-                  Switch
-                </Button>
-              </div>
-
-              <Button variant="secondary" class="w-full justify-between group" onClick={props.onResetStartupPreference}>
-                <span>Reset startup preference</span>
-                <RefreshCcw size={14} class="opacity-80 group-hover:rotate-180 transition-transform" />
-              </Button>
-
-              <p class="text-xs text-gray-7">
-                This clears your saved preference and shows the connection choice on next launch.
-              </p>
-            </div>
-
             <Show when={isTauriRuntime()}>
               <div class="bg-gray-2/30 border border-gray-6/50 rounded-2xl p-5 space-y-3">
                 <div>
@@ -995,103 +1119,6 @@ export default function SettingsView(props: SettingsViewProps) {
               </div>
             </Show>
 
-            <Show when={isTauriRuntime() && isLocalPreference()}>
-              <div class="bg-gray-2/30 border border-gray-6/50 rounded-2xl p-5 space-y-4">
-                <div>
-                  <div class="text-sm font-medium text-gray-12">Engine</div>
-                  <div class="text-xs text-gray-10">Choose how OpenCode runs locally.</div>
-                </div>
-
-                <div class="space-y-3">
-                  <div class="text-xs text-gray-10">Engine source</div>
-                  <div class="grid grid-cols-2 gap-2">
-                    <Button
-                      variant={props.engineSource === "sidecar" ? "secondary" : "outline"}
-                      onClick={() => props.setEngineSource("sidecar")}
-                      disabled={props.busy}
-                    >
-                      Bundled (recommended)
-                    </Button>
-                    <Button
-                      variant={props.engineSource === "path" ? "secondary" : "outline"}
-                      onClick={() => props.setEngineSource("path")}
-                      disabled={props.busy}
-                    >
-                      System install (PATH)
-                    </Button>
-                  </div>
-                  <div class="text-[11px] text-gray-7">
-                    Bundled engine is the most reliable option. Use System install only if you manage OpenCode yourself.
-                  </div>
-                </div>
-
-                <Show when={props.developerMode}>
-                  <div class="space-y-3">
-                    <div class="text-xs text-gray-10">Engine runtime</div>
-                    <div class="grid grid-cols-2 gap-2">
-                      <Button
-                        variant={props.engineRuntime === "direct" ? "secondary" : "outline"}
-                        onClick={() => props.setEngineRuntime("direct")}
-                        disabled={props.busy}
-                      >
-                        Direct (OpenCode)
-                      </Button>
-                      <Button
-                        variant={props.engineRuntime === "openwrk" ? "secondary" : "outline"}
-                        onClick={() => props.setEngineRuntime("openwrk")}
-                        disabled={props.busy}
-                      >
-                        Openwrk orchestrator
-                      </Button>
-                    </div>
-                    <div class="text-[11px] text-gray-7">Applies the next time the engine starts or reloads.</div>
-                  </div>
-                </Show>
-              </div>
-            </Show>
-
-            <div class="bg-gray-2/30 border border-gray-6/50 rounded-2xl p-5 space-y-4">
-              <div>
-                <div class="text-sm font-medium text-gray-12">Reset & Recovery</div>
-                <div class="text-xs text-gray-10">Clear data or restart the setup flow.</div>
-              </div>
-
-              <div class="flex items-center justify-between bg-gray-1 p-3 rounded-xl border border-gray-6 gap-3">
-                <div class="min-w-0">
-                  <div class="text-sm text-gray-12">Reset onboarding</div>
-                  <div class="text-xs text-gray-7">Clears OpenWork preferences and restarts the app.</div>
-                </div>
-                <Button
-                  variant="outline"
-                  class="text-xs h-8 py-0 px-3 shrink-0"
-                  onClick={() => props.openResetModal("onboarding")}
-                  disabled={props.busy || props.resetModalBusy || props.anyActiveRuns}
-                  title={props.anyActiveRuns ? "Stop active runs to reset" : ""}
-                >
-                  Reset
-                </Button>
-              </div>
-
-              <div class="flex items-center justify-between bg-gray-1 p-3 rounded-xl border border-gray-6 gap-3">
-                <div class="min-w-0">
-                  <div class="text-sm text-gray-12">Reset app data</div>
-                  <div class="text-xs text-gray-7">More aggressive. Clears OpenWork cache + app data.</div>
-                </div>
-                <Button
-                  variant="danger"
-                  class="text-xs h-8 py-0 px-3 shrink-0"
-                  onClick={() => props.openResetModal("all")}
-                  disabled={props.busy || props.resetModalBusy || props.anyActiveRuns}
-                  title={props.anyActiveRuns ? "Stop active runs to reset" : ""}
-                >
-                  Reset
-                </Button>
-              </div>
-
-              <div class="text-xs text-gray-7">
-                Requires typing <span class="font-mono text-gray-11">RESET</span> and will restart the app.
-              </div>
-            </div>
           </div>
         </Match>
 
@@ -1122,6 +1149,221 @@ export default function SettingsView(props: SettingsViewProps) {
                   </Button>
                 </div>
 
+                <div class="bg-gray-2/30 border border-gray-6/50 rounded-2xl p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                  <div class="min-w-0">
+                    <div class="text-sm text-gray-12">OpenWork Docker containers</div>
+                    <div class="text-xs text-gray-7">
+                      Force-remove Docker containers launched by OpenWork (sandbox + local dev stacks).
+                    </div>
+                    <Show when={props.dockerCleanupResult}>
+                      <div class="text-xs text-gray-11 mt-2">{props.dockerCleanupResult}</div>
+                    </Show>
+                  </div>
+                  <Button
+                    variant="danger"
+                    class="text-xs h-8 py-0 px-3 shrink-0"
+                    onClick={props.cleanupOpenworkDockerContainers}
+                    disabled={props.dockerCleanupBusy || props.anyActiveRuns || !isTauriRuntime()}
+                    title={
+                      !isTauriRuntime()
+                        ? "Docker cleanup requires the desktop app"
+                        : props.anyActiveRuns
+                          ? "Stop active runs before cleanup"
+                          : ""
+                    }
+                  >
+                    {props.dockerCleanupBusy ? "Removing containers..." : "Delete containers"}
+                  </Button>
+                </div>
+
+                <div class="bg-gray-2/30 border border-gray-6/50 rounded-2xl p-5 space-y-3">
+                  <div class="text-sm font-medium text-gray-12">Startup</div>
+
+                  <div class="flex items-center justify-between bg-gray-1 p-3 rounded-xl border border-gray-6">
+                    <div class="flex items-center gap-3">
+                      <div
+                        class={`p-2 rounded-lg ${
+                          isLocalPreference() ? "bg-indigo-7/10 text-indigo-11" : "bg-green-7/10 text-green-11"
+                        }`}
+                      >
+                        <Show when={isLocalPreference()} fallback={<Smartphone size={18} />}>
+                          <HardDrive size={18} />
+                        </Show>
+                      </div>
+                      <span class="text-sm font-medium text-gray-12">{startupLabel()}</span>
+                    </div>
+                    <Button
+                      variant="outline"
+                      class="text-xs h-8 py-0 px-3"
+                      onClick={props.stopHost}
+                      disabled={props.busy}
+                    >
+                      Switch
+                    </Button>
+                  </div>
+
+                  <Button
+                    variant="secondary"
+                    class="w-full justify-between group"
+                    onClick={props.onResetStartupPreference}
+                  >
+                    <span>Reset startup preference</span>
+                    <RefreshCcw size={14} class="opacity-80 group-hover:rotate-180 transition-transform" />
+                  </Button>
+
+                  <p class="text-xs text-gray-7">
+                    This clears your saved preference and shows the connection choice on next launch.
+                  </p>
+                </div>
+
+                <Show when={isTauriRuntime() && (isLocalPreference() || props.developerMode)}>
+                  <div class="bg-gray-2/30 border border-gray-6/50 rounded-2xl p-5 space-y-4">
+                    <div>
+                      <div class="text-sm font-medium text-gray-12">Engine</div>
+                      <div class="text-xs text-gray-10">Choose how OpenCode runs locally.</div>
+                    </div>
+
+                    <Show when={!isLocalPreference()}>
+                      <div class="text-[11px] text-amber-11 bg-amber-3/40 border border-amber-7/40 rounded-lg px-3 py-2">
+                        Startup preference is currently remote. Engine settings are saved now and apply the next time you
+                        run locally.
+                      </div>
+                    </Show>
+
+                    <div class="space-y-3">
+                      <div class="text-xs text-gray-10">Engine source</div>
+                      <div class={props.developerMode ? "grid grid-cols-3 gap-2" : "grid grid-cols-2 gap-2"}>
+                        <Button
+                          variant={props.engineSource === "sidecar" ? "secondary" : "outline"}
+                          onClick={() => props.setEngineSource("sidecar")}
+                          disabled={props.busy}
+                        >
+                          Bundled (recommended)
+                        </Button>
+                        <Button
+                          variant={props.engineSource === "path" ? "secondary" : "outline"}
+                          onClick={() => props.setEngineSource("path")}
+                          disabled={props.busy}
+                        >
+                          System install (PATH)
+                        </Button>
+                        <Show when={props.developerMode}>
+                          <Button
+                            variant={props.engineSource === "custom" ? "secondary" : "outline"}
+                            onClick={() => props.setEngineSource("custom")}
+                            disabled={props.busy}
+                          >
+                            Custom binary
+                          </Button>
+                        </Show>
+                      </div>
+                      <div class="text-[11px] text-gray-7">
+                        Bundled engine is the most reliable option. Use System install only if you manage OpenCode yourself.
+                      </div>
+                    </div>
+
+                    <Show when={props.developerMode && props.engineSource === "custom"}>
+                      <div class="space-y-2">
+                        <div class="text-xs text-gray-10">Custom OpenCode binary</div>
+                        <div class="flex items-center gap-2">
+                          <div
+                            class="flex-1 min-w-0 text-[11px] text-gray-7 font-mono truncate bg-gray-1 p-3 rounded-xl border border-gray-6"
+                            title={engineCustomBinPathLabel()}
+                          >
+                            {engineCustomBinPathLabel()}
+                          </div>
+                          <Button
+                            variant="outline"
+                            class="text-xs h-10 px-3 shrink-0"
+                            onClick={handlePickEngineBinary}
+                            disabled={props.busy}
+                          >
+                            Choose
+                          </Button>
+                          <Button
+                            variant="outline"
+                            class="text-xs h-10 px-3 shrink-0"
+                            onClick={() => props.setEngineCustomBinPath("")}
+                            disabled={props.busy || !props.engineCustomBinPath.trim()}
+                            title={!props.engineCustomBinPath.trim() ? "No custom path set" : "Clear"}
+                          >
+                            Clear
+                          </Button>
+                        </div>
+                        <div class="text-[11px] text-gray-7">
+                          Use this to point OpenWork at a local OpenCode build (e.g. your fork). Applies next time the engine starts or reloads.
+                        </div>
+                      </div>
+                    </Show>
+
+                    <Show when={props.developerMode}>
+                      <div class="space-y-3">
+                        <div class="text-xs text-gray-10">Engine runtime</div>
+                        <div class="grid grid-cols-2 gap-2">
+                          <Button
+                            variant={props.engineRuntime === "direct" ? "secondary" : "outline"}
+                            onClick={() => props.setEngineRuntime("direct")}
+                            disabled={props.busy}
+                          >
+                            Direct (OpenCode)
+                          </Button>
+                          <Button
+                            variant={props.engineRuntime === "openwork-orchestrator" ? "secondary" : "outline"}
+                            onClick={() => props.setEngineRuntime("openwork-orchestrator")}
+                            disabled={props.busy}
+                          >
+                            OpenWork Orchestrator
+                          </Button>
+                        </div>
+                        <div class="text-[11px] text-gray-7">Applies the next time the engine starts or reloads.</div>
+                      </div>
+                    </Show>
+                  </div>
+                </Show>
+
+                <div class="bg-gray-2/30 border border-gray-6/50 rounded-2xl p-5 space-y-4">
+                  <div>
+                    <div class="text-sm font-medium text-gray-12">Reset & Recovery</div>
+                    <div class="text-xs text-gray-10">Clear data or restart the setup flow.</div>
+                  </div>
+
+                  <div class="flex items-center justify-between bg-gray-1 p-3 rounded-xl border border-gray-6 gap-3">
+                    <div class="min-w-0">
+                      <div class="text-sm text-gray-12">Reset onboarding</div>
+                      <div class="text-xs text-gray-7">Clears OpenWork preferences and restarts the app.</div>
+                    </div>
+                    <Button
+                      variant="outline"
+                      class="text-xs h-8 py-0 px-3 shrink-0"
+                      onClick={() => props.openResetModal("onboarding")}
+                      disabled={props.busy || props.resetModalBusy || props.anyActiveRuns}
+                      title={props.anyActiveRuns ? "Stop active runs to reset" : ""}
+                    >
+                      Reset
+                    </Button>
+                  </div>
+
+                  <div class="flex items-center justify-between bg-gray-1 p-3 rounded-xl border border-gray-6 gap-3">
+                    <div class="min-w-0">
+                      <div class="text-sm text-gray-12">Reset app data</div>
+                      <div class="text-xs text-gray-7">More aggressive. Clears OpenWork cache + app data.</div>
+                    </div>
+                    <Button
+                      variant="danger"
+                      class="text-xs h-8 py-0 px-3 shrink-0"
+                      onClick={() => props.openResetModal("all")}
+                      disabled={props.busy || props.resetModalBusy || props.anyActiveRuns}
+                      title={props.anyActiveRuns ? "Stop active runs to reset" : ""}
+                    >
+                      Reset
+                    </Button>
+                  </div>
+
+                  <div class="text-xs text-gray-7">
+                    Requires typing <span class="font-mono text-gray-11">RESET</span> and will restart the app.
+                  </div>
+                </div>
+
                 <div class="bg-gray-2/30 border border-gray-6/50 rounded-2xl p-5 space-y-4">
                   <div>
                     <div class="text-sm font-medium text-gray-12">Devtools</div>
@@ -1137,12 +1379,12 @@ export default function SettingsView(props: SettingsViewProps) {
                         <div class="space-y-1">
                           <div class="text-[11px] text-gray-7 font-mono truncate">Desktop app: {appVersionLabel()}</div>
                           <div class="text-[11px] text-gray-7 font-mono truncate">Commit: {appCommitLabel()}</div>
-                          <div class="text-[11px] text-gray-7 font-mono truncate">Openwrk: {openwrkVersionLabel()}</div>
+                          <div class="text-[11px] text-gray-7 font-mono truncate">Orchestrator: {orchestratorVersionLabel()}</div>
                           <div class="text-[11px] text-gray-7 font-mono truncate">OpenCode: {opencodeVersionLabel()}</div>
                           <div class="text-[11px] text-gray-7 font-mono truncate">
                             OpenWork server: {openworkServerVersionLabel()}
                           </div>
-                          <div class="text-[11px] text-gray-7 font-mono truncate">Owpenbot: {owpenbotVersionLabel()}</div>
+                          <div class="text-[11px] text-gray-7 font-mono truncate">OpenCodeRouter: {opencodeRouterVersionLabel()}</div>
                         </div>
                     </div>
 
@@ -1184,41 +1426,41 @@ export default function SettingsView(props: SettingsViewProps) {
                     <div class="bg-gray-1 p-4 rounded-xl border border-gray-6 space-y-3">
                       <div class="flex items-center justify-between gap-3">
                         <div>
-                          <div class="text-sm font-medium text-gray-12">Openwrk daemon</div>
+                          <div class="text-sm font-medium text-gray-12">Orchestrator daemon</div>
                           <div class="text-xs text-gray-10">Workspace orchestration layer.</div>
                         </div>
-                        <div class={`text-xs px-2 py-1 rounded-full border ${openwrkStatusStyle()}`}>
-                          {openwrkStatusLabel()}
+                        <div class={`text-xs px-2 py-1 rounded-full border ${orchestratorStatusStyle()}`}>
+                          {orchestratorStatusLabel()}
                         </div>
                       </div>
                       <div class="space-y-1">
                         <div class="text-[11px] text-gray-7 font-mono truncate">
-                          {props.openwrkStatus?.dataDir ?? "Data directory unavailable"}
+                          {props.orchestratorStatus?.dataDir ?? "Data directory unavailable"}
                         </div>
                         <div class="text-[11px] text-gray-7 font-mono truncate">
-                          Daemon: {props.openwrkStatus?.daemon?.baseUrl ?? "—"}
+                          Daemon: {props.orchestratorStatus?.daemon?.baseUrl ?? "—"}
                         </div>
                         <div class="text-[11px] text-gray-7 font-mono truncate">
-                          OpenCode: {props.openwrkStatus?.opencode?.baseUrl ?? "—"}
+                          OpenCode: {props.orchestratorStatus?.opencode?.baseUrl ?? "—"}
                         </div>
                         <div class="text-[11px] text-gray-7 font-mono truncate">
-                          Openwrk version: {props.openwrkStatus?.cliVersion ?? "—"}
+                          Version: {props.orchestratorStatus?.cliVersion ?? "—"}
                         </div>
                         <div class="text-[11px] text-gray-7 font-mono truncate">
-                          Sidecar: {openwrkSidecarSummary()}
+                          Sidecar: {orchestratorSidecarSummary()}
                         </div>
-                        <div class="text-[11px] text-gray-7 font-mono truncate" title={openwrkBinaryPath()}>
-                          Opencode binary: {formatOpenwrkBinary(props.openwrkStatus?.binaries?.opencode ?? null)}
+                        <div class="text-[11px] text-gray-7 font-mono truncate" title={orchestratorBinaryPath()}>
+                          Opencode binary: {formatOrchestratorBinary(props.orchestratorStatus?.binaries?.opencode ?? null)}
                         </div>
                         <div class="text-[11px] text-gray-7 font-mono truncate">
-                          Active workspace: {props.openwrkStatus?.activeId ?? "—"}
+                          Active workspace: {props.orchestratorStatus?.activeId ?? "—"}
                         </div>
                       </div>
-                      <Show when={props.openwrkStatus?.lastError}>
+                      <Show when={props.orchestratorStatus?.lastError}>
                         <div>
                           <div class="text-[11px] text-gray-9 mb-1">Last error</div>
                           <pre class="text-xs text-gray-12 whitespace-pre-wrap break-words max-h-24 overflow-auto bg-gray-2/50 border border-gray-6 rounded-lg p-2">
-                            {props.openwrkStatus?.lastError}
+                            {props.orchestratorStatus?.lastError}
                           </pre>
                         </div>
                       </Show>
@@ -1316,59 +1558,59 @@ export default function SettingsView(props: SettingsViewProps) {
                     <div class="bg-gray-1 p-4 rounded-xl border border-gray-6 space-y-3">
                       <div class="flex items-center justify-between gap-3">
                         <div>
-                          <div class="text-sm font-medium text-gray-12">Owpenbot sidecar</div>
+                          <div class="text-sm font-medium text-gray-12">OpenCodeRouter sidecar</div>
                           <div class="text-xs text-gray-10">Messaging bridge service.</div>
                         </div>
-                        <div class={`text-xs px-2 py-1 rounded-full border ${owpenbotStatusStyle()}`}>
-                          {owpenbotStatusLabel()}
+                        <div class={`text-xs px-2 py-1 rounded-full border ${opencodeRouterStatusStyle()}`}>
+                          {opencodeRouterStatusLabel()}
                         </div>
                       </div>
                       <div class="space-y-1">
                         <div class="text-[11px] text-gray-7 font-mono truncate">
-                          {props.owpenbotInfo?.opencodeUrl?.trim() || "OpenCode URL unavailable"}
+                          {props.opencodeRouterInfo?.opencodeUrl?.trim() || "OpenCode URL unavailable"}
                         </div>
                         <div class="text-[11px] text-gray-7 font-mono truncate">
-                          {props.owpenbotInfo?.workspacePath?.trim() || "No worker directory"}
+                          {props.opencodeRouterInfo?.workspacePath?.trim() || "No worker directory"}
                         </div>
-                        <div class="text-[11px] text-gray-7 font-mono truncate">PID: {props.owpenbotInfo?.pid ?? "—"}</div>
+                        <div class="text-[11px] text-gray-7 font-mono truncate">PID: {props.opencodeRouterInfo?.pid ?? "—"}</div>
                       </div>
                       <div class="flex items-center gap-2">
                         <Button
                           variant="secondary"
-                          onClick={handleOwpenbotRestart}
-                          disabled={owpenbotRestarting() || !isTauriRuntime()}
+                          onClick={handleOpenCodeRouterRestart}
+                          disabled={opencodeRouterRestarting() || !isTauriRuntime()}
                           class="text-xs px-3 py-1.5"
                         >
-                          <RefreshCcw class={`w-3.5 h-3.5 mr-1.5 ${owpenbotRestarting() ? "animate-spin" : ""}`} />
-                          {owpenbotRestarting() ? "Restarting..." : "Restart"}
+                          <RefreshCcw class={`w-3.5 h-3.5 mr-1.5 ${opencodeRouterRestarting() ? "animate-spin" : ""}`} />
+                          {opencodeRouterRestarting() ? "Restarting..." : "Restart"}
                         </Button>
-                        <Show when={props.owpenbotInfo?.running}>
+                        <Show when={props.opencodeRouterInfo?.running}>
                           <Button
                             variant="ghost"
-                            onClick={handleOwpenbotStop}
-                            disabled={owpenbotRestarting()}
+                            onClick={handleOpenCodeRouterStop}
+                            disabled={opencodeRouterRestarting()}
                             class="text-xs px-3 py-1.5"
                           >
                             Stop
                           </Button>
                         </Show>
                       </div>
-                      <Show when={owpenbotRestartError()}>
+                      <Show when={opencodeRouterRestartError()}>
                         <div class="text-xs text-red-11 bg-red-3/50 border border-red-6 rounded-lg p-2">
-                          {owpenbotRestartError()}
+                          {opencodeRouterRestartError()}
                         </div>
                       </Show>
                       <div class="grid gap-2">
                         <div>
                           <div class="text-[11px] text-gray-9 mb-1">Last stdout</div>
                           <pre class="text-xs text-gray-12 whitespace-pre-wrap break-words max-h-24 overflow-auto bg-gray-2/50 border border-gray-6 rounded-lg p-2">
-                            {owpenbotStdout()}
+                            {opencodeRouterStdout()}
                           </pre>
                         </div>
                         <div>
                           <div class="text-[11px] text-gray-9 mb-1">Last stderr</div>
                           <pre class="text-xs text-gray-12 whitespace-pre-wrap break-words max-h-24 overflow-auto bg-gray-2/50 border border-gray-6 rounded-lg p-2">
-                            {owpenbotStderr()}
+                            {opencodeRouterStderr()}
                           </pre>
                         </div>
                       </div>
@@ -1421,7 +1663,7 @@ export default function SettingsView(props: SettingsViewProps) {
                           <div>MCP: {formatCapability(caps().mcp)}</div>
                           <div>Commands: {formatCapability(caps().commands)}</div>
                           <div>Config: {formatCapability(caps().config)}</div>
-                          <div>Proxy (Owpenbot): {caps().proxy?.owpenbot ? "enabled" : "disabled"}</div>
+                          <div>Proxy (OpenCodeRouter): {caps().proxy?.opencodeRouter ? "enabled" : "disabled"}</div>
                           <div>
                             Browser tools: {(() => {
                               const browser = caps().toolProviders?.browser;

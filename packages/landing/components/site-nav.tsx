@@ -3,7 +3,7 @@ import Link from "next/link";
 type Props = {
   stars: string;
   callUrl?: string;
-  active?: "home" | "enterprise";
+  active?: "home" | "download" | "enterprise" | "den";
 };
 
 export function SiteNav(props: Props) {
@@ -11,13 +11,13 @@ export function SiteNav(props: Props) {
   const navLink = (isActive: boolean) =>
     isActive ? "transition text-black" : "transition hover:text-black";
   return (
-    <nav className="sticky top-0 z-50 border-b border-gray-100 bg-white/90 py-4 backdrop-blur">
+    <nav className="sticky top-0 z-50 py-4">
       <div className="mx-auto flex max-w-5xl items-center justify-between px-6">
         <div className="flex items-center gap-6">
           <Link href="/" className="text-lg font-bold tracking-tight">
             OpenWork
           </Link>
-          <div className="hidden items-center gap-6 text-[14px] text-gray-500 md:flex">
+          <div className="hidden items-center gap-6 text-[15px] text-gray-700 md:flex">
             <Link href="/#install" className="transition hover:text-black">
               Getting started
             </Link>
@@ -27,11 +27,14 @@ export function SiteNav(props: Props) {
             <Link href="/#faq" className="transition hover:text-black">
               FAQ
             </Link>
+            <Link href="/download" className={navLink(props.active === "download")}>
+              Download
+            </Link>
             <Link href="/enterprise" className={navLink(props.active === "enterprise")}>
               Enterprise
             </Link>
-            <Link href="#" className="transition hover:text-black">
-              Blog
+            <Link href="/den" className={navLink(props.active === "den")}>
+              Den
             </Link>
           </div>
         </div>
@@ -44,7 +47,7 @@ export function SiteNav(props: Props) {
           </a>
           <a
             href="https://github.com/different-ai/openwork"
-            className="flex items-center gap-1 text-gray-500 transition hover:text-black"
+            className="flex items-center gap-1 text-gray-700 transition hover:text-black"
             rel="noreferrer"
             target="_blank"
             aria-label="OpenWork GitHub stars"

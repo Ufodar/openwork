@@ -219,8 +219,8 @@ if (cleanupEnabled && previousState && (previousState.webPid || previousState.he
     },
     {
       pid: previousState.headlessPid,
-      label: "openwrk",
-      matcher: (cmd) => cmd.includes("openwrk") && cmd.includes("start"),
+      label: "orchestrator",
+      matcher: (cmd) => cmd.includes("openwork-orchestrator") && cmd.includes("start"),
     },
   ];
 
@@ -254,12 +254,18 @@ if (cleanupEnabled && !previousState && process.platform !== "win32") {
   try {
     const ps = spawnSync("ps", ["-eo", "pid=,command="], { encoding: "utf8" });
     const lines = String(ps.stdout || "").split("\n");
-    const matcher = `--filter openwrk dev -- start --workspace ${workspace}`;
     for (const line of lines) {
-      if (!line.includes(matcher)) continue;
+      const cmd = line.trim();
+      if (!cmd) continue;
+      const hasWorker = cmd.includes("openwork-orchestrator") || cmd.includes("--filter openwork-orchestrator");
+      const hasStart = cmd.includes("start");
+      const hasWorkspace =
+        cmd.includes(`--workspace ${workspace}`) ||
+        cmd.includes(`--workspace=${workspace}`);
+      if (!(hasWorker && hasStart && hasWorkspace)) continue;
       const pid = Number(line.trim().split(/\s+/, 1)[0]);
       if (!Number.isFinite(pid) || pid <= 0) continue;
-      logLine(`[dev:headless-web] Cleaning up stale openwrk (pid ${pid})`);
+      logLine(`[dev:headless-web] Cleaning up stale orchestrator (pid ${pid})`);
       killProcessGroup(pid, "SIGTERM");
       cleanupRequested = true;
     }
@@ -304,10 +310,12 @@ const openworkHostToken = process.env.OPENWORK_HOST_TOKEN ??
   previousState?.openworkHostToken ??
   randomUUID();
 // Default to source entrypoints so dev iteration never requires rebuilding binaries.
-// - openwrk can run `.ts` via Bun automatically.
-// - For production / binary parity, override via OPENWORK_SERVER_BIN / OWPENBOT_BIN.
-const defaultOpenworkServerBin = path.join(cwd, "packages/server/src/cli.ts");
-const defaultOwpenbotBin = path.join(cwd, "packages/owpenbot/src/cli.ts");
+// - openwork-orchestrator can run `.ts` via Bun automatically.
+// - For binary parity, override via OPENWORK_SERVER_BIN / OPENCODE_ROUTER_BIN.
+const defaultOpenworkServerEntrypoint = path.join(cwd, "packages/server/src/cli.ts");
+const defaultOpenworkServerBin = path.join(cwd, "packages/server/dist/bin/openwork-server");
+const defaultOpencodeRouterEntrypoint = path.join(cwd, "packages/opencode-router/src/cli.ts");
+const defaultOpencodeRouterBin = path.join(cwd, "packages/opencode-router/dist/bin/opencode-router");
 
 const resolveBinOverride = (value: string | undefined, fallback: string) => {
   const trimmed = (value ?? "").trim();
@@ -315,8 +323,8 @@ const resolveBinOverride = (value: string | undefined, fallback: string) => {
   return path.isAbsolute(trimmed) ? trimmed : path.join(cwd, trimmed);
 };
 
-const openworkServerBin = resolveBinOverride(process.env.OPENWORK_SERVER_BIN, defaultOpenworkServerBin);
-const owpenbotBin = resolveBinOverride(process.env.OWPENBOT_BIN, defaultOwpenbotBin);
+const openworkServerBin = resolveBinOverride(process.env.OPENWORK_SERVER_BIN, defaultOpenworkServerEntrypoint);
+const opencodeRouterBin = resolveBinOverride(process.env.OPENCODE_ROUTER_BIN, defaultOpencodeRouterEntrypoint);
 
 const resolveLatestMtimeMs = async (dir: string): Promise<number> => {
   let latest = 0;
@@ -377,42 +385,56 @@ const ensureOpenworkServer = async () => {
   await runCommand("pnpm", ["--filter", "openwork-server", "build:bin"]);
 };
 
-const ensureOwpenbot = async () => {
-  const isSourceEntrypoint = owpenbotBin.endsWith(".ts") || owpenbotBin.endsWith(".js");
+const ensureOpencodeRouter = async () => {
+  const isSourceEntrypoint = opencodeRouterBin.endsWith(".ts") || opencodeRouterBin.endsWith(".js");
   try {
-    await access(owpenbotBin);
+    await access(opencodeRouterBin);
   } catch {
-    if (!autoBuildEnabled || owpenbotBin !== defaultOwpenbotBin || isSourceEntrypoint) {
-      logLine(`[dev:headless-web] Missing owpenbot binary at ${owpenbotBin}`);
+    if (!autoBuildEnabled || opencodeRouterBin !== defaultOpencodeRouterBin || isSourceEntrypoint) {
+      logLine(`[dev:headless-web] Missing opencode-router binary at ${opencodeRouterBin}`);
       logLine("[dev:headless-web] Auto-build disabled (OPENWORK_DEV_HEADLESS_WEB_AUTOBUILD=0)");
-      logLine("[dev:headless-web] Run: pnpm --filter owpenwork build:bin");
+      logLine("[dev:headless-web] Run: pnpm --filter opencode-router build:bin");
       if (isSourceEntrypoint) {
-        logLine("[dev:headless-web] Or set OWPENBOT_BIN to a valid entrypoint path.");
+        logLine("[dev:headless-web] Or set OPENCODE_ROUTER_BIN to a valid entrypoint path.");
       }
       logLine("[dev:headless-web] Or unset/enable OPENWORK_DEV_HEADLESS_WEB_AUTOBUILD to auto-build.");
       process.exit(1);
     }
 
-    logLine(`[dev:headless-web] Missing owpenbot binary at ${owpenbotBin}`);
-    logLine("[dev:headless-web] Auto-building: pnpm --filter owpenwork build:bin");
+    logLine(`[dev:headless-web] Missing opencode-router binary at ${opencodeRouterBin}`);
+    logLine("[dev:headless-web] Auto-building: pnpm --filter opencode-router build:bin");
     try {
-      await runCommand("pnpm", ["--filter", "owpenwork", "build:bin"]);
-      await access(owpenbotBin);
+      await runCommand("pnpm", ["--filter", "opencode-router", "build:bin"]);
+      await access(opencodeRouterBin);
     } catch (error) {
       logLine(`[dev:headless-web] Auto-build failed: ${error instanceof Error ? error.message : String(error)}`);
       process.exit(1);
     }
   }
+
+  if (!autoBuildEnabled) return;
+  if (isSourceEntrypoint) return;
+  if (opencodeRouterBin !== defaultOpencodeRouterBin) return;
+
+  const [binaryInfo, latestSrcMtime] = await Promise.all([
+    stat(opencodeRouterBin).catch(() => null),
+    resolveLatestMtimeMs(path.join(cwd, "packages/opencode-router/src")),
+  ]);
+  if (!binaryInfo) return;
+  if (latestSrcMtime <= binaryInfo.mtimeMs) return;
+
+  logLine("[dev:headless-web] Detected opencode-router source changes; rebuilding binary");
+  await runCommand("pnpm", ["--filter", "opencode-router", "build:bin"]);
 };
 
 const openworkUrl = `http://${clientHost}:${openworkPort}`;
 const webUrl = `http://${clientHost}:${webPort}`;
-// In practice we want owpenbot on for end-to-end messaging tests.
-// Allow opt-out via OPENWORK_DEV_OWPENBOT=0.
-const owpenbotEnabled = process.env.OPENWORK_DEV_OWPENBOT == null
+// In practice we want opencode-router on for end-to-end messaging tests.
+// Allow opt-out via OPENWORK_DEV_OPENCODE_ROUTER=0.
+const opencodeRouterEnabled = process.env.OPENWORK_DEV_OPENCODE_ROUTER == null
   ? true
-  : readBool(process.env.OPENWORK_DEV_OWPENBOT);
-const owpenbotRequired = readBool(process.env.OPENWORK_DEV_OWPENBOT_REQUIRED);
+  : readBool(process.env.OPENWORK_DEV_OPENCODE_ROUTER);
+const opencodeRouterRequired = readBool(process.env.OPENWORK_DEV_OPENCODE_ROUTER_REQUIRED);
 const viteEnv = {
   ...process.env,
   HOST: viteHost,
@@ -429,13 +451,13 @@ const headlessEnv = {
   OPENWORK_TOKEN: openworkToken,
   OPENWORK_HOST_TOKEN: openworkHostToken,
   OPENWORK_SERVER_BIN: openworkServerBin,
-  OPENWRK_SIDECAR_SOURCE: process.env.OPENWRK_SIDECAR_SOURCE ?? "external",
-  OWPENBOT_BIN: owpenbotBin,
+  OPENWORK_SIDECAR_SOURCE: process.env.OPENWORK_SIDECAR_SOURCE ?? "external",
+  OPENCODE_ROUTER_BIN: opencodeRouterBin,
 };
 
 await ensureOpenworkServer();
-if (owpenbotEnabled) {
-  await ensureOwpenbot();
+if (opencodeRouterEnabled) {
+  await ensureOpencodeRouter();
 }
 
 logLine("[dev:headless-web] Starting services");
@@ -445,7 +467,7 @@ logLine(`[dev:headless-web] Web host: ${viteHost}`);
 logLine(`[dev:headless-web] Web port: ${webPort}`);
 logLine(`[dev:headless-web] Web URL: ${webUrl}`);
 logLine(
-  `[dev:headless-web] Owpenbot: ${owpenbotEnabled ? "on" : "off"} (set OPENWORK_DEV_OWPENBOT=0 to disable)`,
+  `[dev:headless-web] OpenCodeRouter: ${opencodeRouterEnabled ? "on" : "off"} (set OPENWORK_DEV_OPENCODE_ROUTER=0 to disable)`,
 );
 logLine(`[dev:headless-web] OPENWORK_TOKEN: ${openworkToken}`);
 logLine(`[dev:headless-web] OPENWORK_HOST_TOKEN: ${openworkHostToken}`);
@@ -473,7 +495,7 @@ const headlessProcess = spawnLogged(
   "pnpm",
   [
     "--filter",
-    "openwrk",
+    "openwork-orchestrator",
     "dev",
     "--",
     "start",
@@ -483,9 +505,9 @@ const headlessProcess = spawnLogged(
     "auto",
     "--allow-external",
     "--no-opencode-auth",
-    "--owpenbot",
-    owpenbotEnabled ? "true" : "false",
-    ...(owpenbotRequired ? ["--owpenbot-required"] : []),
+    "--opencode-router",
+    opencodeRouterEnabled ? "true" : "false",
+    ...(opencodeRouterRequired ? ["--opencode-router-required"] : []),
     "--openwork-host",
     host,
     "--openwork-port",
@@ -541,7 +563,7 @@ process.on("SIGTERM", () => {
 });
 
 webProcess.on("exit", (code, signal) => shutdown("web", code, signal));
-headlessProcess.on("exit", (code, signal) => shutdown("openwrk", code, signal));
+headlessProcess.on("exit", (code, signal) => shutdown("orchestrator", code, signal));
 
 await writeState({
   schemaVersion: 1,

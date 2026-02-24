@@ -72,14 +72,14 @@ export function WaitlistForm() {
   if (state === "success") {
     return (
       <div className="space-y-3">
-        <p className="text-[14px] text-gray-600">
-          Thanks! We&apos;ll be in touch.
+        <p className="text-[15px] text-gray-700">
+          You&apos;re in. We&apos;ll keep you in the loop.
         </p>
         <button
           onClick={reset}
-          className="text-[13px] text-gray-400 transition hover:text-black"
+          className="text-[14px] text-gray-500 transition hover:text-black"
         >
-          &larr; Sign up another email
+          &larr; Add another email
         </button>
       </div>
     );
@@ -88,12 +88,12 @@ export function WaitlistForm() {
   if (state === "error" || state === "rate-limited") {
     return (
       <div className="space-y-3">
-        <p className="text-[14px] text-red-700">
-          {errorMsg || "Oops! Something went wrong, please try again"}
+        <p className="text-[15px] text-red-700">
+          {errorMsg || "Something went wrong. Please try again."}
         </p>
         <button
           onClick={reset}
-          className="text-[13px] text-gray-400 transition hover:text-black"
+          className="text-[14px] text-gray-500 transition hover:text-black"
         >
           &larr; Try again
         </button>
@@ -121,7 +121,7 @@ export function WaitlistForm() {
         disabled={state === "loading"}
         className="doc-button disabled:opacity-60"
       >
-        {state === "loading" ? "Please wait\u2026" : "Join the waitlist"}
+        {state === "loading" ? "Please wait..." : "Keep me in the loop"}
         {state !== "loading" && (
           <svg
             className="h-4 w-4"

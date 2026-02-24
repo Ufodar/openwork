@@ -1,6 +1,6 @@
 FROM node:22-bookworm-slim
 
-ARG OPENWRK_VERSION=0.11.22
+ARG OPENWORK_ORCHESTRATOR_VERSION=0.11.22
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
@@ -11,11 +11,11 @@ RUN apt-get update \
     unzip \
   && rm -rf /var/lib/apt/lists/*
 
-RUN npm install -g "openwrk@${OPENWRK_VERSION}"
+RUN npm install -g "openwork-orchestrator@${OPENWORK_ORCHESTRATOR_VERSION}"
 
 # Persistent directories (mount volumes here on PaaS/SSH).
-ENV OPENWRK_DATA_DIR=/data/openwrk
-ENV OPENWRK_SIDECAR_DIR=/data/sidecars
+ENV OPENWORK_DATA_DIR=/data/openwork-orchestrator
+ENV OPENWORK_SIDECAR_DIR=/data/sidecars
 
 # The workspace is mounted from the host/volume.
 ENV OPENWORK_WORKSPACE=/workspace
@@ -23,7 +23,7 @@ ENV OPENWORK_WORKSPACE=/workspace
 # OpenWork host contract surface.
 EXPOSE 8787
 
-# Optional: owpenbot health (only relevant if you enable owpenbot).
+# Optional: opencode-router health (only relevant if you enable the router).
 EXPOSE 3005
 
 VOLUME ["/workspace", "/data"]
@@ -32,9 +32,9 @@ VOLUME ["/workspace", "/data"]
 # - OpenWork server is public (0.0.0.0:8787)
 # - OpenCode stays internal (127.0.0.1:4096)
 # - OpenWork server proxies OpenCode via localhost
-# - Owpenbot disabled by default
+# - OpenCode Router disabled by default
 CMD [
-  "openwrk",
+  "openwork",
   "serve",
   "--workspace", "/workspace",
   "--openwork-host", "0.0.0.0",
@@ -44,5 +44,5 @@ CMD [
   "--connect-host", "127.0.0.1",
   "--cors", "*",
   "--approval", "manual",
-  "--no-owpenbot"
+  "--no-opencode-router"
 ]

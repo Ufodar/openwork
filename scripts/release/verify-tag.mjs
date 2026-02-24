@@ -26,9 +26,10 @@ const readCargoVersion = (path) => {
 
 const appVersion = readJson(resolve(root, "packages", "app", "package.json")).version ?? null;
 const desktopVersion = readJson(resolve(root, "packages", "desktop", "package.json")).version ?? null;
-const headlessVersion = readJson(resolve(root, "packages", "headless", "package.json")).version ?? null;
+const orchestratorVersion =
+  readJson(resolve(root, "packages", "orchestrator", "package.json")).version ?? null;
 const serverVersion = readJson(resolve(root, "packages", "server", "package.json")).version ?? null;
-const owpenbotVersion = readJson(resolve(root, "packages", "owpenbot", "package.json")).version ?? null;
+const opencodeRouterVersion = readJson(resolve(root, "packages", "opencode-router", "package.json")).version ?? null;
 const tauriVersion = readJson(resolve(root, "packages", "desktop", "src-tauri", "tauri.conf.json")).version ?? null;
 const cargoVersion = readCargoVersion(resolve(root, "packages", "desktop", "src-tauri", "Cargo.toml"));
 
@@ -45,9 +46,9 @@ const check = (label, actual) => {
 
 check("app", appVersion);
 check("desktop", desktopVersion);
-check("openwrk", headlessVersion);
+check("openwork-orchestrator", orchestratorVersion);
 check("openwork-server", serverVersion);
-check("owpenbot", owpenbotVersion);
+check("opencode-router", opencodeRouterVersion);
 check("tauri", tauriVersion);
 check("cargo", cargoVersion);
 
@@ -59,4 +60,4 @@ if (mismatches.length) {
   process.exit(1);
 }
 
-console.log(`Release tag ${tag} matches app/desktop/openwrk versions.`);
+console.log(`Release tag ${tag} matches app/desktop/openwork-orchestrator versions.`);

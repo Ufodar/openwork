@@ -1,6 +1,6 @@
 # OpenWork Infrastructure Principles
 
-OpenWork is an experience layer. OpenCode is the engine. This document defines how infrastructure is built so every component is usable on its own, composable as a sidecar, and easy to automate.
+OpenWork is an experience layer. `opencode` is the engine. This document defines how infrastructure is built so every component is usable on its own, composable as a sidecar, and easy to automate.
 
 ## Core Principles
 
@@ -27,6 +27,7 @@ OpenWork is an experience layer. OpenCode is the engine. This document defines h
 5.  Local-first, graceful degradation
 
 * Default to local execution.
+* Hosted cloud is a first-class option, not a separate product.
 * If a sidecar is missing or offline, the UI falls back to read-only or explicit user guidance.
 
 6.  Portable configuration
@@ -63,7 +64,7 @@ But what you can do is:
 
 ## Applied to Current Components
 
-### OpenCode Engine
+### opencode Engine
 
 * Always usable via `opencode` CLI.
 * OpenWork never replaces the CLI; it only connects to the engine.
@@ -73,16 +74,26 @@ But what you can do is:
 * Runs standalone via `openwork-server` CLI.
 * Provides filesystem-backed config surfaces (skills, plugins, MCP, commands).
 * Sidecar lifecycle is described in `packages/app/pr/openwork-server.md`.
+* Can also be consumed as a hosted OpenWork Cloud control surface for remote worker lifecycle.
 
-### Owpenbot
+### OpenWork Cloud Control Plane
 
-* Runs standalone via `owpenwork` CLI.
+* Hosted deployment of OpenWork server capabilities for worker provisioning and remote connect.
+* Must preserve the same user-level contract as self-hosted paths:
+  - launch worker
+  - get connect credentials (URL + token)
+  - connect via `Add worker` -> `Connect remote`
+* Should not require a separate mental model for users moving between local and hosted modes.
+
+### OpenCode Router
+
+* Runs standalone via `opencode-router` CLI.
 * Must be able to use OpenWork server for config and approvals.
 
 ## Non-goals
 
 * Replacing OpenCode primitives with custom abstractions.
-* Building multi-tenant or cloud-managed infrastructure.
+* Forcing cloud-only lock-in (self-hosted desktop/CLI paths must remain valid).
 
 ## References
 

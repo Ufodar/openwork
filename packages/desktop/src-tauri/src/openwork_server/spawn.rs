@@ -81,7 +81,7 @@ pub fn spawn_openwork_server(
     opencode_directory: Option<&str>,
     opencode_username: Option<&str>,
     opencode_password: Option<&str>,
-    owpenbot_health_port: Option<u16>,
+    opencode_router_health_port: Option<u16>,
 ) -> Result<(Receiver<CommandEvent>, CommandChild), String> {
     let command = match app.shell().sidecar("openwork-server") {
         Ok(command) => command,
@@ -103,8 +103,8 @@ pub fn spawn_openwork_server(
         .unwrap_or_else(|| Path::new("."));
     let mut command = command.args(args).current_dir(cwd);
 
-    if let Some(port) = owpenbot_health_port {
-        command = command.env("OWPENBOT_HEALTH_PORT", port.to_string());
+    if let Some(port) = opencode_router_health_port {
+        command = command.env("OPENCODE_ROUTER_HEALTH_PORT", port.to_string());
     }
 
     if let Some(username) = opencode_username {
@@ -117,6 +117,10 @@ pub fn spawn_openwork_server(
         if !password.trim().is_empty() {
             command = command.env("OPENWORK_OPENCODE_PASSWORD", password);
         }
+    }
+
+    for (key, value) in crate::bun_env::bun_env_overrides() {
+        command = command.env(key, value);
     }
 
     command

@@ -26,9 +26,7 @@ fn build_urls(port: u16) -> (Option<String>, Option<String>, Option<String>) {
         Some(format!("http://{trimmed}.local:{port}"))
     };
 
-    let lan_url = local_ip()
-        .ok()
-        .map(|ip| format!("http://{ip}:{port}"));
+    let lan_url = local_ip().ok().map(|ip| format!("http://{ip}:{port}"));
 
     let connect_url = lan_url.clone().or(mdns_url.clone());
 
@@ -47,9 +45,12 @@ pub fn start_openwork_server(
     opencode_base_url: Option<&str>,
     opencode_username: Option<&str>,
     opencode_password: Option<&str>,
-    owpenbot_health_port: Option<u16>,
+    opencode_router_health_port: Option<u16>,
 ) -> Result<OpenworkServerInfo, String> {
-    let mut state = manager.inner.lock().map_err(|_| "openwork server mutex poisoned".to_string())?;
+    let mut state = manager
+        .inner
+        .lock()
+        .map_err(|_| "openwork server mutex poisoned".to_string())?;
     OpenworkServerManager::stop_locked(&mut state);
 
     let host = "0.0.0.0".to_string();
@@ -76,7 +77,7 @@ pub fn start_openwork_server(
         },
         opencode_username,
         opencode_password,
-        owpenbot_health_port,
+        opencode_router_health_port,
     )?;
 
     state.child = Some(child);
@@ -101,14 +102,16 @@ pub fn start_openwork_server(
                 CommandEvent::Stdout(line_bytes) => {
                     let line = String::from_utf8_lossy(&line_bytes).to_string();
                     if let Ok(mut state) = state_handle.try_lock() {
-                        let next = state.last_stdout.as_deref().unwrap_or_default().to_string() + &line;
+                        let next =
+                            state.last_stdout.as_deref().unwrap_or_default().to_string() + &line;
                         state.last_stdout = Some(truncate_output(&next, 8000));
                     }
                 }
                 CommandEvent::Stderr(line_bytes) => {
                     let line = String::from_utf8_lossy(&line_bytes).to_string();
                     if let Ok(mut state) = state_handle.try_lock() {
-                        let next = state.last_stderr.as_deref().unwrap_or_default().to_string() + &line;
+                        let next =
+                            state.last_stderr.as_deref().unwrap_or_default().to_string() + &line;
                         state.last_stderr = Some(truncate_output(&next, 8000));
                     }
                 }
@@ -124,7 +127,8 @@ pub fn start_openwork_server(
                 CommandEvent::Error(message) => {
                     if let Ok(mut state) = state_handle.try_lock() {
                         state.child_exited = true;
-                        let next = state.last_stderr.as_deref().unwrap_or_default().to_string() + &message;
+                        let next =
+                            state.last_stderr.as_deref().unwrap_or_default().to_string() + &message;
                         state.last_stderr = Some(truncate_output(&next, 8000));
                     }
                 }

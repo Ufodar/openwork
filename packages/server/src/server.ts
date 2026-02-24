@@ -1,3 +1,4 @@
+import { createHash, randomInt } from "node:crypto";
 import { readFile, writeFile, rm, readdir, rename, stat, unlink } from "node:fs/promises";
 import { homedir, hostname } from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
@@ -14,7 +15,6 @@ import { readJsoncFile, updateJsoncTopLevel, writeJsoncFile } from "./jsonc.js";
 import { recordAudit, readAuditEntries, readLastAudit } from "./audit.js";
 import { ReloadEventStore } from "./events.js";
 import { parseFrontmatter } from "./frontmatter.js";
-import { startReloadWatchers } from "./reload-watcher.js";
 import { opencodeConfigPath, openworkConfigPath, projectCommandsDir, projectSkillsDir } from "./workspace-files.js";
 import { ensureDir, exists, hashToken, shortId } from "./utils.js";
 import { workspaceIdForPath } from "./workspaces.js";
@@ -45,7 +45,7 @@ function toUnixNano(): string {
 }
 
 export function createServerLogger(config: ServerConfig): ServerLogger {
-  const runId = process.env.OPENWRK_RUN_ID ?? process.env.OPENWORK_RUN_ID ?? shortId();
+  const runId = process.env.OPENWORK_RUN_ID ?? shortId();
   const host = hostname().trim();
   const resource: Record<string, string> = {
     "service.name": "openwork-server",
@@ -86,7 +86,7 @@ function logRequest(input: {
   response: Response;
   durationMs: number;
   authMode: AuthMode;
-  proxyService?: "opencode" | "owpenbot";
+  proxyService?: "opencode" | "opencode-router";
   proxyBaseUrl?: string;
   error?: string;
 }) {
@@ -116,28 +116,28 @@ function logRequest(input: {
 
 type AuthMode = "none" | "client" | "host";
 
-function normalizeOwpenbotProxyPath(pathname: string): string {
+function normalizeOpenCodeRouterProxyPath(pathname: string): string {
   const trimmed = pathname.trim();
-  if (!trimmed) return "/owpenbot";
-  if (trimmed === "/owpenbot/") return "/owpenbot";
+  if (!trimmed) return "/opencode-router";
+  if (trimmed === "/opencode-router/") return "/opencode-router";
   return trimmed.endsWith("/") ? trimmed.slice(0, -1) : trimmed;
 }
 
-function resolveOwpenbotProxyPolicy(
+function resolveOpenCodeRouterProxyPolicy(
   method: string,
   pathname: string,
 ): { auth: AuthMode; requiredScope?: TokenScope } {
-  const normalized = normalizeOwpenbotProxyPath(pathname);
+  const normalized = normalizeOpenCodeRouterProxyPath(pathname);
   const upper = method.trim().toUpperCase();
 
   if (upper === "GET") {
-    if (normalized === "/owpenbot" || normalized === "/owpenbot/health") {
+    if (normalized === "/opencode-router" || normalized === "/opencode-router/health") {
       return { auth: "client" };
     }
-    if (normalized === "/owpenbot/bindings") {
+    if (normalized === "/opencode-router/bindings") {
       return { auth: "client", requiredScope: "collaborator" };
     }
-    if (normalized === "/owpenbot/identities/telegram" || normalized === "/owpenbot/identities/slack") {
+    if (normalized === "/opencode-router/identities/telegram" || normalized === "/opencode-router/identities/slack") {
       return { auth: "client", requiredScope: "collaborator" };
     }
   }
@@ -226,21 +226,46 @@ type AgentLabAutomationStore = {
   items: AgentLabAutomation[];
 };
 
+type SoulHeartbeatEntry = {
+  id: string;
+  ts: string | null;
+  workspace: string | null;
+  summary: string;
+  looseEnds: string[];
+  nextAction: string | null;
+};
+
+type SoulStatus = {
+  enabled: boolean;
+  state: "off" | "healthy" | "stale" | "error";
+  memoryEnabled: boolean;
+  instructionsEnabled: boolean;
+  heartbeatLogExists: boolean;
+  heartbeatCommandExists: boolean;
+  heartbeatJob: {
+    name: string;
+    slug: string;
+    schedule: string;
+    lastRunAt: string | null;
+    lastRunStatus: string | null;
+    lastRunError: string | null;
+  } | null;
+  heartbeatCount: number;
+  lastHeartbeatAt: string | null;
+  lastHeartbeatSummary: string | null;
+  staleAfterMs: number | null;
+  overdue: boolean;
+  summary: string;
+  memoryPath: string;
+  heartbeatPath: string;
+};
+
 export function startServer(config: ServerConfig) {
   const approvals = new ApprovalService(config.approval);
   const reloadEvents = new ReloadEventStore();
   const tokens = new TokenService(config);
   const routes = createRoutes(config, approvals, tokens);
   const logger = createServerLogger(config);
-
-  let reloadWatcher: { close: () => void } | null = null;
-  try {
-    reloadWatcher = startReloadWatchers({ config, reloadEvents, logger });
-  } catch (error) {
-    logger.log("warn", "Reload watcher failed to initialize", {
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
 
   const serverOptions: {
     hostname: string;
@@ -257,7 +282,7 @@ export function startServer(config: ServerConfig) {
       const url = new URL(request.url);
       const startedAt = Date.now();
       let authMode: AuthMode = "none";
-      let proxyService: "opencode" | "owpenbot" | undefined;
+      let proxyService: "opencode" | "opencode-router" | undefined;
       let proxyBaseUrl: string | undefined;
       let errorMessage: string | undefined;
 
@@ -302,8 +327,8 @@ export function startServer(config: ServerConfig) {
         }
       }
 
-      if (mount && (mount.restPath === "/owpenbot" || mount.restPath.startsWith("/owpenbot/"))) {
-        const policy = resolveOwpenbotProxyPolicy(request.method, mount.restPath);
+      if (mount && (mount.restPath === "/opencode-router" || mount.restPath.startsWith("/opencode-router/"))) {
+        const policy = resolveOpenCodeRouterProxyPolicy(request.method, mount.restPath);
         authMode = policy.auth;
         try {
           if (authMode === "host") {
@@ -317,9 +342,9 @@ export function startServer(config: ServerConfig) {
               });
             }
           }
-          proxyService = "owpenbot";
-          proxyBaseUrl = resolveOwpenbotBaseUrl();
-          const response = await proxyOwpenbotRequest({ request, url, proxyPath: mount.restPath });
+          proxyService = "opencode-router";
+          proxyBaseUrl = resolveOpenCodeRouterBaseUrl();
+          const response = await proxyOpenCodeRouterRequest({ request, url, proxyPath: mount.restPath });
           return finalize(response);
         } catch (error) {
           const apiError = error instanceof ApiError
@@ -365,8 +390,8 @@ export function startServer(config: ServerConfig) {
         }
       }
 
-      if (url.pathname === "/owpenbot" || url.pathname.startsWith("/owpenbot/")) {
-        const policy = resolveOwpenbotProxyPolicy(request.method, url.pathname);
+      if (url.pathname === "/opencode-router" || url.pathname.startsWith("/opencode-router/")) {
+        const policy = resolveOpenCodeRouterProxyPolicy(request.method, url.pathname);
         authMode = policy.auth;
         try {
           if (authMode === "host") {
@@ -380,9 +405,9 @@ export function startServer(config: ServerConfig) {
               });
             }
           }
-          proxyService = "owpenbot";
-          proxyBaseUrl = resolveOwpenbotBaseUrl();
-          const response = await proxyOwpenbotRequest({ request, url });
+          proxyService = "opencode-router";
+          proxyBaseUrl = resolveOpenCodeRouterBaseUrl();
+          const response = await proxyOpenCodeRouterRequest({ request, url });
           return finalize(response);
         } catch (error) {
           const apiError = error instanceof ApiError
@@ -433,10 +458,6 @@ export function startServer(config: ServerConfig) {
   (serverOptions as { idleTimeout?: number }).idleTimeout = 120;
 
   const server = Bun.serve(serverOptions);
-
-  if (reloadWatcher) {
-    (server as any).reloadWatcher = reloadWatcher;
-  }
 
   return server;
 }
@@ -523,9 +544,9 @@ async function fetchOpencodeJson(workspace: WorkspaceInfo, path: string, init: {
   return json;
 }
 
-function buildOwpenbotProxyUrl(baseUrl: string, path: string, search: string) {
+function buildOpenCodeRouterProxyUrl(baseUrl: string, path: string, search: string) {
   const target = new URL(baseUrl);
-  const trimmedPath = path.replace(/^\/owpenbot/, "");
+  const trimmedPath = path.replace(/^\/opencode-router/, "");
   const normalized = trimmedPath.startsWith("/") ? trimmedPath : `/${trimmedPath}`;
   target.pathname = normalized === "/" ? "/" : normalized;
   target.search = search;
@@ -597,22 +618,22 @@ async function proxyOpencodeRequest(input: {
   }
 }
 
-function resolveOwpenbotBaseUrl(): string {
-  const port = parseInteger(process.env.OWPENBOT_HEALTH_PORT);
+function resolveOpenCodeRouterBaseUrl(): string {
+  const port = parseInteger(process.env.OPENCODE_ROUTER_HEALTH_PORT);
   if (!port) {
-    throw new ApiError(404, "owpenbot_unconfigured", "Owpenbot is not configured on this host");
+    throw new ApiError(404, "opencodeRouter_unconfigured", "OpenCodeRouter is not configured on this host");
   }
   return `http://127.0.0.1:${port}`;
 }
 
-async function proxyOwpenbotRequest(input: {
+async function proxyOpenCodeRouterRequest(input: {
   request: Request;
   url: URL;
   proxyPath?: string;
 }) {
-  const baseUrl = resolveOwpenbotBaseUrl();
+  const baseUrl = resolveOpenCodeRouterBaseUrl();
   const proxyPath = input.proxyPath ?? input.url.pathname;
-  const targetUrl = buildOwpenbotProxyUrl(baseUrl, proxyPath, input.url.search);
+  const targetUrl = buildOpenCodeRouterProxyUrl(baseUrl, proxyPath, input.url.search);
   const headers = new Headers(input.request.headers);
   headers.delete("authorization");
   headers.delete("x-openwork-host-token");
@@ -640,8 +661,8 @@ async function proxyOwpenbotRequest(input: {
       clearTimeout(timeoutId);
     }
   } catch (error) {
-    const port = parseInteger(process.env.OWPENBOT_HEALTH_PORT);
-    throw new ApiError(503, "owpenbot_unreachable", "Owpenbot is not reachable on this host", {
+    const port = parseInteger(process.env.OPENCODE_ROUTER_HEALTH_PORT);
+    throw new ApiError(503, "opencodeRouter_unreachable", "OpenCodeRouter is not reachable on this host", {
       baseUrl,
       port,
       targetUrl,
@@ -657,14 +678,14 @@ function jsonResponse(data: unknown, status = 200) {
   });
 }
 
-function owpenbotDebugEnabled(): boolean {
-  return ["1", "true", "yes"].includes((process.env.OPENWORK_DEBUG_OWPENBOT ?? "").toLowerCase());
+function opencodeRouterDebugEnabled(): boolean {
+  return ["1", "true", "yes"].includes((process.env.OPENWORK_DEBUG_OPENCODE_ROUTER ?? "").toLowerCase());
 }
 
-function logOwpenbotDebug(message: string, details?: Record<string, unknown>) {
-  if (!owpenbotDebugEnabled()) return;
+function logOpenCodeRouterDebug(message: string, details?: Record<string, unknown>) {
+  if (!opencodeRouterDebugEnabled()) return;
   const payload = details ? ` ${JSON.stringify(details)}` : "";
-  console.log(`[owpenbot] ${message}${payload}`);
+  console.log(`[opencodeRouter] ${message}${payload}`);
 }
 
 function withCors(response: Response, request: Request, config: ServerConfig) {
@@ -734,7 +755,7 @@ function buildCapabilities(config: ServerConfig): Capabilities {
   const maxBytes = resolveInboxMaxBytes();
   const toyUiEnabled = resolveToyUiEnabled();
   const browserProvider = resolveBrowserProvider();
-  const owpenbotConfigured = Boolean(parseInteger(process.env.OWPENBOT_HEALTH_PORT));
+  const opencodeRouterConfigured = Boolean(parseInteger(process.env.OPENCODE_ROUTER_HEALTH_PORT));
   const opencodeConfigured = config.workspaces.some((workspace) => Boolean(workspace.baseUrl?.trim()));
   return {
     schemaVersion,
@@ -758,7 +779,7 @@ function buildCapabilities(config: ServerConfig): Capabilities {
     tokens: { scoped: true, scopes: ["owner", "collaborator", "viewer"] },
     proxy: {
       opencode: opencodeConfigured,
-      owpenbot: owpenbotConfigured,
+      opencodeRouter: opencodeRouterConfigured,
     },
     toolProviders: {
       browser: browserProvider,
@@ -954,7 +975,7 @@ async function writeAgentLabAutomations(workspaceRoot: string, store: AgentLabAu
   await writeFile(path, JSON.stringify({ ...store, updatedAt: Date.now() }, null, 2) + "\n", "utf8");
 }
 
-function normalizeWorkspaceRelativePath(input: string, options: { allowSubdirs: boolean }): string {
+export function normalizeWorkspaceRelativePath(input: string, options: { allowSubdirs: boolean }): string {
   const raw = String(input ?? "").trim();
   if (!raw) {
     throw new ApiError(400, "invalid_path", "Path is required");
@@ -963,7 +984,15 @@ function normalizeWorkspaceRelativePath(input: string, options: { allowSubdirs: 
     throw new ApiError(400, "invalid_path", "Path contains null byte");
   }
 
-  const normalized = raw.replace(/\\/g, "/").replace(/^\/+/, "");
+  // A lot of user-facing surfaces (artifacts, tool logs) reference files as
+  // `workspace/<path>` or `/workspace/<path>`. The server API expects
+  // workspace-relative paths, so normalize those common prefixes here.
+  let normalized = raw.replace(/\\/g, "/");
+  normalized = normalized.replace(/^\/+/, "");
+  normalized = normalized.replace(/^\.\//, "");
+  normalized = normalized.replace(/^workspace\//, "");
+  normalized = normalized.replace(/^\/+/, "");
+
   const parts = normalized.split("/").filter(Boolean);
   if (!parts.length) {
     throw new ApiError(400, "invalid_path", "Path is required");
@@ -1008,6 +1037,18 @@ function decodeArtifactId(id: string): string {
   }
 }
 
+function encodeInboxId(path: string): string {
+  return encodeArtifactId(path);
+}
+
+function decodeInboxId(id: string): string {
+  try {
+    return decodeArtifactId(id);
+  } catch {
+    throw new ApiError(400, "invalid_inbox_item", "Inbox item id is invalid");
+  }
+}
+
 async function listArtifacts(outboxRoot: string): Promise<Array<{ id: string; path: string; size: number; updatedAt: number }>> {
   const rootResolved = resolve(outboxRoot);
   if (!(await exists(rootResolved))) return [];
@@ -1043,78 +1084,21 @@ async function listArtifacts(outboxRoot: string): Promise<Array<{ id: string; pa
   return items;
 }
 
-function encodeInboxId(path: string): string {
-  return Buffer.from(path, "utf8").toString("base64url");
-}
-
-function decodeInboxId(id: string): string {
-  const raw = (id ?? "").trim();
-  if (!raw) {
-    throw new ApiError(400, "invalid_inbox_file", "Inbox file id is required");
-  }
-  try {
-    const decoded = Buffer.from(raw, "base64url").toString("utf8");
-    return normalizeWorkspaceRelativePath(decoded, { allowSubdirs: true });
-  } catch {
-    throw new ApiError(400, "invalid_inbox_file", "Inbox file id is invalid");
-  }
-}
-
-async function listInboxFiles(
+async function listInbox(
   inboxRoot: string,
   options?: { prefix?: string },
-): Promise<Array<{ id: string; path: string; size: number; updatedAt: number }>> {
-  const rootResolved = resolve(inboxRoot);
-  if (!(await exists(rootResolved))) return [];
-
+): Promise<Array<{ id: string; path: string; size: number; updatedAt: number; name: string }>> {
   const rawPrefix = (options?.prefix ?? "").trim();
   const prefix = rawPrefix ? normalizeWorkspaceRelativePath(rawPrefix, { allowSubdirs: true }) : "";
-  const startRoot = prefix ? resolveSafeChildPath(rootResolved, prefix) : rootResolved;
-  if (!(await exists(startRoot))) return [];
 
-  const items: Array<{ id: string; path: string; size: number; updatedAt: number }> = [];
+  const items = await listArtifacts(inboxRoot);
+  const filtered = prefix ? items.filter((item) => item.path === prefix || item.path.startsWith(`${prefix}/`)) : items;
 
-  const recordFile = async (abs: string, rel: string) => {
-    const info = await stat(abs);
-    items.push({
-      id: encodeInboxId(rel),
-      path: rel,
-      size: info.size,
-      updatedAt: info.mtimeMs,
-    });
-  };
-
-  const walk = async (dir: string) => {
-    const entries = await readdir(dir, { withFileTypes: true });
-    for (const entry of entries) {
-      const abs = join(dir, entry.name);
-      if (entry.isDirectory()) {
-        await walk(abs);
-        continue;
-      }
-      if (!entry.isFile()) continue;
-      const relWithinStart = relative(startRoot, abs);
-      const rel = normalizeWorkspaceRelativePath(prefix ? join(prefix, relWithinStart) : relWithinStart, {
-        allowSubdirs: true,
-      });
-      await recordFile(abs, rel);
-    }
-  };
-
-  try {
-    const info = await stat(startRoot);
-    if (info.isFile()) {
-      const rel = normalizeWorkspaceRelativePath(prefix, { allowSubdirs: true });
-      await recordFile(startRoot, rel);
-    } else {
-      await walk(startRoot);
-    }
-  } catch {
-    return [];
-  }
-
-  items.sort((a, b) => b.updatedAt - a.updatedAt);
-  return items;
+  return filtered.map((item) => ({
+    ...item,
+    id: encodeInboxId(item.path),
+    name: basename(item.path),
+  }));
 }
 
 function emitReloadEvent(
@@ -1123,7 +1107,10 @@ function emitReloadEvent(
   reason: ReloadReason,
   trigger?: ReloadTrigger,
 ) {
-  reloadEvents.recordDebounced(workspace.id, reason, trigger);
+  void reloadEvents;
+  void workspace;
+  void reason;
+  void trigger;
 }
 
 function buildConfigTrigger(path: string): ReloadTrigger {
@@ -1430,7 +1417,7 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
     return jsonResponse({ updatedAt: Date.now() });
   });
 
-  addRoute(routes, "POST", "/workspace/:id/owpenbot/telegram-token", "client", async (ctx) => {
+  addRoute(routes, "POST", "/workspace/:id/opencode-router/telegram-token", "client", async (ctx) => {
     ensureWritable(config);
     requireClientScope(ctx, "collaborator");
     const workspace = await resolveWorkspace(config, ctx.params.id);
@@ -1438,7 +1425,7 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
     const token = typeof body.token === "string" ? body.token.trim() : "";
     const healthPort = normalizeHealthPort(body.healthPort);
     const requestHost = ctx.url.hostname;
-    logOwpenbotDebug("telegram-token:request", {
+    logOpenCodeRouterDebug("telegram-token:request", {
       workspaceId: workspace.id,
       actor: ctx.actor?.type ?? "unknown",
       hasToken: Boolean(token),
@@ -1451,16 +1438,16 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
 
     await requireApproval(ctx, {
       workspaceId: workspace.id,
-      action: "owpenbot.telegram.set-token",
+      action: "opencodeRouter.telegram.set-token",
       summary: "Set Telegram bot token",
-      paths: [resolveOwpenbotConfigPath()],
+      paths: [resolveOpenCodeRouterConfigPath()],
     });
 
-    const identityId = normalizeOwpenbotIdentityId(workspace.id);
-    await persistOwpenbotTelegramIdentity({ id: identityId, token, enabled: true, directory: workspace.path });
+    const identityId = normalizeOpenCodeRouterIdentityId(workspace.id);
+    await persistOpenCodeRouterTelegramIdentity({ id: identityId, token, enabled: true, directory: workspace.path });
 
-    const port = healthPort ?? resolveOwpenbotHealthPort();
-    const apply = await tryPostOwpenbotHealth(
+    const port = healthPort ?? resolveOpenCodeRouterHealthPort();
+    const apply = await tryPostOpenCodeRouterHealth(
       "/identities/telegram",
       { id: identityId, token, enabled: true, directory: workspace.path },
       { port, requestHost, timeoutMs: 3_000 },
@@ -1478,7 +1465,7 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
       (result.telegram as Record<string, unknown>).bot = bot;
     }
 
-    // Reflect owpenbot apply status when available.
+    // Reflect opencodeRouter apply status when available.
     if (apply.body && typeof apply.body === "object") {
       const record = apply.body as Record<string, unknown>;
       if (record.telegram && typeof record.telegram === "object") {
@@ -1500,10 +1487,10 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
     if (!apply.applied) {
       result.applyError = (typeof result.applyError === "string" && result.applyError.trim())
         ? result.applyError
-        : apply.error ?? "Owpenbot did not apply the update";
+        : apply.error ?? "OpenCodeRouter did not apply the update";
       if (typeof apply.status === "number") result.applyStatus = apply.status;
     }
-    logOwpenbotDebug("telegram-token:updated", {
+    logOpenCodeRouterDebug("telegram-token:updated", {
       workspaceId: workspace.id,
       applied: typeof result.applied === "boolean" ? result.applied : null,
       applyError: typeof result.applyError === "string" ? result.applyError : null,
@@ -1513,8 +1500,8 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
       id: shortId(),
       workspaceId: workspace.id,
       actor: ctx.actor ?? { type: "remote" },
-      action: "owpenbot.telegram.set-token",
-      target: "owpenbot.telegram",
+      action: "opencodeRouter.telegram.set-token",
+      target: "opencodeRouter.telegram",
       summary: "Updated Telegram bot token",
       timestamp: Date.now(),
     });
@@ -1522,14 +1509,14 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
     return jsonResponse(result);
   });
 
-  addRoute(routes, "GET", "/workspace/:id/owpenbot/telegram", "client", async (ctx) => {
+  addRoute(routes, "GET", "/workspace/:id/opencode-router/telegram", "client", async (ctx) => {
     requireClientScope(ctx, "collaborator");
     await resolveWorkspace(config, ctx.params.id);
-    const info = await readOwpenbotTelegramInfo();
+    const info = await readOpenCodeRouterTelegramInfo();
     return jsonResponse({ ok: true, ...info });
   });
 
-  addRoute(routes, "POST", "/workspace/:id/owpenbot/telegram-enabled", "client", async (ctx) => {
+  addRoute(routes, "POST", "/workspace/:id/opencode-router/telegram-enabled", "client", async (ctx) => {
     ensureWritable(config);
     requireClientScope(ctx, "collaborator");
     const workspace = await resolveWorkspace(config, ctx.params.id);
@@ -1541,29 +1528,29 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
 
     await requireApproval(ctx, {
       workspaceId: workspace.id,
-      action: "owpenbot.telegram.set-enabled",
+      action: "opencodeRouter.telegram.set-enabled",
       summary: enabled ? "Enable Telegram" : "Disable Telegram",
-      paths: [resolveOwpenbotConfigPath()],
+      paths: [resolveOpenCodeRouterConfigPath()],
     });
 
-    await persistOwpenbotTelegramEnabled(enabled, { clearToken: !enabled && clearToken });
+    await persistOpenCodeRouterTelegramEnabled(enabled, { clearToken: !enabled && clearToken });
 
-    // Owpenbot no longer exposes a channel-wide enable/disable endpoint.
+    // OpenCodeRouter no longer exposes a channel-wide enable/disable endpoint.
     // Persisting the flag gates all identities on next start.
     const response: Record<string, unknown> = {
       ok: true,
       persisted: true,
       enabled,
       applied: false,
-      applyError: "Restart owpenbot to apply",
+      applyError: "Restart opencodeRouter to apply",
     };
 
     await recordAudit(workspace.path, {
       id: shortId(),
       workspaceId: workspace.id,
       actor: ctx.actor ?? { type: "remote" },
-      action: "owpenbot.telegram.set-enabled",
-      target: "owpenbot.telegram",
+      action: "opencodeRouter.telegram.set-enabled",
+      target: "opencodeRouter.telegram",
       summary: enabled ? "Enabled Telegram" : "Disabled Telegram",
       timestamp: Date.now(),
     });
@@ -1571,7 +1558,7 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
     return jsonResponse(response);
   });
 
-  addRoute(routes, "POST", "/workspace/:id/owpenbot/slack-tokens", "client", async (ctx) => {
+  addRoute(routes, "POST", "/workspace/:id/opencode-router/slack-tokens", "client", async (ctx) => {
     ensureWritable(config);
     requireClientScope(ctx, "collaborator");
     const workspace = await resolveWorkspace(config, ctx.params.id);
@@ -1580,7 +1567,7 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
     const appToken = typeof body.appToken === "string" ? body.appToken.trim() : "";
     const healthPort = normalizeHealthPort(body.healthPort);
     const requestHost = ctx.url.hostname;
-    logOwpenbotDebug("slack-tokens:request", {
+    logOpenCodeRouterDebug("slack-tokens:request", {
       workspaceId: workspace.id,
       actor: ctx.actor?.type ?? "unknown",
       hasBotToken: Boolean(botToken),
@@ -1594,16 +1581,16 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
 
     await requireApproval(ctx, {
       workspaceId: workspace.id,
-      action: "owpenbot.slack.set-tokens",
+      action: "opencodeRouter.slack.set-tokens",
       summary: "Set Slack bot tokens",
-      paths: [resolveOwpenbotConfigPath()],
+      paths: [resolveOpenCodeRouterConfigPath()],
     });
 
-    const identityId = normalizeOwpenbotIdentityId(workspace.id);
-    await persistOwpenbotSlackIdentity({ id: identityId, botToken, appToken, enabled: true, directory: workspace.path });
+    const identityId = normalizeOpenCodeRouterIdentityId(workspace.id);
+    await persistOpenCodeRouterSlackIdentity({ id: identityId, botToken, appToken, enabled: true, directory: workspace.path });
 
-    const port = healthPort ?? resolveOwpenbotHealthPort();
-    const apply = await tryPostOwpenbotHealth(
+    const port = healthPort ?? resolveOpenCodeRouterHealthPort();
+    const apply = await tryPostOpenCodeRouterHealth(
       "/identities/slack",
       { id: identityId, botToken, appToken, enabled: true, directory: workspace.path },
       { port, requestHost, timeoutMs: 3_000 },
@@ -1637,10 +1624,10 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
     if (!apply.applied) {
       result.applyError = (typeof result.applyError === "string" && result.applyError.trim())
         ? result.applyError
-        : apply.error ?? "Owpenbot did not apply the update";
+        : apply.error ?? "OpenCodeRouter did not apply the update";
       if (typeof apply.status === "number") result.applyStatus = apply.status;
     }
-    logOwpenbotDebug("slack-tokens:updated", {
+    logOpenCodeRouterDebug("slack-tokens:updated", {
       workspaceId: workspace.id,
       applied: typeof result.applied === "boolean" ? result.applied : null,
       applyError: typeof result.applyError === "string" ? result.applyError : null,
@@ -1650,8 +1637,8 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
       id: shortId(),
       workspaceId: workspace.id,
       actor: ctx.actor ?? { type: "remote" },
-      action: "owpenbot.slack.set-tokens",
-      target: "owpenbot.slack",
+      action: "opencodeRouter.slack.set-tokens",
+      target: "opencodeRouter.slack",
       summary: "Updated Slack bot tokens",
       timestamp: Date.now(),
     });
@@ -1659,16 +1646,16 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
     return jsonResponse(result);
   });
 
-  addRoute(routes, "GET", "/workspace/:id/owpenbot/identities/telegram", "client", async (ctx) => {
+  addRoute(routes, "GET", "/workspace/:id/opencode-router/identities/telegram", "client", async (ctx) => {
     requireClientScope(ctx, "collaborator");
     const workspace = await resolveWorkspace(config, ctx.params.id);
-    const workspaceIdentityId = normalizeOwpenbotIdentityId(workspace.id);
+    const workspaceIdentityId = normalizeOpenCodeRouterIdentityId(workspace.id);
 
     const healthPortParam = parseInteger(ctx.url.searchParams.get("healthPort") ?? undefined);
-    const port = healthPortParam ?? resolveOwpenbotHealthPort();
+    const port = healthPortParam ?? resolveOpenCodeRouterHealthPort();
     const requestHost = ctx.url.hostname;
 
-    const apply = await tryFetchOwpenbotHealth("GET", "/identities/telegram", {
+    const apply = await tryFetchOpenCodeRouterHealth("GET", "/identities/telegram", {
       port,
       requestHost,
       timeoutMs: 2_000,
@@ -1683,10 +1670,14 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
             (entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === "object" && !Array.isArray(entry)),
           )
           .map((entry) => {
-            const id = normalizeOwpenbotIdentityId(entry.id);
+            const id = normalizeOpenCodeRouterIdentityId(entry.id);
             const enabled = entry.enabled === undefined ? true : entry.enabled === true || entry.enabled === "true";
             const running = entry.running === true || entry.running === "true";
-            return { id, enabled, running };
+            const access = normalizeTelegramAccessMode(
+              entry.access,
+              entry.pairingRequired === true || entry.pairingRequired === "true" ? "private" : "public",
+            );
+            return { id, enabled, running, access, pairingRequired: access === "private" };
           })
           .filter((item) => item.id === workspaceIdentityId);
         return jsonResponse({ ...payload, items });
@@ -1694,7 +1685,7 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
       return jsonResponse(payload);
     }
 
-    const current = await readOwpenbotConfigFile(resolveOwpenbotConfigPath());
+    const current = await readOpenCodeRouterConfigFile(resolveOpenCodeRouterConfigPath());
     const channels = ensurePlainObject(current.channels);
     const telegram = ensurePlainObject(channels.telegram);
     const botsRaw = (telegram as any).bots;
@@ -1702,23 +1693,43 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
     const items = bots
       .filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === "object" && !Array.isArray(entry)))
       .map((entry) => {
-        const id = normalizeOwpenbotIdentityId(entry.id);
+        const id = normalizeOpenCodeRouterIdentityId(entry.id);
         const enabled = entry.enabled === undefined ? true : entry.enabled === true || entry.enabled === "true";
-        return { id, enabled, running: false };
+        const { access } = resolveTelegramAccessFromRecord(entry);
+        return { id, enabled, running: false, access, pairingRequired: access === "private" };
       })
       .filter((item) => item.id === workspaceIdentityId);
     return jsonResponse({ ok: true, items });
   });
 
-  addRoute(routes, "POST", "/workspace/:id/owpenbot/identities/telegram", "client", async (ctx) => {
+  addRoute(routes, "POST", "/workspace/:id/opencode-router/identities/telegram", "client", async (ctx) => {
     ensureWritable(config);
     requireClientScope(ctx, "collaborator");
     const workspace = await resolveWorkspace(config, ctx.params.id);
     const body = await readJsonBody(ctx.request);
     const token = typeof body.token === "string" ? body.token.trim() : "";
     const enabled = body.enabled === undefined ? true : body.enabled === true || body.enabled === "true";
-    const workspaceIdentityId = normalizeOwpenbotIdentityId(workspace.id);
-    const requestedId = typeof body.id === "string" ? normalizeOwpenbotIdentityId(body.id) : "";
+    const access = normalizeTelegramAccessMode(body.access, "public");
+    const pairingCodeInput = typeof body.pairingCode === "string" ? body.pairingCode : "";
+    const normalizedPairingCodeInput = normalizeTelegramPairingCode(pairingCodeInput);
+    if (
+      access === "private" &&
+      pairingCodeInput.trim() &&
+      (normalizedPairingCodeInput.length < 6 || normalizedPairingCodeInput.length > 24)
+    ) {
+      throw new ApiError(
+        400,
+        "invalid_pairing_code",
+        "Pairing code must be 6-24 letters or numbers",
+      );
+    }
+    const pairingCode =
+      access === "private"
+        ? (normalizedPairingCodeInput || normalizeTelegramPairingCode(generateTelegramPairingCode()))
+        : "";
+    const pairingCodeHash = access === "private" ? hashTelegramPairingCode(pairingCode) : "";
+    const workspaceIdentityId = normalizeOpenCodeRouterIdentityId(workspace.id);
+    const requestedId = typeof body.id === "string" ? normalizeOpenCodeRouterIdentityId(body.id) : "";
     if (requestedId && requestedId !== workspaceIdentityId) {
       throw new ApiError(
         400,
@@ -1739,17 +1750,31 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
 
     await requireApproval(ctx, {
       workspaceId: workspace.id,
-      action: "owpenbot.telegram.identity.upsert",
+      action: "opencodeRouter.telegram.identity.upsert",
       summary: `Upsert Telegram identity (${identityId})`,
-      paths: [resolveOwpenbotConfigPath()],
+      paths: [resolveOpenCodeRouterConfigPath()],
     });
 
-    await persistOwpenbotTelegramIdentity({ id: identityId, token, enabled, directory: workspace.path });
+    await persistOpenCodeRouterTelegramIdentity({
+      id: identityId,
+      token,
+      enabled,
+      directory: workspace.path,
+      access,
+      ...(access === "private" ? { pairingCodeHash } : {}),
+    });
 
-    const port = healthPort ?? resolveOwpenbotHealthPort();
-    const apply = await tryPostOwpenbotHealth(
+    const port = healthPort ?? resolveOpenCodeRouterHealthPort();
+    const apply = await tryPostOpenCodeRouterHealth(
       "/identities/telegram",
-      { id: identityId, token, enabled, directory: workspace.path },
+      {
+        id: identityId,
+        token,
+        enabled,
+        directory: workspace.path,
+        access,
+        ...(access === "private" ? { pairingCodeHash } : {}),
+      },
       { port, requestHost, timeoutMs: 3_000 },
     );
 
@@ -1757,7 +1782,13 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
       ok: true,
       persisted: true,
       applied: apply.applied,
-      telegram: { id: identityId, enabled },
+      telegram: {
+        id: identityId,
+        enabled,
+        access,
+        pairingRequired: access === "private",
+        ...(access === "private" ? { pairingCode } : {}),
+      },
     };
 
     const bot = await fetchTelegramBotInfo(token);
@@ -1768,12 +1799,18 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
     if (apply.body && typeof apply.body === "object") {
       const record = apply.body as Record<string, unknown>;
       if (record.telegram && typeof record.telegram === "object") {
-        response.telegram = record.telegram;
+        response.telegram = {
+          ...(response.telegram as Record<string, unknown>),
+          ...(record.telegram as Record<string, unknown>),
+          access,
+          pairingRequired: access === "private",
+          ...(access === "private" ? { pairingCode } : {}),
+        };
       }
     }
 
     if (!apply.applied) {
-      response.applyError = apply.error ?? "Owpenbot did not apply the update";
+      response.applyError = apply.error ?? "OpenCodeRouter did not apply the update";
       if (typeof apply.status === "number") response.applyStatus = apply.status;
     }
 
@@ -1781,8 +1818,8 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
       id: shortId(),
       workspaceId: workspace.id,
       actor: ctx.actor ?? { type: "remote" },
-      action: "owpenbot.telegram.identity.upsert",
-      target: "owpenbot.telegram",
+      action: "opencodeRouter.telegram.identity.upsert",
+      target: "opencodeRouter.telegram",
       summary: `Upserted Telegram identity (${identityId})`,
       timestamp: Date.now(),
     });
@@ -1790,12 +1827,12 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
     return jsonResponse(response);
   });
 
-  addRoute(routes, "DELETE", "/workspace/:id/owpenbot/identities/telegram/:identityId", "client", async (ctx) => {
+  addRoute(routes, "DELETE", "/workspace/:id/opencode-router/identities/telegram/:identityId", "client", async (ctx) => {
     ensureWritable(config);
     requireClientScope(ctx, "collaborator");
     const workspace = await resolveWorkspace(config, ctx.params.id);
-    const workspaceIdentityId = normalizeOwpenbotIdentityId(workspace.id);
-    const requestedId = normalizeOwpenbotIdentityId(ctx.params.identityId);
+    const workspaceIdentityId = normalizeOpenCodeRouterIdentityId(workspace.id);
+    const requestedId = normalizeOpenCodeRouterIdentityId(ctx.params.identityId);
     if (requestedId && requestedId !== workspaceIdentityId) {
       throw new ApiError(
         400,
@@ -1811,16 +1848,16 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
 
     await requireApproval(ctx, {
       workspaceId: workspace.id,
-      action: "owpenbot.telegram.identity.delete",
+      action: "opencodeRouter.telegram.identity.delete",
       summary: `Delete Telegram identity (${identityId})`,
-      paths: [resolveOwpenbotConfigPath()],
+      paths: [resolveOpenCodeRouterConfigPath()],
     });
 
-    const deleted = await deleteOwpenbotTelegramIdentity(identityId);
+    const deleted = await deleteOpenCodeRouterTelegramIdentity(identityId);
     const healthPortParam = parseInteger(ctx.url.searchParams.get("healthPort") ?? undefined);
-    const port = healthPortParam ?? resolveOwpenbotHealthPort();
+    const port = healthPortParam ?? resolveOpenCodeRouterHealthPort();
     const requestHost = ctx.url.hostname;
-    const apply = await tryFetchOwpenbotHealth(
+    const apply = await tryFetchOpenCodeRouterHealth(
       "DELETE",
       `/identities/telegram/${encodeURIComponent(identityId)}`,
       {
@@ -1846,7 +1883,7 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
     }
 
     if (!apply.applied) {
-      response.applyError = apply.error ?? "Owpenbot did not apply the update";
+      response.applyError = apply.error ?? "OpenCodeRouter did not apply the update";
       if (typeof apply.status === "number") response.applyStatus = apply.status;
     }
 
@@ -1854,8 +1891,8 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
       id: shortId(),
       workspaceId: workspace.id,
       actor: ctx.actor ?? { type: "remote" },
-      action: "owpenbot.telegram.identity.delete",
-      target: "owpenbot.telegram",
+      action: "opencodeRouter.telegram.identity.delete",
+      target: "opencodeRouter.telegram",
       summary: `Deleted Telegram identity (${identityId})`,
       timestamp: Date.now(),
     });
@@ -1863,16 +1900,16 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
     return jsonResponse(response);
   });
 
-  addRoute(routes, "GET", "/workspace/:id/owpenbot/identities/slack", "client", async (ctx) => {
+  addRoute(routes, "GET", "/workspace/:id/opencode-router/identities/slack", "client", async (ctx) => {
     requireClientScope(ctx, "collaborator");
     const workspace = await resolveWorkspace(config, ctx.params.id);
-    const workspaceIdentityId = normalizeOwpenbotIdentityId(workspace.id);
+    const workspaceIdentityId = normalizeOpenCodeRouterIdentityId(workspace.id);
 
     const healthPortParam = parseInteger(ctx.url.searchParams.get("healthPort") ?? undefined);
-    const port = healthPortParam ?? resolveOwpenbotHealthPort();
+    const port = healthPortParam ?? resolveOpenCodeRouterHealthPort();
     const requestHost = ctx.url.hostname;
 
-    const apply = await tryFetchOwpenbotHealth("GET", "/identities/slack", {
+    const apply = await tryFetchOpenCodeRouterHealth("GET", "/identities/slack", {
       port,
       requestHost,
       timeoutMs: 2_000,
@@ -1887,7 +1924,7 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
             (entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === "object" && !Array.isArray(entry)),
           )
           .map((entry) => {
-            const id = normalizeOwpenbotIdentityId(entry.id);
+            const id = normalizeOpenCodeRouterIdentityId(entry.id);
             const enabled = entry.enabled === undefined ? true : entry.enabled === true || entry.enabled === "true";
             const running = entry.running === true || entry.running === "true";
             return { id, enabled, running };
@@ -1898,7 +1935,7 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
       return jsonResponse(payload);
     }
 
-    const current = await readOwpenbotConfigFile(resolveOwpenbotConfigPath());
+    const current = await readOpenCodeRouterConfigFile(resolveOpenCodeRouterConfigPath());
     const channels = ensurePlainObject(current.channels);
     const slack = ensurePlainObject(channels.slack);
     const appsRaw = (slack as any).apps;
@@ -1906,7 +1943,7 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
     const items = apps
       .filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === "object" && !Array.isArray(entry)))
       .map((entry) => {
-        const id = normalizeOwpenbotIdentityId(entry.id);
+        const id = normalizeOpenCodeRouterIdentityId(entry.id);
         const enabled = entry.enabled === undefined ? true : entry.enabled === true || entry.enabled === "true";
         return { id, enabled, running: false };
       })
@@ -1914,7 +1951,7 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
     return jsonResponse({ ok: true, items });
   });
 
-  addRoute(routes, "POST", "/workspace/:id/owpenbot/identities/slack", "client", async (ctx) => {
+  addRoute(routes, "POST", "/workspace/:id/opencode-router/identities/slack", "client", async (ctx) => {
     ensureWritable(config);
     requireClientScope(ctx, "collaborator");
     const workspace = await resolveWorkspace(config, ctx.params.id);
@@ -1922,8 +1959,8 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
     const botToken = typeof body.botToken === "string" ? body.botToken.trim() : "";
     const appToken = typeof body.appToken === "string" ? body.appToken.trim() : "";
     const enabled = body.enabled === undefined ? true : body.enabled === true || body.enabled === "true";
-    const workspaceIdentityId = normalizeOwpenbotIdentityId(workspace.id);
-    const requestedId = typeof body.id === "string" ? normalizeOwpenbotIdentityId(body.id) : "";
+    const workspaceIdentityId = normalizeOpenCodeRouterIdentityId(workspace.id);
+    const requestedId = typeof body.id === "string" ? normalizeOpenCodeRouterIdentityId(body.id) : "";
     if (requestedId && requestedId !== workspaceIdentityId) {
       throw new ApiError(
         400,
@@ -1944,15 +1981,15 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
 
     await requireApproval(ctx, {
       workspaceId: workspace.id,
-      action: "owpenbot.slack.identity.upsert",
+      action: "opencodeRouter.slack.identity.upsert",
       summary: `Upsert Slack identity (${identityId})`,
-      paths: [resolveOwpenbotConfigPath()],
+      paths: [resolveOpenCodeRouterConfigPath()],
     });
 
-    await persistOwpenbotSlackIdentity({ id: identityId, botToken, appToken, enabled, directory: workspace.path });
+    await persistOpenCodeRouterSlackIdentity({ id: identityId, botToken, appToken, enabled, directory: workspace.path });
 
-    const port = healthPort ?? resolveOwpenbotHealthPort();
-    const apply = await tryPostOwpenbotHealth(
+    const port = healthPort ?? resolveOpenCodeRouterHealthPort();
+    const apply = await tryPostOpenCodeRouterHealth(
       "/identities/slack",
       { id: identityId, botToken, appToken, enabled, directory: workspace.path },
       { port, requestHost, timeoutMs: 3_000 },
@@ -1973,7 +2010,7 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
     }
 
     if (!apply.applied) {
-      response.applyError = apply.error ?? "Owpenbot did not apply the update";
+      response.applyError = apply.error ?? "OpenCodeRouter did not apply the update";
       if (typeof apply.status === "number") response.applyStatus = apply.status;
     }
 
@@ -1981,8 +2018,8 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
       id: shortId(),
       workspaceId: workspace.id,
       actor: ctx.actor ?? { type: "remote" },
-      action: "owpenbot.slack.identity.upsert",
-      target: "owpenbot.slack",
+      action: "opencodeRouter.slack.identity.upsert",
+      target: "opencodeRouter.slack",
       summary: `Upserted Slack identity (${identityId})`,
       timestamp: Date.now(),
     });
@@ -1990,12 +2027,12 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
     return jsonResponse(response);
   });
 
-  addRoute(routes, "DELETE", "/workspace/:id/owpenbot/identities/slack/:identityId", "client", async (ctx) => {
+  addRoute(routes, "DELETE", "/workspace/:id/opencode-router/identities/slack/:identityId", "client", async (ctx) => {
     ensureWritable(config);
     requireClientScope(ctx, "collaborator");
     const workspace = await resolveWorkspace(config, ctx.params.id);
-    const workspaceIdentityId = normalizeOwpenbotIdentityId(workspace.id);
-    const requestedId = normalizeOwpenbotIdentityId(ctx.params.identityId);
+    const workspaceIdentityId = normalizeOpenCodeRouterIdentityId(workspace.id);
+    const requestedId = normalizeOpenCodeRouterIdentityId(ctx.params.identityId);
     if (requestedId && requestedId !== workspaceIdentityId) {
       throw new ApiError(
         400,
@@ -2011,16 +2048,16 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
 
     await requireApproval(ctx, {
       workspaceId: workspace.id,
-      action: "owpenbot.slack.identity.delete",
+      action: "opencodeRouter.slack.identity.delete",
       summary: `Delete Slack identity (${identityId})`,
-      paths: [resolveOwpenbotConfigPath()],
+      paths: [resolveOpenCodeRouterConfigPath()],
     });
 
-    const deleted = await deleteOwpenbotSlackIdentity(identityId);
+    const deleted = await deleteOpenCodeRouterSlackIdentity(identityId);
     const healthPortParam = parseInteger(ctx.url.searchParams.get("healthPort") ?? undefined);
-    const port = healthPortParam ?? resolveOwpenbotHealthPort();
+    const port = healthPortParam ?? resolveOpenCodeRouterHealthPort();
     const requestHost = ctx.url.hostname;
-    const apply = await tryFetchOwpenbotHealth(
+    const apply = await tryFetchOpenCodeRouterHealth(
       "DELETE",
       `/identities/slack/${encodeURIComponent(identityId)}`,
       {
@@ -2046,7 +2083,7 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
     }
 
     if (!apply.applied) {
-      response.applyError = apply.error ?? "Owpenbot did not apply the update";
+      response.applyError = apply.error ?? "OpenCodeRouter did not apply the update";
       if (typeof apply.status === "number") response.applyStatus = apply.status;
     }
 
@@ -2054,8 +2091,8 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
       id: shortId(),
       workspaceId: workspace.id,
       actor: ctx.actor ?? { type: "remote" },
-      action: "owpenbot.slack.identity.delete",
-      target: "owpenbot.slack",
+      action: "opencodeRouter.slack.identity.delete",
+      target: "opencodeRouter.slack",
       summary: `Deleted Slack identity (${identityId})`,
       timestamp: Date.now(),
     });
@@ -2063,18 +2100,18 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
     return jsonResponse(response);
   });
 
-  addRoute(routes, "GET", "/workspace/:id/owpenbot/bindings", "client", async (ctx) => {
+  addRoute(routes, "GET", "/workspace/:id/opencode-router/bindings", "client", async (ctx) => {
     requireClientScope(ctx, "collaborator");
     const workspace = await resolveWorkspace(config, ctx.params.id);
-    const workspaceIdentityId = normalizeOwpenbotIdentityId(workspace.id);
+    const workspaceIdentityId = normalizeOpenCodeRouterIdentityId(workspace.id);
     const healthPortParam = parseInteger(ctx.url.searchParams.get("healthPort") ?? undefined);
-    const port = healthPortParam ?? resolveOwpenbotHealthPort();
+    const port = healthPortParam ?? resolveOpenCodeRouterHealthPort();
     const requestHost = ctx.url.hostname;
 
     const search = new URLSearchParams();
     const channel = (ctx.url.searchParams.get("channel") ?? "").trim();
     const identityIdParam = (ctx.url.searchParams.get("identityId") ?? "").trim();
-    const requestedId = identityIdParam ? normalizeOwpenbotIdentityId(identityIdParam) : "";
+    const requestedId = identityIdParam ? normalizeOpenCodeRouterIdentityId(identityIdParam) : "";
     if (requestedId && requestedId !== workspaceIdentityId) {
       throw new ApiError(
         400,
@@ -2088,26 +2125,26 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
     const suffix = search.toString();
     const pathname = suffix ? `/bindings?${suffix}` : "/bindings";
 
-    const apply = await tryFetchOwpenbotHealth("GET", pathname, { port, requestHost, timeoutMs: 2_000 });
+    const apply = await tryFetchOpenCodeRouterHealth("GET", pathname, { port, requestHost, timeoutMs: 2_000 });
     if (apply.applied && apply.body && typeof apply.body === "object") {
       return jsonResponse(apply.body);
     }
-    throw new ApiError(503, "owpenbot_unreachable", "Owpenbot is not reachable on this host", {
+    throw new ApiError(503, "opencodeRouter_unreachable", "OpenCodeRouter is not reachable on this host", {
       port,
       error: apply.error,
       status: apply.status,
     });
   });
 
-  addRoute(routes, "POST", "/workspace/:id/owpenbot/bindings", "client", async (ctx) => {
+  addRoute(routes, "POST", "/workspace/:id/opencode-router/bindings", "client", async (ctx) => {
     ensureWritable(config);
     requireClientScope(ctx, "collaborator");
     const workspace = await resolveWorkspace(config, ctx.params.id);
-    const workspaceIdentityId = normalizeOwpenbotIdentityId(workspace.id);
+    const workspaceIdentityId = normalizeOpenCodeRouterIdentityId(workspace.id);
     const body = await readJsonBody(ctx.request);
     const channel = typeof body.channel === "string" ? body.channel.trim().toLowerCase() : "";
     const identityIdParam = typeof body.identityId === "string" ? body.identityId.trim() : "";
-    const requestedId = identityIdParam ? normalizeOwpenbotIdentityId(identityIdParam) : "";
+    const requestedId = identityIdParam ? normalizeOpenCodeRouterIdentityId(identityIdParam) : "";
     if (requestedId && requestedId !== workspaceIdentityId) {
       throw new ApiError(
         400,
@@ -2129,7 +2166,7 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
       throw new ApiError(400, "peer_required", "peerId is required");
     }
 
-    const action = directory ? "owpenbot.binding.set" : "owpenbot.binding.clear";
+    const action = directory ? "opencodeRouter.binding.set" : "opencodeRouter.binding.clear";
     const summary = directory
       ? `Bind ${channel}/${identityId}:${peerId} -> ${directory}`
       : `Clear binding for ${channel}/${identityId}:${peerId}`;
@@ -2138,19 +2175,19 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
       workspaceId: workspace.id,
       action,
       summary,
-      paths: [resolveOwpenbotConfigPath()],
+      paths: [resolveOpenCodeRouterConfigPath()],
     });
 
-    const port = healthPort ?? resolveOwpenbotHealthPort();
+    const port = healthPort ?? resolveOpenCodeRouterHealthPort();
     const payload: Record<string, unknown> = {
       channel,
       identityId,
       peerId,
       ...(directory ? { directory } : {}),
     };
-    const apply = await tryPostOwpenbotHealth("/bindings", payload, { port, requestHost, timeoutMs: 3_000 });
+    const apply = await tryPostOpenCodeRouterHealth("/bindings", payload, { port, requestHost, timeoutMs: 3_000 });
     if (!apply.applied) {
-      throw new ApiError(503, "owpenbot_unreachable", "Owpenbot did not apply binding update", {
+      throw new ApiError(503, "opencodeRouter_unreachable", "OpenCodeRouter did not apply binding update", {
         port,
         error: apply.error,
         status: apply.status,
@@ -2162,7 +2199,7 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
       workspaceId: workspace.id,
       actor: ctx.actor ?? { type: "remote" },
       action,
-      target: "owpenbot.binding",
+      target: "opencodeRouter.binding",
       summary,
       timestamp: Date.now(),
     });
@@ -2173,10 +2210,10 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
     return jsonResponse({ ok: true });
   });
 
-  addRoute(routes, "POST", "/workspace/:id/owpenbot/send", "client", async (ctx) => {
+  addRoute(routes, "POST", "/workspace/:id/opencode-router/send", "client", async (ctx) => {
     requireClientScope(ctx, "collaborator");
     const workspace = await resolveWorkspace(config, ctx.params.id);
-    const workspaceIdentityId = normalizeOwpenbotIdentityId(workspace.id);
+    const workspaceIdentityId = normalizeOpenCodeRouterIdentityId(workspace.id);
     const body = await readJsonBody(ctx.request);
     const channel = typeof body.channel === "string" ? body.channel.trim().toLowerCase() : "";
     const text = typeof body.text === "string" ? body.text : "";
@@ -2188,7 +2225,7 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
     const requestHost = ctx.url.hostname;
 
     const identityIdParam = typeof body.identityId === "string" ? body.identityId.trim() : "";
-    const requestedId = identityIdParam ? normalizeOwpenbotIdentityId(identityIdParam) : "";
+    const requestedId = identityIdParam ? normalizeOpenCodeRouterIdentityId(identityIdParam) : "";
     if (requestedId && requestedId !== workspaceIdentityId) {
       throw new ApiError(
         400,
@@ -2209,8 +2246,8 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
       throw new ApiError(400, "text_required", "text is required");
     }
 
-    const port = healthPort ?? resolveOwpenbotHealthPort();
-    const apply = await tryPostOwpenbotHealth(
+    const port = healthPort ?? resolveOpenCodeRouterHealthPort();
+    const apply = await tryPostOpenCodeRouterHealth(
       "/send",
       {
         channel,
@@ -2224,7 +2261,7 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
     );
 
     if (!apply.applied) {
-      throw new ApiError(503, "owpenbot_unreachable", "Owpenbot did not send the message", {
+      throw new ApiError(503, "opencodeRouter_unreachable", "OpenCodeRouter did not send the message", {
         port,
         error: apply.error,
         status: apply.status,
@@ -2235,8 +2272,8 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
       id: shortId(),
       workspaceId: workspace.id,
       actor: ctx.actor ?? { type: "remote" },
-      action: "owpenbot.send",
-      target: `owpenbot.${channel}`,
+      action: "opencodeRouter.send",
+      target: `opencodeRouter.${channel}`,
       summary: `Sent outbound ${channel} message${identityId ? ` for ${identityId}` : ""}${peerId ? ` to ${peerId}` : ""}`,
       timestamp: Date.now(),
     });
@@ -2256,33 +2293,50 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
 
   addRoute(routes, "GET", "/workspace/:id/events", "client", async (ctx) => {
     const workspace = await resolveWorkspace(config, ctx.params.id);
-    const sinceParam = ctx.url.searchParams.get("since");
-    const parsedSince = sinceParam ? Number(sinceParam) : NaN;
-    const since = Number.isFinite(parsedSince) ? parsedSince : undefined;
-    const items = ctx.reloadEvents.list(workspace.id, since);
-    return jsonResponse({ items, cursor: ctx.reloadEvents.cursor() });
+    void ctx;
+    return jsonResponse({ items: [], cursor: 0, workspaceId: workspace.id, disabled: true });
   });
 
   addRoute(routes, "POST", "/workspace/:id/engine/reload", "client", async (ctx) => {
-    requireClientScope(ctx, "collaborator");
     const workspace = await resolveWorkspace(config, ctx.params.id);
-    await requireApproval(ctx, {
+    throw new ApiError(410, "engine_reload_deprecated", "OpenWork-managed engine reload is disabled", {
       workspaceId: workspace.id,
-      action: "engine.reload",
-      summary: "Reload OpenCode engine",
-      paths: [opencodeConfigPath(workspace.path)],
+      guidance: "Use OpenCode hot reload instead",
     });
-    await reloadOpencodeEngine(workspace);
-    await recordAudit(workspace.path, {
-      id: shortId(),
-      workspaceId: workspace.id,
-      actor: ctx.actor ?? { type: "remote" },
-      action: "engine.reload",
-      target: "opencode.instance",
-      summary: "Reloaded OpenCode engine",
-      timestamp: Date.now(),
-    });
-    return jsonResponse({ ok: true, reloadedAt: Date.now() });
+  });
+
+  addRoute(routes, "GET", "/workspace/:id/inbox", "client", async (ctx) => {
+    const workspace = await resolveWorkspace(config, ctx.params.id);
+    if (!resolveInboxEnabled()) {
+      return jsonResponse({ items: [] });
+    }
+    const inboxRoot = resolveInboxDir(workspace.path);
+    const prefix = (ctx.url.searchParams.get("prefix") ?? "").trim();
+    const items = await listInbox(inboxRoot, prefix ? { prefix } : undefined);
+    return jsonResponse({ items });
+  });
+
+  addRoute(routes, "GET", "/workspace/:id/inbox/:inboxId", "client", async (ctx) => {
+    const workspace = await resolveWorkspace(config, ctx.params.id);
+    if (!resolveInboxEnabled()) {
+      throw new ApiError(404, "inbox_disabled", "Workspace inbox is disabled");
+    }
+    const inboxRoot = resolveInboxDir(workspace.path);
+    const relativePath = decodeInboxId(ctx.params.inboxId);
+    const absPath = resolveSafeChildPath(inboxRoot, relativePath);
+    if (!(await exists(absPath))) {
+      throw new ApiError(404, "inbox_item_not_found", "Inbox item not found");
+    }
+    const info = await stat(absPath);
+    if (!info.isFile()) {
+      throw new ApiError(404, "inbox_item_not_found", "Inbox item not found");
+    }
+
+    const headers = new Headers();
+    headers.set("Content-Type", "application/octet-stream");
+    headers.set("Content-Length", String(info.size));
+    headers.set("Content-Disposition", `attachment; filename=\"${basename(relativePath)}\"`);
+    return new Response((Bun as any).file(absPath), { status: 200, headers });
   });
 
   addRoute(routes, "POST", "/workspace/:id/inbox", "client", async (ctx) => {
@@ -3193,6 +3247,21 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
     return jsonResponse({ job });
   });
 
+  addRoute(routes, "GET", "/workspace/:id/soul/status", "client", async (ctx) => {
+    const workspace = await resolveWorkspace(config, ctx.params.id);
+    const status = await getSoulStatus(workspace.path);
+    return jsonResponse(status);
+  });
+
+  addRoute(routes, "GET", "/workspace/:id/soul/heartbeats", "client", async (ctx) => {
+    const workspace = await resolveWorkspace(config, ctx.params.id);
+    const limitParam = ctx.url.searchParams.get("limit");
+    const parsedLimit = limitParam ? Number(limitParam) : NaN;
+    const limit = Number.isFinite(parsedLimit) && parsedLimit > 0 ? Math.min(parsedLimit, 200) : 20;
+    const { items, total, path } = await listSoulHeartbeats(workspace.path, limit);
+    return jsonResponse({ items, total, path });
+  });
+
   addRoute(routes, "GET", "/workspace/:id/export", "client", async (ctx) => {
     const workspace = await resolveWorkspace(config, ctx.params.id);
     const exportPayload = await exportWorkspace(workspace);
@@ -3308,15 +3377,15 @@ function expandHome(value: string): string {
   return value;
 }
 
-function resolveOwpenbotConfigPath(): string {
-  const override = process.env.OWPENBOT_CONFIG_PATH?.trim();
+function resolveOpenCodeRouterConfigPath(): string {
+  const override = process.env.OPENCODE_ROUTER_CONFIG_PATH?.trim();
   if (override) return expandHome(override);
-  const dataDir = process.env.OWPENBOT_DATA_DIR?.trim() || join(homedir(), ".openwork", "owpenbot");
-  return join(expandHome(dataDir), "owpenbot.json");
+  const dataDir = process.env.OPENCODE_ROUTER_DATA_DIR?.trim() || join(homedir(), ".openwork", "opencode-router");
+  return join(expandHome(dataDir), "opencode-router.json");
 }
 
-function resolveOwpenbotHealthPort(): number {
-  return parseInteger(process.env.OWPENBOT_HEALTH_PORT) ?? 3005;
+function resolveOpenCodeRouterHealthPort(): number {
+  return parseInteger(process.env.OPENCODE_ROUTER_HEALTH_PORT) ?? 3005;
 }
 
 function parseJsonResponse(text: string): unknown {
@@ -3336,7 +3405,7 @@ function normalizeHealthPort(value: unknown): number | null {
   return port;
 }
 
-type OwpenbotConfigFile = Record<string, unknown> & {
+type OpenCodeRouterConfigFile = Record<string, unknown> & {
   version?: number;
   channels?: Record<string, unknown> & {
     telegram?: Record<string, unknown>;
@@ -3433,7 +3502,7 @@ async function persistWorkspaceDeletion(configPath: string, workspaceId: string,
   }
 }
 
-function normalizeOwpenbotIdentityId(value: unknown): string {
+function normalizeOpenCodeRouterIdentityId(value: unknown): string {
   const trimmed = typeof value === "string" ? value.trim() : "";
   if (!trimmed) return "default";
   const safe = trimmed.replace(/[^a-zA-Z0-9_.-]+/g, "-");
@@ -3441,7 +3510,56 @@ function normalizeOwpenbotIdentityId(value: unknown): string {
   return cleaned || "default";
 }
 
-async function readOwpenbotConfigFile(configPath: string): Promise<OwpenbotConfigFile> {
+type TelegramAccessMode = "public" | "private";
+
+const TELEGRAM_PAIRING_CODE_HASH_PATTERN = /^[a-f0-9]{64}$/;
+const TELEGRAM_PAIRING_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+function normalizeTelegramAccessMode(value: unknown, fallback: TelegramAccessMode = "public"): TelegramAccessMode {
+  const raw = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (raw === "private") return "private";
+  if (raw === "public") return "public";
+  return fallback;
+}
+
+function normalizeTelegramPairingCode(value: string): string {
+  return value.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+function normalizeTelegramPairingCodeHash(value: unknown): string {
+  const raw = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (!TELEGRAM_PAIRING_CODE_HASH_PATTERN.test(raw)) return "";
+  return raw;
+}
+
+function hashTelegramPairingCode(value: string): string {
+  return createHash("sha256").update(normalizeTelegramPairingCode(value)).digest("hex");
+}
+
+function generateTelegramPairingCode(): string {
+  let code = "";
+  for (let index = 0; index < 8; index += 1) {
+    code += TELEGRAM_PAIRING_CODE_ALPHABET[randomInt(0, TELEGRAM_PAIRING_CODE_ALPHABET.length)] ?? "";
+  }
+  if (code.length !== 8) {
+    throw new ApiError(500, "pairing_code_generation_failed", "Failed to generate Telegram pairing code");
+  }
+  return `${code.slice(0, 4)}-${code.slice(4)}`;
+}
+
+function resolveTelegramAccessFromRecord(record: Record<string, unknown>): {
+  access: TelegramAccessMode;
+  pairingCodeHash: string;
+} {
+  const pairingCodeHash = normalizeTelegramPairingCodeHash(record.pairingCodeHash);
+  const access = normalizeTelegramAccessMode(record.access, pairingCodeHash ? "private" : "public");
+  return {
+    access,
+    pairingCodeHash: access === "private" ? pairingCodeHash : "",
+  };
+}
+
+async function readOpenCodeRouterConfigFile(configPath: string): Promise<OpenCodeRouterConfigFile> {
   if (!(await exists(configPath))) {
     return { version: 1 };
   }
@@ -3450,7 +3568,7 @@ async function readOwpenbotConfigFile(configPath: string): Promise<OwpenbotConfi
   try {
     raw = await readFile(configPath, "utf8");
   } catch (error) {
-    throw new ApiError(500, "owpenbot_config_read_failed", "Failed to read owpenbot.json", {
+    throw new ApiError(500, "opencodeRouter_config_read_failed", "Failed to read opencode-router.json", {
       path: configPath,
       error: String(error),
     });
@@ -3458,18 +3576,18 @@ async function readOwpenbotConfigFile(configPath: string): Promise<OwpenbotConfi
 
   try {
     const parsed = JSON.parse(raw) as unknown;
-    return ensurePlainObject(parsed) as OwpenbotConfigFile;
+    return ensurePlainObject(parsed) as OpenCodeRouterConfigFile;
   } catch (error) {
-    throw new ApiError(422, "invalid_json", "Failed to parse owpenbot.json", {
+    throw new ApiError(422, "invalid_json", "Failed to parse opencode-router.json", {
       path: configPath,
       error: String(error),
     });
   }
 }
 
-async function writeOwpenbotConfigFile(configPath: string, config: OwpenbotConfigFile): Promise<void> {
+async function writeOpenCodeRouterConfigFile(configPath: string, config: OpenCodeRouterConfigFile): Promise<void> {
   await ensureDir(dirname(configPath));
-  const next: OwpenbotConfigFile = {
+  const next: OpenCodeRouterConfigFile = {
     ...config,
     version: typeof config.version === "number" && Number.isFinite(config.version) ? config.version : 1,
   };
@@ -3487,9 +3605,9 @@ async function writeOwpenbotConfigFile(configPath: string, config: OwpenbotConfi
   }
 }
 
-async function persistOwpenbotTelegramToken(token: string): Promise<void> {
-  const configPath = resolveOwpenbotConfigPath();
-  const current = await readOwpenbotConfigFile(configPath);
+async function persistOpenCodeRouterTelegramToken(token: string): Promise<void> {
+  const configPath = resolveOpenCodeRouterConfigPath();
+  const current = await readOpenCodeRouterConfigFile(configPath);
   const channels = ensurePlainObject(current.channels);
   const telegram = ensurePlainObject(channels.telegram);
 
@@ -3510,7 +3628,7 @@ async function persistOwpenbotTelegramToken(token: string): Promise<void> {
   }
   if (!found) nextBots.push({ id: "default", token, enabled: true });
 
-  const next: OwpenbotConfigFile = {
+  const next: OpenCodeRouterConfigFile = {
     ...current,
     channels: {
       ...channels,
@@ -3524,23 +3642,27 @@ async function persistOwpenbotTelegramToken(token: string): Promise<void> {
       },
     },
   };
-  await writeOwpenbotConfigFile(configPath, next);
+  await writeOpenCodeRouterConfigFile(configPath, next);
 }
 
-async function persistOwpenbotTelegramIdentity(identity: {
+async function persistOpenCodeRouterTelegramIdentity(identity: {
   id: string;
   token: string;
   enabled: boolean;
   directory?: string;
+  access?: TelegramAccessMode;
+  pairingCodeHash?: string;
 }): Promise<void> {
-  const configPath = resolveOwpenbotConfigPath();
-  const current = await readOwpenbotConfigFile(configPath);
+  const configPath = resolveOpenCodeRouterConfigPath();
+  const current = await readOpenCodeRouterConfigFile(configPath);
   const channels = ensurePlainObject(current.channels);
   const telegram = ensurePlainObject(channels.telegram);
 
-  const id = normalizeOwpenbotIdentityId(identity.id);
+  const id = normalizeOpenCodeRouterIdentityId(identity.id);
   const token = identity.token.trim();
   const directory = typeof identity.directory === "string" ? identity.directory.trim() : "";
+  const requestedAccess = identity.access ? normalizeTelegramAccessMode(identity.access, "public") : undefined;
+  const requestedPairingCodeHash = normalizeTelegramPairingCodeHash(identity.pairingCodeHash);
   if (!token) {
     throw new ApiError(400, "token_required", "Telegram token is required");
   }
@@ -3552,7 +3674,7 @@ async function persistOwpenbotTelegramIdentity(identity: {
   for (const entry of bots) {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
     const record = entry as Record<string, unknown>;
-    const entryId = normalizeOwpenbotIdentityId(record.id);
+    const entryId = normalizeOpenCodeRouterIdentityId(record.id);
     if (entryId !== id) {
       nextBots.push(record);
       continue;
@@ -3560,10 +3682,37 @@ async function persistOwpenbotTelegramIdentity(identity: {
     found = true;
     const prevDir = typeof record.directory === "string" ? record.directory.trim() : "";
     const nextDir = directory || prevDir;
-    nextBots.push({ id, token, enabled: identity.enabled, ...(nextDir ? { directory: nextDir } : {}) });
+    const existingAccessState = resolveTelegramAccessFromRecord(record);
+    const access = requestedAccess ?? existingAccessState.access;
+    const pairingCodeHash = access === "private"
+      ? (requestedPairingCodeHash || existingAccessState.pairingCodeHash)
+      : "";
+    if (access === "private" && !pairingCodeHash) {
+      throw new ApiError(400, "pairing_code_required", "Telegram private access requires a pairing code hash");
+    }
+    nextBots.push({
+      id,
+      token,
+      enabled: identity.enabled,
+      ...(nextDir ? { directory: nextDir } : {}),
+      access,
+      ...(access === "private" ? { pairingCodeHash } : {}),
+    });
   }
   if (!found) {
-    nextBots.push({ id, token, enabled: identity.enabled, ...(directory ? { directory } : {}) });
+    const access = requestedAccess ?? "public";
+    const pairingCodeHash = access === "private" ? requestedPairingCodeHash : "";
+    if (access === "private" && !pairingCodeHash) {
+      throw new ApiError(400, "pairing_code_required", "Telegram private access requires a pairing code hash");
+    }
+    nextBots.push({
+      id,
+      token,
+      enabled: identity.enabled,
+      ...(directory ? { directory } : {}),
+      access,
+      ...(access === "private" ? { pairingCodeHash } : {}),
+    });
   }
 
   const nextTelegram: Record<string, unknown> = {
@@ -3576,20 +3725,20 @@ async function persistOwpenbotTelegramIdentity(identity: {
     nextTelegram.token = token;
   }
 
-  const next: OwpenbotConfigFile = {
+  const next: OpenCodeRouterConfigFile = {
     ...current,
     channels: {
       ...channels,
       telegram: nextTelegram,
     },
   };
-  await writeOwpenbotConfigFile(configPath, next);
+  await writeOpenCodeRouterConfigFile(configPath, next);
 }
 
-async function deleteOwpenbotTelegramIdentity(idRaw: string): Promise<boolean> {
-  const id = normalizeOwpenbotIdentityId(idRaw);
-  const configPath = resolveOwpenbotConfigPath();
-  const current = await readOwpenbotConfigFile(configPath);
+async function deleteOpenCodeRouterTelegramIdentity(idRaw: string): Promise<boolean> {
+  const id = normalizeOpenCodeRouterIdentityId(idRaw);
+  const configPath = resolveOpenCodeRouterConfigPath();
+  const current = await readOpenCodeRouterConfigFile(configPath);
   const channels = ensurePlainObject(current.channels);
   const telegram = ensurePlainObject(channels.telegram);
 
@@ -3600,7 +3749,7 @@ async function deleteOwpenbotTelegramIdentity(idRaw: string): Promise<boolean> {
   for (const entry of bots) {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
     const record = entry as Record<string, unknown>;
-    const entryId = normalizeOwpenbotIdentityId(record.id);
+    const entryId = normalizeOpenCodeRouterIdentityId(record.id);
     if (entryId === id) {
       deleted = true;
       continue;
@@ -3616,20 +3765,20 @@ async function deleteOwpenbotTelegramIdentity(idRaw: string): Promise<boolean> {
     delete (nextTelegram as any).token;
   }
 
-  const next: OwpenbotConfigFile = {
+  const next: OpenCodeRouterConfigFile = {
     ...current,
     channels: {
       ...channels,
       telegram: nextTelegram,
     },
   };
-  await writeOwpenbotConfigFile(configPath, next);
+  await writeOpenCodeRouterConfigFile(configPath, next);
   return deleted;
 }
 
-async function persistOwpenbotTelegramEnabled(enabled: boolean, options?: { clearToken?: boolean }) {
-  const configPath = resolveOwpenbotConfigPath();
-  const current = await readOwpenbotConfigFile(configPath);
+async function persistOpenCodeRouterTelegramEnabled(enabled: boolean, options?: { clearToken?: boolean }) {
+  const configPath = resolveOpenCodeRouterConfigPath();
+  const current = await readOpenCodeRouterConfigFile(configPath);
   const channels = ensurePlainObject(current.channels);
   const telegram = ensurePlainObject(channels.telegram);
 
@@ -3663,14 +3812,14 @@ async function persistOwpenbotTelegramEnabled(enabled: boolean, options?: { clea
     delete nextTelegram.token;
   }
 
-  const next: OwpenbotConfigFile = {
+  const next: OpenCodeRouterConfigFile = {
     ...current,
     channels: {
       ...channels,
       telegram: nextTelegram,
     },
   };
-  await writeOwpenbotConfigFile(configPath, next);
+  await writeOpenCodeRouterConfigFile(configPath, next);
 }
 
 async function fetchTelegramBotInfo(token: string): Promise<TelegramBotInfo | null> {
@@ -3698,13 +3847,13 @@ async function fetchTelegramBotInfo(token: string): Promise<TelegramBotInfo | nu
   }
 }
 
-async function readOwpenbotTelegramInfo(): Promise<{
+async function readOpenCodeRouterTelegramInfo(): Promise<{
   configured: boolean;
   enabled: boolean;
   bot: TelegramBotInfo | null;
 }> {
-  const configPath = resolveOwpenbotConfigPath();
-  const current = await readOwpenbotConfigFile(configPath);
+  const configPath = resolveOpenCodeRouterConfigPath();
+  const current = await readOpenCodeRouterConfigFile(configPath);
   const channels = ensurePlainObject(current.channels);
   const telegram = ensurePlainObject(channels.telegram);
 
@@ -3734,9 +3883,9 @@ async function readOwpenbotTelegramInfo(): Promise<{
   return { configured, enabled, bot };
 }
 
-async function persistOwpenbotSlackTokens(botToken: string, appToken: string): Promise<void> {
-  const configPath = resolveOwpenbotConfigPath();
-  const current = await readOwpenbotConfigFile(configPath);
+async function persistOpenCodeRouterSlackTokens(botToken: string, appToken: string): Promise<void> {
+  const configPath = resolveOpenCodeRouterConfigPath();
+  const current = await readOpenCodeRouterConfigFile(configPath);
   const channels = ensurePlainObject(current.channels);
   const slack = ensurePlainObject(channels.slack);
 
@@ -3757,7 +3906,7 @@ async function persistOwpenbotSlackTokens(botToken: string, appToken: string): P
   }
   if (!found) nextApps.push({ id: "default", botToken, appToken, enabled: true });
 
-  const next: OwpenbotConfigFile = {
+  const next: OpenCodeRouterConfigFile = {
     ...current,
     channels: {
       ...channels,
@@ -3772,22 +3921,22 @@ async function persistOwpenbotSlackTokens(botToken: string, appToken: string): P
       },
     },
   };
-  await writeOwpenbotConfigFile(configPath, next);
+  await writeOpenCodeRouterConfigFile(configPath, next);
 }
 
-async function persistOwpenbotSlackIdentity(identity: {
+async function persistOpenCodeRouterSlackIdentity(identity: {
   id: string;
   botToken: string;
   appToken: string;
   enabled: boolean;
   directory?: string;
 }): Promise<void> {
-  const configPath = resolveOwpenbotConfigPath();
-  const current = await readOwpenbotConfigFile(configPath);
+  const configPath = resolveOpenCodeRouterConfigPath();
+  const current = await readOpenCodeRouterConfigFile(configPath);
   const channels = ensurePlainObject(current.channels);
   const slack = ensurePlainObject(channels.slack);
 
-  const id = normalizeOwpenbotIdentityId(identity.id);
+  const id = normalizeOpenCodeRouterIdentityId(identity.id);
   const botToken = identity.botToken.trim();
   const appToken = identity.appToken.trim();
   const directory = typeof identity.directory === "string" ? identity.directory.trim() : "";
@@ -3802,7 +3951,7 @@ async function persistOwpenbotSlackIdentity(identity: {
   for (const entry of apps) {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
     const record = entry as Record<string, unknown>;
-    const entryId = normalizeOwpenbotIdentityId(record.id);
+    const entryId = normalizeOpenCodeRouterIdentityId(record.id);
     if (entryId !== id) {
       nextApps.push(record);
       continue;
@@ -3827,20 +3976,20 @@ async function persistOwpenbotSlackIdentity(identity: {
     nextSlack.appToken = appToken;
   }
 
-  const next: OwpenbotConfigFile = {
+  const next: OpenCodeRouterConfigFile = {
     ...current,
     channels: {
       ...channels,
       slack: nextSlack,
     },
   };
-  await writeOwpenbotConfigFile(configPath, next);
+  await writeOpenCodeRouterConfigFile(configPath, next);
 }
 
-async function deleteOwpenbotSlackIdentity(idRaw: string): Promise<boolean> {
-  const id = normalizeOwpenbotIdentityId(idRaw);
-  const configPath = resolveOwpenbotConfigPath();
-  const current = await readOwpenbotConfigFile(configPath);
+async function deleteOpenCodeRouterSlackIdentity(idRaw: string): Promise<boolean> {
+  const id = normalizeOpenCodeRouterIdentityId(idRaw);
+  const configPath = resolveOpenCodeRouterConfigPath();
+  const current = await readOpenCodeRouterConfigFile(configPath);
   const channels = ensurePlainObject(current.channels);
   const slack = ensurePlainObject(channels.slack);
 
@@ -3851,7 +4000,7 @@ async function deleteOwpenbotSlackIdentity(idRaw: string): Promise<boolean> {
   for (const entry of apps) {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
     const record = entry as Record<string, unknown>;
-    const entryId = normalizeOwpenbotIdentityId(record.id);
+    const entryId = normalizeOpenCodeRouterIdentityId(record.id);
     if (entryId === id) {
       deleted = true;
       continue;
@@ -3868,18 +4017,18 @@ async function deleteOwpenbotSlackIdentity(idRaw: string): Promise<boolean> {
     delete (nextSlack as any).appToken;
   }
 
-  const next: OwpenbotConfigFile = {
+  const next: OpenCodeRouterConfigFile = {
     ...current,
     channels: {
       ...channels,
       slack: nextSlack,
     },
   };
-  await writeOwpenbotConfigFile(configPath, next);
+  await writeOpenCodeRouterConfigFile(configPath, next);
   return deleted;
 }
 
-type OwpenbotApplyAttempt = {
+type OpenCodeRouterApplyAttempt = {
   applied: boolean;
   port: number;
   hosts: string[];
@@ -3889,11 +4038,11 @@ type OwpenbotApplyAttempt = {
   body?: unknown;
 };
 
-async function tryPostOwpenbotHealth(
+async function tryPostOpenCodeRouterHealth(
   pathname: string,
   payload: unknown,
   options: { port: number; requestHost?: string | null; timeoutMs: number },
-): Promise<OwpenbotApplyAttempt> {
+): Promise<OpenCodeRouterApplyAttempt> {
   const candidates = Array.from(
     new Set(
       ["127.0.0.1", options.requestHost].filter(
@@ -3903,7 +4052,7 @@ async function tryPostOwpenbotHealth(
   );
   const port = options.port;
 
-  let lastError: OwpenbotApplyAttempt | null = null;
+  let lastError: OpenCodeRouterApplyAttempt | null = null;
   for (const host of candidates) {
     const url = `http://${host}:${port}${pathname}`;
     const controller = new AbortController();
@@ -3934,7 +4083,7 @@ async function tryPostOwpenbotHealth(
       const detail =
         typeof parsed === "object" && parsed && "error" in parsed
           ? String((parsed as Record<string, unknown>).error)
-          : response.statusText || "Owpenbot request failed";
+          : response.statusText || "OpenCodeRouter request failed";
       lastError = {
         applied: false,
         port,
@@ -3965,16 +4114,16 @@ async function tryPostOwpenbotHealth(
       applied: false,
       port,
       hosts: candidates,
-      error: "Owpenbot health server is unavailable",
+      error: "OpenCodeRouter health server is unavailable",
     }
   );
 }
 
-async function tryFetchOwpenbotHealth(
+async function tryFetchOpenCodeRouterHealth(
   method: "GET" | "DELETE",
   pathname: string,
   options: { port: number; requestHost?: string | null; timeoutMs: number },
-): Promise<OwpenbotApplyAttempt> {
+): Promise<OpenCodeRouterApplyAttempt> {
   const candidates = Array.from(
     new Set(
       ["127.0.0.1", options.requestHost].filter(
@@ -3984,7 +4133,7 @@ async function tryFetchOwpenbotHealth(
   );
   const port = options.port;
 
-  let lastError: OwpenbotApplyAttempt | null = null;
+  let lastError: OpenCodeRouterApplyAttempt | null = null;
   for (const host of candidates) {
     const url = `http://${host}:${port}${pathname}`;
     const controller = new AbortController();
@@ -4014,7 +4163,7 @@ async function tryFetchOwpenbotHealth(
       const detail =
         typeof parsed === "object" && parsed && "error" in parsed
           ? String((parsed as Record<string, unknown>).error)
-          : response.statusText || "Owpenbot request failed";
+          : response.statusText || "OpenCodeRouter request failed";
       lastError = {
         applied: false,
         port,
@@ -4045,21 +4194,21 @@ async function tryFetchOwpenbotHealth(
       applied: false,
       port,
       hosts: candidates,
-      error: "Owpenbot health server is unavailable",
+      error: "OpenCodeRouter health server is unavailable",
     }
   );
 }
 
-async function updateOwpenbotTelegramToken(
+async function updateOpenCodeRouterTelegramToken(
   token: string,
   healthPortOverride?: number | null,
   requestHost?: string | null,
 ): Promise<Record<string, unknown>> {
-  // Always persist first so the token is saved even if owpenbot is offline.
-  await persistOwpenbotTelegramToken(token);
+  // Always persist first so the token is saved even if opencodeRouter is offline.
+  await persistOpenCodeRouterTelegramToken(token);
 
-  const port = healthPortOverride ?? resolveOwpenbotHealthPort();
-  const apply = await tryPostOwpenbotHealth(
+  const port = healthPortOverride ?? resolveOpenCodeRouterHealthPort();
+  const apply = await tryPostOpenCodeRouterHealth(
     "/config/telegram-token",
     { token },
     { port, requestHost, timeoutMs: 3_000 },
@@ -4077,7 +4226,7 @@ async function updateOwpenbotTelegramToken(
     (response.telegram as Record<string, unknown>).bot = bot;
   }
 
-  // Prefer owpenbot's response payload when available.
+  // Prefer opencodeRouter's response payload when available.
   if (apply.body && typeof apply.body === "object") {
     const record = apply.body as Record<string, unknown>;
     if (record.telegram && typeof record.telegram === "object") {
@@ -4085,7 +4234,7 @@ async function updateOwpenbotTelegramToken(
     }
   }
 
-  // If owpenbot reports apply status, reflect it at the top-level.
+  // If opencodeRouter reports apply status, reflect it at the top-level.
   let telegramStarting = false;
   if (response.telegram && typeof response.telegram === "object") {
     const telegram = response.telegram as Record<string, unknown>;
@@ -4103,25 +4252,25 @@ async function updateOwpenbotTelegramToken(
   if (!apply.applied) {
     response.applyError = (typeof response.applyError === "string" && response.applyError.trim())
       ? response.applyError
-      : apply.error ?? "Owpenbot did not apply the update";
+      : apply.error ?? "OpenCodeRouter did not apply the update";
     if (typeof apply.status === "number") response.applyStatus = apply.status;
   } else if (response.applied === false && !telegramStarting && !response.applyError) {
-    response.applyError = "Owpenbot did not apply the update";
+    response.applyError = "OpenCodeRouter did not apply the update";
   }
 
   return response;
 }
 
-async function updateOwpenbotSlackTokens(
+async function updateOpenCodeRouterSlackTokens(
   botToken: string,
   appToken: string,
   healthPortOverride?: number | null,
   requestHost?: string | null,
 ): Promise<Record<string, unknown>> {
-  await persistOwpenbotSlackTokens(botToken, appToken);
+  await persistOpenCodeRouterSlackTokens(botToken, appToken);
 
-  const port = healthPortOverride ?? resolveOwpenbotHealthPort();
-  const apply = await tryPostOwpenbotHealth(
+  const port = healthPortOverride ?? resolveOpenCodeRouterHealthPort();
+  const apply = await tryPostOpenCodeRouterHealth(
     "/config/slack-tokens",
     { botToken, appToken },
     { port, requestHost, timeoutMs: 3_000 },
@@ -4158,13 +4307,268 @@ async function updateOwpenbotSlackTokens(
   if (!apply.applied) {
     response.applyError = (typeof response.applyError === "string" && response.applyError.trim())
       ? response.applyError
-      : apply.error ?? "Owpenbot did not apply the update";
+      : apply.error ?? "OpenCodeRouter did not apply the update";
     if (typeof apply.status === "number") response.applyStatus = apply.status;
   } else if (response.applied === false && !slackStarting && !response.applyError) {
-    response.applyError = "Owpenbot did not apply the update";
+    response.applyError = "OpenCodeRouter did not apply the update";
   }
 
   return response;
+}
+
+function resolveSoulMemoryPath(workspaceRoot: string): string {
+  return join(workspaceRoot, ".opencode", "soul.md");
+}
+
+function resolveSoulHeartbeatPath(workspaceRoot: string): string {
+  return join(workspaceRoot, ".opencode", "soul", "heartbeat.jsonl");
+}
+
+function normalizeSoulTimestamp(value: unknown): string | null {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const parsed = Date.parse(trimmed);
+    return Number.isFinite(parsed) ? new Date(parsed).toISOString() : trimmed;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return new Date(value).toISOString();
+  }
+  return null;
+}
+
+function toSoulStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+      .filter(Boolean);
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed ? [trimmed] : [];
+  }
+  return [];
+}
+
+function parseSoulHeartbeatLine(rawLine: string, lineIndex: number): SoulHeartbeatEntry | null {
+  const trimmed = rawLine.trim();
+  if (!trimmed) return null;
+  let parsed: Record<string, unknown>;
+  try {
+    const value = JSON.parse(trimmed);
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    parsed = value as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+
+  const ts = normalizeSoulTimestamp(parsed.ts);
+  const workspace = typeof parsed.workspace === "string" && parsed.workspace.trim()
+    ? parsed.workspace.trim()
+    : null;
+  const looseEnds = toSoulStringArray(parsed.loose_ends ?? parsed.looseEnds);
+  const nextActionRaw = parsed.next_action ?? parsed.nextAction;
+  const nextAction = typeof nextActionRaw === "string" && nextActionRaw.trim() ? nextActionRaw.trim() : null;
+  const summaryRaw = typeof parsed.summary === "string" ? parsed.summary.trim() : "";
+  const summary =
+    summaryRaw ||
+    nextAction ||
+    (looseEnds.length ? `Loose ends: ${looseEnds.slice(0, 2).join("; ")}` : "(no summary)");
+
+  return {
+    id: `${ts ?? "unknown"}-${lineIndex}`,
+    ts,
+    workspace,
+    summary,
+    looseEnds,
+    nextAction,
+  };
+}
+
+function parseSoulHeartbeatEntries(content: string): SoulHeartbeatEntry[] {
+  const lines = content.split(/\r?\n/);
+  const items: SoulHeartbeatEntry[] = [];
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const item = parseSoulHeartbeatLine(lines[i] ?? "", i + 1);
+    if (item) items.push(item);
+  }
+  return items;
+}
+
+function configIncludesSoulInstruction(config: Record<string, unknown>): boolean {
+  const target = ".opencode/soul.md";
+  const instructions = config.instructions;
+  if (typeof instructions === "string") {
+    return instructions.includes(target);
+  }
+  if (Array.isArray(instructions)) {
+    return instructions.some((entry) => typeof entry === "string" && entry.includes(target));
+  }
+  return false;
+}
+
+function estimateCronIntervalMs(schedule: string): number | null {
+  const parts = schedule.trim().split(/\s+/);
+  if (parts.length < 5) return null;
+  const [minute, hour, dom, mon, dow] = parts;
+  if (!minute || !hour || !dom || !mon || !dow) return null;
+
+  if (minute === "*" && hour === "*" && dom === "*" && mon === "*" && dow === "*") {
+    return 60_000;
+  }
+
+  const minuteEvery = /^\*\/(\d+)$/.exec(minute);
+  if (minuteEvery && hour === "*" && dom === "*" && mon === "*" && dow === "*") {
+    const interval = Number(minuteEvery[1]);
+    if (Number.isFinite(interval) && interval > 0) {
+      return interval * 60_000;
+    }
+  }
+
+  const hourEvery = /^\*\/(\d+)$/.exec(hour);
+  if (hourEvery && /^\d+$/.test(minute) && dom === "*" && mon === "*" && dow === "*") {
+    const interval = Number(hourEvery[1]);
+    if (Number.isFinite(interval) && interval > 0) {
+      return interval * 60 * 60_000;
+    }
+  }
+
+  if (/^\d+$/.test(minute) && /^\d+$/.test(hour) && dom === "*" && mon === "*" && dow === "*") {
+    return 24 * 60 * 60_000;
+  }
+
+  if (/^\d+$/.test(minute) && /^\d+$/.test(hour) && dom === "*" && mon === "*" && dow !== "*") {
+    return 24 * 60 * 60_000;
+  }
+
+  return null;
+}
+
+async function listSoulHeartbeats(
+  workspaceRoot: string,
+  limit: number,
+): Promise<{ items: SoulHeartbeatEntry[]; total: number; path: string }> {
+  const heartbeatPath = resolveSoulHeartbeatPath(workspaceRoot);
+  const relativePath = ".opencode/soul/heartbeat.jsonl";
+  if (!(await exists(heartbeatPath))) {
+    return { items: [], total: 0, path: relativePath };
+  }
+
+  const content = await readFile(heartbeatPath, "utf8");
+  const all = parseSoulHeartbeatEntries(content);
+  return { items: all.slice(0, Math.max(1, limit)), total: all.length, path: relativePath };
+}
+
+async function getSoulStatus(workspaceRoot: string): Promise<SoulStatus> {
+  const [opencodeConfig, memoryEnabled, heartbeatLogExists] = await Promise.all([
+    readOpencodeConfig(workspaceRoot),
+    exists(resolveSoulMemoryPath(workspaceRoot)),
+    exists(resolveSoulHeartbeatPath(workspaceRoot)),
+  ]);
+
+  let heartbeatCommandExists = false;
+  try {
+    const commands = await listCommands(workspaceRoot, "workspace");
+    heartbeatCommandExists = commands.some((command) => command.name === "soul-heartbeat");
+  } catch {
+    heartbeatCommandExists = false;
+  }
+
+  let heartbeatJob: {
+    name: string;
+    slug: string;
+    schedule: string;
+    lastRunAt: string | null;
+    lastRunStatus: string | null;
+    lastRunError: string | null;
+  } | null = null;
+
+  try {
+    const jobs = await listScheduledJobs(workspaceRoot);
+    const found = jobs.find((job) => {
+      if (job.name === "soul-heartbeat") return true;
+      if (job.slug === "soul-heartbeat") return true;
+      return job.slug.includes("soul-heartbeat");
+    });
+    if (found) {
+      heartbeatJob = {
+        name: found.name,
+        slug: found.slug,
+        schedule: found.schedule,
+        lastRunAt: found.lastRunAt ?? null,
+        lastRunStatus: found.lastRunStatus ?? null,
+        lastRunError: found.lastRunError ?? null,
+      };
+    }
+  } catch {
+    heartbeatJob = null;
+  }
+
+  const instructionsEnabled = configIncludesSoulInstruction(opencodeConfig);
+  const heartbeats = await listSoulHeartbeats(workspaceRoot, 500);
+  const lastHeartbeat = heartbeats.items[0] ?? null;
+  const lastHeartbeatAt = lastHeartbeat?.ts ?? null;
+  const lastHeartbeatSummary = lastHeartbeat?.summary ?? null;
+
+  const enabled =
+    memoryEnabled ||
+    instructionsEnabled ||
+    heartbeatLogExists ||
+    heartbeatCommandExists ||
+    Boolean(heartbeatJob);
+
+  const estimatedIntervalMs = heartbeatJob ? estimateCronIntervalMs(heartbeatJob.schedule) : null;
+  const staleAfterMs = enabled
+    ? Math.max(estimatedIntervalMs ? estimatedIntervalMs * 2 : 24 * 60 * 60_000, 30 * 60_000)
+    : null;
+
+  const parsedLastHeartbeat = lastHeartbeatAt ? Date.parse(lastHeartbeatAt) : NaN;
+  const hasLastHeartbeat = Number.isFinite(parsedLastHeartbeat);
+  const overdue = Boolean(
+    enabled &&
+    staleAfterMs != null &&
+    (heartbeatJob || lastHeartbeatAt) &&
+    (!hasLastHeartbeat || Date.now() - parsedLastHeartbeat > staleAfterMs),
+  );
+
+  let state: SoulStatus["state"] = "off";
+  if (!enabled) {
+    state = "off";
+  } else if ((heartbeatJob?.lastRunStatus ?? "") === "failed" || Boolean(heartbeatJob?.lastRunError?.trim())) {
+    state = "error";
+  } else if (overdue) {
+    state = "stale";
+  } else {
+    state = "healthy";
+  }
+
+  const summary = !enabled
+    ? "Soul mode is not enabled for this worker yet."
+    : state === "error"
+      ? "Soul heartbeat ran into an error."
+      : state === "stale"
+        ? "Soul heartbeat is overdue."
+        : heartbeatJob
+          ? "Soul mode is active and heartbeat is on schedule."
+          : "Soul mode is active. Heartbeat schedule not found.";
+
+  return {
+    enabled,
+    state,
+    memoryEnabled,
+    instructionsEnabled,
+    heartbeatLogExists,
+    heartbeatCommandExists,
+    heartbeatJob,
+    heartbeatCount: heartbeats.total,
+    lastHeartbeatAt,
+    lastHeartbeatSummary,
+    staleAfterMs,
+    overdue,
+    summary,
+    memoryPath: ".opencode/soul.md",
+    heartbeatPath: ".opencode/soul/heartbeat.jsonl",
+  };
 }
 
 async function readOpencodeConfig(workspaceRoot: string): Promise<Record<string, unknown>> {

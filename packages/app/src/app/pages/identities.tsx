@@ -3,6 +3,7 @@ import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount }
 import {
   ArrowRight,
   ChevronRight,
+  Copy,
   Link,
   RefreshCcw,
   Shield,
@@ -16,9 +17,9 @@ import {
 } from "../lib/openwork-server";
 import type {
   OpenworkServerClient,
-  OpenworkOwpenbotHealthSnapshot,
-  OpenworkOwpenbotIdentityItem,
-  OpenworkOwpenbotSendResult,
+  OpenworkOpenCodeRouterHealthSnapshot,
+  OpenworkOpenCodeRouterIdentityItem,
+  OpenworkOpenCodeRouterSendResult,
   OpenworkServerStatus,
   OpenworkWorkspaceFileContent,
 } from "../lib/openwork-server";
@@ -35,15 +36,18 @@ export type IdentitiesViewProps = {
   developerMode: boolean;
 };
 
-const OWPENBOT_AGENT_FILE_PATH = ".opencode/agents/owpenbot.md";
-const OWPENBOT_AGENT_FILE_TEMPLATE = `# Owpenbot Messaging Agent
+const OPENCODE_ROUTER_AGENT_FILE_PATH = ".opencode/agents/opencode-router.md";
+const OPENCODE_ROUTER_AGENT_FILE_TEMPLATE = `# OpenCodeRouter Messaging Agent
 
 Use this file to define how the assistant responds in Slack/Telegram for this workspace.
 
 Examples:
 - Keep responses concise and action-oriented.
-- Ask one clarifying question when requirements are ambiguous.
-- Prefer concrete tool use over speculation when troubleshooting.
+- Use tools directly; never ask end users to run router commands.
+- Never expose raw peer IDs or Telegram chat IDs unless the user explicitly asks for debug output.
+- Never ask end users for peer IDs or identity IDs.
+- For outbound delivery, call opencode_router_status and opencode_router_send yourself.
+- If Telegram says chat not found, tell the user the recipient must message the bot first (for example /start), then retry.
 `;
 
 function formatRequestError(error: unknown): string {
@@ -53,7 +57,7 @@ function formatRequestError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function isOwpenbotSnapshot(value: unknown): value is OpenworkOwpenbotHealthSnapshot {
+function isOpenCodeRouterSnapshot(value: unknown): value is OpenworkOpenCodeRouterHealthSnapshot {
   if (!value || typeof value !== "object") return false;
   const record = value as Record<string, unknown>;
   return (
@@ -64,10 +68,21 @@ function isOwpenbotSnapshot(value: unknown): value is OpenworkOwpenbotHealthSnap
   );
 }
 
-function isOwpenbotIdentities(value: unknown): value is { ok: boolean; items: OpenworkOwpenbotIdentityItem[] } {
+function isOpenCodeRouterIdentities(value: unknown): value is { ok: boolean; items: OpenworkOpenCodeRouterIdentityItem[] } {
   if (!value || typeof value !== "object") return false;
   const record = value as Record<string, unknown>;
   return typeof record.ok === "boolean" && Array.isArray(record.items);
+}
+
+function getTelegramUsernameFromResult(value: unknown): string | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const bot = record.bot;
+  if (!bot || typeof bot !== "object") return null;
+  const username = (bot as Record<string, unknown>).username;
+  if (typeof username !== "string") return null;
+  const normalized = username.trim().replace(/^@+/, "");
+  return normalized || null;
 }
 
 /* ---- Brand channel icons ---- */
@@ -115,13 +130,13 @@ function StatusPill(props: { label: string; value: string; ok: boolean }) {
 export default function IdentitiesView(props: IdentitiesViewProps) {
   const [refreshing, setRefreshing] = createSignal(false);
 
-  const [health, setHealth] = createSignal<OpenworkOwpenbotHealthSnapshot | null>(null);
+  const [health, setHealth] = createSignal<OpenworkOpenCodeRouterHealthSnapshot | null>(null);
   const [healthError, setHealthError] = createSignal<string | null>(null);
 
-  const [telegramIdentities, setTelegramIdentities] = createSignal<OpenworkOwpenbotIdentityItem[]>([]);
+  const [telegramIdentities, setTelegramIdentities] = createSignal<OpenworkOpenCodeRouterIdentityItem[]>([]);
   const [telegramIdentitiesError, setTelegramIdentitiesError] = createSignal<string | null>(null);
 
-  const [slackIdentities, setSlackIdentities] = createSignal<OpenworkOwpenbotIdentityItem[]>([]);
+  const [slackIdentities, setSlackIdentities] = createSignal<OpenworkOpenCodeRouterIdentityItem[]>([]);
   const [slackIdentitiesError, setSlackIdentitiesError] = createSignal<string | null>(null);
 
   const [telegramToken, setTelegramToken] = createSignal("");
@@ -129,6 +144,8 @@ export default function IdentitiesView(props: IdentitiesViewProps) {
   const [telegramSaving, setTelegramSaving] = createSignal(false);
   const [telegramStatus, setTelegramStatus] = createSignal<string | null>(null);
   const [telegramError, setTelegramError] = createSignal<string | null>(null);
+  const [telegramBotUsername, setTelegramBotUsername] = createSignal<string | null>(null);
+  const [telegramPairingCode, setTelegramPairingCode] = createSignal<string | null>(null);
 
   const [slackBotToken, setSlackBotToken] = createSignal("");
   const [slackAppToken, setSlackAppToken] = createSignal("");
@@ -137,7 +154,7 @@ export default function IdentitiesView(props: IdentitiesViewProps) {
   const [slackStatus, setSlackStatus] = createSignal<string | null>(null);
   const [slackError, setSlackError] = createSignal<string | null>(null);
 
-  const [expandedChannel, setExpandedChannel] = createSignal<string | null>(null);
+  const [expandedChannel, setExpandedChannel] = createSignal<string | null>("telegram");
   const [activeTab, setActiveTab] = createSignal<"general" | "advanced">("general");
 
   const [agentLoading, setAgentLoading] = createSignal(false);
@@ -157,7 +174,7 @@ export default function IdentitiesView(props: IdentitiesViewProps) {
   const [sendBusy, setSendBusy] = createSignal(false);
   const [sendStatus, setSendStatus] = createSignal<string | null>(null);
   const [sendError, setSendError] = createSignal<string | null>(null);
-  const [sendResult, setSendResult] = createSignal<OpenworkOwpenbotSendResult | null>(null);
+  const [sendResult, setSendResult] = createSignal<OpenworkOpenCodeRouterSendResult | null>(null);
 
   const [reconnectStatus, setReconnectStatus] = createSignal<string | null>(null);
   const [reconnectError, setReconnectError] = createSignal<string | null>(null);
@@ -203,6 +220,11 @@ export default function IdentitiesView(props: IdentitiesViewProps) {
 
   const hasTelegramConnected = createMemo(() => telegramIdentities().some((i) => i.enabled));
   const hasSlackConnected = createMemo(() => slackIdentities().some((i) => i.enabled));
+  const telegramBotLink = createMemo(() => {
+    const username = telegramBotUsername();
+    if (!username) return null;
+    return `https://t.me/${username}`;
+  });
   const agentDirty = createMemo(() => agentDraft() !== agentContent());
 
   const messagesToday = createMemo(() => {
@@ -267,7 +289,7 @@ export default function IdentitiesView(props: IdentitiesViewProps) {
     setAgentLoading(true);
     setAgentError(null);
     try {
-      const result = (await client.readWorkspaceFile(id, OWPENBOT_AGENT_FILE_PATH)) as OpenworkWorkspaceFileContent;
+      const result = (await client.readWorkspaceFile(id, OPENCODE_ROUTER_AGENT_FILE_PATH)) as OpenworkWorkspaceFileContent;
       const nextContent = result.content ?? "";
       setAgentExists(true);
       setAgentContent(nextContent);
@@ -300,12 +322,12 @@ export default function IdentitiesView(props: IdentitiesViewProps) {
     setAgentError(null);
     try {
       const result = await client.writeWorkspaceFile(id, {
-        path: OWPENBOT_AGENT_FILE_PATH,
-        content: OWPENBOT_AGENT_FILE_TEMPLATE,
+        path: OPENCODE_ROUTER_AGENT_FILE_PATH,
+        content: OPENCODE_ROUTER_AGENT_FILE_TEMPLATE,
       });
       setAgentExists(true);
-      setAgentContent(OWPENBOT_AGENT_FILE_TEMPLATE);
-      setAgentDraft(OWPENBOT_AGENT_FILE_TEMPLATE);
+      setAgentContent(OPENCODE_ROUTER_AGENT_FILE_TEMPLATE);
+      setAgentDraft(OPENCODE_ROUTER_AGENT_FILE_TEMPLATE);
       setAgentBaseUpdatedAt(typeof result.updatedAt === "number" ? result.updatedAt : null);
       setAgentStatus("Created default messaging agent file.");
     } catch (error) {
@@ -328,7 +350,7 @@ export default function IdentitiesView(props: IdentitiesViewProps) {
     setAgentError(null);
     try {
       const result = await client.writeWorkspaceFile(id, {
-        path: OWPENBOT_AGENT_FILE_PATH,
+        path: OPENCODE_ROUTER_AGENT_FILE_PATH,
         content: agentDraft(),
         baseUpdatedAt: agentBaseUpdatedAt(),
       });
@@ -362,7 +384,7 @@ export default function IdentitiesView(props: IdentitiesViewProps) {
     setSendError(null);
     setSendResult(null);
     try {
-      const result = await client.sendOwpenbotMessage(id, {
+      const result = await client.sendOpenCodeRouterMessage(id, {
         channel: sendChannel(),
         text,
         ...(sendDirectory().trim() ? { directory: sendDirectory().trim() } : {}),
@@ -395,6 +417,8 @@ export default function IdentitiesView(props: IdentitiesViewProps) {
       if (!id) {
         setHealth(null);
         setTelegramIdentities([]);
+        setTelegramBotUsername(null);
+        setTelegramPairingCode(null);
         setSlackIdentities([]);
         setHealthError("Worker scope unavailable. Reconnect using a worker URL or switch to a known worker.");
         setTelegramIdentitiesError("Worker scope unavailable.");
@@ -406,13 +430,16 @@ export default function IdentitiesView(props: IdentitiesViewProps) {
         return;
       }
 
-      const [healthRes, tgRes, slackRes] = await Promise.all([
-        client.owpenbotHealth(),
-        client.getOwpenbotTelegramIdentities(id),
-        client.getOwpenbotSlackIdentities(id),
+      const [healthRes, tgRes, slackRes, telegramInfo] = await Promise.all([
+        client.opencodeRouterHealth(),
+        client.getOpenCodeRouterTelegramIdentities(id),
+        client.getOpenCodeRouterSlackIdentities(id),
+        client.getOpenCodeRouterTelegram(id).catch(() => null),
       ]);
 
-      if (isOwpenbotSnapshot(healthRes.json)) {
+      setTelegramBotUsername(getTelegramUsernameFromResult(telegramInfo));
+
+      if (isOpenCodeRouterSnapshot(healthRes.json)) {
         setHealth(healthRes.json);
       } else {
         setHealth(null);
@@ -420,19 +447,23 @@ export default function IdentitiesView(props: IdentitiesViewProps) {
           const message =
             (healthRes.json && typeof (healthRes.json as any).message === "string")
               ? String((healthRes.json as any).message)
-              : `Owpenbot health unavailable (${healthRes.status})`;
+              : `OpenCodeRouter health unavailable (${healthRes.status})`;
           setHealthError(message);
         }
       }
 
-      if (isOwpenbotIdentities(tgRes)) {
+      if (isOpenCodeRouterIdentities(tgRes)) {
         setTelegramIdentities(tgRes.items ?? []);
+        if (!tgRes.items?.length) {
+          setTelegramPairingCode(null);
+        }
       } else {
         setTelegramIdentities([]);
+        setTelegramPairingCode(null);
         setTelegramIdentitiesError("Telegram identities unavailable.");
       }
 
-      if (isOwpenbotIdentities(slackRes)) {
+      if (isOpenCodeRouterIdentities(slackRes)) {
         setSlackIdentities(slackRes.items ?? []);
       } else {
         setSlackIdentities([]);
@@ -446,6 +477,7 @@ export default function IdentitiesView(props: IdentitiesViewProps) {
       const message = formatRequestError(error);
       setHealth(null);
       setTelegramIdentities([]);
+      setTelegramBotUsername(null);
       setSlackIdentities([]);
       setHealthError(message);
       setTelegramIdentitiesError(message);
@@ -471,7 +503,7 @@ export default function IdentitiesView(props: IdentitiesViewProps) {
     setReconnectStatus("Reconnected.");
   };
 
-  const upsertTelegram = async () => {
+  const upsertTelegram = async (access: "public" | "private") => {
     if (telegramSaving()) return;
     if (!serverReady()) return;
     const id = workspaceId();
@@ -486,13 +518,30 @@ export default function IdentitiesView(props: IdentitiesViewProps) {
     setTelegramStatus(null);
     setTelegramError(null);
     try {
-      const result = await client.upsertOwpenbotTelegramIdentity(id, { token, enabled: telegramEnabled() });
+      const result = await client.upsertOpenCodeRouterTelegramIdentity(id, {
+        token,
+        enabled: telegramEnabled(),
+        access,
+      });
       if (result.ok) {
+        const pairingCode = typeof result.telegram?.pairingCode === "string" ? result.telegram.pairingCode.trim() : "";
+        if (access === "private" && pairingCode) {
+          setTelegramPairingCode(pairingCode);
+          setTelegramStatus(`Private bot saved. Pair via /pair ${pairingCode}`);
+        } else {
+          setTelegramPairingCode(null);
+        }
         const username = (result.telegram as any)?.bot?.username;
         if (username) {
-          setTelegramStatus(`Saved (@${String(username)})`);
+          const normalized = String(username).trim().replace(/^@+/, "");
+          setTelegramBotUsername(normalized || null);
+          if (access !== "private" || !pairingCode) {
+            setTelegramStatus(`Saved (@${normalized || String(username)})`);
+          }
         } else {
-          setTelegramStatus(result.applied === false ? "Saved (pending apply)." : "Saved.");
+          if (access !== "private" || !pairingCode) {
+            setTelegramStatus(result.applied === false ? "Saved (pending apply)." : "Saved.");
+          }
         }
       } else {
         setTelegramError("Failed to save.");
@@ -522,8 +571,10 @@ export default function IdentitiesView(props: IdentitiesViewProps) {
     setTelegramStatus(null);
     setTelegramError(null);
     try {
-      const result = await client.deleteOwpenbotTelegramIdentity(id, identityId);
+      const result = await client.deleteOpenCodeRouterTelegramIdentity(id, identityId);
       if (result.ok) {
+        setTelegramBotUsername(null);
+        setTelegramPairingCode(null);
         setTelegramStatus(result.applied === false ? "Deleted (pending apply)." : "Deleted.");
       } else {
         setTelegramError("Failed to delete.");
@@ -536,6 +587,17 @@ export default function IdentitiesView(props: IdentitiesViewProps) {
       setTelegramError(formatRequestError(error));
     } finally {
       setTelegramSaving(false);
+    }
+  };
+
+  const copyTelegramPairingCode = async () => {
+    const code = telegramPairingCode();
+    if (!code) return;
+    try {
+      await navigator.clipboard.writeText(code);
+      setTelegramStatus("Pairing code copied.");
+    } catch {
+      setTelegramError("Could not copy pairing code. Copy it manually.");
     }
   };
 
@@ -555,7 +617,7 @@ export default function IdentitiesView(props: IdentitiesViewProps) {
     setSlackStatus(null);
     setSlackError(null);
     try {
-      const result = await client.upsertOwpenbotSlackIdentity(id, { botToken, appToken, enabled: slackEnabled() });
+      const result = await client.upsertOpenCodeRouterSlackIdentity(id, { botToken, appToken, enabled: slackEnabled() });
       if (result.ok) {
         setSlackStatus(result.applied === false ? "Saved (pending apply)." : "Saved.");
       } else {
@@ -587,7 +649,7 @@ export default function IdentitiesView(props: IdentitiesViewProps) {
     setSlackStatus(null);
     setSlackError(null);
     try {
-      const result = await client.deleteOwpenbotSlackIdentity(id, identityId);
+      const result = await client.deleteOpenCodeRouterSlackIdentity(id, identityId);
       if (result.ok) {
         setSlackStatus(result.applied === false ? "Deleted (pending apply)." : "Deleted.");
       } else {
@@ -615,6 +677,8 @@ export default function IdentitiesView(props: IdentitiesViewProps) {
     setHealthError(null);
     setTelegramIdentities([]);
     setTelegramIdentitiesError(null);
+    setTelegramBotUsername(null);
+    setTelegramPairingCode(null);
     setSlackIdentities([]);
     setSlackIdentitiesError(null);
     resetAgentState();
@@ -624,6 +688,7 @@ export default function IdentitiesView(props: IdentitiesViewProps) {
     setReconnectStatus(null);
     setReconnectError(null);
     setActiveTab("general");
+    setExpandedChannel("telegram");
   });
 
   onMount(() => {
@@ -684,7 +749,7 @@ export default function IdentitiesView(props: IdentitiesViewProps) {
         <div class="rounded-xl border border-gray-4 bg-gray-1 p-5">
           <div class="text-sm font-semibold text-gray-12">Connect to an OpenWork server</div>
           <div class="mt-1 text-xs text-gray-10">
-            Identities are available when you are connected to an OpenWork host (<code class="text-[11px] font-mono bg-gray-3 px-1 py-0.5 rounded">openwrk</code>).
+            Identities are available when you are connected to an OpenWork host (<code class="text-[11px] font-mono bg-gray-3 px-1 py-0.5 rounded">openwork</code>).
           </div>
         </div>
       </Show>
@@ -807,7 +872,7 @@ export default function IdentitiesView(props: IdentitiesViewProps) {
                     </Show>
                   </div>
                   <div class="text-[13px] text-gray-9 mt-0.5 leading-snug">
-                    Create a Telegram bot that anyone can message. Great for personal automations and external contacts.
+                    Connect a Telegram bot in public mode (open inbox) or private mode (pairing code required).
                   </div>
                 </div>
                 <ChevronRight
@@ -841,7 +906,7 @@ export default function IdentitiesView(props: IdentitiesViewProps) {
                                 </span>
                               </div>
                               <div class="text-[11px] text-gray-9 mt-0.5 pl-3.5">
-                                {item.enabled ? "Enabled" : "Disabled"} · {item.running ? "Running" : "Stopped"}
+                                {item.enabled ? "Enabled" : "Disabled"} · {item.running ? "Running" : "Stopped"} · {item.access === "private" ? "Private" : "Public"}
                               </div>
                             </div>
                             <div class="flex items-center gap-2 flex-shrink-0">
@@ -897,9 +962,25 @@ export default function IdentitiesView(props: IdentitiesViewProps) {
                   {/* Add new identity form */}
                   <div class="space-y-2.5">
                     <Show when={telegramIdentities().length === 0}>
-                      <p class="text-[13px] text-gray-10 leading-relaxed">
-                        Create a Telegram bot via @BotFather and paste the bot token here. We'll handle the rest.
-                      </p>
+                      <div class="rounded-xl border border-gray-4 bg-gray-2/60 px-3.5 py-3 space-y-2.5">
+                        <div class="text-[12px] font-semibold text-gray-12">Quick setup</div>
+                        <ol class="space-y-2 text-[12px] text-gray-10 leading-relaxed">
+                          <li class="flex items-start gap-2">
+                            <span class="mt-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-gray-4 text-[10px] font-semibold text-gray-11">1</span>
+                            <span>
+                              Open <a href="https://t.me/BotFather" target="_blank" rel="noreferrer" class="font-medium text-gray-12 underline">@BotFather</a> and run <code class="rounded bg-gray-3 px-1 py-0.5 font-mono text-[11px]">/newbot</code>.
+                            </span>
+                          </li>
+                          <li class="flex items-start gap-2">
+                            <span class="mt-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-gray-4 text-[10px] font-semibold text-gray-11">2</span>
+                            <span>Copy the bot token and paste it below.</span>
+                          </li>
+                          <li class="flex items-start gap-2">
+                            <span class="mt-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-gray-4 text-[10px] font-semibold text-gray-11">3</span>
+                            <span>Choose <span class="font-medium text-gray-12">Public</span> for open inbox or <span class="font-medium text-gray-12">Private</span> to require <code class="rounded bg-gray-3 px-1 py-0.5 font-mono text-[11px]">/pair &lt;code&gt;</code>.</span>
+                          </li>
+                        </ol>
+                      </div>
                     </Show>
 
                     <div>
@@ -922,26 +1003,89 @@ export default function IdentitiesView(props: IdentitiesViewProps) {
                       Enabled
                     </label>
 
-                    <button
-                      onClick={() => void upsertTelegram()}
-                      disabled={telegramSaving() || !workspaceId() || !telegramToken().trim()}
-                      class={`flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold text-white border-none transition-opacity ${
-                        telegramSaving() || !workspaceId() || !telegramToken().trim()
-                          ? "opacity-50 cursor-not-allowed"
-                          : "opacity-100 cursor-pointer hover:opacity-90"
-                      }`}
-                      style={{ background: "#229ED9" }}
-                    >
-                      <Show
-                        when={!telegramSaving()}
-                        fallback={
-                          <div class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                        }
+                    <div class="rounded-lg border border-gray-4 bg-gray-2/50 px-3 py-2 text-[11px] text-gray-10 leading-relaxed">
+                      Public bot: first Telegram chat auto-links. Private bot: requires a pairing code before any messages run tools.
+                    </div>
+
+                    <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      <button
+                        onClick={() => void upsertTelegram("public")}
+                        disabled={telegramSaving() || !workspaceId() || !telegramToken().trim()}
+                        class={`flex items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-semibold transition-colors ${
+                          telegramSaving() || !workspaceId() || !telegramToken().trim()
+                            ? "cursor-not-allowed border-gray-5 bg-gray-3 text-gray-8"
+                            : "cursor-pointer border-gray-6 bg-gray-12 text-gray-1 hover:bg-gray-11"
+                        }`}
                       >
-                        <Link size={15} />
-                      </Show>
-                      {telegramSaving() ? "Connecting..." : "Connect Telegram"}
-                    </button>
+                        <Show
+                          when={!telegramSaving()}
+                          fallback={
+                            <div class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                          }
+                        >
+                          <Link size={15} />
+                        </Show>
+                        {telegramSaving() ? "Connecting..." : "Create public bot"}
+                      </button>
+
+                      <button
+                        onClick={() => void upsertTelegram("private")}
+                        disabled={telegramSaving() || !workspaceId() || !telegramToken().trim()}
+                        class={`flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold text-white border-none transition-opacity ${
+                          telegramSaving() || !workspaceId() || !telegramToken().trim()
+                            ? "opacity-50 cursor-not-allowed"
+                            : "opacity-100 cursor-pointer hover:opacity-90"
+                        }`}
+                        style={{ background: "#229ED9" }}
+                      >
+                        <Show
+                          when={!telegramSaving()}
+                          fallback={
+                            <div class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                          }
+                        >
+                          <Shield size={15} />
+                        </Show>
+                        {telegramSaving() ? "Connecting..." : "Create private bot"}
+                      </button>
+                    </div>
+
+                    <Show when={telegramPairingCode()}>
+                      {(code) => (
+                        <div class="rounded-xl border border-sky-7/25 bg-sky-1/40 px-3.5 py-3 space-y-2">
+                          <div class="text-[12px] font-semibold text-sky-11">Private pairing code</div>
+                          <div class="rounded-md border border-sky-7/20 bg-white/80 px-3 py-2 font-mono text-[13px] tracking-[0.08em] text-sky-12">
+                            {code()}
+                          </div>
+                          <div class="text-[11px] text-sky-11/90 leading-relaxed">
+                            In Telegram, open the chat that should control this worker and send <code class="rounded bg-sky-3/60 px-1 py-0.5 font-mono text-[10px]">/pair {code()}</code>.
+                          </div>
+                          <div class="flex items-center gap-2">
+                            <Button variant="outline" class="h-7 px-2.5 text-[11px]" onClick={() => void copyTelegramPairingCode()}>
+                              <Copy size={12} />
+                              <span class="ml-1">Copy code</span>
+                            </Button>
+                            <Button variant="outline" class="h-7 px-2.5 text-[11px]" onClick={() => setTelegramPairingCode(null)}>
+                              Hide
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                    </Show>
+
+                    <Show when={telegramBotLink()}>
+                      {(value) => (
+                        <a
+                          href={value()}
+                          target="_blank"
+                          rel="noreferrer"
+                          class="inline-flex items-center gap-2 rounded-lg border border-gray-4 bg-gray-2/50 px-3 py-2 text-[12px] font-medium text-gray-11 hover:bg-gray-2"
+                        >
+                          <Link size={14} />
+                          Open @{telegramBotUsername()} in Telegram
+                        </a>
+                      )}
+                    </Show>
 
                     <Show when={telegramIdentities().length === 0}>
                       <Show when={telegramStatus()}>
@@ -1188,7 +1332,7 @@ export default function IdentitiesView(props: IdentitiesViewProps) {
               </div>
             </div>
             <span class="rounded-md border border-gray-4 bg-gray-2/50 px-2 py-1 text-[11px] font-mono text-gray-10">
-              {OWPENBOT_AGENT_FILE_PATH}
+              {OPENCODE_ROUTER_AGENT_FILE_PATH}
             </span>
           </div>
 
@@ -1212,7 +1356,7 @@ export default function IdentitiesView(props: IdentitiesViewProps) {
 
           <textarea
             class="min-h-[220px] w-full rounded-lg border border-gray-4 bg-gray-1 px-3 py-2.5 text-[13px] font-mono text-gray-12 placeholder:text-gray-8"
-            placeholder="Add messaging behavior instructions for owpenbot here..."
+            placeholder="Add messaging behavior instructions for opencodeRouter here..."
             value={agentDraft()}
             onInput={(e) => setAgentDraft(e.currentTarget.value)}
           />

@@ -1319,6 +1319,12 @@ export default function DocumentWriterView(props: SessionViewProps) {
     props.sendPromptAsync(nextDraft).catch(() => undefined);
   };
 
+  const cancelRun = () => {
+    const id = sessionId().trim();
+    if (!id) return;
+    props.abortSession(id).catch(() => undefined);
+  };
+
   const listCommands = async (): Promise<SlashCommandOption[]> => {
     try {
       return await props.listCommands();
@@ -2050,8 +2056,11 @@ export default function DocumentWriterView(props: SessionViewProps) {
 
         <Composer
           prompt={props.prompt}
+          developerMode={props.developerMode}
           busy={props.busy}
+          isStreaming={isAgentRunning()}
           onSend={handleSendPrompt}
+          onStop={cancelRun}
           onDraftChange={handleDraftChange}
           selectedModelLabel={props.selectedSessionModelLabel || "Model"}
           onModelClick={props.openSessionModelPicker}

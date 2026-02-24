@@ -1473,6 +1473,12 @@ export function createOpenworkServerClient(options: { baseUrl: string; token?: s
     },
 
     downloadInbox: (workspaceId: string, inboxId: string) =>
+      requestBinary(
+        baseUrl,
+        `/workspace/${encodeURIComponent(workspaceId)}/inbox/${encodeURIComponent(inboxId)}`,
+        { token, hostToken, timeoutMs: timeouts.binary },
+      ),
+
     downloadInboxItem: (workspaceId: string, inboxId: string) =>
       requestBinary(
         baseUrl,

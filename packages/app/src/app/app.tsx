@@ -5921,10 +5921,12 @@ export default function App() {
     }
 
     if (path.startsWith("/session")) {
-      const [, , sessionSegment] = rawPath.split("/");
-      const id = (sessionSegment ?? "").trim();
+      const segments = rawPath.split("/");
+      const id = (segments[2] ?? "").trim();
+      const forcedPathView =
+        (segments[3] ?? "").trim().toLowerCase() === "view" && (segments[4] ?? "").trim().toLowerCase() === "session";
       const forcedView =
-        typeof window !== "undefined" && new URLSearchParams(window.location.search).get("view") === "session";
+        forcedPathView || new URLSearchParams(location.search).get("view") === "session";
 
       if (!id) {
         const fallback = activeSessionId();
@@ -5954,8 +5956,12 @@ export default function App() {
         const inferred = inferSessionPreferredView(title);
         const resolved = stored !== "session" ? stored : inferred ?? stored;
         if (resolved === "document-writer") {
-          goToDocumentWriter(id, { replace: true });
-          return;
+          window.setTimeout(() => {
+            if (location.pathname.trim().toLowerCase() !== `/session/${id.toLowerCase()}`) return;
+            if (new URLSearchParams(location.search).get("view") === "session") return;
+            if (getSessionPreferredView(id) !== "document-writer") return;
+            goToDocumentWriter(id, { replace: true });
+          }, 0);
         }
 
         void (async () => {
@@ -5965,7 +5971,7 @@ export default function App() {
             return;
           }
           if (location.pathname.trim().toLowerCase() !== `/session/${id.toLowerCase()}`) return;
-          if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("view") === "session") return;
+          if (new URLSearchParams(location.search).get("view") === "session") return;
           if (getSessionPreferredView(id) !== "document-writer") return;
           goToDocumentWriter(id, { replace: true });
         })();

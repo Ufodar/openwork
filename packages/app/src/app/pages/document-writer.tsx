@@ -1966,7 +1966,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
               onClick={() => {
                 const id = sessionId();
                 if (!id) return;
-                navigate(`/session/${id}?view=session`);
+                navigate(`/session/${id}/view/session`);
               }}
               disabled={!sessionId()}
               title="Open session view"

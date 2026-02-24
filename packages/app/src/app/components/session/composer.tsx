@@ -785,14 +785,18 @@ export default function Composer(props: ComposerProps) {
   };
 
   const focusEditorEnd = () => {
-    if (!editorRef) return;
+    if (!editorRef || !editorRef.isConnected) return;
     const selection = window.getSelection();
     if (!selection) return;
-    const range = document.createRange();
-    range.selectNodeContents(editorRef);
-    range.collapse(false);
-    selection.removeAllRanges();
-    selection.addRange(range);
+    try {
+      const range = document.createRange();
+      range.selectNodeContents(editorRef);
+      range.collapse(false);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    } catch {
+      return;
+    }
     editorRef.focus();
   };
 

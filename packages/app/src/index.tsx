@@ -1,4 +1,5 @@
 /* @refresh reload */
+import 'solid-devtools'
 import { render } from "solid-js/web";
 import { HashRouter, Route, Router } from "@solidjs/router";
 
@@ -7,6 +8,7 @@ import "./app/index.css";
 import AppEntry from "./app/entry";
 import { PlatformProvider, type Platform } from "./app/context/platform";
 import { isTauriRuntime } from "./app/utils";
+
 
 bootstrapTheme();
 

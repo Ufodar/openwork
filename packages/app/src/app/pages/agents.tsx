@@ -21,41 +21,41 @@ const agentTypes: AgentType[] = [
     icon: FileText,
     status: "available",
   },
-  {
-    id: "bid-writer",
-    name: "Bid Writer",
-    description: "Draft tender/bid documents with strict fact extraction and compliance mapping",
-    icon: FileText,
-    status: "available",
-  },
-  {
-    id: "bid-dedupe",
-    name: "Bid Dedupe",
-    description: "Compare bid documents for duplicate text and images",
-    icon: Search,
-    status: "available",
-  },
-  {
-    id: "code-reviewer",
-    name: "Code Reviewer",
-    description: "Review code for bugs, security issues, and best practices",
-    icon: Code2,
-    status: "available",
-  },
-  {
-    id: "research-agent",
-    name: "Research Agent",
-    description: "Research topics, summarize findings, and compile reports",
-    icon: Search,
-    status: "coming-soon",
-  },
-  {
-    id: "general-assistant",
-    name: "General Assistant",
-    description: "General-purpose AI assistant for various tasks",
-    icon: MessageSquare,
-    status: "available",
-  },
+  // {
+  //   id: "bid-writer",
+  //   name: "Bid Writer",
+  //   description: "Draft tender/bid documents with strict fact extraction and compliance mapping",
+  //   icon: FileText,
+  //   status: "available",
+  // },
+  // {
+  //   id: "bid-dedupe",
+  //   name: "Bid Dedupe",
+  //   description: "Compare bid documents for duplicate text and images",
+  //   icon: Search,
+  //   status: "available",
+  // },
+  // {
+  //   id: "code-reviewer",
+  //   name: "Code Reviewer",
+  //   description: "Review code for bugs, security issues, and best practices",
+  //   icon: Code2,
+  //   status: "available",
+  // },
+  // {
+  //   id: "research-agent",
+  //   name: "Research Agent",
+  //   description: "Research topics, summarize findings, and compile reports",
+  //   icon: Search,
+  //   status: "coming-soon",
+  // },
+  // {
+  //   id: "general-assistant",
+  //   name: "General Assistant",
+  //   description: "General-purpose AI assistant for various tasks",
+  //   icon: MessageSquare,
+  //   status: "available",
+  // },
 ];
 
 export type AgentsViewProps = {
@@ -212,8 +212,8 @@ export default function AgentsView(props: AgentsViewProps) {
               return (
                 <button
                   class={`group flex flex-col gap-3 rounded-xl border p-5 text-left transition-colors ${disabled()
-                      ? "border-dls-border bg-dls-surface opacity-50 cursor-not-allowed"
-                      : "border-dls-border bg-dls-surface hover:border-gray-8 hover:bg-dls-hover cursor-pointer"
+                    ? "border-dls-border bg-dls-surface opacity-50 cursor-not-allowed"
+                    : "border-dls-border bg-dls-surface hover:border-gray-8 hover:bg-dls-hover cursor-pointer"
                     }`}
                   onClick={() => handleFeaturedClick(featured)}
                   disabled={disabled()}

@@ -62,6 +62,7 @@ const isOnlyOfficeImportable = (path: string) => {
 
 const DOCX_SECTION_COPY_TARGET_EXTENSIONS = new Set([".docx", ".docm", ".dotx", ".dotm"]);
 const DOCX_SECTION_COPY_SOURCE_EXTENSIONS = new Set([...DOCX_SECTION_COPY_TARGET_EXTENSIONS, ".doc"]);
+const RUNNING_REFRESH_INTERVAL_MS = 60_000;
 
 const getFileExtension = (value: string) => {
   const base = value.split("/").pop() ?? value;
@@ -237,15 +238,12 @@ export default function DocumentWriterView(props: SessionViewProps) {
   });
 
   const documentsList = createMemo(() => documents() ?? []);
-  const targetDocInList = createMemo(() => {
-    const name = (targetDoc() ?? "").trim();
-    if (!name) return null;
-    return (documentsList() ?? []).find((doc) => doc.name === name) ?? null;
-  });
+  const targetDocName = createMemo(() => (targetDoc() ?? "").trim());
   const otherDocsList = createMemo(() => {
-    const name = (targetDoc() ?? "").trim();
-    if (!name) return [] as DocumentItem[];
-    return (documentsList() ?? []).filter((doc) => doc.name !== name);
+    const name = targetDocName();
+    const items = documentsList() ?? [];
+    if (!name) return items;
+    return items.filter((doc) => doc.name !== name);
   });
 
   const REF_CATEGORIES = [
@@ -382,20 +380,20 @@ export default function DocumentWriterView(props: SessionViewProps) {
 
   type DedupeCandidate =
     | {
-        key: string;
-        kind: "doc";
-        name: string;
-        updatedAt: number;
-        sourceLabel: string;
-      }
+      key: string;
+      kind: "doc";
+      name: string;
+      updatedAt: number;
+      sourceLabel: string;
+    }
     | {
-        key: string;
-        kind: "inbox";
-        inboxId: string;
-        path: string;
-        updatedAt: number;
-        sourceLabel: string;
-      };
+      key: string;
+      kind: "inbox";
+      inboxId: string;
+      path: string;
+      updatedAt: number;
+      sourceLabel: string;
+    };
 
   const dedupeCandidates = createMemo(() => {
     const target = targetDoc();
@@ -507,7 +505,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
       ...cfg,
       doc,
       seq: configSeq(),
-      readonly: isAgentRunning() || (Boolean(target) && doc !== target),
+      readonly: isAgentRunning() || !target || doc !== target,
     } satisfies EditorSource;
   });
 
@@ -526,31 +524,6 @@ export default function DocumentWriterView(props: SessionViewProps) {
     }
     return { documentServerUrl: "http://localhost:8080", config: data };
   });
-
-  const handleUpload = async (e: Event) => {
-    const cfg = apiConfig();
-    if (!cfg) return;
-
-    const input = e.target as HTMLInputElement;
-    if (!input.files?.length) return;
-    const file = input.files[0];
-
-    const formData = new FormData();
-    formData.append("file", file);
-
-    const query = new URLSearchParams();
-    query.set("session", cfg.sessionId);
-    const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/upload", query);
-    const result = (await fetchJson(url, cfg.token, { method: "POST", body: formData })) as { name?: string };
-    input.value = "";
-    await refetchDocuments();
-    const name = typeof result?.name === "string" ? result.name.trim() : "";
-    if (name) {
-      setTargetDoc(name);
-      setActiveDoc(name);
-      setConfigSeq((v) => v + 1);
-    }
-  };
 
   const archiveOtherDocuments = async () => {
     const cfg = apiConfig();
@@ -665,10 +638,6 @@ export default function DocumentWriterView(props: SessionViewProps) {
     const cfg = apiConfig();
     if (!cfg) return;
     if (refsOpenBusyId()) return;
-    if (!targetDoc()) {
-      setRefsError("Upload/select a target document first. Reference files are preview-only.");
-      return;
-    }
     setRefsOpenBusyId(item.id);
     setRefsError(null);
     try {
@@ -1195,7 +1164,20 @@ export default function DocumentWriterView(props: SessionViewProps) {
     if (!items.length) return;
 
     if (!targetDoc()) {
-      const preferred = items.find((doc) => !doc.name.startsWith("refs/")) ?? items[0];
+      const preferred =
+        items.find((doc) => {
+          const normalized = doc.name.replace(/^\/+/, "");
+          return (
+            normalized.startsWith(".refs/templates/") ||
+            normalized.startsWith("refs/templates/") ||
+            normalized.startsWith("templates/")
+          );
+        }) ??
+        items.find((doc) => {
+          const normalized = doc.name.replace(/^\/+/, "");
+          return !normalized.startsWith(".refs/") && !normalized.startsWith("refs/");
+        }) ??
+        items[0];
       setTargetDoc(preferred.name);
       if (!activeDoc()) setActiveDoc(preferred.name);
       return;
@@ -1215,6 +1197,21 @@ export default function DocumentWriterView(props: SessionViewProps) {
     if (!serverReady()) return;
     setConfigSeq((v) => v + 1);
     void refetchDocuments();
+  });
+
+  createEffect(() => {
+    const running = isAgentRunning();
+    const ready = serverReady();
+    const doc = targetDoc();
+    const id = sessionId();
+    if (!running || !ready || !doc || !id) return;
+    if (typeof window === "undefined") return;
+
+    const timer = window.setInterval(() => {
+      setConfigSeq((v) => v + 1);
+    }, RUNNING_REFRESH_INTERVAL_MS);
+
+    onCleanup(() => window.clearInterval(timer));
   });
 
   // Composer state (copied in spirit from SessionView but simplified)
@@ -1373,31 +1370,17 @@ export default function DocumentWriterView(props: SessionViewProps) {
               >
                 <FolderArchive size={16} />
               </button>
-              <label
-                class={`cursor-pointer p-2 hover:bg-dls-hover rounded ${!serverReady() ? "opacity-50 cursor-not-allowed" : ""
-                  }`}
-                title="Upload"
-              >
-                <Plus size={16} />
-                <input
-                  type="file"
-                  class="hidden"
-                  disabled={!serverReady()}
-                  onChange={handleUpload}
-                  accept={DOCUMENT_UPLOAD_ACCEPT}
-                />
-              </label>
             </div>
           }
         >
           <div class="h-12 px-3 border-b border-dls-border flex justify-between items-center">
             <div class="min-w-0">
-              <h2 class="text-sm font-semibold text-dls-text leading-none">Document Writer</h2>
-              <Show when={activeDocPath()}>
+              <h2 class="text-sm font-semibold text-dls-text leading-none">文档编写</h2>
+              {/* <Show when={activeDocPath()}>
                 <div class="mt-1 text-[11px] text-dls-secondary truncate" title={activeDocPath()}>
                   {activeDocPath()}
                 </div>
-              </Show>
+              </Show> */}
             </div>
             <div class="flex items-center gap-1">
               <button
@@ -1419,30 +1402,16 @@ export default function DocumentWriterView(props: SessionViewProps) {
               >
                 <RefreshCw size={16} class={documents.loading ? "animate-spin" : ""} />
               </button>
-                <button
-                  type="button"
-                  class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
-                  onClick={() => void archiveOtherDocuments()}
-                  disabled={!serverReady() || !targetDoc() || archiveBusy()}
-                  title="Archive other documents"
-                  aria-label="Archive other documents"
-                >
-                  <FolderArchive size={16} />
-                </button>
-              <label
-                class={`cursor-pointer p-2 hover:bg-dls-hover rounded ${!serverReady() ? "opacity-50 cursor-not-allowed" : ""
-                  }`}
-                title="Upload"
+              <button
+                type="button"
+                class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
+                onClick={() => void archiveOtherDocuments()}
+                disabled={!serverReady() || !targetDoc() || archiveBusy()}
+                title="Archive other documents"
+                aria-label="Archive other documents"
               >
-                <Plus size={16} />
-                <input
-                  type="file"
-                  class="hidden"
-                  disabled={!serverReady()}
-                  onChange={handleUpload}
-                  accept={DOCUMENT_UPLOAD_ACCEPT}
-                />
-              </label>
+                <FolderArchive size={16} />
+              </button>
             </div>
           </div>
         </Show>
@@ -1459,25 +1428,51 @@ export default function DocumentWriterView(props: SessionViewProps) {
                 </div>
               }
             >
-              <Show
-                when={(documentsList() ?? []).length > 0}
-                fallback={<div class="p-2 text-xs text-dls-secondary">No documents yet.</div>}
-              >
-                <Show
-                  when={Boolean(targetDocInList())}
-                  fallback={
-                    <For each={documentsList()}>
+              <Show when={targetDocName()}>
+                <button
+                  class={`w-full rounded flex items-center mb-1 transition-colors ${documentsCollapsed() ? "justify-center p-2" : "text-left p-2 gap-2"
+                    } ${activeDoc() === targetDocName()
+                      ? "bg-dls-hover text-dls-text"
+                      : "text-dls-secondary hover:bg-dls-surface"
+                    }`}
+                  onClick={() => setActiveDoc(targetDocName())}
+                  title={documentsCollapsed() ? targetDocName() : undefined}
+                >
+                  <FileText size={16} />
+                  <Show when={!documentsCollapsed()}>
+                    <span class="truncate">
+                      {targetDocName()}
+                      <span class="ml-2 text-[10px] text-dls-secondary">(target)</span>
+                    </span>
+                  </Show>
+                </button>
+              </Show>
+
+              <Show when={otherDocsList().length > 0 && !documentsCollapsed()}>
+                <button
+                  type="button"
+                  class="w-full mt-1 rounded flex items-center justify-between px-2 py-2 text-[11px] text-dls-secondary hover:text-dls-text hover:bg-dls-hover"
+                  onClick={() => setOtherDocsExpanded((v) => !v)}
+                  aria-expanded={otherDocsExpanded()}
+                >
+                  <span>{targetDocName() ? "Other documents" : "Session documents"}</span>
+                  <span class="flex items-center gap-2">
+                    <span class="text-[10px]">{otherDocsList().length}</span>
+                    <ChevronDown size={14} class={`transition-transform ${otherDocsExpanded() ? "rotate-180" : ""}`} />
+                  </span>
+                </button>
+                <Show when={otherDocsExpanded()}>
+                  <div class="mt-1">
+                    <For each={otherDocsList()}>
                       {(doc) => (
                         <button
+                          type="button"
                           class={`w-full rounded flex items-center mb-1 transition-colors ${documentsCollapsed() ? "justify-center p-2" : "text-left p-2 gap-2"
                             } ${activeDoc() === doc.name
                               ? "bg-dls-hover text-dls-text"
                               : "text-dls-secondary hover:bg-dls-surface"
                             }`}
-                          onClick={() => {
-                            setTargetDoc(doc.name);
-                            setActiveDoc(doc.name);
-                          }}
+                          onClick={() => setActiveDoc(doc.name)}
                           title={documentsCollapsed() ? doc.name : undefined}
                         >
                           <FileText size={16} />
@@ -1487,82 +1482,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
                         </button>
                       )}
                     </For>
-                  }
-                >
-                  <button
-                    class={`w-full rounded flex items-center mb-1 transition-colors ${documentsCollapsed() ? "justify-center p-2" : "text-left p-2 gap-2"
-                      } ${activeDoc() === targetDocInList()!.name
-                        ? "bg-dls-hover text-dls-text"
-                        : "text-dls-secondary hover:bg-dls-surface"
-                      }`}
-                    onClick={() => setActiveDoc(targetDocInList()!.name)}
-                    title={documentsCollapsed() ? targetDocInList()!.name : undefined}
-                  >
-                    <FileText size={16} />
-                    <Show when={!documentsCollapsed()}>
-                      <span class="truncate">
-                        {targetDocInList()!.name}
-                        <span class="ml-2 text-[10px] text-dls-secondary">(target)</span>
-                      </span>
-                    </Show>
-                  </button>
-
-                  <Show when={otherDocsList().length > 0 && !documentsCollapsed()}>
-                    <button
-                      type="button"
-                      class="w-full mt-1 rounded flex items-center justify-between px-2 py-2 text-[11px] text-dls-secondary hover:text-dls-text hover:bg-dls-hover"
-                      onClick={() => setOtherDocsExpanded((v) => !v)}
-                      aria-expanded={otherDocsExpanded()}
-                    >
-                      <span>Other documents</span>
-                      <span class="flex items-center gap-2">
-                        <span class="text-[10px]">{otherDocsList().length}</span>
-                        <ChevronDown size={14} class={`transition-transform ${otherDocsExpanded() ? "rotate-180" : ""}`} />
-                      </span>
-                    </button>
-                    <Show when={otherDocsExpanded()}>
-                      <div class="mt-1">
-                        <For each={otherDocsList()}>
-                          {(doc) => (
-                            <div
-                              class={`w-full rounded flex items-center mb-1 transition-colors ${activeDoc() === doc.name
-                                ? "bg-dls-hover text-dls-text"
-                                : "text-dls-secondary hover:bg-dls-surface"
-                                }`}
-                            >
-                              <button
-                                type="button"
-                                class={`flex-1 flex items-center transition-colors ${documentsCollapsed() ? "justify-center p-2" : "text-left p-2 gap-2"
-                                  }`}
-                                onClick={() => setActiveDoc(doc.name)}
-                                title={documentsCollapsed() ? doc.name : undefined}
-                              >
-                                <FileText size={16} />
-                                <Show when={!documentsCollapsed()}>
-                                  <span class="truncate">{doc.name}</span>
-                                </Show>
-                              </button>
-                              <Show when={!documentsCollapsed()}>
-                                <button
-                                  type="button"
-                                  class="p-2 rounded hover:bg-dls-active text-dls-secondary hover:text-dls-text"
-                                  onClick={() => {
-                                    setTargetDoc(doc.name);
-                                    setActiveDoc(doc.name);
-                                    setConfigSeq((v) => v + 1);
-                                  }}
-                                  title="Set as target"
-                                  aria-label={`Set ${doc.name} as target`}
-                                >
-                                  <ArrowRight size={16} />
-                                </button>
-                              </Show>
-                            </div>
-                          )}
-                        </For>
-                      </div>
-                    </Show>
-                  </Show>
+                  </div>
                 </Show>
               </Show>
             </Show>
@@ -1570,7 +1490,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
 
           <Show when={!documentsCollapsed()}>
             <div class="mt-3 pt-3 border-t border-dls-border">
-              <div class="px-2">
+              {/* <div class="px-2">
                 <div class="flex items-center justify-between">
                   <button
                     type="button"
@@ -1733,7 +1653,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
                     </div>
                   </Show>
                 </Show>
-              </div>
+              </div> */}
 
               <div class="flex items-center justify-between px-2">
                 <div class="text-[10px] uppercase tracking-wider text-dls-secondary">Reference materials</div>
@@ -1910,10 +1830,10 @@ export default function DocumentWriterView(props: SessionViewProps) {
         </div>
       </div>
 
-	      {/* Middle: OnlyOffice */}
-	      <div class="relative z-0 flex-1 min-w-0 flex flex-col">
-	        <div class="h-12 border-b border-dls-border flex items-center justify-between px-3">
-	          <div class="flex items-center gap-2 min-w-0">
+      {/* Middle: OnlyOffice */}
+      <div class="relative z-0 flex-1 min-w-0 flex flex-col">
+        <div class="h-12 border-b border-dls-border flex items-center justify-between px-3">
+          <div class="flex items-center gap-2 min-w-0">
             <button
               type="button"
               class="p-2 -ml-1 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text"
@@ -1924,42 +1844,42 @@ export default function DocumentWriterView(props: SessionViewProps) {
               <Show when={documentsCollapsed()} fallback={<PanelLeftClose size={16} />}>
                 <PanelLeftOpen size={16} />
               </Show>
-	            </button>
-	            <div class="text-xs text-dls-secondary truncate">
-	              <Show when={targetDoc()} fallback={"Upload/select a target document"}>
-	                Target: <span class="text-dls-text">{targetDoc()}</span>
-	                <Show when={activeDoc() && activeDoc() !== targetDoc()}>
-	                  <span class="ml-2 text-dls-secondary">· Viewing:</span>{" "}
-	                  <span class="text-dls-text">{activeDoc()}</span>
-	                </Show>
-	              </Show>
-	            </div>
-	          </div>
-	          <div class="flex items-center gap-2">
+            </button>
+            <div class="text-xs text-dls-secondary truncate">
+              <Show when={targetDoc()} fallback={"Select a target document from 模板/格式"}>
+                Target: <span class="text-dls-text">{targetDoc()}</span>
+                <Show when={activeDoc() && activeDoc() !== targetDoc()}>
+                  <span class="ml-2 text-dls-secondary">· Viewing:</span>{" "}
+                  <span class="text-dls-text">{activeDoc()}</span>
+                </Show>
+              </Show>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
             <button
               type="button"
               class="rounded-lg border border-dls-border bg-dls-surface px-2 py-1 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover disabled:opacity-50"
-	              onClick={() => {
-	                const path = activeDocPath();
-	                if (!path) return;
-	                const existing = props.prompt.trim();
-	                const next = existing ? `${existing}\n\nTarget document: ${path}\n` : `Target document: ${path}\n`;
-	                props.setPrompt(next);
-	              }}
-	              disabled={!activeDocPath()}
-	              title="Insert document path into the prompt"
-	            >
-	              Use in prompt
-	            </button>
+              onClick={() => {
+                const path = activeDocPath();
+                if (!path) return;
+                const existing = props.prompt.trim();
+                const next = existing ? `${existing}\n\nTarget document: ${path}\n` : `Target document: ${path}\n`;
+                props.setPrompt(next);
+              }}
+              disabled={!activeDocPath()}
+              title="Insert document path into the prompt"
+            >
+              Use in prompt
+            </button>
             <button
               type="button"
-	              class="rounded-lg border border-dls-border bg-dls-surface px-2 py-1 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover disabled:opacity-50"
-	              onClick={() => setConfigSeq((v) => v + 1)}
-	              disabled={!activeDoc()}
-	              title="Reload OnlyOffice config"
-	            >
-	              Reload
-	            </button>
+              class="rounded-lg border border-dls-border bg-dls-surface px-2 py-1 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover disabled:opacity-50"
+              onClick={() => setConfigSeq((v) => v + 1)}
+              disabled={!activeDoc()}
+              title="Reload OnlyOffice config"
+            >
+              Reload
+            </button>
             <button
               type="button"
               class="rounded-lg border border-dls-border bg-dls-surface px-2 py-1 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover disabled:opacity-50"
@@ -1976,42 +1896,42 @@ export default function DocumentWriterView(props: SessionViewProps) {
           </div>
         </div>
 
-	        <div class="flex-1 min-h-0 overflow-hidden">
-	          <Show
-	            when={activeDoc()}
-	            fallback={<div class="h-full flex items-center justify-center text-dls-secondary">Select a document to edit</div>}
-	          >
-	            <div class="relative h-full w-full">
-	              <Show when={editorPayload()} fallback={<div class="p-4 text-xs text-dls-secondary">Loading editor...</div>}>
-	                <OnlyOfficeEditor
-	                  documentServerUrl={editorPayload()!.documentServerUrl}
-	                  config={editorPayload()!.config}
-	                />
-	              </Show>
-	              <Show when={targetDoc() && activeDoc() && activeDoc() !== targetDoc()}>
-	                <div
-	                  class="pointer-events-none absolute inset-x-0 top-3 flex justify-center px-4"
-	                  role="status"
-	                  aria-live="polite"
-	                >
-	                  <div class="max-w-lg rounded-xl border border-dls-border bg-dls-surface/90 px-4 py-2 shadow-lg backdrop-blur">
-	                    <div class="text-xs text-dls-secondary">
-	                      <span class="font-medium text-dls-text">Preview mode</span>{" "}
-	                      (chat edits <span class="text-dls-text">{targetDoc()}</span>).{" "}
-	                      <button
-	                        type="button"
-	                        class="pointer-events-auto ml-2 underline text-dls-secondary hover:text-dls-text"
-	                        onClick={() => setActiveDoc(targetDoc())}
-	                      >
-	                        Back to target
-	                      </button>
-	                    </div>
-	                  </div>
-	                </div>
-	              </Show>
-	              <Show when={isAgentRunning()}>
-	                <div
-	                  class="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center px-4"
+        <div class="flex-1 min-h-0 overflow-hidden">
+          <Show
+            when={activeDoc()}
+            fallback={<div class="h-full flex items-center justify-center text-dls-secondary">Select a document to edit</div>}
+          >
+            <div class="relative h-full w-full">
+              <Show when={editorPayload()} fallback={<div class="p-4 text-xs text-dls-secondary">Loading editor...</div>}>
+                <OnlyOfficeEditor
+                  documentServerUrl={editorPayload()!.documentServerUrl}
+                  config={editorPayload()!.config}
+                />
+              </Show>
+              <Show when={targetDoc() && activeDoc() && activeDoc() !== targetDoc()}>
+                <div
+                  class="pointer-events-none absolute inset-x-0 top-3 flex justify-center px-4"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <div class="max-w-lg rounded-xl border border-dls-border bg-dls-surface/90 px-4 py-2 shadow-lg backdrop-blur">
+                    <div class="text-xs text-dls-secondary">
+                      <span class="font-medium text-dls-text">Preview mode</span>{" "}
+                      (chat edits <span class="text-dls-text">{targetDoc()}</span>).{" "}
+                      <button
+                        type="button"
+                        class="pointer-events-auto ml-2 underline text-dls-secondary hover:text-dls-text"
+                        onClick={() => setActiveDoc(targetDoc())}
+                      >
+                        Back to target
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </Show>
+              <Show when={isAgentRunning()}>
+                <div
+                  class="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center px-4"
                   role="status"
                   aria-live="polite"
                 >
@@ -2022,14 +1942,14 @@ export default function DocumentWriterView(props: SessionViewProps) {
                     </div>
                   </div>
                 </div>
-	              </Show>
-	            </div>
-	          </Show>
-	        </div>
-	      </div>
+              </Show>
+            </div>
+          </Show>
+        </div>
+      </div>
 
       {/* Right: Chat */}
-      <div class="relative z-30 shrink-0 w-[420px] border-l border-dls-border flex flex-col bg-dls-surface">
+      <div class="relative z-30 shrink-0 w-[500px] border-l border-dls-border flex flex-col bg-dls-surface">
         <div class="h-12 border-b border-dls-border px-3 flex items-center justify-between">
           <div class="min-w-0">
             <div class="text-sm font-medium text-dls-text truncate">Chat</div>
@@ -2107,13 +2027,13 @@ export default function DocumentWriterView(props: SessionViewProps) {
             class="w-full max-w-4xl rounded-2xl border border-dls-border bg-dls-surface shadow-2xl overflow-hidden"
             onMouseDown={(event) => event.stopPropagation()}
           >
-	            <div class="flex items-center justify-between px-4 py-3 border-b border-dls-border">
-	              <div class="min-w-0">
-	                <div class="text-sm font-semibold text-dls-text truncate">Insert section</div>
-	                <div class="mt-1 text-[11px] text-dls-secondary truncate">
-	                  Target: {targetDoc() ?? "—"}
-	                </div>
-	              </div>
+            <div class="flex items-center justify-between px-4 py-3 border-b border-dls-border">
+              <div class="min-w-0">
+                <div class="text-sm font-semibold text-dls-text truncate">Insert section</div>
+                <div class="mt-1 text-[11px] text-dls-secondary truncate">
+                  Target: {targetDoc() ?? "—"}
+                </div>
+              </div>
               <button
                 type="button"
                 class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text"
@@ -2204,11 +2124,11 @@ export default function DocumentWriterView(props: SessionViewProps) {
                     type="text"
                     value={sectionCopyTargetQuery()}
                     onInput={(event) => setSectionCopyTargetQuery(event.currentTarget.value)}
-	                    placeholder="Search target headings…"
-	                    class="w-full rounded-lg border border-dls-border bg-dls-surface px-3 py-2 text-xs text-dls-text placeholder:text-dls-secondary focus:outline-none focus:ring-2 focus:ring-dls-accent/40"
-	                    disabled={!targetDoc() || !isDocxSectionCopyTarget(targetDoc() ?? "")}
-	                  />
-	                </div>
+                    placeholder="Search target headings…"
+                    class="w-full rounded-lg border border-dls-border bg-dls-surface px-3 py-2 text-xs text-dls-text placeholder:text-dls-secondary focus:outline-none focus:ring-2 focus:ring-dls-accent/40"
+                    disabled={!targetDoc() || !isDocxSectionCopyTarget(targetDoc() ?? "")}
+                  />
+                </div>
                 <div class="mt-2 rounded-lg border border-dls-border overflow-hidden max-h-[360px] overflow-y-auto">
                   <Show when={!sectionCopyTargetHeadings.loading} fallback={<div class="p-3 text-xs text-dls-secondary">Loading…</div>}>
                     <Show

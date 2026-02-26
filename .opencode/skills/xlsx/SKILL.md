@@ -75,29 +75,6 @@ A user may ask you to create, edit, or analyze the contents of an .xlsx file. Yo
 
 ## Reading and analyzing data
 
-### Quick preview / extraction (no pandas/openpyxl required)
-
-In many OpenWork/OpenCode environments, heavyweight Python packages like `pandas` / `openpyxl` are **not** installed.
-If your goal is to **quickly read a spreadsheet** (sheet names, headers, a few rows) to feed into another deliverable
-(e.g. drafting a Word document), prefer the built-in OOXML reader:
-
-```bash
-# List sheets
-python3 .opencode/skills/xlsx/scripts/preview_xlsx.py file.xlsx --list-sheets
-
-# Preview the first sheet as JSON
-python3 .opencode/skills/xlsx/scripts/preview_xlsx.py file.xlsx --sheet 1 --max-rows 60 --max-cols 30 --format json
-
-# Preview as TSV (easy to skim / grep)
-python3 .opencode/skills/xlsx/scripts/preview_xlsx.py file.xlsx --sheet 1 --max-rows 60 --max-cols 30 --format tsv
-```
-
-If the user provides an old Excel binary (`.xls`), convert it first via LibreOffice:
-
-```bash
-python3 .opencode/skills/xlsx/scripts/office/soffice.py --headless --convert-to xlsx --outdir /tmp file.xls
-```
-
 ### Data analysis with pandas
 For data analysis, visualization, and basic operations, use **pandas** which provides powerful data manipulation capabilities:
 

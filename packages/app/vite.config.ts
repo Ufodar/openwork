@@ -2,6 +2,7 @@ import os from "node:os";
 import { defineConfig } from "vite";
 import tailwindcss from "@tailwindcss/vite";
 import solid from "vite-plugin-solid";
+import devtools from "solid-devtools/vite";
 
 const portValue = Number.parseInt(process.env.PORT ?? "", 10);
 const devPort = Number.isFinite(portValue) && portValue > 0 ? portValue : 5173;
@@ -24,7 +25,18 @@ if (shortHostname && shortHostname !== hostname) {
 }
 
 export default defineConfig({
-  plugins: [tailwindcss(), solid()],
+  plugins: [
+    devtools({
+      autoname: true,
+      locator: {
+        targetIDE: "vscode",
+        componentLocation: true,
+        jsxLocation: true,
+      },
+    }),
+    tailwindcss(),
+    solid(),
+  ],
   server: {
     port: devPort,
     strictPort: true,

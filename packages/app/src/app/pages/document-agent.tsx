@@ -50,6 +50,114 @@ const RIGHT_PANEL_MIN_WIDTH = 360;
 const CENTER_PANEL_MIN_WIDTH = 520;
 const STREAM_SCROLL_MIN_INTERVAL_MS = 90;
 const IMAGE_PREVIEW_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".avif"]);
+const MARKDOWN_PREVIEW_EXTENSIONS = new Set([".md", ".mdx", ".markdown"]);
+const TEXT_PREVIEW_EXTENSIONS = new Set([
+  ".txt",
+  ".text",
+  ".log",
+  ".out",
+  ".err",
+  ".trace",
+  ".csv",
+  ".tsv",
+  ".psv",
+  ".json",
+  ".jsonl",
+  ".ndjson",
+  ".geojson",
+  ".jsonc",
+  ".json5",
+  ".yaml",
+  ".yml",
+  ".toml",
+  ".ini",
+  ".conf",
+  ".cnf",
+  ".cfg",
+  ".properties",
+  ".props",
+  ".dotenv",
+  ".env",
+  ".xml",
+  ".xsd",
+  ".xsl",
+  ".xslt",
+  ".html",
+  ".htm",
+  ".mhtml",
+  ".sql",
+  ".ddl",
+  ".dml",
+  ".sh",
+  ".bash",
+  ".zsh",
+  ".fish",
+  ".ps1",
+  ".bat",
+  ".cmd",
+  ".py",
+  ".rb",
+  ".php",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".cjs",
+  ".ts",
+  ".tsx",
+  ".mts",
+  ".cts",
+  ".java",
+  ".kt",
+  ".kts",
+  ".go",
+  ".rs",
+  ".swift",
+  ".scala",
+  ".lua",
+  ".r",
+  ".c",
+  ".h",
+  ".cpp",
+  ".hpp",
+  ".cc",
+  ".hh",
+  ".css",
+  ".scss",
+  ".sass",
+  ".less",
+  ".proto",
+  ".graphql",
+  ".gql",
+  ".service",
+  ".timer",
+  ".socket",
+  ".mount",
+  ".target",
+  ".ics",
+  ".vcf",
+  ".eml",
+  ".srt",
+  ".vtt",
+]);
+const TEXT_PREVIEW_BASENAMES = new Set([
+  "dockerfile",
+  "makefile",
+  "readme",
+  "license",
+  ".env",
+  ".gitignore",
+  ".dockerignore",
+  ".editorconfig",
+  ".npmrc",
+  ".gitconfig",
+  ".bashrc",
+  ".zshrc",
+  "jenkinsfile",
+  "procfile",
+  "kustomization",
+  "hosts",
+]);
+const TEXT_PREVIEW_MAX_BYTES = 2 * 1024 * 1024;
 const ONLYOFFICE_IMPORT_EXTENSIONS = new Set(
   DOCUMENT_UPLOAD_ACCEPT.split(",")
     .map((ext) => ext.trim().toLowerCase())
@@ -62,8 +170,24 @@ const getFileExtension = (value: string) => {
   const match = base.toLowerCase().match(/\.[^.]+$/);
   return match ? match[0] : "";
 };
+const getFileBaseName = (value: string) => (value.split("/").pop() ?? value).toLowerCase();
 const isOnlyOfficeImportable = (path: string) => ONLYOFFICE_IMPORT_EXTENSIONS.has(getFileExtension(path));
 const isImagePreviewable = (path: string) => IMAGE_PREVIEW_EXTENSIONS.has(getFileExtension(path));
+const isMarkdownPreviewable = (path: string) => MARKDOWN_PREVIEW_EXTENSIONS.has(getFileExtension(path));
+const isTextPreviewable = (path: string) => {
+  const ext = getFileExtension(path);
+  if (TEXT_PREVIEW_EXTENSIONS.has(ext)) return true;
+  const base = getFileBaseName(path);
+  if (TEXT_PREVIEW_BASENAMES.has(base)) return true;
+  if (base === ".env" || base.startsWith(".env.")) return true;
+  return false;
+};
+const formatPreviewBytes = (bytes: number) => {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
 
 type FileTreeNode = {
   name: string;
@@ -763,10 +887,13 @@ export default function DocumentAgentView(props: SessionViewProps) {
     if (!session) return "";
     return `documents/sessions/${session}/${normalized}`;
   });
-  const activeDocKind = createMemo<"none" | "image" | "onlyoffice" | "unsupported">(() => {
+  const activeDocKind = createMemo<"none" | "image" | "pdf" | "markdown" | "text" | "onlyoffice" | "unsupported">(() => {
     const doc = activeDoc();
     if (!doc) return "none";
     if (isImagePreviewable(doc)) return "image";
+    if (getFileExtension(doc) === ".pdf") return "pdf";
+    if (isMarkdownPreviewable(doc)) return "markdown";
+    if (isTextPreviewable(doc)) return "text";
     if (isOnlyOfficeImportable(doc)) return "onlyoffice";
     return "unsupported";
   });
@@ -778,6 +905,66 @@ export default function DocumentAgentView(props: SessionViewProps) {
     query.set("docId", doc);
     query.set("session", cfg.sessionId);
     return buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/file", query);
+  });
+  const textPreviewSource = createMemo(() => {
+    const kind = activeDocKind();
+    const url = activeDocDownloadUrl();
+    if (!url) return null;
+    if (kind !== "markdown" && kind !== "text") return null;
+    return { url, kind };
+  });
+  const [textPreview] = createResource(textPreviewSource, async (source) => {
+    if (!source) return null;
+    const response = await fetch(source.url);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const blob = await response.blob();
+    const shownBytes = Math.min(blob.size, TEXT_PREVIEW_MAX_BYTES);
+    const content = await blob.slice(0, shownBytes).text();
+    return {
+      content,
+      shownBytes,
+      totalBytes: blob.size,
+      truncated: blob.size > shownBytes,
+    };
+  });
+  const [pdfPreviewUrl, setPdfPreviewUrl] = createSignal<string | null>(null);
+  const [pdfPreviewError, setPdfPreviewError] = createSignal<string | null>(null);
+  const clearPdfPreviewUrl = () => {
+    const current = pdfPreviewUrl();
+    if (current) URL.revokeObjectURL(current);
+    setPdfPreviewUrl(null);
+  };
+  createEffect(() => {
+    const kind = activeDocKind();
+    const url = activeDocDownloadUrl();
+    if (kind !== "pdf" || !url) {
+      setPdfPreviewError(null);
+      clearPdfPreviewUrl();
+      return;
+    }
+    let canceled = false;
+    const controller = new AbortController();
+    setPdfPreviewError(null);
+    (async () => {
+      try {
+        const response = await fetch(url, { signal: controller.signal });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const blob = await response.blob();
+        if (canceled) return;
+        const objectUrl = URL.createObjectURL(blob);
+        clearPdfPreviewUrl();
+        setPdfPreviewUrl(objectUrl);
+      } catch (error) {
+        if (canceled) return;
+        if (error instanceof Error && error.name === "AbortError") return;
+        clearPdfPreviewUrl();
+        setPdfPreviewError(error instanceof Error ? error.message : tr("docagent.preview_load_failed"));
+      }
+    })();
+    onCleanup(() => {
+      canceled = true;
+      controller.abort();
+    });
   });
 
   createEffect(() => {
@@ -901,6 +1088,7 @@ export default function DocumentAgentView(props: SessionViewProps) {
   });
 
   onCleanup(() => {
+    clearPdfPreviewUrl();
     if (scrollFrame !== undefined) {
       window.cancelAnimationFrame(scrollFrame);
       scrollFrame = undefined;
@@ -1351,6 +1539,41 @@ export default function DocumentAgentView(props: SessionViewProps) {
                     alt={activeDoc() ?? "image"}
                     class="max-h-full max-w-full object-contain rounded-lg border border-dls-border bg-white"
                   />
+                </div>
+              </Show>
+              <Show when={activeDocKind() === "pdf"}>
+                <div class="h-full w-full bg-dls-surface">
+                  <Show when={!pdfPreviewError()} fallback={<div class="p-4 text-xs text-red-11">{pdfPreviewError()}</div>}>
+                    <Show when={pdfPreviewUrl()} fallback={<div class="p-4 text-xs text-dls-secondary">{tr("docagent.loading_pdf_preview")}</div>}>
+                      <iframe
+                        src={pdfPreviewUrl()!}
+                        title={activeDoc() ?? tr("docagent.pdf_preview_title")}
+                        class="h-full w-full border-0 bg-white"
+                      />
+                    </Show>
+                  </Show>
+                </div>
+              </Show>
+              <Show when={activeDocKind() === "markdown" || activeDocKind() === "text"}>
+                <div class="h-full w-full overflow-auto bg-dls-surface p-4">
+                  <Show when={!textPreview.error} fallback={<div class="text-xs text-red-11">{textPreview.error instanceof Error ? textPreview.error.message : tr("docagent.preview_load_failed")}</div>}>
+                    <Show when={!textPreview.loading && textPreview()} fallback={<div class="text-xs text-dls-secondary">{tr("docagent.loading_text_preview")}</div>}>
+                      <div class="mb-2 text-[11px] text-dls-secondary">
+                        <Show when={activeDocKind() === "markdown"} fallback={tr("docagent.text_preview_readonly")}>
+                          {tr("docagent.markdown_preview_readonly")}
+                        </Show>
+                        <Show when={textPreview()!.truncated}>
+                          {" "}
+                          {tr("docagent.preview_truncated")
+                            .replace("{shown}", formatPreviewBytes(textPreview()!.shownBytes))
+                            .replace("{total}", formatPreviewBytes(textPreview()!.totalBytes))}
+                        </Show>
+                      </div>
+                      <pre class="text-xs leading-relaxed whitespace-pre-wrap break-words rounded-lg border border-dls-border bg-white p-3 text-dls-text">
+                        {textPreview()!.content}
+                      </pre>
+                    </Show>
+                  </Show>
                 </div>
               </Show>
               <Show when={activeDocKind() === "onlyoffice"}>

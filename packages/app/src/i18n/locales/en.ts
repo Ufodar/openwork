@@ -193,8 +193,15 @@ export default {
   "docagent.add_server_token_to_attach_files": "Add a server token to attach files.",
   "docagent.connect_server_to_attach_files": "Connect to OpenWork server to attach files.",
   "docagent.unsupported_preview_title": "This file type can't be previewed in the editor.",
-  "docagent.unsupported_preview_desc": "OnlyOffice supports office-style formats. Download the file to view it in a compatible app.",
+  "docagent.unsupported_preview_desc": "Image, PDF, Markdown, plain-text source, and OnlyOffice document previews are supported. Download other formats to view them in a compatible app.",
   "docagent.download_file": "Download file",
+  "docagent.loading_text_preview": "Loading text preview...",
+  "docagent.loading_pdf_preview": "Loading PDF preview...",
+  "docagent.preview_load_failed": "Failed to load preview.",
+  "docagent.text_preview_readonly": "Text preview (read-only).",
+  "docagent.markdown_preview_readonly": "Markdown preview (read-only source).",
+  "docagent.preview_truncated": "Preview truncated: showing {shown} of {total}.",
+  "docagent.pdf_preview_title": "PDF preview",
 
   // ==================== Workspace ====================
   "workspace.rename_title": "Edit worker name",

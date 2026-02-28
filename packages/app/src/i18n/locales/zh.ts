@@ -192,6 +192,16 @@ export default {
   "docagent.no_session_selected": "未选择会话",
   "docagent.add_server_token_to_attach_files": "请先添加服务器令牌后再上传附件。",
   "docagent.connect_server_to_attach_files": "请先连接 OpenWork 服务器后再上传附件。",
+  "docagent.unsupported_preview_title": "该文件类型暂不支持在编辑器中预览。",
+  "docagent.unsupported_preview_desc": "已支持图片、PDF、Markdown、文本源码和 OnlyOffice 办公文档预览。其他格式可先下载后在兼容应用中查看。",
+  "docagent.download_file": "下载文件",
+  "docagent.loading_text_preview": "正在加载文本预览...",
+  "docagent.loading_pdf_preview": "正在加载 PDF 预览...",
+  "docagent.preview_load_failed": "加载预览失败。",
+  "docagent.text_preview_readonly": "文本预览（只读）。",
+  "docagent.markdown_preview_readonly": "Markdown 预览（只读源码）。",
+  "docagent.preview_truncated": "预览已截断：当前显示 {shown} / {total}。",
+  "docagent.pdf_preview_title": "PDF 预览",
 
   // ==================== Workspace ====================
   "workspace.rename_title": "编辑工作区名称",

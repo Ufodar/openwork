@@ -380,12 +380,46 @@ function normalizeDocumentPath(value: string): string {
     return parts.join("/");
 }
 
-function validateDocumentMutationPath(relPath: string): void {
+const ALLOWED_HIDDEN_FILE_NAMES = new Set([
+    ".env",
+    ".gitignore",
+    ".dockerignore",
+    ".editorconfig",
+    ".npmrc",
+    ".gitconfig",
+    ".bashrc",
+    ".zshrc",
+]);
+
+function isAllowedHiddenLeafName(name: string): boolean {
+    const lower = name.trim().toLowerCase();
+    if (!lower.startsWith(".")) return false;
+    if (ALLOWED_HIDDEN_FILE_NAMES.has(lower)) return true;
+    if (lower.startsWith(".env.")) return true;
+    return false;
+}
+
+function shouldHideDocumentEntry(entryName: string, isDirectory: boolean): boolean {
+    if (!entryName.startsWith(".")) return false;
+    if (isDirectory) return true;
+    return !isAllowedHiddenLeafName(entryName);
+}
+
+function validateDocumentMutationPath(relPath: string, options?: { allowHiddenLeafFile?: boolean }): void {
     const segments = relPath.split("/").filter(Boolean);
     if (!segments.length) {
         throw new ApiError(400, "invalid_request", "Document path is required");
     }
-    if (segments.some((segment) => segment.startsWith("."))) {
+    const allowHiddenLeafFile = Boolean(options?.allowHiddenLeafFile);
+    const hasDisallowedHiddenSegment = segments.some((segment, index) => {
+        if (!segment.startsWith(".")) return false;
+        const isLeaf = index === segments.length - 1;
+        if (allowHiddenLeafFile && isLeaf && isAllowedHiddenLeafName(segment)) {
+            return false;
+        }
+        return true;
+    });
+    if (hasDisallowedHiddenSegment) {
         throw new ApiError(400, "invalid_request", "Hidden paths are not allowed");
     }
 }
@@ -473,7 +507,7 @@ export function createDocumentRoutes(routes: unknown[]) {
             const walk = async (dir: string) => {
                 const entries = await readdir(dir, { withFileTypes: true });
                 for (const entry of entries) {
-                    if (entry.name.startsWith(".")) continue;
+                    if (shouldHideDocumentEntry(entry.name, entry.isDirectory())) continue;
                     const fullPath = join(dir, entry.name);
                     if (entry.isDirectory()) {
                         const relDir = relative(docsDir, fullPath).replace(/\\/g, "/");
@@ -541,7 +575,7 @@ export function createDocumentRoutes(routes: unknown[]) {
             const walk = async (dir: string) => {
                 const entries = await readdir(dir, { withFileTypes: true });
                 for (const entry of entries) {
-                    if (entry.name.startsWith(".")) continue; // hide dot dirs/files
+                    if (shouldHideDocumentEntry(entry.name, entry.isDirectory())) continue;
                     const fullPath = join(dir, entry.name);
                     if (entry.isDirectory()) {
                         await walk(fullPath);
@@ -1939,7 +1973,7 @@ export function createDocumentRoutes(routes: unknown[]) {
             const requestedPath = typeof payload?.path === "string" ? payload.path : "";
             const relPath = normalizeDocumentPath(requestedPath);
             if (!relPath) throw new ApiError(400, "invalid_request", "File path is required");
-            validateDocumentMutationPath(relPath);
+            validateDocumentMutationPath(relPath, { allowHiddenLeafFile: true });
 
             const docsDir = resolveDocumentsDir(workspace.path, sessionId);
             await ensureDir(docsDir);
@@ -2017,7 +2051,7 @@ export function createDocumentRoutes(routes: unknown[]) {
                     destRel = `${destRel}/${name}`;
                 }
             }
-            validateDocumentMutationPath(destRel);
+            validateDocumentMutationPath(destRel, { allowHiddenLeafFile: true });
 
             const filePath = resolveDocumentPathSafe(docsDir, destRel);
             await ensureDir(dirname(filePath));

@@ -241,10 +241,30 @@ const uploadRelativePath = (file: File) => {
   return normalizeRelativePath(candidate, file.name || "file");
 };
 
+const ALLOWED_HIDDEN_FILE_NAMES = new Set([
+  ".env",
+  ".gitignore",
+  ".dockerignore",
+  ".editorconfig",
+  ".npmrc",
+  ".gitconfig",
+  ".bashrc",
+  ".zshrc",
+]);
+
 const hasHiddenPathSegment = (path: string) => {
   const normalized = normalizeRelativePath(path, "");
   if (!normalized) return false;
-  return normalized.split("/").some((segment) => segment.startsWith("."));
+  const segments = normalized.split("/");
+  return segments.some((segment, index) => {
+    if (!segment.startsWith(".")) return false;
+    const isLeaf = index === segments.length - 1;
+    if (!isLeaf) return true;
+    const lower = segment.toLowerCase();
+    if (ALLOWED_HIDDEN_FILE_NAMES.has(lower)) return false;
+    if (lower.startsWith(".env.")) return false;
+    return true;
+  });
 };
 
 const createRefFolderNode = (name: string, path: string): RefFolderNode => ({

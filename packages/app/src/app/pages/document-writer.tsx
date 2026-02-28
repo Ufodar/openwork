@@ -2604,7 +2604,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
                             .replace("{total}", formatPreviewBytes(textPreview()!.totalBytes))}
                         </Show>
                       </div>
-                      <pre class="text-xs leading-relaxed whitespace-pre-wrap break-words rounded-lg border border-dls-border bg-white p-3 text-dls-text">
+                      <pre class="text-xs leading-relaxed whitespace-pre-wrap break-words rounded-lg border border-dls-border bg-dls-sidebar p-3 text-dls-text font-mono">
                         {textPreview()!.content}
                       </pre>
                     </Show>

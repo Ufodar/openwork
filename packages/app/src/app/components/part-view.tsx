@@ -5,6 +5,7 @@ import { File } from "lucide-solid";
 import { isTauriRuntime, safeStringify, summarizeStep } from "../utils";
 import { usePlatform } from "../context/platform";
 import { perfNow, recordPerfLog } from "../lib/perf-log";
+import { currentLocale, t } from "../../i18n";
 
 type Props = {
   part: Part;
@@ -407,6 +408,15 @@ function createCustomRenderer(tone: "light" | "dark") {
 }
 
 export default function PartView(props: Props) {
+  const tr = (key: string) => t(key, currentLocale());
+  const format = (key: string, vars?: Record<string, string | number>) => {
+    let text = tr(key);
+    if (!vars) return text;
+    for (const [name, value] of Object.entries(vars)) {
+      text = text.replace(new RegExp(`\\{${name}\\}`, "g"), String(value));
+    }
+    return text;
+  };
   const platform = usePlatform();
   const p = () => props.part;
   const developerMode = () => props.developerMode ?? false;
@@ -611,17 +621,84 @@ export default function PartView(props: Props) {
   });
   const toolState = () => toolData()?.state ?? {};
   const toolName = () => (toolData()?.tool ? String(toolData()?.tool) : "tool");
+  const localizeToolText = (raw: string) => {
+    const text = raw.trim();
+    if (!text) return text;
+
+    const compactPathToken = (value: string) => {
+      const token = value
+        .trim()
+        .replace(/^[`'"([{]+|[`'"\])},.;:]+$/g, "");
+      const segments = token.split(/[\\/]/).filter(Boolean);
+      return segments.length > 0 ? segments[segments.length - 1] : token;
+    };
+
+    const patterns: Array<{ pattern: RegExp; render: (value: string) => string }> = [
+      { pattern: /^Read (.+)$/i, render: (value) => format("session.tool_read_file", { target: compactPathToken(value) }) },
+      { pattern: /^Edit (.+)$/i, render: (value) => format("session.tool_edit_file", { target: compactPathToken(value) }) },
+      { pattern: /^(?:Write|Update) (.+)$/i, render: (value) => format("session.tool_update_file", { target: compactPathToken(value) }) },
+      { pattern: /^List (.+)$/i, render: (value) => format("session.tool_list_target", { target: compactPathToken(value) }) },
+      { pattern: /^Search (.+)$/i, render: (value) => format("session.tool_search_target", { target: value }) },
+      { pattern: /^Fetch (.+)$/i, render: (value) => format("session.tool_fetch_target", { target: value }) },
+      {
+        pattern: /^filesystem\s+read(?:\s+text)?\s+file(?:\s+(.+))?$/i,
+        render: (value) =>
+          value ? format("session.tool_read_file", { target: compactPathToken(value) }) : tr("session.tool_read_file_generic"),
+      },
+      {
+        pattern: /^filesystem\s+write\s+file(?:\s+(.+))?$/i,
+        render: (value) =>
+          value
+            ? format("session.tool_update_file", { target: compactPathToken(value) })
+            : tr("session.tool_write_file_generic"),
+      },
+      {
+        pattern: /^filesystem\s+list\s+directory(?:\s+(.+))?$/i,
+        render: (value) =>
+          value ? format("session.tool_list_target", { target: compactPathToken(value) }) : tr("session.tool_list_files"),
+      },
+      {
+        pattern: /^filesystem\s+get\s+file\s+info(?:\s+(.+))?$/i,
+        render: (value) =>
+          value ? format("session.tool_read_file", { target: compactPathToken(value) }) : tr("session.tool_file_info"),
+      },
+    ];
+
+    for (const entry of patterns) {
+      const match = text.match(entry.pattern);
+      if (match) return entry.render((match[1] ?? "").trim());
+    }
+
+    const normalizedLower = text.toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+    const lowerExact = new Map<string, string>([
+      ["filesystem list directory", tr("session.tool_list_files")],
+      ["filesystem read text file", tr("session.tool_read_file_generic")],
+      ["filesystem write file", tr("session.tool_write_file_generic")],
+      ["filesystem get file info", tr("session.tool_file_info")],
+      ["read file", tr("session.tool_read_file_generic")],
+      ["write file", tr("session.tool_write_file_generic")],
+      ["list files", tr("session.tool_list_files")],
+    ]);
+    return lowerExact.get(normalizedLower) ?? text;
+  };
   const toolTitle = () => {
     const title = toolSummary()?.title;
-    if (title) return title;
-    return toolState()?.title ? String(toolState().title) : toolName();
+    if (title) return localizeToolText(title);
+    return localizeToolText(toolState()?.title ? String(toolState().title) : toolName());
   };
   const toolStatus = () => (toolState()?.status ? String(toolState().status) : "unknown");
+  const toolStatusLabel = () => {
+    const status = toolStatus().toLowerCase();
+    if (status === "completed" || status === "done") return tr("session.tool_status_completed");
+    if (status === "running" || status === "pending") return tr("session.tool_status_running");
+    if (status === "error" || status === "failed") return tr("session.tool_status_error");
+    return tr("session.tool_status_unknown");
+  };
   const toolSubtitle = () => {
     const detail = toolSummary()?.detail;
-    if (detail) return detail;
+    if (detail) return localizeToolText(detail);
     if (toolState()?.subtitle || toolState()?.detail || toolState()?.summary) {
-      return String(toolState().subtitle ?? toolState().detail ?? toolState().summary);
+      return localizeToolText(String(toolState().subtitle ?? toolState().detail ?? toolState().summary));
     }
     return "";
   };
@@ -851,7 +928,9 @@ export default function PartView(props: Props) {
                 <div class={`text-xs font-medium text-gray-12`.trim()}>
                   {toolTitle()}
                 </div>
-                <div class={`text-[11px] ${subtleTextClass()}`.trim()}>{toolName()}</div>
+                <Show when={developerMode()}>
+                  <div class={`text-[11px] ${subtleTextClass()}`.trim()}>{toolName()}</div>
+                </Show>
               </div>
               <div
                 class={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
@@ -864,7 +943,7 @@ export default function PartView(props: Props) {
                         : "bg-gray-2/10 text-gray-12"
                 }`}
               >
-                {toolStatus()}
+                {toolStatusLabel()}
               </div>
             </div>
 
@@ -874,7 +953,7 @@ export default function PartView(props: Props) {
 
             <Show when={diagnostics().length > 0}>
               <div class={`rounded-lg border ${panelBgClass()} p-2`.trim()}>
-                <div class={`text-[11px] font-medium ${subtleTextClass()}`.trim()}>Diagnostics</div>
+                <div class={`text-[11px] font-medium ${subtleTextClass()}`.trim()}>{tr("session.tool_diagnostics")}</div>
                 <div class="mt-2 grid gap-2">
                   <For each={diagnostics()}>
                     {(diag: any) => (
@@ -902,7 +981,7 @@ export default function PartView(props: Props) {
 
             <Show when={diffText()}>
               <div class={`rounded-lg border ${panelBgClass()} p-2`.trim()}>
-                <div class={`text-[11px] font-medium ${subtleTextClass()}`.trim()}>Diff</div>
+                <div class={`text-[11px] font-medium ${subtleTextClass()}`.trim()}>{tr("session.tool_diff")}</div>
                 <div class="mt-2 grid gap-1 rounded-md overflow-hidden">
                   <For each={diffLines()}>
                     {(line) => (
@@ -949,7 +1028,7 @@ export default function PartView(props: Props) {
 
             <Show when={showToolOutput() && hasReadXmlOutput()}>
               <details class={`rounded-lg ${panelBgClass()} p-2`.trim()}>
-                <summary class={`cursor-pointer text-xs ${subtleTextClass()}`.trim()}>Raw read output</summary>
+                <summary class={`cursor-pointer text-xs ${subtleTextClass()}`.trim()}>{tr("session.tool_raw_read_output")}</summary>
                 <pre class={`mt-2 whitespace-pre-wrap break-words text-xs text-gray-12`.trim()}>
                   {outputPreview()}
                 </pre>
@@ -961,13 +1040,13 @@ export default function PartView(props: Props) {
                 class={`text-[11px] ${subtleTextClass()} hover:text-gray-12 transition-colors`}
                 onClick={() => setExpandedOutput((current) => !current)}
               >
-                {expandedOutput() ? "Show less" : "Show more"}
+                {expandedOutput() ? tr("session.show_less") : tr("session.show_more")}
               </button>
             </Show>
 
             <Show when={showToolOutput() && toolInput() != null}>
               <details class={`rounded-lg ${panelBgClass()} p-2`.trim()}>
-                <summary class={`cursor-pointer text-xs ${subtleTextClass()}`.trim()}>Input</summary>
+                <summary class={`cursor-pointer text-xs ${subtleTextClass()}`.trim()}>{tr("session.tool_input")}</summary>
                 <pre class={`mt-2 whitespace-pre-wrap break-words text-xs text-gray-12`.trim()}>
                   {safeStringify(toolInput())}
                 </pre>

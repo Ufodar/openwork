@@ -1,4 +1,4 @@
-import { For, Show, createMemo, createSignal, onCleanup } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import type { JSX } from "solid-js";
 import type { Part } from "@opencode-ai/sdk/v2/client";
 import { Check, ChevronDown, ChevronRight, Copy, Eye, File, FileEdit, FolderSearch, Pencil, Search, Sparkles, Terminal } from "lucide-solid";
@@ -139,8 +139,95 @@ function getTaskStepInfo(part: Part): TaskStepInfo {
 
 export default function MessageList(props: MessageListProps) {
   const tr = (key: string) => t(key, currentLocale());
+  const format = (key: string, vars?: Record<string, string | number>) => {
+    let text = tr(key);
+    if (!vars) return text;
+    for (const [name, value] of Object.entries(vars)) {
+      text = text.replace(new RegExp(`\\{${name}\\}`, "g"), String(value));
+    }
+    return text;
+  };
+  const localizeStepText = (raw: string) => {
+    const text = raw.trim();
+    if (!text) return text;
+    const compactPathToken = (value: string) => {
+      const token = value
+        .trim()
+        .replace(/^[`'"([{]+|[`'"\])},.;:]+$/g, "");
+      const segments = token.split(/[\\/]/).filter(Boolean);
+      return segments.length > 0 ? segments[segments.length - 1] : token;
+    };
+
+    const thinking = text.match(/^Thinking:\s*(.+)$/i);
+    if (thinking) return `${tr("session.thinking")}: ${thinking[1]}`;
+
+    const patterns: Array<{ pattern: RegExp; render: (value: string) => string }> = [
+      { pattern: /^Read (.+)$/i, render: (value) => format("session.tool_read_file", { target: value }) },
+      { pattern: /^Edit (.+)$/i, render: (value) => format("session.tool_edit_file", { target: value }) },
+      { pattern: /^(?:Write|Update) (.+)$/i, render: (value) => format("session.tool_update_file", { target: value }) },
+      { pattern: /^List (.+)$/i, render: (value) => format("session.tool_list_target", { target: value }) },
+      { pattern: /^Search (.+)$/i, render: (value) => format("session.tool_search_target", { target: value }) },
+      { pattern: /^Fetch (.+)$/i, render: (value) => format("session.tool_fetch_target", { target: value }) },
+      { pattern: /^Load skill (.+)$/i, render: (value) => format("session.tool_load_skill_target", { target: value }) },
+      { pattern: /^Delegate (.+)$/i, render: (value) => format("session.tool_delegate_target", { target: value }) },
+      { pattern: /^Run (.+)$/i, render: (value) => format("session.tool_run_command_target", { target: value }) },
+      {
+        pattern: /^filesystem\s+read(?:\s+text)?\s+file(?:\s+(.+))?$/i,
+        render: (value) =>
+          value ? format("session.tool_read_file", { target: compactPathToken(value) }) : tr("session.tool_read_file_generic"),
+      },
+      {
+        pattern: /^filesystem\s+write\s+file(?:\s+(.+))?$/i,
+        render: (value) =>
+          value
+            ? format("session.tool_update_file", { target: compactPathToken(value) })
+            : tr("session.tool_write_file_generic"),
+      },
+      {
+        pattern: /^filesystem\s+list\s+directory(?:\s+(.+))?$/i,
+        render: (value) =>
+          value ? format("session.tool_list_target", { target: compactPathToken(value) }) : tr("session.tool_list_files"),
+      },
+      {
+        pattern: /^filesystem\s+get\s+file\s+info(?:\s+(.+))?$/i,
+        render: (value) =>
+          value ? format("session.tool_read_file", { target: compactPathToken(value) }) : tr("session.tool_file_info"),
+      },
+    ];
+
+    for (const entry of patterns) {
+      const match = text.match(entry.pattern);
+      if (match) return entry.render((match[1] ?? "").trim());
+    }
+
+    const exact = new Map<string, string>([
+      ["Read file", tr("session.tool_read_file_generic")],
+      ["Edit file", tr("session.tool_edit_file_generic")],
+      ["Write file", tr("session.tool_write_file_generic")],
+      ["Update file", tr("session.tool_update_file_generic")],
+      ["List files", tr("session.tool_list_files")],
+      ["Search code", tr("session.tool_search_code")],
+      ["Fetch web page", tr("session.tool_fetch_web")],
+      ["Run command", tr("session.tool_run_command")],
+      ["Task", tr("session.tool_task")],
+      ["Load skill", tr("session.tool_load_skill")],
+      ["Compact session context", tr("session.status_compacting_context")],
+    ]);
+    const direct = exact.get(text);
+    if (direct) return direct;
+
+    const normalizedLower = text.toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+    const lowerExact = new Map<string, string>([
+      ["filesystem list directory", tr("session.tool_list_files")],
+      ["filesystem read text file", tr("session.tool_read_file_generic")],
+      ["filesystem write file", tr("session.tool_write_file_generic")],
+      ["filesystem get file info", tr("session.tool_file_info")],
+    ]);
+    return lowerExact.get(normalizedLower) ?? text;
+  };
   const [copyingId, setCopyingId] = createSignal<string | null>(null);
   let previousMessagePartCountById = new Map<string, number>();
+  let autoExpandedStepIds = new Set<string>();
   let copyTimeout: number | undefined;
   const isAttachmentPart = (part: Part) => {
     if (part.type !== "file") return false;
@@ -267,14 +354,22 @@ export default function MessageList(props: MessageListProps) {
       stepGroupCount += groups.reduce((count, group) => (group.kind === "steps" ? count + 1 : count), 0);
 
       if (isStepsOnly) {
-        blocks.push({
+        const nextCluster: StepClusterBlock = {
           kind: "steps-cluster",
           id: stepGroups[0].id,
           stepIds: stepGroups.map((group) => group.id),
           partsGroups: stepGroups.map((group) => group.parts),
           messageIds: [messageId],
           isUser,
-        });
+        };
+        const previous = blocks[blocks.length - 1];
+        if (previous?.kind === "steps-cluster" && previous.isUser === nextCluster.isUser) {
+          previous.stepIds = [...previous.stepIds, ...nextCluster.stepIds];
+          previous.partsGroups = [...previous.partsGroups, ...nextCluster.partsGroups];
+          previous.messageIds = [...previous.messageIds, ...nextCluster.messageIds];
+        } else {
+          blocks.push(nextCluster);
+        }
         return;
       }
 
@@ -321,6 +416,27 @@ export default function MessageList(props: MessageListProps) {
     return blocks;
   });
 
+  createEffect(() => {
+    if (props.developerMode) return;
+    const blocks = messageBlocks();
+    const toExpand: string[] = [];
+    for (const block of blocks) {
+      if (block.kind !== "steps-cluster") continue;
+      const ids = [block.id, ...block.stepIds];
+      for (const id of ids) {
+        if (!id || autoExpandedStepIds.has(id)) continue;
+        autoExpandedStepIds.add(id);
+        toExpand.push(id);
+      }
+    }
+    if (!toExpand.length) return;
+    props.setExpandedStepIds((current) => {
+      const next = new Set(current);
+      toExpand.forEach((id) => next.add(id));
+      return next;
+    });
+  });
+
   const latestAssistantMessageId = createMemo(() => {
     for (let index = props.messages.length - 1; index >= 0; index -= 1) {
       const message = props.messages[index];
@@ -348,13 +464,15 @@ export default function MessageList(props: MessageListProps) {
     const category = createMemo(() => summary().toolCategory ?? "tool");
     const status = createMemo(() => summary().status);
     const task = createMemo(() => getTaskStepInfo(rowProps.part));
+    const localizedTitle = createMemo(() => localizeStepText(summary().title));
+    const localizedDetail = createMemo(() => localizeStepText(summary().detail ?? ""));
 
     if (rowProps.part.type === "reasoning") {
       return (
         <div class="py-2">
           <div class="rounded-2xl border border-gray-6/60 bg-gray-2/40 px-3 py-2.5">
-            <div class="text-[12px] font-medium text-gray-12">{summary().title}</div>
-            <Show when={summary().detail}>
+            <div class="text-[12px] font-medium text-gray-12">{localizedTitle()}</div>
+            <Show when={localizedDetail()}>
               {(detail) => (
                 <p class="mt-1 text-[12px] leading-relaxed text-gray-10 whitespace-pre-wrap break-words">
                   {detail()}
@@ -379,7 +497,7 @@ export default function MessageList(props: MessageListProps) {
         </div>
         {/* Title */}
         <span class="text-[13px] text-gray-12 font-medium truncate min-w-0 max-w-[260px]">
-          {summary().title}
+          {localizedTitle()}
         </span>
         {/* Skill badge */}
         <Show when={summary().isSkill}>
@@ -393,15 +511,15 @@ export default function MessageList(props: MessageListProps) {
           </span>
         </Show>
         {/* Detail - truncated to single line */}
-        <Show when={summary().detail}>
+        <Show when={localizedDetail()}>
           <span class="text-[12px] text-gray-9 truncate min-w-0">
-            {summary().detail}
+            {localizedDetail()}
           </span>
         </Show>
-        <Show when={task().agentType && !summary().detail}>
+        <Show when={task().agentType && !localizedDetail()}>
           {(agentType) => (
             <span class="text-[12px] text-gray-9 truncate min-w-0">
-              {agentType()} agent
+              {format("session.tool_agent_suffix", { agent: String(agentType()) })}
             </span>
           )}
         </Show>
@@ -531,49 +649,55 @@ export default function MessageList(props: MessageListProps) {
         const description = pick("description");
         if (description) return compactText(description);
         const command = pick("command", "cmd");
-        return command ? compactText(`Run ${command}`, 48) : "Run command";
+        return command
+          ? compactText(format("session.tool_run_command_target", { target: command }), 56)
+          : tr("session.tool_run_command");
       }
 
       if (tool === "read") {
         const file = target("filePath", "path", "file");
-        return file ? `Read ${file}` : "Read file";
+        return file ? format("session.tool_read_file", { target: file }) : tr("session.tool_read_file_generic");
       }
 
       if (tool === "edit") {
         const file = target("filePath", "path", "file");
-        return file ? `Edit ${file}` : "Edit file";
+        return file ? format("session.tool_edit_file", { target: file }) : tr("session.tool_edit_file_generic");
       }
 
       if (tool === "write" || tool === "apply_patch") {
         const file = target("filePath", "path", "file");
-        return file ? `Update ${file}` : "Update file";
+        return file ? format("session.tool_update_file", { target: file }) : tr("session.tool_update_file_generic");
       }
 
       if (tool === "grep" || tool === "glob") {
         const pattern = pick("pattern", "query");
-        return pattern ? `Search ${compactText(pattern, 36)}` : "Search code";
+        return pattern
+          ? format("session.tool_search_target", { target: compactText(pattern, 36) })
+          : tr("session.tool_search_code");
       }
 
       if (tool === "list") {
         const path = target("path");
-        return path ? `List ${path}` : "List files";
+        return path ? format("session.tool_list_target", { target: path }) : tr("session.tool_list_files");
       }
 
       if (tool === "task") {
         const description = pick("description");
         if (description) return compactText(description);
         const agent = pick("subagent_type");
-        return agent ? `Delegate ${agent}` : "Delegate task";
+        return agent ? format("session.tool_delegate_target", { target: agent }) : tr("session.status_delegating");
       }
 
       if (tool === "webfetch") {
         const url = pick("url");
-        return url ? `Fetch ${compactText(url, 36)}` : "Fetch web page";
+        return url
+          ? format("session.tool_fetch_target", { target: compactText(url, 36) })
+          : tr("session.tool_fetch_web");
       }
 
       if (tool === "skill") {
         const name = pick("name");
-        return name ? `Load skill ${name}` : "Load skill";
+        return name ? format("session.tool_load_skill_target", { target: name }) : tr("session.tool_load_skill");
       }
 
       return "";
@@ -590,13 +714,13 @@ export default function MessageList(props: MessageListProps) {
         const toolName = String((step as any).tool ?? "").trim();
         if (toolName) {
           const friendlyTool = toolName.replace(/[_-]+/g, " ");
-          return compactText(friendlyTool);
+          return compactText(localizeStepText(friendlyTool));
         }
       }
 
       const summary = summarizeStep(step);
-      const title = compactText(summary.title);
-      const detail = compactText(summary.detail ?? "");
+      const title = compactText(localizeStepText(summary.title));
+      const detail = compactText(localizeStepText(summary.detail ?? ""));
       const generic = /^(application|tool|step|working|done|completed|success)$/i.test(title);
 
       if (title && !generic) return title;

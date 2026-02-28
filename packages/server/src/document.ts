@@ -1,5 +1,6 @@
-import { copyFile, readFile, writeFile, readdir, stat, rm, rename } from "node:fs/promises";
+import { copyFile, readFile, writeFile, readdir, stat, rm, rename, mkdtemp } from "node:fs/promises";
 import { dirname, join, resolve, relative, basename, extname, isAbsolute } from "node:path";
+import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import jwt from "jsonwebtoken";
@@ -1924,6 +1925,62 @@ export function createDocumentRoutes(routes: unknown[]) {
             }
 
             return jsonResponse({ error: 0 });
+        },
+    });
+
+    routes.push({
+        method: "POST",
+        regex: /^\/w\/([^/]+)\/document\/folder\/download$/,
+        keys: ["id"],
+        auth: "client",
+        handler: async (ctx: RequestContext) => {
+            const workspaceId = ctx.params.id;
+            const sessionId = parseDocumentSessionId(ctx.url.searchParams.get("session"));
+            const workspace = ctx.config.workspaces.find((w: WorkspaceInfo) => w.id === workspaceId);
+            if (!workspace) throw new ApiError(404, "not_found", "Workspace not found");
+
+            const payload = (await ctx.request.json().catch(() => null)) as any;
+            const requestedPath = typeof payload?.path === "string" ? payload.path : "";
+            const dirPath = normalizeDocumentPath(requestedPath);
+            if (!dirPath) throw new ApiError(400, "invalid_request", "Folder path is required");
+            validateDocumentMutationPath(dirPath);
+
+            const docsDir = resolveDocumentsDir(workspace.path, sessionId);
+            await ensureDir(docsDir);
+
+            const absPath = resolveDocumentPathSafe(docsDir, dirPath);
+            if (!(await exists(absPath))) throw new ApiError(404, "not_found", "Folder not found");
+            const info = await stat(absPath);
+            if (!info.isDirectory()) throw new ApiError(400, "invalid_request", "Path is not a folder");
+
+            const archiveBase = await mkdtemp(join(tmpdir(), "openwork-doc-folder-"));
+            try {
+                const folderName = basename(absPath) || "folder";
+                const zipPath = join(archiveBase, `${folderName}.zip`);
+                const parentDir = dirname(absPath);
+                const zipResult = spawnSync("zip", ["-r", "-q", zipPath, folderName], {
+                    cwd: parentDir,
+                    encoding: "utf8",
+                });
+
+                if (zipResult.status !== 0 || !(await exists(zipPath))) {
+                    const stderr = typeof zipResult.stderr === "string" ? zipResult.stderr.trim() : "";
+                    const stdout = typeof zipResult.stdout === "string" ? zipResult.stdout.trim() : "";
+                    const message = stderr || stdout || "Failed to create folder archive";
+                    throw new ApiError(400, "folder_zip_failed", message);
+                }
+
+                const filename = `${folderName}.zip`;
+                const data = await readFile(zipPath);
+                return new Response(data, {
+                    headers: {
+                        "Content-Type": "application/zip",
+                        "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
+                    },
+                });
+            } finally {
+                await rm(archiveBase, { recursive: true, force: true }).catch(() => undefined);
+            }
         },
     });
 

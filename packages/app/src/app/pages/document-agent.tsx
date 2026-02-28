@@ -1,6 +1,6 @@
 import { For, Show, createEffect, createMemo, createResource, createSignal, on, onCleanup } from "solid-js";
 import type { Agent } from "@opencode-ai/sdk/v2/client";
-import { AtSign, ChevronDown, ChevronRight, FileText, Folder, FolderOpen, FolderPlus, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Trash2 } from "lucide-solid";
+import { AtSign, ChevronDown, ChevronRight, Download, FileText, Folder, FolderOpen, FolderPlus, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Trash2 } from "lucide-solid";
 import { useNavigate } from "@solidjs/router";
 
 import type { ComposerDraft, SlashCommandOption } from "../types";
@@ -380,6 +380,44 @@ export default function DocumentAgentView(props: SessionViewProps) {
     return await response.json();
   };
 
+  const parseErrorMessage = async (response: Response) => {
+    const text = await response.text().catch(() => "");
+    if (!text) return `Request failed (${response.status})`;
+    try {
+      const parsed = JSON.parse(text) as { message?: unknown } | null;
+      if (parsed && typeof parsed.message === "string" && parsed.message.trim()) {
+        return parsed.message;
+      }
+    } catch {
+      // ignore JSON parse errors and fallback to raw text
+    }
+    return text;
+  };
+
+  const parseDownloadFilename = (response: Response, fallback: string) => {
+    const disposition = response.headers.get("content-disposition") ?? "";
+    const match = disposition.match(/filename\\*=UTF-8''([^;]+)|filename=\"?([^\";]+)\"?/i);
+    const raw = match?.[1] ?? match?.[2] ?? "";
+    if (!raw) return fallback;
+    try {
+      return decodeURIComponent(raw);
+    } catch {
+      return raw;
+    }
+  };
+
+  const triggerBrowserDownload = (blob: Blob, filename: string) => {
+    const objectUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = filename || "download";
+    anchor.rel = "noopener";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1_000);
+  };
+
   const docWriterStateKey = createMemo(() => {
     const w = workspaceId();
     const s = sessionId();
@@ -420,6 +458,7 @@ export default function DocumentAgentView(props: SessionViewProps) {
   const [configSeq, setConfigSeq] = createSignal(0);
   const [uploadBusy, setUploadBusy] = createSignal(false);
   const [deleteBusyPath, setDeleteBusyPath] = createSignal<string | null>(null);
+  const [downloadBusyPath, setDownloadBusyPath] = createSignal<string | null>(null);
   const [activeFolder, setActiveFolder] = createSignal("");
   const [lastSessionStatus, setLastSessionStatus] = createSignal(props.sessionStatus ?? "idle");
   const [nearBottom, setNearBottom] = createSignal(true);
@@ -520,6 +559,23 @@ export default function DocumentAgentView(props: SessionViewProps) {
             aria-label={tr("docagent.use_in_prompt")}
           >
             <AtSign size={12} />
+          </button>
+          <button
+            type="button"
+            class="p-1 rounded hover:bg-dls-active text-dls-secondary hover:text-dls-text disabled:opacity-50"
+            onClick={(event) => {
+              event.stopPropagation();
+              if (nodeProps.node.isDirectory) {
+                void downloadDocumentFolder(nodeProps.node.path);
+              } else {
+                void downloadDocumentFile(nodeProps.node.path);
+              }
+            }}
+            disabled={Boolean(downloadBusyPath())}
+            title={nodeProps.node.isDirectory ? tr("docagent.download_folder") : tr("docagent.download_file")}
+            aria-label={nodeProps.node.isDirectory ? tr("docagent.download_folder") : tr("docagent.download_file")}
+          >
+            <Download size={12} />
           </button>
           <button
             type="button"
@@ -811,6 +867,71 @@ export default function DocumentAgentView(props: SessionViewProps) {
       setToastMessage(message);
     } finally {
       setUploadBusy(false);
+    }
+  };
+
+  const downloadDocumentFile = async (docPath: string) => {
+    const cfg = apiConfig();
+    const normalized = normalizeRelativePath(docPath, "");
+    if (!cfg || !normalized) return;
+    if (downloadBusyPath()) return;
+
+    setDownloadBusyPath(normalized);
+    setToastMessage(null);
+    try {
+      const query = new URLSearchParams();
+      query.set("docId", normalized);
+      query.set("session", cfg.sessionId);
+      const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/file", query);
+      const headers = new Headers();
+      if (cfg.token) headers.set("Authorization", `Bearer ${cfg.token}`);
+      const response = await fetch(url, { headers });
+      if (!response.ok) {
+        throw new Error(await parseErrorMessage(response));
+      }
+      const blob = await response.blob();
+      const fallbackName = normalized.split("/").pop() ?? "download";
+      const filename = parseDownloadFilename(response, fallbackName);
+      triggerBrowserDownload(blob, filename);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : tr("docagent.failed_download_file");
+      setToastMessage(message);
+    } finally {
+      setDownloadBusyPath(null);
+    }
+  };
+
+  const downloadDocumentFolder = async (folderPath: string) => {
+    const cfg = apiConfig();
+    const normalized = normalizeRelativePath(folderPath, "");
+    if (!cfg || !normalized) return;
+    if (downloadBusyPath()) return;
+
+    setDownloadBusyPath(normalized);
+    setToastMessage(null);
+    try {
+      const query = new URLSearchParams();
+      query.set("session", cfg.sessionId);
+      const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/folder/download", query);
+      const headers = new Headers({ "Content-Type": "application/json" });
+      if (cfg.token) headers.set("Authorization", `Bearer ${cfg.token}`);
+      const response = await fetch(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ path: normalized }),
+      });
+      if (!response.ok) {
+        throw new Error(await parseErrorMessage(response));
+      }
+      const blob = await response.blob();
+      const fallbackName = `${normalized.split("/").pop() ?? "folder"}.zip`;
+      const filename = parseDownloadFilename(response, fallbackName);
+      triggerBrowserDownload(blob, filename);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : tr("docagent.failed_download_folder");
+      setToastMessage(message);
+    } finally {
+      setDownloadBusyPath(null);
     }
   };
 

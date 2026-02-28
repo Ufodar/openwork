@@ -7,6 +7,7 @@ import type { MessageGroup, MessageWithParts } from "../../types";
 import { groupMessageParts, summarizeStep } from "../../utils";
 import PartView from "../part-view";
 import { perfNow, recordPerfLog } from "../../lib/perf-log";
+import { currentLocale, t } from "../../../i18n";
 
 export type MessageListProps = {
   messages: MessageWithParts[];
@@ -137,6 +138,7 @@ function getTaskStepInfo(part: Part): TaskStepInfo {
 }
 
 export default function MessageList(props: MessageListProps) {
+  const tr = (key: string) => t(key, currentLocale());
   const [copyingId, setCopyingId] = createSignal<string | null>(null);
   let previousMessagePartCountById = new Map<string, number>();
   let copyTimeout: number | undefined;
@@ -376,18 +378,18 @@ export default function MessageList(props: MessageListProps) {
           <ToolIcon category={category()} size={13} />
         </div>
         {/* Title */}
-        <span class="text-[13px] text-gray-12 font-medium truncate shrink-0 max-w-[200px]">
+        <span class="text-[13px] text-gray-12 font-medium truncate min-w-0 max-w-[260px]">
           {summary().title}
         </span>
         {/* Skill badge */}
         <Show when={summary().isSkill}>
           <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-3 text-purple-11 shrink-0">
-            skill
+            {tr("session.step_badge_skill")}
           </span>
         </Show>
         <Show when={task().isTask}>
           <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-3 text-blue-11 shrink-0">
-            subagent
+            {tr("session.step_badge_subagent")}
           </span>
         </Show>
         {/* Detail - truncated to single line */}
@@ -415,7 +417,7 @@ export default function MessageList(props: MessageListProps) {
               props.openSessionById?.(sessionId);
             }}
           >
-            open
+            {tr("session.open_session")}
           </button>
         </Show>
       </div>
@@ -429,7 +431,7 @@ export default function MessageList(props: MessageListProps) {
         {(part) => (
           <div>
             <StepRow part={part} isUser={listProps.isUser} />
-            <Show when={props.developerMode && part.type !== "reasoning" && (part.type !== "tool" || props.showThinking)}>
+            <Show when={part.type === "tool" || (props.developerMode && part.type !== "reasoning")}>
               <div class="pl-6 pb-2 text-xs text-gray-10">
                 <PartView
                   part={part}
@@ -472,15 +474,17 @@ export default function MessageList(props: MessageListProps) {
       const tools = toolCallCount();
       const reasoning = reasoningCount();
       if (tools > 0 && reasoning > 0) {
-        return `${tools} step${tools === 1 ? "" : "s"} with ${reasoning} thought update${reasoning === 1 ? "" : "s"}`;
+        return tr("session.execution_summary_tools_reasoning")
+          .replace("{tools}", tools.toLocaleString())
+          .replace("{reasoning}", reasoning.toLocaleString());
       }
       if (tools > 0) {
-        return `${tools} step${tools === 1 ? "" : "s"}`;
+        return tr("session.execution_summary_tools").replace("{tools}", tools.toLocaleString());
       }
       if (reasoning > 0) {
-        return `${reasoning} thought update${reasoning === 1 ? "" : "s"}`;
+        return tr("session.execution_summary_reasoning").replace("{reasoning}", reasoning.toLocaleString());
       }
-      return "updates";
+      return tr("session.execution_summary_updates");
     };
 
     const compactPathToken = (value: string) => {
@@ -491,7 +495,7 @@ export default function MessageList(props: MessageListProps) {
       return segments.length > 0 ? segments[segments.length - 1] : token;
     };
 
-    const compactText = (value: string, max = 42) => {
+    const compactText = (value: string, max = 64) => {
       const singleLine = value.replace(/\s+/g, " ").trim();
       if (!singleLine) return "";
       return singleLine.length > max ? `${singleLine.slice(0, Math.max(0, max - 3))}...` : singleLine;
@@ -577,7 +581,7 @@ export default function MessageList(props: MessageListProps) {
 
     const latestStepLabel = () => {
       const step = latestStep();
-      if (!step) return "Last step";
+      if (!step) return tr("session.last_step");
 
       const fromTool = toolHeadline(step);
       if (fromTool) return compactText(fromTool);
@@ -598,7 +602,7 @@ export default function MessageList(props: MessageListProps) {
       if (title && !generic) return title;
       if (detail) return isPathLike(detail) ? compactPathToken(detail) : detail;
       if (title) return title;
-      return "Last step";
+      return tr("session.last_step");
     };
     const hasRunning = () =>
       containerProps.partsGroups.some((parts) =>
@@ -628,14 +632,14 @@ export default function MessageList(props: MessageListProps) {
               <span class="inline-flex h-1 w-1 rounded-full bg-blue-10/70 animate-pulse" />
             </Show>
             <span class="truncate max-w-[58ch]">
-              {expanded() ? "Hide timeline" : "Execution timeline"}
+              {expanded() ? tr("session.hide_timeline") : tr("session.execution_timeline")}
             </span>
           </span>
           <Show when={!expanded()}>
-            <span class="text-[11px] text-gray-9 truncate max-w-[42ch]">{`${executionSummary()} - ${latestStepLabel()}`}</span>
+            <span class="text-[11px] text-gray-9 truncate max-w-[56ch]">{`${executionSummary()} - ${latestStepLabel()}`}</span>
           </Show>
           <Show when={expanded()}>
-            <span class="text-[11px] text-gray-9 truncate max-w-[42ch]">{executionSummary()}</span>
+            <span class="text-[11px] text-gray-9 truncate max-w-[56ch]">{executionSummary()}</span>
           </Show>
         </button>
 

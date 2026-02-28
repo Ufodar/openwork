@@ -3,6 +3,7 @@ import { Check, ChevronDown, GripVertical, Loader2, Plus, RefreshCcw, Settings, 
 
 import type { TodoItem, WorkspaceConnectionState } from "../../types";
 import type { WorkspaceInfo } from "../../lib/tauri";
+import { currentLocale, t } from "../../../i18n";
 
 type SessionSummary = {
   id: string;
@@ -52,6 +53,7 @@ export type SidebarProps = {
 };
 
 export default function SessionSidebar(props: SidebarProps) {
+  const tr = (key: string) => t(key, currentLocale());
   const MAX_SESSIONS_PREVIEW = 8;
   const realTodos = createMemo(() => props.todos.filter((todo) => todo.content.trim()));
   const WORKSPACE_COLLAPSE_KEY = "openwork.workspace-collapse.v1";
@@ -283,21 +285,21 @@ export default function SessionSidebar(props: SidebarProps) {
           disabled={props.newTaskDisabled}
         >
           <Plus size={16} />
-          New task
+          {tr("session.new_task")}
         </button>
       </div>
 
       <div class="flex-1 overflow-y-auto px-4 py-4 space-y-6">
         <div>
           <div class="flex items-center justify-between px-2 mb-2">
-            <div class="text-xs text-gray-10 font-semibold uppercase tracking-wider">Workspaces</div>
+            <div class="text-xs text-gray-10 font-semibold uppercase tracking-wider">{tr("dashboard.workspaces")}</div>
           </div>
           <div class="space-y-4">
             <Show
               when={props.workspaceGroups.length > 0}
               fallback={
                 <div class="px-3 py-2 rounded-lg border border-dashed border-gray-6 text-xs text-gray-9">
-                  No workspaces in this session yet. Add one to get started.
+                  {tr("session.no_workspaces_yet")}
                 </div>
               }
             >
@@ -527,8 +529,11 @@ export default function SessionSidebar(props: SidebarProps) {
                                 onClick={() => toggleShowAllSessions(group.workspace.id)}
                               >
                                 {showingAll()
-                                  ? "Show fewer"
-                                  : `Show ${sessions().length - MAX_SESSIONS_PREVIEW} more`}
+                                  ? tr("session.show_fewer")
+                                  : tr("session.show_more_count").replace(
+                                      "{count}",
+                                      String(sessions().length - MAX_SESSIONS_PREVIEW),
+                                    )}
                               </button>
                             </Show>
                           </Show>
@@ -659,7 +664,7 @@ export default function SessionSidebar(props: SidebarProps) {
                   closeContextMenu();
                 }}
               >
-                New task
+                {tr("session.new_task")}
               </button>
               <button
                 class="w-full text-left px-3 py-2 text-sm rounded-lg text-red-11 hover:bg-red-1/40 transition-colors"

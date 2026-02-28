@@ -5,6 +5,7 @@ import type { OpenworkServerStatus } from "../lib/openwork-server";
 import type { OpenCodeRouterStatus } from "../lib/tauri";
 import type { McpStatusMap } from "../types";
 import { getOpenCodeRouterStatus } from "../lib/tauri";
+import { currentLocale, t } from "../../i18n";
 
 import Button from "./button";
 
@@ -21,6 +22,7 @@ type StatusBarProps = {
 };
 
 export default function StatusBar(props: StatusBarProps) {
+  const tr = (key: string) => t(key, currentLocale());
   const [opencodeRouterStatus, setOpenCodeRouterStatus] = createSignal<OpenCodeRouterStatus | null>(null);
   const [documentVisible, setDocumentVisible] = createSignal(true);
 
@@ -79,7 +81,7 @@ export default function StatusBar(props: StatusBarProps) {
   const proTips = createMemo<ProTip[]>(() => [
     {
       id: "slack",
-      label: "Connect Slack",
+      label: tr("status.connect_slack"),
       enabled: () => {
         const status = opencodeRouterStatus();
         return Boolean(status && (status.slack.items?.length ?? 0) === 0);
@@ -88,7 +90,7 @@ export default function StatusBar(props: StatusBarProps) {
     },
     {
       id: "telegram",
-      label: "Connect Telegram",
+      label: tr("status.connect_telegram"),
       enabled: () => {
         const status = opencodeRouterStatus();
         return Boolean(status && (status.telegram.items?.length ?? 0) === 0);
@@ -97,13 +99,13 @@ export default function StatusBar(props: StatusBarProps) {
     },
     {
       id: "notion",
-      label: "Connect Notion MCP",
+      label: tr("status.connect_notion_mcp"),
       enabled: () => notionStatus() !== "connected",
       action: () => runAction(props.onOpenMcp),
     },
     {
       id: "providers",
-      label: "Use your own models (OpenRouter, Anthropic, OpenAI)",
+      label: tr("status.use_own_models"),
       enabled: () => props.clientConnected && providerConnectedCount() === 0,
       action: () => runAction(props.onOpenProviders),
     },
@@ -230,11 +232,11 @@ export default function StatusBar(props: StatusBarProps) {
             variant="ghost"
             class="h-7 px-2.5 py-0 text-xs"
             onClick={props.onOpenSettings}
-            title="Settings"
+            title={tr("dashboard.settings")}
           >
             <Settings class="w-4 h-4" />
             <Show when={props.developerMode}>
-              <span class="text-gray-11 font-medium">Settings</span>
+              <span class="text-gray-11 font-medium">{tr("dashboard.settings")}</span>
             </Show>
           </Button>
         </div>

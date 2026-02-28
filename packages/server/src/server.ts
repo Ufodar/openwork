@@ -4581,6 +4581,7 @@ async function readOpenworkConfig(workspaceRoot: string): Promise<Record<string,
   if (!(await exists(path))) return {};
   try {
     const raw = await readFile(path, "utf8");
+    if (!raw.trim()) return {};
     return JSON.parse(raw) as Record<string, unknown>;
   } catch {
     throw new ApiError(422, "invalid_json", "Failed to parse openwork.json");

@@ -1,0 +1,1516 @@
+import { For, Show, createEffect, createMemo, createResource, createSignal, on, onCleanup } from "solid-js";
+import type { Agent } from "@opencode-ai/sdk/v2/client";
+import { AtSign, ChevronDown, ChevronRight, FileText, Folder, FolderOpen, FolderPlus, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Trash2 } from "lucide-solid";
+import { useNavigate } from "@solidjs/router";
+
+import type { ComposerDraft, SlashCommandOption } from "../types";
+import type { SessionViewProps } from "./session";
+import OnlyOfficeEditor from "../components/onlyoffice-editor";
+import MessageList from "../components/session/message-list";
+import Composer from "../components/session/composer";
+import { DOCUMENT_UPLOAD_ACCEPT } from "../lib/documents";
+import { currentLocale, t as i18n } from "../../i18n";
+
+type DocumentItem = {
+  name: string;
+  updatedAt: number;
+  size: number;
+  type: string;
+};
+
+type DocumentListResult = {
+  items: DocumentItem[];
+  dirs: string[];
+};
+
+type DocumentWriterUiState = {
+  schemaVersion: 1;
+  activeDoc?: string;
+  leftPaneWidth?: number;
+  rightPaneWidth?: number;
+};
+
+type OnlyOfficePayload = { documentServerUrl: string; config: any };
+type EditorSource = {
+  baseUrl: string;
+  token: string;
+  workspaceId: string;
+  sessionId: string;
+  doc: string;
+  seq: number;
+  readonly: boolean;
+};
+
+const RUNNING_REFRESH_INTERVAL_MS = 60_000;
+const LEFT_PANEL_COLLAPSED_WIDTH = 56;
+const LEFT_PANEL_DEFAULT_WIDTH = 256;
+const LEFT_PANEL_MIN_WIDTH = 220;
+const RIGHT_PANEL_DEFAULT_WIDTH = 500;
+const RIGHT_PANEL_MIN_WIDTH = 360;
+const CENTER_PANEL_MIN_WIDTH = 520;
+const STREAM_SCROLL_MIN_INTERVAL_MS = 90;
+const IMAGE_PREVIEW_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".avif"]);
+const ONLYOFFICE_IMPORT_EXTENSIONS = new Set(
+  DOCUMENT_UPLOAD_ACCEPT.split(",")
+    .map((ext) => ext.trim().toLowerCase())
+    .filter(Boolean),
+);
+
+const clampNumber = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
+const getFileExtension = (value: string) => {
+  const base = value.split("/").pop() ?? value;
+  const match = base.toLowerCase().match(/\.[^.]+$/);
+  return match ? match[0] : "";
+};
+const isOnlyOfficeImportable = (path: string) => ONLYOFFICE_IMPORT_EXTENSIONS.has(getFileExtension(path));
+const isImagePreviewable = (path: string) => IMAGE_PREVIEW_EXTENSIONS.has(getFileExtension(path));
+
+type FileTreeNode = {
+  name: string;
+  path: string;
+  isDirectory: boolean;
+  children: FileTreeNode[];
+  size?: number;
+  updatedAt?: number;
+  type?: string;
+};
+
+const normalizeRelativePath = (value: string, fallback = "") => {
+  const cleaned = value.replace(/\\/g, "/").replace(/^\/+/, "").trim();
+  const parts = cleaned
+    .split("/")
+    .map((segment) => segment.trim())
+    .filter((segment) => segment && segment !== "." && segment !== "..");
+  return parts.length ? parts.join("/") : fallback;
+};
+
+const joinRelativePath = (...parts: Array<string | null | undefined>) =>
+  normalizeRelativePath(parts.filter(Boolean).join("/"), "");
+
+const uploadRelativePath = (file: File) => {
+  const candidate = (file as File & { webkitRelativePath?: string }).webkitRelativePath?.trim() || file.name;
+  return normalizeRelativePath(candidate, file.name || "file");
+};
+
+const hasHiddenPathSegment = (path: string) => {
+  const normalized = normalizeRelativePath(path, "");
+  if (!normalized) return false;
+  return normalized.split("/").some((segment) => segment.startsWith("."));
+};
+
+const parentDirPath = (path: string) => {
+  const normalized = normalizeRelativePath(path, "");
+  if (!normalized) return "";
+  const index = normalized.lastIndexOf("/");
+  return index === -1 ? "" : normalized.slice(0, index);
+};
+
+function buildFileTree(items: DocumentItem[], directories: string[]): FileTreeNode[] {
+  const root: FileTreeNode = { name: "", path: "", isDirectory: true, children: [] };
+  const foldersByPath = new Map<string, FileTreeNode>([["", root]]);
+
+  const ensureFolder = (folderPath: string): FileTreeNode => {
+    const normalized = normalizeRelativePath(folderPath, "");
+    if (!normalized) return root;
+    const parts = normalized.split("/");
+    let current = root;
+    let currentPath = "";
+    for (const part of parts) {
+      currentPath = currentPath ? `${currentPath}/${part}` : part;
+      let folder = foldersByPath.get(currentPath);
+      if (!folder) {
+        folder = { name: part, path: currentPath, isDirectory: true, children: [] };
+        current.children.push(folder);
+        foldersByPath.set(currentPath, folder);
+      }
+      current = folder;
+    }
+    return current;
+  };
+
+  for (const directory of directories) {
+    const normalized = normalizeRelativePath(directory, "");
+    if (!normalized) continue;
+    ensureFolder(normalized);
+  }
+
+  for (const item of items) {
+    const normalized = normalizeRelativePath(item.name, "");
+    if (!normalized) continue;
+    const parts = normalized.split("/");
+    const fileName = parts.pop();
+    if (!fileName) continue;
+    const folderPath = parts.join("/");
+    const parent = ensureFolder(folderPath);
+    if (parent.children.some((child) => !child.isDirectory && child.path === normalized)) {
+      continue;
+    }
+    parent.children.push({
+      name: fileName,
+      path: normalized,
+      isDirectory: false,
+      children: [],
+      size: item.size,
+      updatedAt: item.updatedAt,
+      type: item.type,
+    });
+  }
+
+  const sortTree = (nodes: FileTreeNode[]) => {
+    nodes.sort((a, b) => {
+      if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+    for (const n of nodes) if (n.isDirectory) sortTree(n.children);
+  };
+  sortTree(root.children);
+  return root.children;
+}
+
+export default function DocumentAgentView(props: SessionViewProps) {
+  const navigate = useNavigate();
+  const tr = (key: string) => i18n(key, currentLocale());
+  let uploadInputEl: HTMLInputElement | undefined;
+  let uploadFolderInputEl: HTMLInputElement | undefined;
+  let chatContainerEl: HTMLDivElement | undefined;
+  let messagesEndEl: HTMLDivElement | undefined;
+  let bottomVisibilityEl: HTMLDivElement | undefined;
+  let scrollFrame: number | undefined;
+  let pendingScrollBehavior: ScrollBehavior = "auto";
+  let lastAutoScrollAt = 0;
+
+  const sessionId = createMemo(() => props.selectedSessionId?.trim() ?? "");
+  const workspaceId = createMemo(() => props.openworkServerWorkspaceId?.trim() ?? "");
+  const isAgentRunning = createMemo(() => (props.sessionStatus ?? "idle") === "running");
+
+  const serverReady = createMemo(
+    () =>
+      props.openworkServerStatus === "connected" &&
+      Boolean(props.openworkServerClient) &&
+      Boolean(workspaceId()),
+  );
+
+  const apiConfig = createMemo(() => {
+    const client = props.openworkServerClient;
+    if (!client) return null;
+    const workspace = workspaceId();
+    const session = sessionId();
+    if (!workspace || !session) return null;
+    return {
+      baseUrl: client.baseUrl,
+      token: client.token?.trim() ?? "",
+      workspaceId: workspace,
+      sessionId: session,
+    };
+  });
+
+  const buildUrl = (baseUrl: string, workspace: string, pathname: string, query?: URLSearchParams) => {
+    const url = new URL(`/w/${encodeURIComponent(workspace)}${pathname}`, baseUrl);
+    if (query) {
+      url.search = query.toString();
+    }
+    return url.toString();
+  };
+
+  const fetchJson = async (url: string, token: string, init?: RequestInit) => {
+    const headers = new Headers(init?.headers);
+    if (token && !headers.has("Authorization")) {
+      headers.set("Authorization", `Bearer ${token}`);
+    }
+    const response = await fetch(url, { ...init, headers });
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      try {
+        const parsed = JSON.parse(text) as { message?: unknown; details?: any } | null;
+        const message = parsed && typeof parsed.message === "string" ? parsed.message : "";
+        const reportPath =
+          parsed?.details?.report?.inboxPath && typeof parsed.details.report.inboxPath === "string"
+            ? parsed.details.report.inboxPath
+            : "";
+        const suffix = reportPath ? `\n\nReport: ${reportPath}` : "";
+        throw new Error((message || `Request failed (${response.status})`) + suffix);
+      } catch {
+        throw new Error(text || `Request failed (${response.status})`);
+      }
+    }
+    return await response.json();
+  };
+
+  const docWriterStateKey = createMemo(() => {
+    const w = workspaceId();
+    const s = sessionId();
+    if (!w || !s) return "";
+    return `openwork.document-writer.ui.v1:${w}:${s}`;
+  });
+
+  const readDocWriterState = (key: string): DocumentWriterUiState | null => {
+    if (!key || typeof window === "undefined") return null;
+    try {
+      const raw = window.localStorage.getItem(key);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as Partial<DocumentWriterUiState> | null;
+      if (!parsed || parsed.schemaVersion !== 1) return null;
+      return parsed as DocumentWriterUiState;
+    } catch {
+      return null;
+    }
+  };
+
+  const writeDocWriterState = (key: string, state: DocumentWriterUiState) => {
+    if (!key || typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(key, JSON.stringify(state));
+    } catch {
+      // ignore
+    }
+  };
+
+  // "Target" is the document we mutate via agent/tools. "Active" is what OnlyOffice currently displays.
+  // Active can temporarily point at a reference preview while the target remains stable.
+  const [targetDoc, setTargetDoc] = createSignal<string | null>(null);
+  const [activeDoc, setActiveDoc] = createSignal<string | null>(null);
+  const [documentsCollapsed, setDocumentsCollapsed] = createSignal(false);
+  const [leftPaneWidth, setLeftPaneWidth] = createSignal(LEFT_PANEL_DEFAULT_WIDTH);
+  const [rightPaneWidth, setRightPaneWidth] = createSignal(RIGHT_PANEL_DEFAULT_WIDTH);
+  const [resizingPane, setResizingPane] = createSignal<"left" | "right" | null>(null);
+  const [configSeq, setConfigSeq] = createSignal(0);
+  const [uploadBusy, setUploadBusy] = createSignal(false);
+  const [deleteBusyPath, setDeleteBusyPath] = createSignal<string | null>(null);
+  const [activeFolder, setActiveFolder] = createSignal("");
+  const [lastSessionStatus, setLastSessionStatus] = createSignal(props.sessionStatus ?? "idle");
+  const [nearBottom, setNearBottom] = createSignal(true);
+  let paneResizeCleanup: (() => void) | null = null;
+
+  const [documents, { refetch: refetchDocuments }] = createResource(apiConfig, async (cfg) => {
+    if (!cfg) return { items: [], dirs: [] } satisfies DocumentListResult;
+    const query = new URLSearchParams();
+    query.set("session", cfg.sessionId);
+    const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/documents", query);
+    const data = (await fetchJson(url, cfg.token)) as { items?: DocumentItem[]; dirs?: string[] };
+    return {
+      items: Array.isArray(data.items) ? data.items : [],
+      dirs: Array.isArray(data.dirs) ? data.dirs : [],
+    } satisfies DocumentListResult;
+  });
+
+  const documentsList = createMemo(() => documents()?.items ?? []);
+  const documentDirs = createMemo(() => documents()?.dirs ?? []);
+
+  const fileTree = createMemo(() => buildFileTree(documentsList(), documentDirs()));
+  const [expandedFolders, setExpandedFolders] = createSignal<Set<string>>(new Set());
+
+  const expandFolderPath = (folderPath: string) => {
+    const normalized = normalizeRelativePath(folderPath, "");
+    if (!normalized) return;
+    setExpandedFolders((prev) => {
+      const next = new Set(prev);
+      const parts = normalized.split("/");
+      let current = "";
+      for (const part of parts) {
+        current = current ? `${current}/${part}` : part;
+        next.add(current);
+      }
+      return next;
+    });
+  };
+
+  function TreeNodeView(nodeProps: { node: FileTreeNode; depth: number }) {
+    const expanded = createMemo(() => expandedFolders().has(nodeProps.node.path));
+    const isActive = createMemo(() =>
+      nodeProps.node.isDirectory ? activeFolder() === nodeProps.node.path : activeDoc() === nodeProps.node.path,
+    );
+    const workspacePath = createMemo(() =>
+      toWorkspaceRelativeDocumentPath(nodeProps.node.path, { directory: nodeProps.node.isDirectory }),
+    );
+    const toggleExpand = () => {
+      setExpandedFolders((prev) => {
+        const next = new Set(prev);
+        if (next.has(nodeProps.node.path)) next.delete(nodeProps.node.path);
+        else next.add(nodeProps.node.path);
+        return next;
+      });
+    };
+    return (
+      <div>
+        <div
+          class={`w-full flex items-center gap-1 px-2 py-1 text-xs rounded hover:bg-gray-4 ${
+            isActive() ? "bg-gray-5 text-gray-12 font-medium" : "text-gray-11"
+          }`}
+          style={{ "padding-left": `${8 + nodeProps.depth * 16}px` }}
+        >
+          <button
+            type="button"
+            class="min-w-0 flex-1 flex items-center gap-1.5 text-left"
+            onClick={() => {
+              if (nodeProps.node.isDirectory) {
+                setActiveFolder(nodeProps.node.path);
+                toggleExpand();
+              } else {
+                setActiveFolder(parentDirPath(nodeProps.node.path));
+                setActiveDoc(nodeProps.node.path);
+                setTargetDoc(nodeProps.node.path);
+                setConfigSeq((v) => v + 1);
+              }
+            }}
+            title={workspacePath()}
+          >
+            <Show when={nodeProps.node.isDirectory}
+              fallback={<FileText size={14} class="shrink-0" />}>
+              <Show when={expanded()} fallback={<ChevronRight size={14} class="shrink-0" />}>
+                <ChevronDown size={14} class="shrink-0" />
+              </Show>
+              <Show when={expanded()} fallback={<Folder size={14} class="shrink-0" />}>
+                <FolderOpen size={14} class="shrink-0" />
+              </Show>
+            </Show>
+            <span class="truncate">{nodeProps.node.name}</span>
+          </button>
+          <button
+            type="button"
+            class="p-1 rounded hover:bg-dls-active text-dls-secondary hover:text-dls-text"
+            onClick={(event) => {
+              event.stopPropagation();
+              insertReferenceInPrompt(workspacePath());
+            }}
+            title={tr("docagent.use_in_prompt")}
+            aria-label={tr("docagent.use_in_prompt")}
+          >
+            <AtSign size={12} />
+          </button>
+          <button
+            type="button"
+            class="p-1 rounded hover:bg-dls-active text-dls-secondary hover:text-red-11 disabled:opacity-50"
+            onClick={(event) => {
+              event.stopPropagation();
+              if (nodeProps.node.isDirectory) {
+                void deleteDocumentFolder(nodeProps.node.path);
+              } else {
+                void deleteDocumentFile(nodeProps.node.path);
+              }
+            }}
+            disabled={Boolean(deleteBusyPath())}
+            title={nodeProps.node.isDirectory ? tr("docagent.delete_folder") : tr("docagent.delete_file")}
+            aria-label={nodeProps.node.isDirectory ? tr("docagent.delete_folder") : tr("docagent.delete_file")}
+          >
+            <Trash2 size={12} />
+          </button>
+        </div>
+        <Show when={nodeProps.node.isDirectory && expanded()}>
+          <For each={nodeProps.node.children}>
+            {(child) => <TreeNodeView node={child} depth={nodeProps.depth + 1} />}
+          </For>
+        </Show>
+      </div>
+    );
+  }
+
+  const scrollToLatest = (behavior: ScrollBehavior = "auto") => {
+    messagesEndEl?.scrollIntoView({ behavior, block: "end" });
+  };
+
+  const scheduleScrollToLatest = (behavior: ScrollBehavior = "auto") => {
+    if (behavior === "smooth") {
+      pendingScrollBehavior = "smooth";
+    }
+    if (scrollFrame !== undefined) return;
+    scrollFrame = window.requestAnimationFrame(() => {
+      scrollFrame = undefined;
+      const nextBehavior = pendingScrollBehavior;
+      pendingScrollBehavior = "auto";
+      const now = Date.now();
+      if (nextBehavior === "auto" && now - lastAutoScrollAt < STREAM_SCROLL_MIN_INTERVAL_MS) {
+        return;
+      }
+      lastAutoScrollAt = now;
+      scrollToLatest(nextBehavior);
+    });
+  };
+
+  const leftPaneDisplayWidth = createMemo(() =>
+    documentsCollapsed() ? LEFT_PANEL_COLLAPSED_WIDTH : leftPaneWidth(),
+  );
+
+  const getViewportWidth = () => {
+    if (typeof window === "undefined") {
+      return LEFT_PANEL_DEFAULT_WIDTH + RIGHT_PANEL_DEFAULT_WIDTH + CENTER_PANEL_MIN_WIDTH;
+    }
+    return window.innerWidth || LEFT_PANEL_DEFAULT_WIDTH + RIGHT_PANEL_DEFAULT_WIDTH + CENTER_PANEL_MIN_WIDTH;
+  };
+
+  const clampPaneWidthsToViewport = () => {
+    const viewport = getViewportWidth();
+    const effectiveLeft = leftPaneDisplayWidth();
+
+    const maxRight = Math.max(RIGHT_PANEL_MIN_WIDTH, viewport - effectiveLeft - CENTER_PANEL_MIN_WIDTH);
+    const nextRight = clampNumber(rightPaneWidth(), RIGHT_PANEL_MIN_WIDTH, maxRight);
+    if (nextRight !== rightPaneWidth()) {
+      setRightPaneWidth(nextRight);
+    }
+
+    if (documentsCollapsed()) return;
+    const maxLeft = Math.max(LEFT_PANEL_MIN_WIDTH, viewport - nextRight - CENTER_PANEL_MIN_WIDTH);
+    const nextLeft = clampNumber(leftPaneWidth(), LEFT_PANEL_MIN_WIDTH, maxLeft);
+    if (nextLeft !== leftPaneWidth()) {
+      setLeftPaneWidth(nextLeft);
+    }
+  };
+
+  const beginPaneResize = (pane: "left" | "right", event: MouseEvent) => {
+    if (typeof window === "undefined") return;
+    if (pane === "left" && documentsCollapsed()) return;
+    paneResizeCleanup?.();
+    event.preventDefault();
+
+    const startX = event.clientX;
+    const startLeft = leftPaneWidth();
+    const startRight = rightPaneWidth();
+    const collapsed = documentsCollapsed();
+
+    setResizingPane(pane);
+
+    const previousUserSelect = document.body.style.userSelect;
+    const previousCursor = document.body.style.cursor;
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "col-resize";
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      const delta = moveEvent.clientX - startX;
+      const viewport = getViewportWidth();
+      if (pane === "left") {
+        const maxLeft = Math.max(LEFT_PANEL_MIN_WIDTH, viewport - startRight - CENTER_PANEL_MIN_WIDTH);
+        const next = clampNumber(startLeft + delta, LEFT_PANEL_MIN_WIDTH, maxLeft);
+        setLeftPaneWidth(next);
+        return;
+      }
+
+      const effectiveLeft = collapsed ? LEFT_PANEL_COLLAPSED_WIDTH : startLeft;
+      const maxRight = Math.max(RIGHT_PANEL_MIN_WIDTH, viewport - effectiveLeft - CENTER_PANEL_MIN_WIDTH);
+      const next = clampNumber(startRight - delta, RIGHT_PANEL_MIN_WIDTH, maxRight);
+      setRightPaneWidth(next);
+    };
+
+    const cleanup = () => {
+      setResizingPane(null);
+      document.body.style.userSelect = previousUserSelect;
+      document.body.style.cursor = previousCursor;
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+      window.removeEventListener("blur", onWindowBlur);
+      paneResizeCleanup = null;
+    };
+
+    const onMouseUp = () => {
+      cleanup();
+    };
+
+    const onWindowBlur = () => {
+      cleanup();
+    };
+
+    paneResizeCleanup = cleanup;
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    window.addEventListener("blur", onWindowBlur);
+  };
+
+  onCleanup(() => {
+    paneResizeCleanup?.();
+  });
+
+  const editorSource = createMemo(() => {
+    const cfg = apiConfig();
+    const doc = activeDoc();
+    if (!cfg || !doc || activeDocKind() !== "onlyoffice") return null;
+    return {
+      ...cfg,
+      doc,
+      seq: configSeq(),
+      readonly: isAgentRunning(),
+    } satisfies EditorSource;
+  });
+
+  const [editorPayload] = createResource(editorSource, async (input): Promise<OnlyOfficePayload | null> => {
+    if (!input) return null;
+    const query = new URLSearchParams();
+    query.set("doc", input.doc);
+    query.set("session", input.sessionId);
+    if (input.readonly) {
+      query.set("readonly", "1");
+    }
+    const url = buildUrl(input.baseUrl, input.workspaceId, "/document/config", query);
+    const data = (await fetchJson(url, input.token)) as any;
+    if (data && typeof data.documentServerUrl === "string" && data.config) {
+      return { documentServerUrl: data.documentServerUrl, config: data.config };
+    }
+    return { documentServerUrl: "http://localhost:8080", config: data };
+  });
+
+  const documentWorkspaceRoot = createMemo(() => {
+    const session = apiConfig()?.sessionId ?? sessionId();
+    if (!session) return "documents";
+    return `documents/sessions/${session}`;
+  });
+
+  const toWorkspaceRelativeDocumentPath = (path: string, options?: { directory?: boolean }) => {
+    const normalized = normalizeRelativePath(path, "");
+    const base = documentWorkspaceRoot();
+    const joined = normalized ? `${base}/${normalized}` : base;
+    return options?.directory ? `${joined}/` : joined;
+  };
+
+  const insertReferenceInPrompt = (workspaceRelativePath: string) => {
+    const tag = `@${workspaceRelativePath}`;
+    const existing = props.prompt.trim();
+    const next = existing ? `${existing}\n${tag}` : tag;
+    props.setPrompt(next);
+  };
+
+  const uploadDocuments = async (
+    files: File[],
+    options?: { baseDir?: string; preserveRelativePath?: boolean },
+  ) => {
+    const cfg = apiConfig();
+    if (!cfg || !files.length) return;
+    if (uploadBusy()) return;
+
+    const baseDir = normalizeRelativePath(options?.baseDir ?? activeFolder(), "");
+    const preserveRelativePath = options?.preserveRelativePath ?? false;
+    const hiddenSkipMessage = (count: number) =>
+      tr("docagent.skipped_hidden_documents_count").replace("{count}", String(count));
+
+    setUploadBusy(true);
+    setToastMessage(null);
+    let skippedHiddenCount = 0;
+    try {
+      const query = new URLSearchParams();
+      query.set("session", cfg.sessionId);
+      const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/upload", query);
+      const uploadEntries = files
+        .map((file) => {
+          const relativePath = preserveRelativePath
+            ? uploadRelativePath(file)
+            : normalizeRelativePath(file.name, file.name || "file");
+          const destination = joinRelativePath(baseDir, relativePath);
+          return { file, destination };
+        })
+        .filter((entry) => {
+          if (hasHiddenPathSegment(entry.destination)) {
+            skippedHiddenCount += 1;
+            return false;
+          }
+          return true;
+        });
+
+      if (!uploadEntries.length) {
+        setToastMessage(hiddenSkipMessage(skippedHiddenCount));
+        return;
+      }
+
+      for (const entry of uploadEntries) {
+        const form = new FormData();
+        form.append("file", entry.file);
+        if (entry.destination) {
+          form.append("path", entry.destination);
+        }
+        await fetchJson(url, cfg.token, {
+          method: "POST",
+          body: form,
+        });
+      }
+      await refetchDocuments();
+      const uploadedMessage =
+        uploadEntries.length === 1
+          ? tr("docagent.uploaded_one_document")
+          : tr("docagent.uploaded_documents_count").replace("{count}", String(uploadEntries.length));
+      setToastMessage(
+        skippedHiddenCount > 0 ? `${uploadedMessage}\n${hiddenSkipMessage(skippedHiddenCount)}` : uploadedMessage,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : tr("docagent.failed_upload_documents");
+      setToastMessage(skippedHiddenCount > 0 ? `${message}\n${hiddenSkipMessage(skippedHiddenCount)}` : message);
+    } finally {
+      setUploadBusy(false);
+    }
+  };
+
+  const createFolder = async () => {
+    const cfg = apiConfig();
+    if (!cfg) return;
+    if (uploadBusy()) return;
+
+    const seed = activeFolder() ? `${activeFolder()}/` : "";
+    const input = window.prompt(tr("docagent.create_folder_prompt"), seed);
+    if (input == null) return;
+    const folderPath = normalizeRelativePath(input, "");
+    if (!folderPath) {
+      setToastMessage(tr("docagent.folder_path_required"));
+      return;
+    }
+
+    setUploadBusy(true);
+    setToastMessage(null);
+    try {
+      const query = new URLSearchParams();
+      query.set("session", cfg.sessionId);
+      const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/mkdir", query);
+      await fetchJson(url, cfg.token, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: folderPath }),
+      });
+      expandFolderPath(folderPath);
+      setActiveFolder(folderPath);
+      await refetchDocuments();
+      setToastMessage(tr("docagent.created_folder").replace("{path}", folderPath));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : tr("docagent.failed_create_folder");
+      setToastMessage(message);
+    } finally {
+      setUploadBusy(false);
+    }
+  };
+
+  const deleteDocumentFile = async (docPath: string) => {
+    const cfg = apiConfig();
+    const normalized = normalizeRelativePath(docPath, "");
+    if (!cfg || !normalized) return;
+    if (deleteBusyPath()) return;
+
+    const ok = window.confirm(
+      tr("docagent.delete_file_confirm").replace("{path}", normalized),
+    );
+    if (!ok) return;
+
+    setDeleteBusyPath(normalized);
+    setToastMessage(null);
+    try {
+      const query = new URLSearchParams();
+      query.set("session", cfg.sessionId);
+      const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/delete", query);
+      await fetchJson(url, cfg.token, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: normalized }),
+      });
+      if (targetDoc() === normalized) setTargetDoc(null);
+      if (activeDoc() === normalized) setActiveDoc(null);
+      setToastMessage(tr("docagent.deleted_file").replace("{path}", normalized));
+      await refetchDocuments();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : tr("docagent.failed_delete_file");
+      setToastMessage(message);
+    } finally {
+      setDeleteBusyPath(null);
+    }
+  };
+
+  const deleteDocumentFolder = async (folderPath: string) => {
+    const cfg = apiConfig();
+    const normalized = normalizeRelativePath(folderPath, "");
+    if (!cfg || !normalized) return;
+    if (deleteBusyPath()) return;
+
+    const count = documentsList().filter((item) => item.name.startsWith(`${normalized}/`)).length;
+    const ok = window.confirm(
+      tr("docagent.delete_folder_confirm")
+        .replace("{path}", normalized)
+        .replace("{count}", String(count)),
+    );
+    if (!ok) return;
+
+    setDeleteBusyPath(normalized);
+    setToastMessage(null);
+    try {
+      const query = new URLSearchParams();
+      query.set("session", cfg.sessionId);
+      const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/rmdir", query);
+      await fetchJson(url, cfg.token, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: normalized }),
+      });
+      const prefix = `${normalized}/`;
+      const target = targetDoc();
+      const active = activeDoc();
+      const folder = activeFolder();
+      if (target && target.startsWith(prefix)) setTargetDoc(null);
+      if (active && active.startsWith(prefix)) setActiveDoc(null);
+      if (folder && (folder === normalized || folder.startsWith(prefix))) setActiveFolder("");
+      setExpandedFolders((prev) => {
+        const next = new Set<string>();
+        for (const path of prev) {
+          if (path === normalized || path.startsWith(prefix)) continue;
+          next.add(path);
+        }
+        return next;
+      });
+      setToastMessage(tr("docagent.deleted_folder").replace("{path}", normalized));
+      await refetchDocuments();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : tr("docagent.failed_delete_folder");
+      setToastMessage(message);
+    } finally {
+      setDeleteBusyPath(null);
+    }
+  };
+
+  const activeDocPath = createMemo(() => {
+    const doc = targetDoc();
+    if (!doc) return "";
+    const normalized = doc.trim().replace(/^\/+/, "");
+    if (!normalized) return "";
+    const session = apiConfig()?.sessionId ?? sessionId();
+    if (!session) return "";
+    return `documents/sessions/${session}/${normalized}`;
+  });
+  const activeDocKind = createMemo<"none" | "image" | "onlyoffice" | "unsupported">(() => {
+    const doc = activeDoc();
+    if (!doc) return "none";
+    if (isImagePreviewable(doc)) return "image";
+    if (isOnlyOfficeImportable(doc)) return "onlyoffice";
+    return "unsupported";
+  });
+  const activeDocDownloadUrl = createMemo(() => {
+    const cfg = apiConfig();
+    const doc = activeDoc();
+    if (!cfg || !doc) return "";
+    const query = new URLSearchParams();
+    query.set("docId", doc);
+    query.set("session", cfg.sessionId);
+    return buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/file", query);
+  });
+
+  createEffect(() => {
+    sessionId();
+    setTargetDoc(null);
+    setActiveDoc(null);
+    setActiveFolder("");
+    setResizingPane(null);
+  });
+
+  createEffect(() => {
+    const key = docWriterStateKey();
+    if (!key) return;
+    const state = readDocWriterState(key);
+    if (!state) {
+      setLeftPaneWidth(LEFT_PANEL_DEFAULT_WIDTH);
+      setRightPaneWidth(RIGHT_PANEL_DEFAULT_WIDTH);
+      return;
+    }
+    const nextActive = typeof state?.activeDoc === "string" ? state.activeDoc.trim() : "";
+    if (nextActive) setActiveDoc(nextActive);
+    const nextLeft = typeof state?.leftPaneWidth === "number" ? state.leftPaneWidth : Number.NaN;
+    if (Number.isFinite(nextLeft) && nextLeft > 0) setLeftPaneWidth(nextLeft);
+    const nextRight = typeof state?.rightPaneWidth === "number" ? state.rightPaneWidth : Number.NaN;
+    if (Number.isFinite(nextRight) && nextRight > 0) setRightPaneWidth(nextRight);
+  });
+
+  createEffect(() => {
+    const key = docWriterStateKey();
+    if (!key) return;
+    const a = activeDoc();
+    writeDocWriterState(key, {
+      schemaVersion: 1,
+      activeDoc: a ? a : undefined,
+      leftPaneWidth: Math.round(leftPaneWidth()),
+      rightPaneWidth: Math.round(rightPaneWidth()),
+    });
+  });
+
+  createEffect(() => {
+    leftPaneWidth();
+    rightPaneWidth();
+    documentsCollapsed();
+    clampPaneWidthsToViewport();
+  });
+
+  createEffect(() => {
+    if (typeof window === "undefined") return;
+    const onResize = () => clampPaneWidthsToViewport();
+    window.addEventListener("resize", onResize);
+    onCleanup(() => window.removeEventListener("resize", onResize));
+  });
+
+  createEffect(() => {
+    const items = documentsList();
+    if (!items.length) {
+      setTargetDoc(null);
+      setActiveDoc(null);
+      return;
+    }
+
+    const previousTarget = targetDoc();
+    const currentActive = activeDoc();
+    const activeExists = currentActive ? items.some((doc) => doc.name === currentActive) : false;
+    const targetExists = previousTarget ? items.some((doc) => doc.name === previousTarget) : false;
+
+    let nextTarget: string | null = targetExists ? previousTarget : null;
+    if (!nextTarget && activeExists && currentActive) {
+      nextTarget = currentActive;
+    }
+    if (!nextTarget) {
+      nextTarget = items[0]?.name ?? null;
+    }
+    if (previousTarget !== nextTarget) {
+      setTargetDoc(nextTarget);
+    }
+
+    if (!currentActive || !activeExists) {
+      setActiveDoc(nextTarget ?? items[0].name);
+      return;
+    }
+  });
+
+  createEffect(() => {
+    const normalizedDirs = new Set(
+      documentDirs()
+        .map((dir) => normalizeRelativePath(dir, ""))
+        .filter(Boolean),
+    );
+    const current = activeFolder();
+    if (!current) return;
+    if (!normalizedDirs.has(current)) {
+      setActiveFolder("");
+    }
+  });
+
+  createEffect(() => {
+    const prev = lastSessionStatus();
+    const next = props.sessionStatus ?? "idle";
+    setLastSessionStatus(next);
+    if (prev !== "running" || next === "running") return;
+    if (!targetDoc()) return;
+    if (!serverReady()) return;
+    setConfigSeq((v) => v + 1);
+    void refetchDocuments();
+  });
+
+  createEffect(() => {
+    const running = isAgentRunning();
+    const ready = serverReady();
+    const doc = targetDoc();
+    const id = sessionId();
+    if (!running || !ready || !doc || !id) return;
+    if (typeof window === "undefined") return;
+
+    const timer = window.setInterval(() => {
+      setConfigSeq((v) => v + 1);
+    }, RUNNING_REFRESH_INTERVAL_MS);
+
+    onCleanup(() => window.clearInterval(timer));
+  });
+
+  onCleanup(() => {
+    if (scrollFrame !== undefined) {
+      window.cancelAnimationFrame(scrollFrame);
+      scrollFrame = undefined;
+    }
+  });
+
+  // Composer state (copied in spirit from SessionView but simplified)
+  let agentPickerRef: HTMLDivElement | undefined;
+  const [toastMessage, setToastMessage] = createSignal<string | null>(null);
+  const [agentPickerOpen, setAgentPickerOpen] = createSignal(false);
+  const [agentPickerBusy, setAgentPickerBusy] = createSignal(false);
+  const [agentPickerReady, setAgentPickerReady] = createSignal(false);
+  const [agentPickerError, setAgentPickerError] = createSignal<string | null>(null);
+  const [agentOptions, setAgentOptions] = createSignal<Agent[]>([]);
+
+  createEffect(() => {
+    if (!toastMessage()) return;
+    const id = window.setTimeout(() => setToastMessage(null), 2800);
+    onCleanup(() => window.clearTimeout(id));
+  });
+
+  const agentLabel = createMemo(() => props.selectedSessionAgent ?? tr("session.default_agent"));
+
+  const loadAgentOptions = async (force = false) => {
+    if (agentPickerBusy()) return agentOptions();
+    if (agentPickerReady() && !force) return agentOptions();
+    setAgentPickerBusy(true);
+    setAgentPickerError(null);
+    try {
+      const agents = await props.listAgents();
+      const sorted = agents.slice().sort((a, b) => a.name.localeCompare(b.name));
+      setAgentOptions(sorted);
+      setAgentPickerReady(true);
+      return sorted;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : tr("docagent.failed_load_agents");
+      setAgentPickerError(message);
+      setAgentOptions([]);
+      return [];
+    } finally {
+      setAgentPickerBusy(false);
+    }
+  };
+
+  const openAgentPicker = () => {
+    setAgentPickerOpen((current) => !current);
+    if (!agentPickerReady()) {
+      void loadAgentOptions();
+    }
+  };
+
+  const applySessionAgent = (agent: string | null) => {
+    const id = sessionId();
+    if (!id) {
+      setToastMessage(tr("docagent.no_session_selected"));
+      return;
+    }
+    props.setSessionAgent(id, agent);
+  };
+
+  createEffect(() => {
+    if (!agentPickerOpen()) return;
+    const handler = (event: MouseEvent) => {
+      if (!agentPickerRef) return;
+      if (agentPickerRef.contains(event.target as Node)) return;
+      setAgentPickerOpen(false);
+    };
+    window.addEventListener("mousedown", handler);
+    onCleanup(() => window.removeEventListener("mousedown", handler));
+  });
+
+  createEffect(() => {
+    const container = chatContainerEl;
+    const sentinel = bottomVisibilityEl;
+    if (!container || !sentinel) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        setNearBottom(Boolean(entry?.isIntersecting));
+      },
+      {
+        root: container,
+        rootMargin: "0px 0px 96px 0px",
+        threshold: 0,
+      },
+    );
+    observer.observe(sentinel);
+    onCleanup(() => observer.disconnect());
+  });
+
+  const chatPartCount = createMemo(() =>
+    props.messages.reduce((count, message) => count + message.parts.length, 0),
+  );
+
+  createEffect(
+    on(
+      () => [sessionId(), props.messages.length, chatPartCount()] as const,
+      ([nextSessionId], previous) => {
+        const previousSessionId = previous?.[0] ?? "";
+        if (!nextSessionId) return;
+        if (nextSessionId !== previousSessionId) {
+          queueMicrotask(() => scheduleScrollToLatest("auto"));
+          return;
+        }
+        if (nearBottom()) {
+          scheduleScrollToLatest("auto");
+        }
+      },
+      { defer: true },
+    ),
+  );
+
+  const isSandboxWorkspace = createMemo(() =>
+    Boolean((props.activeWorkspaceDisplay as any)?.sandboxContainerName?.trim()),
+  );
+
+  const attachmentsEnabled = createMemo(() => {
+    if (props.activeWorkspaceDisplay.workspaceType !== "remote") return true;
+    return props.openworkServerStatus === "connected";
+  });
+  const attachmentsDisabledReason = createMemo(() => {
+    if (attachmentsEnabled()) return null;
+    if (props.openworkServerStatus === "limited") {
+      return tr("docagent.add_server_token_to_attach_files");
+    }
+    return tr("docagent.connect_server_to_attach_files");
+  });
+
+  const handleDraftChange = (draft: ComposerDraft) => {
+    props.setPrompt(draft.text);
+  };
+
+  const handleSendPrompt = (draft: ComposerDraft) => {
+    const path = activeDocPath();
+    const shouldPrefix = draft.mode === "prompt" && !draft.command && Boolean(path);
+    if (!shouldPrefix) {
+      props.sendPromptAsync(draft).catch(() => undefined);
+      return;
+    }
+
+    const prefix = tr("docagent.target_document_prompt_prefix").replace("{path}", path);
+    const baseText = draft.text ?? "";
+    const baseResolvedText = draft.resolvedText ?? null;
+    const already =
+      baseText.includes(prefix) || (typeof baseResolvedText === "string" ? baseResolvedText.includes(prefix) : false);
+    const nextDraft = already
+      ? draft
+      : {
+        ...draft,
+        text: `${prefix}\n\n${baseText}`.trim(),
+        resolvedText: baseResolvedText != null ? `${prefix}\n\n${baseResolvedText}`.trim() : undefined,
+      };
+    props.sendPromptAsync(nextDraft).catch(() => undefined);
+  };
+
+  const cancelRun = () => {
+    const id = sessionId().trim();
+    if (!id) return;
+    props.abortSession(id).catch(() => undefined);
+  };
+
+  const listCommands = async (): Promise<SlashCommandOption[]> => {
+    try {
+      return await props.listCommands();
+    } catch {
+      return [];
+    }
+  };
+
+  return (
+    <div class="relative isolate flex h-screen w-full bg-dls-surface text-dls-text font-sans overflow-hidden">
+      <input
+        ref={(el) => {
+          uploadInputEl = el;
+        }}
+        type="file"
+        class="hidden"
+        multiple
+        onChange={(event) => {
+          const list = event.currentTarget.files ? Array.from(event.currentTarget.files) : [];
+          if (list.length > 0) {
+            void uploadDocuments(list, { baseDir: activeFolder() });
+          }
+          event.currentTarget.value = "";
+        }}
+      />
+      <input
+        ref={(el) => {
+          const input = el as HTMLInputElement & { webkitdirectory?: boolean; directory?: boolean };
+          input.webkitdirectory = true;
+          input.directory = true;
+          uploadFolderInputEl = input;
+        }}
+        type="file"
+        class="hidden"
+        multiple
+        onChange={(event) => {
+          const list = event.currentTarget.files ? Array.from(event.currentTarget.files) : [];
+          if (list.length > 0) {
+            void uploadDocuments(list, { baseDir: activeFolder(), preserveRelativePath: true });
+          }
+          event.currentTarget.value = "";
+        }}
+      />
+
+      {/* Left: Document list */}
+      <div
+        class={`relative z-20 shrink-0 border-r border-dls-border flex flex-col bg-dls-sidebar ${resizingPane() === "left" ? "" : "transition-[width] duration-150 ease-out"
+          }`}
+        style={{ width: `${leftPaneDisplayWidth()}px` }}
+      >
+        <Show
+          when={!documentsCollapsed()}
+          fallback={
+            <div class="p-2 border-b border-dls-border flex flex-col items-center gap-2">
+              <button
+                type="button"
+                class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text"
+                onClick={() => setDocumentsCollapsed(false)}
+                title={tr("docagent.expand_documents")}
+                aria-label={tr("docagent.expand_documents")}
+              >
+                <PanelLeftOpen size={16} />
+              </button>
+              <button
+                type="button"
+                class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
+                onClick={() => uploadInputEl?.click()}
+                disabled={!serverReady() || uploadBusy()}
+                title={tr("docagent.upload_documents")}
+                aria-label={tr("docagent.upload_documents")}
+              >
+                <Plus size={16} />
+              </button>
+              <button
+                type="button"
+                class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
+                onClick={() => uploadFolderInputEl?.click()}
+                disabled={!serverReady() || uploadBusy()}
+                title={tr("docagent.upload_folder")}
+                aria-label={tr("docagent.upload_folder")}
+              >
+                <Folder size={16} />
+              </button>
+              <button
+                type="button"
+                class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
+                onClick={() => void createFolder()}
+                disabled={!serverReady() || uploadBusy()}
+                title={tr("docagent.create_folder")}
+                aria-label={tr("docagent.create_folder")}
+              >
+                <FolderPlus size={16} />
+              </button>
+              <button
+                type="button"
+                class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
+                onClick={() => void refetchDocuments()}
+                disabled={!serverReady() || documents.loading}
+                title={tr("docagent.refresh_documents")}
+                aria-label={tr("docagent.refresh_documents")}
+              >
+                <RefreshCw size={16} class={documents.loading ? "animate-spin" : ""} />
+              </button>
+            </div>
+          }
+        >
+          <div class="px-3 py-2 border-b border-dls-border space-y-2">
+            <div class="flex items-center justify-between gap-2">
+              <div class="min-w-0">
+                <h2 class="text-sm font-semibold text-dls-text leading-none">{tr("docagent.documents")}</h2>
+                <div class="mt-1 text-[10px] text-dls-secondary truncate">
+                  <Show when={activeFolder()} fallback={tr("docagent.folder_root")}>
+                    {tr("docagent.folder_label").replace("{path}", activeFolder())}
+                  </Show>
+                </div>
+              </div>
+              <button
+                type="button"
+                class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text"
+                onClick={() => setDocumentsCollapsed(true)}
+                title={tr("docagent.collapse_documents")}
+                aria-label={tr("docagent.collapse_documents")}
+              >
+                <PanelLeftClose size={16} />
+              </button>
+            </div>
+            <div class="flex items-center gap-1 flex-wrap">
+              <button
+                type="button"
+                class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
+                onClick={() => uploadInputEl?.click()}
+                disabled={!serverReady() || uploadBusy()}
+                title={tr("docagent.upload_documents")}
+                aria-label={tr("docagent.upload_documents")}
+              >
+                <Plus size={16} />
+              </button>
+              <button
+                type="button"
+                class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
+                onClick={() => uploadFolderInputEl?.click()}
+                disabled={!serverReady() || uploadBusy()}
+                title={tr("docagent.upload_folder")}
+                aria-label={tr("docagent.upload_folder")}
+              >
+                <Folder size={16} />
+              </button>
+              <button
+                type="button"
+                class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
+                onClick={() => void createFolder()}
+                disabled={!serverReady() || uploadBusy()}
+                title={tr("docagent.create_folder")}
+                aria-label={tr("docagent.create_folder")}
+              >
+                <FolderPlus size={16} />
+              </button>
+              <button
+                type="button"
+                class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
+                onClick={() => void refetchDocuments()}
+                disabled={!serverReady() || documents.loading}
+                title={tr("docagent.refresh_documents")}
+                aria-label={tr("docagent.refresh_documents")}
+              >
+                <RefreshCw size={16} class={documents.loading ? "animate-spin" : ""} />
+              </button>
+            </div>
+          </div>
+        </Show>
+        <div class="overflow-y-auto flex-1 py-2">
+          <Show
+            when={serverReady()}
+            fallback={<div class="p-2 text-xs text-dls-secondary">{tr("docagent.server_not_connected")}</div>}
+          >
+            <Show
+              when={!documents.error}
+              fallback={
+                <div class="p-2 text-xs text-red-11 whitespace-pre-wrap break-words">
+                  {documents.error instanceof Error ? documents.error.message : tr("docagent.failed_load_documents")}
+                </div>
+              }
+            >
+              <For each={fileTree()}>
+                {(node) => <TreeNodeView node={node} depth={0} />}
+              </For>
+              <Show when={fileTree().length === 0}>
+                <div class="px-4 py-8 text-center text-xs text-gray-10">
+                  {tr("docagent.no_documents")}
+                </div>
+              </Show>
+            </Show>
+          </Show>
+        </div>
+      </div>
+
+      <Show when={!documentsCollapsed()}>
+        <div
+          class={`relative z-30 shrink-0 w-1.5 cursor-col-resize ${resizingPane() === "left" ? "bg-dls-border/80" : "bg-transparent hover:bg-dls-border/60"
+            }`}
+          onMouseDown={(event) => beginPaneResize("left", event)}
+          role="separator"
+          aria-label={tr("docagent.resize_documents_panel")}
+          aria-orientation="vertical"
+        >
+          <div class="absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-dls-border/60" />
+        </div>
+      </Show>
+
+      {/* Middle: OnlyOffice */}
+      <div class="relative z-0 flex-1 min-w-0 flex flex-col">
+        <div class="h-12 border-b border-dls-border flex items-center justify-between px-3">
+          <div class="flex items-center gap-2 min-w-0">
+            <button
+              type="button"
+              class="p-2 -ml-1 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text"
+              onClick={() => setDocumentsCollapsed((v) => !v)}
+              title={documentsCollapsed() ? tr("docagent.show_documents") : tr("docagent.hide_documents")}
+              aria-label={documentsCollapsed() ? tr("docagent.show_documents") : tr("docagent.hide_documents")}
+            >
+              <Show when={documentsCollapsed()} fallback={<PanelLeftClose size={16} />}>
+                <PanelLeftOpen size={16} />
+              </Show>
+            </button>
+            <div class="text-xs text-dls-secondary truncate">
+              <Show when={targetDoc()} fallback={tr("docagent.select_target_document")}>
+                {tr("docagent.target_prefix")} <span class="text-dls-text">{targetDoc()}</span>
+                <Show when={activeDoc() && activeDoc() !== targetDoc()}>
+                  <span class="ml-2 text-dls-secondary">· {tr("docagent.viewing_prefix")}</span>{" "}
+                  <span class="text-dls-text">{activeDoc()}</span>
+                </Show>
+              </Show>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <button
+              type="button"
+              class="rounded-lg border border-dls-border bg-dls-surface px-2 py-1 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover disabled:opacity-50"
+              onClick={() => {
+                const path = activeDocPath();
+                if (!path) return;
+                const prefix = tr("docagent.target_document_prompt_prefix").replace("{path}", path);
+                const existing = props.prompt.trim();
+                const next = existing ? `${existing}\n\n${prefix}\n` : `${prefix}\n`;
+                props.setPrompt(next);
+              }}
+              disabled={!activeDocPath()}
+              title={tr("docagent.insert_document_path_into_prompt")}
+            >
+              {tr("docagent.use_in_prompt")}
+            </button>
+            <button
+              type="button"
+              class="rounded-lg border border-dls-border bg-dls-surface px-2 py-1 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover disabled:opacity-50"
+              onClick={() => setConfigSeq((v) => v + 1)}
+              disabled={!activeDoc() || activeDocKind() !== "onlyoffice"}
+              title={tr("docagent.reload_onlyoffice_config")}
+            >
+              {tr("docagent.reload")}
+            </button>
+            <button
+              type="button"
+              class="rounded-lg border border-dls-border bg-dls-surface px-2 py-1 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover disabled:opacity-50"
+              onClick={() => {
+                const id = sessionId();
+                if (!id) return;
+                navigate(`/session/${id}/view/session`);
+              }}
+              disabled={!sessionId()}
+              title={tr("docagent.open_session_view")}
+            >
+              {tr("docagent.session")}
+            </button>
+          </div>
+        </div>
+
+        <div class="flex-1 min-h-0 overflow-hidden">
+          <Show
+            when={activeDoc()}
+            fallback={<div class="h-full flex items-center justify-center text-dls-secondary">{tr("docagent.select_document_to_edit")}</div>}
+          >
+            <div class="relative h-full w-full">
+              <Show when={activeDocKind() === "image"}>
+                <div class="h-full w-full overflow-auto bg-dls-surface flex items-center justify-center p-4">
+                  <img
+                    src={activeDocDownloadUrl()}
+                    alt={activeDoc() ?? "image"}
+                    class="max-h-full max-w-full object-contain rounded-lg border border-dls-border bg-white"
+                  />
+                </div>
+              </Show>
+              <Show when={activeDocKind() === "onlyoffice"}>
+                <Show when={editorPayload()} fallback={<div class="p-4 text-xs text-dls-secondary">{tr("docagent.loading_editor")}</div>}>
+                  <OnlyOfficeEditor
+                    documentServerUrl={editorPayload()!.documentServerUrl}
+                    config={editorPayload()!.config}
+                  />
+                </Show>
+              </Show>
+              <Show when={activeDocKind() === "unsupported"}>
+                <div class="h-full w-full flex items-center justify-center px-6">
+                  <div class="max-w-xl rounded-xl border border-dls-border bg-dls-surface p-4 text-center space-y-3">
+                    <div class="text-sm text-dls-text">{tr("docagent.unsupported_preview_title")}</div>
+                    <div class="text-xs text-dls-secondary">{tr("docagent.unsupported_preview_desc")}</div>
+                    <Show when={activeDocDownloadUrl()}>
+                      <a
+                        href={activeDocDownloadUrl()}
+                        download={activeDoc() ?? "download"}
+                        class="inline-flex items-center rounded-lg border border-dls-border bg-dls-surface px-3 py-1.5 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover"
+                      >
+                        {tr("docagent.download_file")}
+                      </a>
+                    </Show>
+                  </div>
+                </div>
+              </Show>
+              <Show when={targetDoc() && activeDoc() && activeDoc() !== targetDoc()}>
+                <div
+                  class="pointer-events-none absolute inset-x-0 top-3 flex justify-center px-4"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <div class="max-w-lg rounded-xl border border-dls-border bg-dls-surface/90 px-4 py-2 shadow-lg backdrop-blur">
+                    <div class="text-xs text-dls-secondary">
+                      <span class="font-medium text-dls-text">{tr("docagent.preview_mode")}</span>{" "}
+                      {tr("docagent.preview_mode_desc").replace("{target}", targetDoc() ?? "")}{" "}
+                      <button
+                        type="button"
+                        class="pointer-events-auto ml-2 underline text-dls-secondary hover:text-dls-text"
+                        onClick={() => setActiveDoc(targetDoc())}
+                      >
+                        {tr("docagent.back_to_target")}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </Show>
+              <Show when={isAgentRunning()}>
+                <div
+                  class="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center px-4"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <div class="max-w-lg rounded-xl border border-dls-border bg-dls-surface/90 px-4 py-2 shadow-lg backdrop-blur">
+                    <div class="text-xs text-dls-secondary">
+                      <span class="font-medium text-dls-text">{tr("docagent.ai_is_editing")}</span>{" "}
+                      {tr("docagent.ai_is_editing_desc")}
+                    </div>
+                  </div>
+                </div>
+              </Show>
+            </div>
+          </Show>
+        </div>
+      </div>
+
+      <div
+        class={`relative z-30 shrink-0 w-1.5 cursor-col-resize ${resizingPane() === "right" ? "bg-dls-border/80" : "bg-transparent hover:bg-dls-border/60"
+          }`}
+        onMouseDown={(event) => beginPaneResize("right", event)}
+        role="separator"
+        aria-label={tr("docagent.resize_chat_panel")}
+        aria-orientation="vertical"
+      >
+        <div class="absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-dls-border/60" />
+      </div>
+
+      {/* Right: Chat */}
+      <div class="relative z-30 shrink-0 border-l border-dls-border flex flex-col bg-dls-surface" style={{ width: `${rightPaneWidth()}px` }}>
+        <div class="h-12 border-b border-dls-border px-3 flex items-center justify-between">
+          <div class="min-w-0">
+            <div class="text-sm font-medium text-dls-text truncate">{tr("docagent.chat")}</div>
+            <div class="text-[11px] text-dls-secondary truncate">
+              <Show when={props.selectedSessionAgent} fallback={tr("session.default_agent")}>
+                @{props.selectedSessionAgent}
+              </Show>
+            </div>
+          </div>
+          <div class="text-[11px] text-dls-secondary truncate" title={sessionId()}>
+            {sessionId() ? `#${sessionId()}` : tr("docagent.no_session")}
+          </div>
+        </div>
+
+        <div class="flex-1 min-h-0 overflow-y-auto" ref={(el) => (chatContainerEl = el)}>
+          <MessageList
+            messages={props.messages}
+            developerMode={props.developerMode}
+            showThinking={props.showThinking}
+            expandedStepIds={props.expandedStepIds}
+            setExpandedStepIds={props.setExpandedStepIds}
+          />
+          <div
+            ref={(el) => {
+              messagesEndEl = el;
+              bottomVisibilityEl = el;
+            }}
+          />
+        </div>
+
+        <Composer
+          prompt={props.prompt}
+          developerMode={props.developerMode}
+          busy={props.busy}
+          isStreaming={isAgentRunning()}
+          onSend={handleSendPrompt}
+          onStop={cancelRun}
+          onDraftChange={handleDraftChange}
+          selectedModelLabel={props.selectedSessionModelLabel || tr("session.model")}
+          onModelClick={props.openSessionModelPicker}
+          modelVariantLabel={props.modelVariantLabel}
+          modelVariant={props.modelVariant}
+          onModelVariantChange={props.setModelVariant}
+          agentLabel={agentLabel()}
+          selectedAgent={props.selectedSessionAgent}
+          agentPickerOpen={agentPickerOpen()}
+          agentPickerBusy={agentPickerBusy()}
+          agentPickerError={agentPickerError()}
+          agentOptions={agentOptions()}
+          onToggleAgentPicker={openAgentPicker}
+          onSelectAgent={(agent) => {
+            applySessionAgent(agent);
+            setAgentPickerOpen(false);
+          }}
+          setAgentPickerRef={(el) => {
+            agentPickerRef = el;
+          }}
+          showNotionBanner={false}
+          onNotionBannerClick={() => undefined}
+          toast={toastMessage()}
+          onToast={(message) => setToastMessage(message)}
+          listAgents={props.listAgents}
+          recentFiles={props.workingFiles}
+          searchFiles={props.searchFiles}
+          listCommands={listCommands}
+          isRemoteWorkspace={props.activeWorkspaceDisplay.workspaceType === "remote"}
+          isSandboxWorkspace={isSandboxWorkspace()}
+          attachmentsEnabled={attachmentsEnabled()}
+          attachmentsDisabledReason={attachmentsDisabledReason()}
+        />
+      </div>
+
+      <Show when={Boolean(resizingPane())}>
+        <div
+          class="fixed inset-0 z-40 cursor-col-resize select-none"
+          onMouseDown={(event) => event.preventDefault()}
+          onMouseMove={(event) => event.preventDefault()}
+          onMouseUp={() => paneResizeCleanup?.()}
+        />
+      </Show>
+    </div>
+  );
+}

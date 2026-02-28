@@ -38,8 +38,8 @@ import DashboardView from "./pages/dashboard";
 import SessionView from "./pages/session";
 import ProtoWorkspacesView from "./pages/proto-workspaces";
 import ProtoV1UxView from "./pages/proto-v1-ux";
-import DocumentView from "./pages/document";
 import DocumentWriterView from "./pages/document-writer";
+import DocumentAgentView from "./pages/document-agent";
 import { createClient, unwrap, waitForHealthy, type OpencodeAuth } from "./lib/opencode";
 import {
   abortSession as abortSessionTyped,
@@ -106,7 +106,7 @@ import {
   modelEquals,
   normalizeDirectoryPath,
 } from "./utils";
-import { currentLocale, setLocale, t, type Language } from "../i18n";
+import { currentLocale, initLocale, setLocale, t, type Language } from "../i18n";
 import {
   isWindowsPlatform,
   lastUserModelFromMessages,
@@ -245,6 +245,8 @@ function stripRemoteConnectQuery(rawUrl: string): string | null {
 }
 
 export default function App() {
+  initLocale();
+
   const envOpenworkWorkspaceId =
     typeof import.meta.env?.VITE_OPENWORK_WORKSPACE_ID === "string"
       ? import.meta.env.VITE_OPENWORK_WORKSPACE_ID.trim() || null
@@ -274,6 +276,7 @@ export default function App() {
 
   const location = useLocation();
   const navigate = useNavigate();
+  let routeHydratedSessionKey = "";
 
   const [creatingSession, setCreatingSession] = createSignal(false);
   const [sessionViewLockUntil, setSessionViewLockUntil] = createSignal(0);
@@ -283,14 +286,14 @@ export default function App() {
     if (path.startsWith("/session")) return "session";
     if (path.startsWith("/proto")) return "proto";
     if (path.startsWith("/document-writer")) return "document-writer";
-    if (path.startsWith("/document")) return "document";
+    if (path.startsWith("/document-agent")) return "document-agent";
     return "dashboard";
   });
   const isProtoV1Ux = createMemo(() =>
     location.pathname.toLowerCase().startsWith("/proto-v1-ux")
   );
 
-  const [tab, setTabState] = createSignal<DashboardTab>("scheduled");
+  const [tab, setTabState] = createSignal<DashboardTab>("agents");
   const [settingsTab, setSettingsTab] = createSignal<SettingsTab>("general");
 
   const goToDashboard = (nextTab: DashboardTab, options?: { replace?: boolean }) => {
@@ -334,10 +337,6 @@ export default function App() {
       navigate("/session");
       return;
     }
-    if (next === "document") {
-      navigate("/document");
-      return;
-    }
     if (next === "document-writer") {
       if (sessionId) {
         goToDocumentWriter(sessionId);
@@ -346,6 +345,19 @@ export default function App() {
       const fallback = activeSessionId();
       if (fallback) {
         goToDocumentWriter(fallback);
+        return;
+      }
+      navigate("/session");
+      return;
+    }
+    if (next === "document-agent") {
+      if (sessionId) {
+        goToDocumentAgent(sessionId);
+        return;
+      }
+      const fallback = activeSessionId();
+      if (fallback) {
+        goToDocumentAgent(fallback);
         return;
       }
       navigate("/session");
@@ -370,6 +382,15 @@ export default function App() {
       return;
     }
     navigate(`/document-writer/${trimmed}`, options);
+  };
+
+  const goToDocumentAgent = (sessionId: string, options?: { replace?: boolean }) => {
+    const trimmed = sessionId.trim();
+    if (!trimmed) {
+      navigate("/session", options);
+      return;
+    }
+    navigate(`/document-agent/${trimmed}`, options);
   };
 
   const [startupPreference, setStartupPreference] = createSignal<StartupPreference | null>(null);
@@ -891,6 +912,61 @@ export default function App() {
   const [lastPromptSent, setLastPromptSent] = createSignal("");
 
   type PartInput = TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput;
+  const inferFileMimeType = (path: string) => {
+    const normalized = path.replace(/\\/g, "/").toLowerCase();
+    const fileName = normalized.split("/").pop() ?? normalized;
+    const match = fileName.match(/\.[^.]+$/);
+    const ext = match ? match[0] : "";
+    switch (ext) {
+      case ".png":
+        return "image/png";
+      case ".jpg":
+      case ".jpeg":
+        return "image/jpeg";
+      case ".gif":
+        return "image/gif";
+      case ".webp":
+        return "image/webp";
+      case ".bmp":
+        return "image/bmp";
+      case ".svg":
+        return "image/svg+xml";
+      case ".avif":
+        return "image/avif";
+      case ".pdf":
+        return "application/pdf";
+      case ".mp3":
+        return "audio/mpeg";
+      case ".wav":
+        return "audio/wav";
+      case ".m4a":
+        return "audio/mp4";
+      case ".ogg":
+        return "audio/ogg";
+      case ".flac":
+        return "audio/flac";
+      case ".mp4":
+        return "video/mp4";
+      case ".mov":
+        return "video/quicktime";
+      case ".webm":
+        return "video/webm";
+      case ".mkv":
+        return "video/x-matroska";
+      case ".avi":
+        return "video/x-msvideo";
+      case ".txt":
+        return "text/plain";
+      case ".md":
+        return "text/markdown";
+      case ".csv":
+        return "text/csv";
+      case ".json":
+        return "application/json";
+      default:
+        return "application/octet-stream";
+    }
+  };
 
   const buildPromptParts = (draft: ComposerDraft): PartInput[] => {
     const parts: PartInput[] = [];
@@ -925,7 +1001,7 @@ export default function App() {
         if (!absolute) continue;
         parts.push({
           type: "file",
-          mime: "text/plain",
+          mime: inferFileMimeType(part.path),
           url: `file://${absolute}`,
           filename: filenameFromPath(part.path),
         } as FilePartInput);
@@ -969,7 +1045,7 @@ export default function App() {
       if (!absolute) continue;
       parts.push({
         type: "file",
-        mime: "text/plain",
+        mime: inferFileMimeType(part.path),
         url: `file://${absolute}`,
         filename: filenameFromPath(part.path),
       } as FilePartInput);
@@ -1432,11 +1508,18 @@ export default function App() {
     // SSE will handle any further sync — calling loadSessions/refreshSidebarWorkspaceSessions
     // here races with SSE and can wipe unrelated sessions from the store.
     setSessions(sessions().filter((s) => s.id !== trimmed));
-    const activeWsId = workspaceStore.activeWorkspaceId();
-    setSidebarSessionsByWorkspaceId((prev) => ({
-      ...prev,
-      [activeWsId]: (prev[activeWsId] ?? []).filter((s) => s.id !== trimmed),
-    }));
+    setSidebarSessionsByWorkspaceId((prev) => {
+      const next: Record<string, SidebarSessionItem[]> = {};
+      let changed = false;
+      for (const [workspaceId, list] of Object.entries(prev)) {
+        const filtered = (list ?? []).filter((session) => session.id !== trimmed);
+        if (filtered.length !== list.length) {
+          changed = true;
+        }
+        next[workspaceId] = filtered;
+      }
+      return changed ? next : prev;
+    });
 
     // If we're currently routed to the deleted session, navigate away immediately.
     // (Otherwise the route effect can try to re-select a session that no longer exists.)
@@ -1449,18 +1532,23 @@ export default function App() {
       // ignore
     }
 
+    // Remove deleted session from per-workspace local selection cache.
+    const map = readSessionByWorkspace();
+    let mapChanged = false;
+    const nextMap = { ...map };
+    for (const [workspaceId, cachedSessionId] of Object.entries(map)) {
+      if (cachedSessionId === trimmed) {
+        delete nextMap[workspaceId];
+        mapChanged = true;
+      }
+    }
+    if (mapChanged) {
+      writeSessionByWorkspace(nextMap);
+    }
+
     // If the deleted session was selected, clear selection so routing can fall back cleanly.
     if (selectedSessionId() === trimmed) {
       setSelectedSessionId(null);
-      const activeWorkspace = workspaceStore.activeWorkspaceId().trim();
-      if (activeWorkspace) {
-        const map = readSessionByWorkspace();
-        if (map[activeWorkspace] === trimmed) {
-          const next = { ...map };
-          delete next[activeWorkspace];
-          writeSessionByWorkspace(next);
-        }
-      }
     }
 
     const nextStatus = { ...sessionStatusById() };
@@ -1916,11 +2004,11 @@ export default function App() {
   const [modelVariant, setModelVariant] = createSignal<string | null>(null);
 
   const MODEL_VARIANT_OPTIONS = [
-    { value: "none", label: "None" },
-    { value: "low", label: "Low" },
-    { value: "medium", label: "Medium" },
-    { value: "high", label: "High" },
-    { value: "xhigh", label: "X-High" },
+    { value: "none" },
+    { value: "low" },
+    { value: "medium" },
+    { value: "high" },
+    { value: "xhigh" },
   ];
 
   const normalizeModelVariant = (value: string | null) => {
@@ -1933,7 +2021,7 @@ export default function App() {
 
   const formatModelVariantLabel = (value: string | null) => {
     const normalized = normalizeModelVariant(value) ?? "none";
-    return MODEL_VARIANT_OPTIONS.find((option) => option.value === normalized)?.label ?? "None";
+    return t(`session.variant_${normalized}`, currentLocale());
   };
 
   const handleEditModelVariant = () => {
@@ -2572,8 +2660,8 @@ export default function App() {
       case "dashboard":
       case "session":
       case "proto":
-      case "document":
       case "document-writer":
+      case "document-agent":
         return value;
       default:
         return null;
@@ -2749,7 +2837,7 @@ export default function App() {
     const id = sessionId.trim();
     if (!id) return "session";
     const view = openworkSessionPrefsById()[id]?.view;
-    return view === "document-writer" ? "document-writer" : "session";
+    return view === "document-writer" ? "document-writer" : view === "document-agent" ? "document-agent" : "session";
   };
 
   const getSessionPreferredAgent = (sessionId: string): string | null => {
@@ -2812,7 +2900,7 @@ export default function App() {
   const persistSessionPreferredView = async (sessionId: string, view: View): Promise<void> => {
     const id = sessionId.trim();
     if (!id) return;
-    if (view !== "document-writer") return;
+    if (view !== "document-writer" && view !== "document-agent") return;
 
     const localBase = openworkSessionPrefsById();
     const localExisting = localBase[id] ?? null;
@@ -2988,12 +3076,20 @@ export default function App() {
     persistSessionPreferredView(sessionId, "document-writer").catch(() => undefined);
   });
 
+  createEffect(() => {
+    if (currentView() !== "document-agent") return;
+    const sessionId = activeSessionId();
+    if (!sessionId) return;
+    persistSessionPreferredView(sessionId, "document-agent").catch(() => undefined);
+  });
+
   const inferSessionPreferredView = (title?: string | null): View | null => {
     const normalized = (title ?? "").trim().toLowerCase();
     if (!normalized) return null;
     if (normalized.includes("document writer")) return "document-writer";
     if (normalized.includes("bid writer")) return "document-writer";
     if (normalized.includes("bid dedupe")) return "document-writer";
+    if (normalized.includes("document agent")) return "document-agent";
     return null;
   };
 
@@ -3003,6 +3099,7 @@ export default function App() {
     if (normalized.includes("document writer")) return "document-writer";
     if (normalized.includes("bid writer")) return "bid-writer";
     if (normalized.includes("bid dedupe")) return "bid-dedupe";
+    if (normalized.includes("document agent")) return "document-writer";
     return null;
   };
 
@@ -3029,6 +3126,9 @@ export default function App() {
     setView(resolved, id);
     if (resolved === "document-writer") {
       persistSessionPreferredView(id, "document-writer").catch(() => undefined);
+    }
+    if (resolved === "document-agent") {
+      persistSessionPreferredView(id, "document-agent").catch(() => undefined);
     }
   };
 
@@ -3790,6 +3890,28 @@ export default function App() {
     formatModelLabel(selectedSessionModel(), providers())
   );
 
+  // Workspace customization: keep the chat model picker focused on a single
+  // company model instead of listing every built-in provider.
+  const PINNED_PROVIDER_ID = "my-company";
+  const PINNED_MODEL_ID = "Kimi-K2.5";
+  const PINNED_MODEL_REF: ModelRef = {
+    providerID: PINNED_PROVIDER_ID,
+    modelID: PINNED_MODEL_ID,
+  };
+  const isPinnedModelOption = (providerID: string, modelID: string) =>
+    providerID === PINNED_PROVIDER_ID && modelID === PINNED_MODEL_ID;
+
+  createEffect(() => {
+    const allProviders = providers();
+    const hasPinnedModel = allProviders.some(
+      (provider) => provider.id === PINNED_PROVIDER_ID && Boolean(provider.models?.[PINNED_MODEL_ID]),
+    );
+    if (!hasPinnedModel) return;
+    if (modelEquals(defaultModel(), PINNED_MODEL_REF)) return;
+    setDefaultModelExplicit(true);
+    setDefaultModel(PINNED_MODEL_REF);
+  });
+
   const modelPickerCurrent = createMemo(() =>
     modelPickerTarget() === "default" ? defaultModel() : selectedSessionModel()
   );
@@ -3823,6 +3945,7 @@ export default function App() {
     const next: ModelOption[] = [];
 
     for (const provider of sortedProviders) {
+      if (provider.id !== PINNED_PROVIDER_ID) continue;
       const defaultModelID = defaults[provider.id];
       const isConnected = providerConnectedIds().includes(provider.id);
       const models = Object.values(provider.models ?? {}).filter(
@@ -3837,6 +3960,7 @@ export default function App() {
       });
 
       for (const model of models) {
+        if (!isPinnedModelOption(provider.id, model.id)) continue;
         const isFree = model.cost?.input === 0 && model.cost?.output === 0;
         const isDefault =
           provider.id === currentDefault.providerID && model.id === currentDefault.modelID;
@@ -4641,12 +4765,15 @@ export default function App() {
       if (nextView === "document-writer") {
         persistSessionPreferredView(session.id, "document-writer").catch(() => undefined);
       }
+      if (nextView === "document-agent") {
+        persistSessionPreferredView(session.id, "document-agent").catch(() => undefined);
+      }
 
       // setSessionViewLockUntil(Date.now() + 1200);
       if (nextView === "document-writer") {
         goToDocumentWriter(session.id);
-      } else if (nextView === "document") {
-        navigate("/document");
+      } else if (nextView === "document-agent") {
+        goToDocumentAgent(session.id);
       } else {
         goToSession(session.id);
       }
@@ -5890,7 +6017,7 @@ export default function App() {
     if (dashboardTabs.has(normalized as DashboardTab)) {
       return normalized as DashboardTab;
     }
-    return "scheduled";
+    return "agents";
   };
 
   const initialRoute = () => {
@@ -5901,6 +6028,26 @@ export default function App() {
   createEffect(() => {
     const rawPath = location.pathname.trim();
     const path = rawPath.toLowerCase();
+    const isKnownMissingSession = (sessionId: string) => {
+      if (!sessionsLoaded()) return false;
+      if (sessions().some((session) => session.id === sessionId)) return false;
+
+      const workspaceId = workspaceStore.activeWorkspaceId().trim();
+      if (!workspaceId) return false;
+
+      const sidebarStatus = sidebarSessionStatusByWorkspaceId()[workspaceId] ?? "idle";
+      if (sidebarStatus !== "ready") return false;
+
+      const sidebarSessions = sidebarSessionsByWorkspaceId()[workspaceId] ?? [];
+      return !sidebarSessions.some((session) => session.id === sessionId);
+    };
+
+    const ensureRouteSessionHydrated = (sessionId: string) => {
+      const key = `${workspaceStore.activeWorkspaceId()}::${sessionId}`;
+      if (selectedSessionId() === sessionId && routeHydratedSessionKey === key) return;
+      routeHydratedSessionKey = key;
+      void selectSession(sessionId);
+    };
 
     if (path === "" || path === "/") {
       navigate(initialRoute(), { replace: true });
@@ -5938,7 +6085,7 @@ export default function App() {
 
       // If the URL points at a session that no longer exists (e.g. after deletion),
       // route back to /session so the app can fall back safely.
-      if (sessionsLoaded() && !sessions().some((session) => session.id === id)) {
+      if (isKnownMissingSession(id)) {
         if (selectedSessionId() === id) {
           setSelectedSessionId(null);
         }
@@ -5946,9 +6093,7 @@ export default function App() {
         return;
       }
 
-      if (selectedSessionId() !== id) {
-        void selectSession(id);
-      }
+      ensureRouteSessionHydrated(id);
 
       if (!forcedView) {
         const stored = getSessionPreferredView(id);
@@ -5963,6 +6108,14 @@ export default function App() {
             goToDocumentWriter(id, { replace: true });
           }, 0);
         }
+        if (resolved === "document-agent") {
+          window.setTimeout(() => {
+            if (location.pathname.trim().toLowerCase() !== `/session/${id.toLowerCase()}`) return;
+            if (new URLSearchParams(location.search).get("view") === "session") return;
+            if (getSessionPreferredView(id) !== "document-agent") return;
+            goToDocumentAgent(id, { replace: true });
+          }, 0);
+        }
 
         void (async () => {
           try {
@@ -5972,8 +6125,14 @@ export default function App() {
           }
           if (location.pathname.trim().toLowerCase() !== `/session/${id.toLowerCase()}`) return;
           if (new URLSearchParams(location.search).get("view") === "session") return;
-          if (getSessionPreferredView(id) !== "document-writer") return;
-          goToDocumentWriter(id, { replace: true });
+          const preferred = getSessionPreferredView(id);
+          if (preferred === "document-writer") {
+            goToDocumentWriter(id, { replace: true });
+            return;
+          }
+          if (preferred === "document-agent") {
+            goToDocumentAgent(id, { replace: true });
+          }
         })();
       }
       return;
@@ -5993,7 +6152,7 @@ export default function App() {
         return;
       }
 
-      if (sessionsLoaded() && !sessions().some((session) => session.id === id)) {
+      if (isKnownMissingSession(id)) {
         if (selectedSessionId() === id) {
           setSelectedSessionId(null);
         }
@@ -6001,9 +6160,33 @@ export default function App() {
         return;
       }
 
-      if (selectedSessionId() !== id) {
-        void selectSession(id);
+      ensureRouteSessionHydrated(id);
+      return;
+    }
+
+    if (path.startsWith("/document-agent")) {
+      const [, , sessionSegment] = rawPath.split("/");
+      const id = (sessionSegment ?? "").trim();
+
+      if (!id) {
+        const fallback = activeSessionId();
+        if (fallback) {
+          goToDocumentAgent(fallback, { replace: true });
+        } else {
+          navigate("/session", { replace: true });
+        }
+        return;
       }
+
+      if (isKnownMissingSession(id)) {
+        if (selectedSessionId() === id) {
+          setSelectedSessionId(null);
+        }
+        navigate("/session", { replace: true });
+        return;
+      }
+
+      ensureRouteSessionHydrated(id);
       return;
     }
 
@@ -6029,11 +6212,6 @@ export default function App() {
 
     if (path.startsWith("/onboarding")) {
       navigate("/session", { replace: true });
-      return;
-    }
-
-    if (path.startsWith("/document")) {
-      // Allow navigation to document view
       return;
     }
 
@@ -6067,12 +6245,8 @@ export default function App() {
         <Match when={currentView() === "document-writer"}>
           <DocumentWriterView {...sessionProps()} />
         </Match>
-        <Match when={currentView() === "document"}>
-          <DocumentView
-            openworkServerStatus={openworkServerStatus()}
-            openworkServerClient={openworkServerClient()}
-            openworkServerWorkspaceId={openworkServerWorkspaceId()}
-          />
+        <Match when={currentView() === "document-agent"}>
+          <DocumentAgentView {...sessionProps()} />
         </Match>
         <Match when={true}>
           <DashboardView {...dashboardProps()} />

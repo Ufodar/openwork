@@ -458,7 +458,7 @@ export default function PartView(props: Props) {
   const subtleTextClass = () => (tone() === "dark" ? "text-gray-12/70" : "text-gray-11");
   const panelBgClass = () => (tone() === "dark" ? "bg-gray-2/10" : "bg-gray-2/30");
   const toolOnly = () => true;
-  const showToolOutput = () => developerMode();
+  const showToolOutput = () => true;
   const markdownSource = createMemo(() => {
     if (!renderMarkdown() || p().type !== "text") return "";
     return "text" in p() ? String((p() as { text: string }).text ?? "") : "";

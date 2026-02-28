@@ -139,7 +139,6 @@ const SLIDE_EXTENSIONS = [
     ".otp",
 ];
 
-const ALLOWED_EXTENSIONS = new Set([...WORD_EXTENSIONS, ...CELL_EXTENSIONS, ...SLIDE_EXTENSIONS]);
 const DOCX_ZIP_EXTENSIONS = new Set([".docx", ".docm", ".dotx", ".dotm"]);
 const SESSION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 
@@ -372,6 +371,25 @@ function resolveDocumentPathSafe(docsDir: string, relPath: string): string {
     return resolvedPath;
 }
 
+function normalizeDocumentPath(value: string): string {
+    const normalized = value.replace(/\\/g, "/").replace(/^\/+/, "").trim();
+    const parts = normalized
+        .split("/")
+        .map((segment) => segment.trim())
+        .filter((segment) => Boolean(segment) && segment !== "." && segment !== "..");
+    return parts.join("/");
+}
+
+function validateDocumentMutationPath(relPath: string): void {
+    const segments = relPath.split("/").filter(Boolean);
+    if (!segments.length) {
+        throw new ApiError(400, "invalid_request", "Document path is required");
+    }
+    if (segments.some((segment) => segment.startsWith("."))) {
+        throw new ApiError(400, "invalid_request", "Hidden paths are not allowed");
+    }
+}
+
 function jsonResponse(data: unknown, status = 200) {
     return new Response(JSON.stringify(data), {
         status,
@@ -379,42 +397,34 @@ function jsonResponse(data: unknown, status = 200) {
     });
 }
 
-function getOnlyOfficeUrl(request?: Request): string {
-    const override = (process.env.ONLYOFFICE_URL ?? "").trim();
-    if (override) return override.replace(/\/+$/, "");
+const LOCAL_ONLYOFFICE_URL = "http://localhost:8080";
+const POD_IP = process.env.OPENWORK_POD_IP ?? "192.168.5.250";
+const POD_ONLYOFFICE_URL = `http://${POD_IP}:30080`;
+const LOCAL_ONLYOFFICE_PUBLIC_BASE_URL = "http://host.docker.internal:8789";
+const POD_ONLYOFFICE_PUBLIC_BASE_URL = `http://${POD_IP}:30789`;
 
-    const origin = (request?.headers.get("origin") ?? "").trim();
-    const host = (request?.headers.get("host") ?? "").trim();
-    const candidate = origin || (host ? `http://${host}` : "");
-    if (candidate) {
-        try {
-            const url = new URL(candidate);
-            const protocol = url.protocol || "http:";
-            const hostname = url.hostname;
-            if (hostname) return `${protocol}//${hostname}:8080`;
-        } catch {
-            // ignore and fall back
-        }
-    }
+function resolveOnlyOfficeNetworkMode(): "local" | "pod" {
+    const raw = (
+        process.env.OPENWORK_DOC_NETWORK_MODE ??
+        process.env.OPENWORK_NETWORK_MODE ??
+        process.env.OPENWORK_MODE ??
+        ""
+    )
+        .trim()
+        .toLowerCase();
+    return raw === "pod" ? "pod" : "local";
+}
 
-    return "http://localhost:8080";
+function getOnlyOfficeUrl(_request?: Request): string {
+    return resolveOnlyOfficeNetworkMode() === "pod" ? POD_ONLYOFFICE_URL : LOCAL_ONLYOFFICE_URL;
 }
 
 function getOnlyOfficeJwtSecret(): string {
     return (process.env.ONLYOFFICE_JWT_SECRET ?? "").trim();
 }
 
-function resolveOnlyOfficePublicBaseUrl(host: string, port: number): string {
-    const override = (process.env.ONLYOFFICE_CALLBACK_URL || "").trim();
-    if (override) return override.replace(/\/+$/, "");
-
-    const normalizedHost = host.trim();
-    if (!normalizedHost || normalizedHost === "0.0.0.0" || normalizedHost === "::") {
-        // Common local-dev case: OpenWork binds to 0.0.0.0 but OnlyOffice runs in Docker.
-        // `host.docker.internal` works on macOS/Windows Docker Desktop; Linux users can override via ONLYOFFICE_CALLBACK_URL.
-        return `http://host.docker.internal:${port}`;
-    }
-    return `http://${normalizedHost}:${port}`;
+function resolveOnlyOfficePublicBaseUrl(_host: string, _port: number): string {
+    return resolveOnlyOfficeNetworkMode() === "pod" ? POD_ONLYOFFICE_PUBLIC_BASE_URL : LOCAL_ONLYOFFICE_PUBLIC_BASE_URL;
 }
 
 function buildDocumentQuery(docId: string, sessionId?: string | null): string {
@@ -458,6 +468,7 @@ export function createDocumentRoutes(routes: unknown[]) {
             await ensureDir(docsDir);
 
             const docs: Array<{ name: string; updatedAt: number; size: number; type: string }> = [];
+            const dirs = new Set<string>();
 
             const walk = async (dir: string) => {
                 const entries = await readdir(dir, { withFileTypes: true });
@@ -465,12 +476,12 @@ export function createDocumentRoutes(routes: unknown[]) {
                     if (entry.name.startsWith(".")) continue;
                     const fullPath = join(dir, entry.name);
                     if (entry.isDirectory()) {
+                        const relDir = relative(docsDir, fullPath).replace(/\\/g, "/");
+                        if (relDir) dirs.add(relDir);
                         await walk(fullPath);
                         continue;
                     }
                     if (!entry.isFile()) continue;
-                    const ext = extname(entry.name).toLowerCase();
-                    if (!ALLOWED_EXTENSIONS.has(ext)) continue;
 
                     const info = await stat(fullPath);
                     const relName = relative(docsDir, fullPath).replace(/\\/g, "/");
@@ -485,7 +496,7 @@ export function createDocumentRoutes(routes: unknown[]) {
 
             await walk(docsDir);
             docs.sort((a, b) => b.updatedAt - a.updatedAt);
-            return jsonResponse({ items: docs });
+            return jsonResponse({ items: docs, dirs: Array.from(dirs).sort((a, b) => a.localeCompare(b)) });
         },
     });
 
@@ -537,8 +548,6 @@ export function createDocumentRoutes(routes: unknown[]) {
                         continue;
                     }
                     if (!entry.isFile()) continue;
-                    const ext = extname(entry.name).toLowerCase();
-                    if (!ALLOWED_EXTENSIONS.has(ext)) continue;
 
                     const relName = relative(docsDir, fullPath).replace(/\\/g, "/");
                     if (relName === keep) continue;
@@ -599,11 +608,6 @@ export function createDocumentRoutes(routes: unknown[]) {
             };
 
             const initialDestRel = deriveDestRel().replace(/^\/+/, "");
-            const ext = extname(initialDestRel).toLowerCase();
-            if (!ALLOWED_EXTENSIONS.has(ext)) {
-                throw new ApiError(400, "invalid_request", "Unsupported document type");
-            }
-
             let destRel = initialDestRel;
             let destAbs = resolveDocumentPathSafe(docsDir, destRel);
             if (await exists(destAbs)) {
@@ -615,6 +619,7 @@ export function createDocumentRoutes(routes: unknown[]) {
                     return jsonResponse({ ok: true, doc: destRel, reused: true });
                 }
                 if (mode === "copy") {
+                    const ext = extname(destRel).toLowerCase();
                     const dirRel = dirname(destRel).replace(/\\/g, "/");
                     const base = basename(destRel, ext);
                     const unique = `${base}-${shortId()}${ext}`;
@@ -1888,6 +1893,97 @@ export function createDocumentRoutes(routes: unknown[]) {
         },
     });
 
+    routes.push({
+        method: "POST",
+        regex: /^\/w\/([^/]+)\/document\/mkdir$/,
+        keys: ["id"],
+        auth: "client",
+        handler: async (ctx: RequestContext) => {
+            const workspaceId = ctx.params.id;
+            const sessionId = parseDocumentSessionId(ctx.url.searchParams.get("session"));
+            const workspace = ctx.config.workspaces.find((w: WorkspaceInfo) => w.id === workspaceId);
+            if (!workspace) throw new ApiError(404, "not_found", "Workspace not found");
+
+            const payload = (await ctx.request.json().catch(() => null)) as any;
+            const requestedPath = typeof payload?.path === "string" ? payload.path : "";
+            const dirPath = normalizeDocumentPath(requestedPath);
+            if (!dirPath) throw new ApiError(400, "invalid_request", "Folder path is required");
+            validateDocumentMutationPath(dirPath);
+
+            const docsDir = resolveDocumentsDir(workspace.path, sessionId);
+            await ensureDir(docsDir);
+
+            const absPath = resolveDocumentPathSafe(docsDir, dirPath);
+            await ensureDir(absPath);
+            const info = await stat(absPath);
+            if (!info.isDirectory()) {
+                throw new ApiError(400, "invalid_request", "Target path is not a folder");
+            }
+
+            return jsonResponse({ ok: true, path: dirPath });
+        },
+    });
+
+    routes.push({
+        method: "POST",
+        regex: /^\/w\/([^/]+)\/document\/delete$/,
+        keys: ["id"],
+        auth: "client",
+        handler: async (ctx: RequestContext) => {
+            const workspaceId = ctx.params.id;
+            const sessionId = parseDocumentSessionId(ctx.url.searchParams.get("session"));
+            const workspace = ctx.config.workspaces.find((w: WorkspaceInfo) => w.id === workspaceId);
+            if (!workspace) throw new ApiError(404, "not_found", "Workspace not found");
+
+            const payload = (await ctx.request.json().catch(() => null)) as any;
+            const requestedPath = typeof payload?.path === "string" ? payload.path : "";
+            const relPath = normalizeDocumentPath(requestedPath);
+            if (!relPath) throw new ApiError(400, "invalid_request", "File path is required");
+            validateDocumentMutationPath(relPath);
+
+            const docsDir = resolveDocumentsDir(workspace.path, sessionId);
+            await ensureDir(docsDir);
+
+            const absPath = resolveDocumentPathSafe(docsDir, relPath);
+            if (!(await exists(absPath))) throw new ApiError(404, "not_found", "File not found");
+            const info = await stat(absPath);
+            if (!info.isFile()) throw new ApiError(400, "invalid_request", "Path is not a file");
+            await rm(absPath, { force: true });
+
+            return jsonResponse({ ok: true, path: relPath });
+        },
+    });
+
+    routes.push({
+        method: "POST",
+        regex: /^\/w\/([^/]+)\/document\/rmdir$/,
+        keys: ["id"],
+        auth: "client",
+        handler: async (ctx: RequestContext) => {
+            const workspaceId = ctx.params.id;
+            const sessionId = parseDocumentSessionId(ctx.url.searchParams.get("session"));
+            const workspace = ctx.config.workspaces.find((w: WorkspaceInfo) => w.id === workspaceId);
+            if (!workspace) throw new ApiError(404, "not_found", "Workspace not found");
+
+            const payload = (await ctx.request.json().catch(() => null)) as any;
+            const requestedPath = typeof payload?.path === "string" ? payload.path : "";
+            const dirPath = normalizeDocumentPath(requestedPath);
+            if (!dirPath) throw new ApiError(400, "invalid_request", "Folder path is required");
+            validateDocumentMutationPath(dirPath);
+
+            const docsDir = resolveDocumentsDir(workspace.path, sessionId);
+            await ensureDir(docsDir);
+
+            const absPath = resolveDocumentPathSafe(docsDir, dirPath);
+            if (!(await exists(absPath))) throw new ApiError(404, "not_found", "Folder not found");
+            const info = await stat(absPath);
+            if (!info.isDirectory()) throw new ApiError(400, "invalid_request", "Path is not a folder");
+
+            await rm(absPath, { recursive: true, force: true });
+            return jsonResponse({ ok: true, path: dirPath });
+        },
+    });
+
     // Upload Document
     routes.push({
         method: "POST",
@@ -1911,15 +2007,23 @@ export function createDocumentRoutes(routes: unknown[]) {
             await ensureDir(docsDir);
 
             const name = basename(file.name);
-            const ext = extname(name).toLowerCase();
-            if (!ALLOWED_EXTENSIONS.has(ext)) {
-                throw new ApiError(400, "invalid_request", `Unsupported file type: ${ext || "unknown"}`);
+            const requestedPath = typeof formData.get("path") === "string" ? String(formData.get("path")) : "";
+            let destRel = normalizeDocumentPath(requestedPath);
+            if (!destRel) {
+                destRel = name;
+            } else {
+                const tail = destRel.split("/").pop() ?? "";
+                if (!tail || !extname(tail)) {
+                    destRel = `${destRel}/${name}`;
+                }
             }
+            validateDocumentMutationPath(destRel);
 
-            const filePath = resolveDocumentPathSafe(docsDir, name);
+            const filePath = resolveDocumentPathSafe(docsDir, destRel);
+            await ensureDir(dirname(filePath));
             await writeFile(filePath, Buffer.from(await file.arrayBuffer()));
 
-            return jsonResponse({ ok: true, name });
+            return jsonResponse({ ok: true, name: destRel });
         },
     });
 }

@@ -1,61 +1,41 @@
 import { For, Show, createMemo, createSignal, onMount } from "solid-js";
 import type { Agent } from "@opencode-ai/sdk/v2/client";
-import { Bot, Code2, FileText, Loader2, MessageSquare, RefreshCw, Search } from "lucide-solid";
+import { AlertTriangle, Bot, Code2, FileText, Folder, Loader2, MessageSquare, RefreshCw, Search, Terminal } from "lucide-solid";
 
 import Button from "../components/button";
 import type { CreateSessionOptions, View } from "../types";
+import { currentLocale, t } from "../../i18n";
 
 interface AgentType {
   id: string;
-  name: string;
-  description: string;
+  nameKey: string;
+  descriptionKey: string;
   icon: typeof Bot;
   status: "available" | "coming-soon";
 }
 
 const agentTypes: AgentType[] = [
   {
+    id: "general-assistant",
+    nameKey: "agents.general_assistant_name",
+    descriptionKey: "agents.general_assistant_desc",
+    icon: Terminal,
+    status: "available",
+  },
+  {
+    id: "document-agent",
+    nameKey: "agents.document_agent_name",
+    descriptionKey: "agents.document_agent_desc",
+    icon: Folder,
+    status: "available",
+  },
+  {
     id: "document-writer",
-    name: "Document Writer",
-    description: "Create and edit Word documents with AI assistance using OOXML knowledge",
+    nameKey: "agents.bid_writer_name",
+    descriptionKey: "agents.bid_writer_desc",
     icon: FileText,
     status: "available",
   },
-  // {
-  //   id: "bid-writer",
-  //   name: "Bid Writer",
-  //   description: "Draft tender/bid documents with strict fact extraction and compliance mapping",
-  //   icon: FileText,
-  //   status: "available",
-  // },
-  // {
-  //   id: "bid-dedupe",
-  //   name: "Bid Dedupe",
-  //   description: "Compare bid documents for duplicate text and images",
-  //   icon: Search,
-  //   status: "available",
-  // },
-  // {
-  //   id: "code-reviewer",
-  //   name: "Code Reviewer",
-  //   description: "Review code for bugs, security issues, and best practices",
-  //   icon: Code2,
-  //   status: "available",
-  // },
-  // {
-  //   id: "research-agent",
-  //   name: "Research Agent",
-  //   description: "Research topics, summarize findings, and compile reports",
-  //   icon: Search,
-  //   status: "coming-soon",
-  // },
-  // {
-  //   id: "general-assistant",
-  //   name: "General Assistant",
-  //   description: "General-purpose AI assistant for various tasks",
-  //   icon: MessageSquare,
-  //   status: "available",
-  // },
 ];
 
 export type AgentsViewProps = {
@@ -65,6 +45,7 @@ export type AgentsViewProps = {
 };
 
 export default function AgentsView(props: AgentsViewProps) {
+  const tr = (key: string) => t(key, currentLocale());
   const [agents, setAgents] = createSignal<Agent[]>([]);
   const [agentsBusy, setAgentsBusy] = createSignal(false);
   const [agentsError, setAgentsError] = createSignal<string | null>(null);
@@ -92,12 +73,17 @@ export default function AgentsView(props: AgentsViewProps) {
   const isFeaturedAgentAvailable = (featured: AgentType) => {
     if (featured.status === "coming-soon") return false;
     if (featured.id === "general-assistant") return true;
+    if (featured.id === "document-agent") return true;
     if (featured.id === "document-writer") return true;
     return agentByKey().has(normalizeAgentKey(featured.id));
   };
 
   const resolveFeaturedAgentName = (featured: AgentType): string | null => {
     if (featured.id === "general-assistant") return null;
+    if (featured.id === "document-agent") {
+      const match = agentByKey().get(normalizeAgentKey("document-writer"));
+      return match?.name ?? null;
+    }
     const match = agentByKey().get(normalizeAgentKey(featured.id));
     return match?.name ?? null;
   };
@@ -120,7 +106,7 @@ export default function AgentsView(props: AgentsViewProps) {
       const list = await props.listAgents();
       setAgents(list);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to load agents";
+      const message = error instanceof Error ? error.message : tr("agents.failed_load_agents");
       setAgentsError(message);
     } finally {
       setAgentsBusy(false);
@@ -134,37 +120,35 @@ export default function AgentsView(props: AgentsViewProps) {
   function handleFeaturedClick(featured: AgentType) {
     if (featured.status === "coming-soon") return;
 
+    if (featured.id === "general-assistant") {
+      props.createSessionAndOpen({ title: tr(featured.nameKey), view: "session" });
+      return;
+    }
+
+    if (featured.id === "document-agent") {
+      const agent = resolveFeaturedAgentName(featured) ?? "document-writer";
+      props.createSessionAndOpen({ title: tr(featured.nameKey), agent, view: "document-agent" });
+      return;
+    }
+
     if (featured.id === "document-writer") {
       const agent = resolveFeaturedAgentName(featured) ?? "document-writer";
-      props.createSessionAndOpen({ title: featured.name, agent, view: "document-writer" });
-      return;
-    }
-
-    if (featured.id === "bid-writer") {
-      const agent = resolveFeaturedAgentName(featured) ?? "bid-writer";
-      props.createSessionAndOpen({ title: featured.name, agent, view: "document-writer" });
-      return;
-    }
-
-    if (featured.id === "bid-dedupe") {
-      const agent = resolveFeaturedAgentName(featured) ?? "bid-dedupe";
-      props.createSessionAndOpen({ title: featured.name, agent, view: "document-writer" });
+      props.createSessionAndOpen({ title: tr(featured.nameKey), agent, view: "document-writer" });
       return;
     }
 
     if (!isFeaturedAgentAvailable(featured)) return;
-
     const agent = resolveFeaturedAgentName(featured);
-    props.createSessionAndOpen({ title: featured.name, agent });
+    props.createSessionAndOpen({ title: tr(featured.nameKey), agent });
   }
 
   return (
     <div class="space-y-8">
       <div class="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h2 class="text-xl font-semibold text-dls-text">Agent Hub</h2>
+          <h2 class="text-xl font-semibold text-dls-text">{tr("agents.hub_title")}</h2>
           <p class="mt-1 text-sm text-dls-secondary">
-            Choose a specialized agent to start a new session
+            {tr("agents.hub_subtitle")}
           </p>
         </div>
         <div class="flex flex-wrap items-center gap-2">
@@ -172,7 +156,7 @@ export default function AgentsView(props: AgentsViewProps) {
             variant="outline"
             disabled={agentsBusy()}
             onClick={() => void refreshAgents({ force: true })}
-            title="Refresh agents"
+            title={tr("agents.refresh_agents")}
           >
             <Show
               when={!agentsBusy()}
@@ -180,9 +164,9 @@ export default function AgentsView(props: AgentsViewProps) {
             >
               <RefreshCw size={16} />
             </Show>
-            Refresh
+            {tr("common.refresh")}
           </Button>
-          <Button onClick={() => props.createSessionAndOpen()}>New session</Button>
+          <Button onClick={() => props.createSessionAndOpen()}>{tr("agents.new_session")}</Button>
         </div>
       </div>
 
@@ -194,11 +178,11 @@ export default function AgentsView(props: AgentsViewProps) {
 
       <div>
         <div class="flex items-center justify-between gap-3">
-          <h3 class="text-sm font-semibold text-dls-text">Featured</h3>
+          <h3 class="text-sm font-semibold text-dls-text">{tr("agents.featured")}</h3>
           <Show when={agentsBusy()}>
             <div class="flex items-center gap-2 text-xs text-dls-secondary">
               <Loader2 size={14} class="animate-spin" />
-              Loading
+              {tr("agents.loading")}
             </div>
           </Show>
         </div>
@@ -224,19 +208,25 @@ export default function AgentsView(props: AgentsViewProps) {
                     </div>
                     <Show when={featured.status === "coming-soon"}>
                       <span class="rounded-full bg-dls-hover px-2 py-0.5 text-xs text-dls-secondary">
-                        Soon
+                        {tr("agents.soon")}
                       </span>
                     </Show>
                     <Show when={featured.status !== "coming-soon" && featured.id !== "general-assistant" && !available()}>
                       <span class="rounded-full bg-dls-hover px-2 py-0.5 text-xs text-dls-secondary">
-                        Not installed
+                        {tr("agents.not_installed")}
+                      </span>
+                    </Show>
+                    <Show when={featured.id === "general-assistant"}>
+                      <span class="flex items-center gap-1 rounded-full bg-orange-3 px-2 py-0.5 text-xs text-orange-11">
+                        <AlertTriangle size={12} />
+                        {tr("agents.use_with_caution")}
                       </span>
                     </Show>
                   </div>
                   <div>
-                    <h3 class="text-sm font-medium text-dls-text">{featured.name}</h3>
+                    <h3 class="text-sm font-medium text-dls-text">{tr(featured.nameKey)}</h3>
                     <p class="mt-1 text-xs text-dls-secondary leading-relaxed">
-                      {featured.description}
+                      {tr(featured.descriptionKey)}
                     </p>
                   </div>
                 </button>
@@ -247,13 +237,13 @@ export default function AgentsView(props: AgentsViewProps) {
 
         <Show when={!agentsBusy() && agents().length === 0 && !agentsError()}>
           <div class="mt-3 text-xs text-dls-secondary">
-            No agents found. Connect to OpenCode, or add agents under{" "}
+            {tr("agents.no_agents_found")}{" "}
             <span class="font-mono">.opencode/agents/</span>.
           </div>
         </Show>
       </div>
 
-      <div>
+      {/* <div>
         <div class="flex flex-wrap items-center justify-between gap-3">
           <h3 class="text-sm font-semibold text-dls-text">Installed agents</h3>
           <div class="relative">
@@ -318,7 +308,7 @@ export default function AgentsView(props: AgentsViewProps) {
             }}
           </For>
         </div>
-      </div>
+      </div> */}
     </div>
   );
 }

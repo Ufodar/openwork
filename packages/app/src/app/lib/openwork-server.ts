@@ -660,14 +660,14 @@ export function hydrateOpenworkServerSettingsFromEnv() {
     const envUrlNormalized = normalizeOpenworkServerUrl(envUrl) ?? "";
     const allowEnvTokenOverride = Boolean(import.meta.env?.DEV);
 
-    if (!current.urlOverride && envUrl) {
+    if (envUrl && currentUrlNormalized !== envUrlNormalized) {
       next.urlOverride = normalizeOpenworkServerUrl(envUrl) ?? undefined;
       changed = true;
     }
 
-    if (!current.portOverride && envPort) {
+    if (envPort) {
       const parsed = Number(envPort);
-      if (Number.isFinite(parsed) && parsed > 0) {
+      if (Number.isFinite(parsed) && parsed > 0 && current.portOverride !== parsed) {
         next.portOverride = parsed;
         changed = true;
       }

@@ -52,6 +52,7 @@ import AgentsView from "./agents";
 import StatusBar from "../components/status-bar";
 import ProviderAuthModal, { type ProviderOAuthStartResult } from "../components/provider-auth-modal";
 import ShareWorkspaceModal from "../components/share-workspace-modal";
+import { currentLocale, t as i18n } from "../../i18n";
 import {
   Bot,
   Box,
@@ -297,6 +298,7 @@ export type DashboardViewProps = {
 };
 
 export default function DashboardView(props: DashboardViewProps) {
+  const tr = (key: string) => i18n(key, currentLocale());
   const title = createMemo(() => {
     switch (props.tab) {
       case "scheduled":
@@ -314,9 +316,9 @@ export default function DashboardView(props: DashboardViewProps) {
       case "config":
         return "Advanced";
       case "agents":
-        return "Agent Hub";
+        return tr("agents.hub_title");
       case "settings":
-        return "Settings";
+        return tr("dashboard.settings");
       default:
         return "Automations";
     }
@@ -327,15 +329,15 @@ export default function DashboardView(props: DashboardViewProps) {
     workspace.openworkWorkspaceName?.trim() ||
     workspace.name?.trim() ||
     workspace.path?.trim() ||
-    "Worker";
+    tr("dashboard.worker_fallback");
   const workspaceKindLabel = (workspace: WorkspaceInfo) =>
     workspace.workspaceType === "remote"
       ? workspace.sandboxBackend === "docker" ||
         Boolean(workspace.sandboxRunId?.trim()) ||
         Boolean(workspace.sandboxContainerName?.trim())
-        ? "Sandbox"
-        : "Remote"
-      : "Local";
+        ? tr("dashboard.workspace_kind_sandbox")
+        : tr("dashboard.workspace_kind_remote")
+      : tr("dashboard.workspace_kind_local");
 
   const openSessionFromList = (workspaceId: string, sessionId: string, sessionTitle?: string | null) => {
     // Route-driven selection: navigate first and let the route effect own selectSession.
@@ -425,7 +427,9 @@ export default function DashboardView(props: DashboardViewProps) {
   const showMoreLabel = (workspaceId: string, total: number) => {
     const remaining = Math.max(0, total - previewCount(workspaceId));
     const nextCount = Math.min(MAX_SESSIONS_PREVIEW, remaining);
-    return nextCount > 0 ? `Show ${nextCount} more` : "Show more";
+    return nextCount > 0
+      ? tr("session.show_more_count").replace("{count}", String(nextCount))
+      : tr("session.show_more");
   };
   const [workspaceMenuId, setWorkspaceMenuId] = createSignal<string | null>(null);
   let workspaceMenuRef: HTMLDivElement | undefined;
@@ -933,7 +937,11 @@ export default function DashboardView(props: DashboardViewProps) {
                         <button
                           type="button"
                           class="mr-2 -ml-1 p-1 rounded-md text-dls-secondary hover:text-dls-text hover:bg-dls-active"
-                          aria-label={isWorkspaceExpanded(workspace().id) ? "Collapse" : "Expand"}
+                          aria-label={
+                            isWorkspaceExpanded(workspace().id)
+                              ? tr("dashboard.collapse")
+                              : tr("dashboard.expand")
+                          }
                           onClick={(event) => {
                             event.stopPropagation();
                             toggleWorkspaceExpanded(workspace().id);
@@ -987,7 +995,7 @@ export default function DashboardView(props: DashboardViewProps) {
                             createTaskInWorkspace(workspace().id);
                           }}
                           disabled={props.newTaskDisabled}
-                          aria-label="New task"
+                          aria-label={tr("session.new_task")}
                         >
                           <Plus size={14} />
                         </button>
@@ -1000,7 +1008,7 @@ export default function DashboardView(props: DashboardViewProps) {
                               current === workspace().id ? null : workspace().id
                             );
                           }}
-                          aria-label="Worker options"
+                          aria-label={tr("session.worker_options")}
                         >
                           <MoreHorizontal size={14} />
                         </button>
@@ -1019,7 +1027,7 @@ export default function DashboardView(props: DashboardViewProps) {
                               setWorkspaceMenuId(null);
                             }}
                           >
-                            Edit name
+                            {tr("dashboard.edit_name")}
                           </button>
                           <button
                             type="button"
@@ -1029,7 +1037,7 @@ export default function DashboardView(props: DashboardViewProps) {
                               setWorkspaceMenuId(null);
                             }}
                           >
-                            Share...
+                            {tr("dashboard.share")}
                           </button>
                           <button
                             type="button"
@@ -1039,7 +1047,9 @@ export default function DashboardView(props: DashboardViewProps) {
                               setWorkspaceMenuId(null);
                             }}
                           >
-                            {soulEnabled() ? "Soul settings" : "Enable soul"}
+                            {soulEnabled()
+                              ? tr("dashboard.soul_settings")
+                              : tr("dashboard.enable_soul")}
                           </button>
                           <Show when={workspace().workspaceType === "remote"}>
                             <button
@@ -1051,7 +1061,7 @@ export default function DashboardView(props: DashboardViewProps) {
                               }}
                               disabled={isConnecting()}
                             >
-                              Test connection
+                              {tr("dashboard.test_connection")}
                             </button>
                             <button
                               type="button"
@@ -1062,7 +1072,7 @@ export default function DashboardView(props: DashboardViewProps) {
                               }}
                               disabled={isConnecting()}
                             >
-                              Edit connection
+                              {tr("dashboard.edit_connection")}
                             </button>
                           </Show>
                           <Show when={workspace().sandboxContainerName?.trim()}>
@@ -1074,7 +1084,7 @@ export default function DashboardView(props: DashboardViewProps) {
                                 setWorkspaceMenuId(null);
                               }}
                             >
-                              Stop sandbox
+                              {tr("dashboard.stop_sandbox")}
                             </button>
                           </Show>
                           <button
@@ -1085,7 +1095,7 @@ export default function DashboardView(props: DashboardViewProps) {
                               setWorkspaceMenuId(null);
                             }}
                           >
-                            Remove worker
+                            {tr("dashboard.remove_worker")}
                           </button>
                         </div>
                       </Show>
@@ -1187,8 +1197,10 @@ export default function DashboardView(props: DashboardViewProps) {
                                   onClick={() => createTaskInWorkspace(workspace().id)}
                                   disabled={props.newTaskDisabled}
                                 >
-                                  <span class="group-hover/empty:hidden">No tasks yet.</span>
-                                  <span class="hidden group-hover/empty:inline font-medium">+ New task</span>
+                                  <span class="group-hover/empty:hidden">{tr("dashboard.no_tasks_yet")}</span>
+                                  <span class="hidden group-hover/empty:inline font-medium">
+                                    {tr("dashboard.new_task_with_plus")}
+                                  </span>
                                 </button>
                               </Show>
 
@@ -1205,7 +1217,7 @@ export default function DashboardView(props: DashboardViewProps) {
                           }
                         >
                           <div class="w-full px-3 py-2 text-xs text-dls-secondary ml-2 text-left rounded-lg">
-                            Loading tasks...
+                            {tr("dashboard.loading_tasks")}
                           </div>
                         </Show>
                       </Show>
@@ -1216,7 +1228,7 @@ export default function DashboardView(props: DashboardViewProps) {
             </For>
           </div>
 
-          <div class="relative" ref={(el) => (addWorkspaceMenuRef = el)}>
+          {/* <div class="relative" ref={(el) => (addWorkspaceMenuRef = el)}>
             <button
               type="button"
               class="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium text-dls-secondary hover:text-dls-text hover:bg-dls-hover"
@@ -1263,7 +1275,7 @@ export default function DashboardView(props: DashboardViewProps) {
                 </button>
               </div>
             </Show>
-          </div>
+          </div> */}
         </div>
 
       </aside>
@@ -1641,7 +1653,7 @@ export default function DashboardView(props: DashboardViewProps) {
           mcpStatuses={props.mcpStatuses}
         />
         <nav class="md:hidden border-t border-dls-border bg-dls-surface">
-          <div class={`mx-auto max-w-5xl px-4 py-3 grid gap-2 ${props.developerMode ? "grid-cols-7" : "grid-cols-6"}`}>
+          <div class="mx-auto max-w-5xl px-4 py-3 grid gap-2 grid-cols-1">
             <button
               class={`flex flex-col items-center gap-1 text-xs ${
                 props.tab === "agents" ? "text-gray-12" : "text-gray-10"
@@ -1649,9 +1661,9 @@ export default function DashboardView(props: DashboardViewProps) {
               onClick={() => props.setTab("agents")}
             >
               <Bot size={18} />
-              Agents
+              {tr("dashboard.agents")}
             </button>
-            <button
+            {/* <button
               class={`flex flex-col items-center gap-1 text-xs ${
                 props.tab === "scheduled" ? "text-gray-12" : "text-gray-10"
               }`}
@@ -1706,20 +1718,20 @@ export default function DashboardView(props: DashboardViewProps) {
                 <SlidersHorizontal size={18} />
                 Advanced
               </button>
-            </Show>
+            </Show> */}
           </div>
         </nav>
       </main>
 
       <aside class="w-56 hidden md:flex flex-col bg-dls-sidebar border-l border-dls-border p-4">
         <div class="space-y-1 pt-2">
-          {navItem("agents", "Agents", <Bot size={18} />)}
-          {navItem("scheduled", "Automations", <History size={18} />)}
-          {navItem("soul", "Soul", <HeartPulse size={18} class={soulNavIconClass()} />)}
-          {navItem("skills", "Skills", <Zap size={18} />)}
-          {navItem("mcp", "Extensions", <Box size={18} />)}
-          {navItem("identities", "Messaging", <MessageCircle size={18} />)}
-          <Show when={props.developerMode}>{navItem("config", "Advanced", <SlidersHorizontal size={18} />)}</Show>
+          {navItem("agents", tr("dashboard.agents"), <Bot size={18} />)}
+          {/* {navItem("scheduled", "Automations", <History size={18} />)} */}
+          {/* {navItem("soul", "Soul", <HeartPulse size={18} class={soulNavIconClass()} />)} */}
+          {/* {navItem("skills", "Skills", <Zap size={18} />)} */}
+          {/* {navItem("mcp", "Extensions", <Box size={18} />)} */}
+          {/* {navItem("identities", "Messaging", <MessageCircle size={18} />)} */}
+          {/* <Show when={props.developerMode}>{navItem("config", "Advanced", <SlidersHorizontal size={18} />)}</Show> */}
         </div>
       </aside>
     </div>

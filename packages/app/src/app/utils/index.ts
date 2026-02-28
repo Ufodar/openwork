@@ -704,6 +704,10 @@ function buildToolTitle(state: any, toolName: string): string {
     return name ? `Load skill ${name}` : "Load skill";
   }
 
+  if (lower === "compact" || lower === "summarize" || lower === "summary") {
+    return "Compact session context";
+  }
+
   const stateTitle = normalizeStepText(state?.title);
   if (stateTitle) {
     return truncateStepText(isPathLike(stateTitle) ? normalizePathToken(stateTitle) : stateTitle, 56);
@@ -749,6 +753,10 @@ function buildToolDetail(state: any, toolName: string): string | undefined {
   if (lower === "webfetch") {
     const url = pick("url");
     if (url) return truncateStepText(url, 80);
+  }
+
+  if (lower === "compact" || lower === "summarize" || lower === "summary") {
+    return "Context summarized";
   }
 
   // For file operations, show the filename

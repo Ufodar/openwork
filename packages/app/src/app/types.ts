@@ -125,7 +125,7 @@ export type OpencodeEvent = {
   properties?: unknown;
 };
 
-export type View = "onboarding" | "dashboard" | "session" | "proto" | "document" | "document-writer";
+export type View = "onboarding" | "dashboard" | "session" | "proto" | "document-writer" | "document-agent";
 
 export type CreateSessionOptions = {
   title?: string;

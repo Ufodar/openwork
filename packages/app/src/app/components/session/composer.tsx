@@ -5,6 +5,7 @@ import { ArrowUp, AtSign, Check, ChevronDown, File as FileIcon, Paperclip, Squar
 
 import type { ComposerAttachment, ComposerDraft, ComposerPart, PromptMode, SlashCommandOption } from "../../types";
 import { perfNow, recordPerfLog } from "../../lib/perf-log";
+import { currentLocale, t } from "../../../i18n";
 
 type MentionOption = {
   id: string;
@@ -208,13 +209,7 @@ const RECENT_EMIT_TTL_MS = 30_000;
 const MAX_RECENT_EMITS = 400;
 const DRAFT_FLUSH_DEBOUNCE_MS = 140;
 
-const MODEL_VARIANT_OPTIONS = [
-  { value: "none", label: "None" },
-  { value: "low", label: "Low" },
-  { value: "medium", label: "Medium" },
-  { value: "high", label: "High" },
-  { value: "xhigh", label: "X-High" },
-];
+const MODEL_VARIANT_OPTIONS = ["none", "low", "medium", "high", "xhigh"] as const;
 
 const partsToText = (parts: ComposerPart[]) =>
   parts
@@ -445,6 +440,7 @@ const buildRangeFromOffsets = (root: HTMLElement, start: number, end: number) =>
 };
 
 export default function Composer(props: ComposerProps) {
+  const tr = (key: string) => t(key, currentLocale());
   let editorRef: HTMLDivElement | undefined;
   let fileInputRef: HTMLInputElement | undefined;
   let inboxFileInputRef: HTMLInputElement | undefined;
@@ -1066,7 +1062,7 @@ export default function Composer(props: ComposerProps) {
 
   const addAttachments = async (files: File[]) => {
     if (attachmentsDisabled()) {
-      props.onToast(props.attachmentsDisabledReason ?? "Attachments are unavailable.");
+      props.onToast(props.attachmentsDisabledReason ?? tr("session.attachments_unavailable"));
       return;
     }
     const next: ComposerAttachment[] = [];
@@ -1712,7 +1708,7 @@ export default function Composer(props: ComposerProps) {
                         class="shrink-0 rounded-md border border-dls-border bg-dls-hover px-2 py-1 text-[10px] text-dls-text hover:bg-dls-active"
                         onClick={() => inboxFileInputRef?.click()}
                       >
-                        Upload to inbox
+                        {tr("session.upload_to_inbox")}
                       </button>
                     </Show>
                   </div>
@@ -1722,13 +1718,13 @@ export default function Composer(props: ComposerProps) {
               <div class="flex flex-col gap-2">
                 <div class="flex-1 min-w-0">
                   <Show when={props.isRemoteWorkspace}>
-                    <div class="mb-2 text-[10px] uppercase tracking-wider text-dls-secondary">Remote workspace</div>
+                    <div class="mb-2 text-[10px] uppercase tracking-wider text-dls-secondary">{tr("session.remote_workspace")}</div>
                   </Show>
 
                   <div class="relative">
                     <Show when={!hasDraftContent()}>
                       <div class="absolute left-0 top-0 text-dls-secondary text-sm leading-relaxed pointer-events-none">
-                        Ask OpenWork...
+                        {tr("session.placeholder")}
                       </div>
                     </Show>
                     <div
@@ -1784,8 +1780,8 @@ export default function Composer(props: ComposerProps) {
                           disabled={attachmentsDisabled()}
                           title={
                             attachmentsDisabled()
-                              ? props.attachmentsDisabledReason ?? "Attachments are unavailable."
-                              : "Attach files"
+                              ? props.attachmentsDisabledReason ?? tr("session.attachments_unavailable")
+                              : tr("session.attach_files")
                           }
                         >
                           <Paperclip size={16} />
@@ -1798,7 +1794,7 @@ export default function Composer(props: ComposerProps) {
                             onClick={props.onToggleAgentPicker}
                             disabled={props.busy}
                             aria-expanded={props.agentPickerOpen}
-                            title="Agent"
+                            title={tr("session.agent")}
                           >
                             <AtSign size={14} />
                             <span class="max-w-[140px] truncate">{props.agentLabel}</span>
@@ -1808,14 +1804,14 @@ export default function Composer(props: ComposerProps) {
                           <Show when={props.agentPickerOpen}>
                             <div class="absolute left-0 bottom-full mb-2 w-64 rounded-xl border border-dls-border bg-dls-surface shadow-xl backdrop-blur-md overflow-hidden z-40">
                               <div class="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-dls-secondary border-b border-dls-border">
-                                Agent
+                                {tr("session.agent")}
                               </div>
 
                               <div class="p-2 space-y-1 max-h-64 overflow-y-auto" onMouseDown={(event: MouseEvent) => event.preventDefault()}>
                                 <Show
                                   when={!props.agentPickerBusy}
                                   fallback={
-                                    <div class="px-3 py-2 text-xs text-dls-secondary">Loading agents...</div>
+                                    <div class="px-3 py-2 text-xs text-dls-secondary">{tr("session.loading_agents")}</div>
                                   }
                                 >
                                   <Show when={!props.agentPickerError}>
@@ -1830,7 +1826,7 @@ export default function Composer(props: ComposerProps) {
                                         props.onSelectAgent(null);
                                       }}
                                     >
-                                      <span>Default agent</span>
+                                      <span>{tr("session.default_agent")}</span>
                                       <Show when={!props.selectedAgent}>
                                         <Check size={14} class="text-dls-secondary" />
                                       </Show>
@@ -1889,32 +1885,32 @@ export default function Composer(props: ComposerProps) {
                             disabled={props.busy}
                             aria-expanded={variantMenuOpen()}
                           >
-                            <span>Thinking</span>
+                            <span>{tr("session.thinking")}</span>
                             <span class="font-mono text-dls-text">{props.modelVariantLabel}</span>
                             <ChevronDown size={14} />
                           </button>
                           <Show when={variantMenuOpen()}>
                             <div class="absolute left-0 bottom-full mb-2 w-48 rounded-xl border border-dls-border bg-dls-surface shadow-xl backdrop-blur-md overflow-hidden z-40">
                               <div class="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-dls-secondary border-b border-dls-border">
-                                Thinking effort
+                                {tr("session.thinking_effort")}
                               </div>
                               <div class="p-2 space-y-1">
                                 <For each={MODEL_VARIANT_OPTIONS}>
                                   {(option) => (
                                     <button
                                       type="button"
-                                      class={`w-full flex items-center justify-between rounded-lg px-3 py-2 text-left text-xs transition-colors ${activeVariant() === option.value
+                                      class={`w-full flex items-center justify-between rounded-lg px-3 py-2 text-left text-xs transition-colors ${activeVariant() === option
                                         ? "bg-dls-active text-dls-text"
                                         : "text-dls-secondary hover:bg-dls-hover"
                                         }`}
                                       onClick={() => {
-                                        props.onModelVariantChange(option.value);
+                                        props.onModelVariantChange(option);
                                         setVariantMenuOpen(false);
                                       }}
                                     >
-                                      <span>{option.label}</span>
-                                      <Show when={activeVariant() === option.value}>
-                                        <span class="text-[10px] uppercase tracking-wider text-dls-secondary">Active</span>
+                                      <span>{tr(`session.variant_${option}`)}</span>
+                                      <Show when={activeVariant() === option}>
+                                        <span class="text-[10px] uppercase tracking-wider text-dls-secondary">{tr("session.active")}</span>
                                       </Show>
                                     </button>
                                   )}
@@ -1936,7 +1932,7 @@ export default function Composer(props: ComposerProps) {
                                 ? "bg-dls-active text-dls-secondary"
                                 : "bg-dls-accent text-white"
                                 }`}
-                              title="Send"
+                              title={tr("session.send")}
                             >
                               <ArrowUp size={18} />
                             </button>

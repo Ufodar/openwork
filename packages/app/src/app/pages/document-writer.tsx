@@ -1,6 +1,6 @@
-import { For, Show, createEffect, createMemo, createResource, createSignal, onCleanup } from "solid-js";
+import { For, Show, createEffect, createMemo, createResource, createSignal, on, onCleanup } from "solid-js";
 import type { Agent } from "@opencode-ai/sdk/v2/client";
-import { ArrowRight, AtSign, CheckCircle2, ChevronDown, Copy, Download, FileText, Folder, FolderArchive, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Search, Trash2, X } from "lucide-solid";
+import { ArrowRight, AtSign, CheckCircle2, ChevronDown, Download, FileText, Folder, FolderArchive, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Search, Trash2, X } from "lucide-solid";
 import { useNavigate } from "@solidjs/router";
 
 import type { ComposerDraft, SlashCommandOption } from "../types";
@@ -19,8 +19,9 @@ type DocumentItem = {
 
 type DocumentWriterUiState = {
   schemaVersion: 1;
-  targetDoc?: string;
   activeDoc?: string;
+  leftPaneWidth?: number;
+  rightPaneWidth?: number;
 };
 
 type InboxItem = {
@@ -30,13 +31,14 @@ type InboxItem = {
   updatedAt: number;
 };
 
-type OnlyOfficePayload = { documentServerUrl: string; config: any };
-type DocHeading = {
-  level: number;
-  text: string;
-  elementCount: number;
+type RefFolderNode = {
+  name: string;
+  path: string;
+  folders: RefFolderNode[];
+  files: InboxItem[];
 };
-type HeadingChoice = DocHeading & { occurrence: number };
+
+type OnlyOfficePayload = { documentServerUrl: string; config: any };
 type EditorSource = {
   baseUrl: string;
   token: string;
@@ -52,6 +54,7 @@ const ONLYOFFICE_IMPORT_EXTENSIONS = new Set(
     .map((ext) => ext.trim().toLowerCase())
     .filter(Boolean),
 );
+const IMAGE_PREVIEW_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".avif"]);
 
 const isOnlyOfficeImportable = (path: string) => {
   const base = path.split("/").pop() ?? path;
@@ -60,21 +63,80 @@ const isOnlyOfficeImportable = (path: string) => {
   return ONLYOFFICE_IMPORT_EXTENSIONS.has(match[0]);
 };
 
-const DOCX_SECTION_COPY_TARGET_EXTENSIONS = new Set([".docx", ".docm", ".dotx", ".dotm"]);
-const DOCX_SECTION_COPY_SOURCE_EXTENSIONS = new Set([...DOCX_SECTION_COPY_TARGET_EXTENSIONS, ".doc"]);
+const DOCX_SECTION_COPY_SOURCE_EXTENSIONS = new Set([".docx", ".docm", ".dotx", ".dotm", ".doc"]);
 const RUNNING_REFRESH_INTERVAL_MS = 60_000;
+const LEFT_PANEL_COLLAPSED_WIDTH = 56;
+const LEFT_PANEL_DEFAULT_WIDTH = 256;
+const LEFT_PANEL_MIN_WIDTH = 220;
+const RIGHT_PANEL_DEFAULT_WIDTH = 500;
+const RIGHT_PANEL_MIN_WIDTH = 360;
+const CENTER_PANEL_MIN_WIDTH = 520;
+const STREAM_SCROLL_MIN_INTERVAL_MS = 90;
+const INBOX_PATH_PREFIXES = [".opencode/openwork/inbox/", "opencode/openwork/inbox/", "openwork/inbox/"] as const;
+
+const clampNumber = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
+const normalizeInboxPath = (value: string) => {
+  const normalized = value.replace(/\\/g, "/").replace(/^\/+/, "").replace(/^\.\//, "");
+  for (const prefix of INBOX_PATH_PREFIXES) {
+    if (normalized.startsWith(prefix)) {
+      return normalized.slice(prefix.length);
+    }
+  }
+  return normalized;
+};
 
 const getFileExtension = (value: string) => {
   const base = value.split("/").pop() ?? value;
   const match = base.toLowerCase().match(/\.[^.]+$/);
   return match ? match[0] : "";
 };
+const isImagePreviewable = (path: string) => IMAGE_PREVIEW_EXTENSIONS.has(getFileExtension(path));
 
-const isDocxSectionCopyTarget = (value: string) => DOCX_SECTION_COPY_TARGET_EXTENSIONS.has(getFileExtension(value));
 const isDocxSectionCopySource = (value: string) => DOCX_SECTION_COPY_SOURCE_EXTENSIONS.has(getFileExtension(value));
+const isTemplateDocName = (value: string) => {
+  const normalized = value.trim().replace(/^\/+/, "");
+  return (
+    normalized.startsWith(".refs/templates/") ||
+    normalized.startsWith("refs/templates/") ||
+    normalized.startsWith("templates/")
+  );
+};
+
+const normalizeRelativePath = (value: string, fallback = "file") => {
+  const cleaned = value.replace(/\\/g, "/").replace(/^\/+/, "").trim();
+  const parts = cleaned
+    .split("/")
+    .map((segment) => segment.trim())
+    .filter((segment) => segment && segment !== "." && segment !== "..");
+  return parts.length ? parts.join("/") : fallback;
+};
+
+const uploadRelativePath = (file: File) => {
+  const candidate = (file as File & { webkitRelativePath?: string }).webkitRelativePath?.trim() || file.name;
+  return normalizeRelativePath(candidate, file.name || "file");
+};
+
+const hasHiddenPathSegment = (path: string) => {
+  const normalized = normalizeRelativePath(path, "");
+  if (!normalized) return false;
+  return normalized.split("/").some((segment) => segment.startsWith("."));
+};
+
+const createRefFolderNode = (name: string, path: string): RefFolderNode => ({
+  name,
+  path,
+  folders: [],
+  files: [],
+});
 
 export default function DocumentWriterView(props: SessionViewProps) {
   const navigate = useNavigate();
+  let chatContainerEl: HTMLDivElement | undefined;
+  let messagesEndEl: HTMLDivElement | undefined;
+  let bottomVisibilityEl: HTMLDivElement | undefined;
+  let scrollFrame: number | undefined;
+  let pendingScrollBehavior: ScrollBehavior = "auto";
+  let lastAutoScrollAt = 0;
 
   const sessionId = createMemo(() => props.selectedSessionId?.trim() ?? "");
   const workspaceId = createMemo(() => props.openworkServerWorkspaceId?.trim() ?? "");
@@ -167,25 +229,21 @@ export default function DocumentWriterView(props: SessionViewProps) {
   const [targetDoc, setTargetDoc] = createSignal<string | null>(null);
   const [activeDoc, setActiveDoc] = createSignal<string | null>(null);
   const [documentsCollapsed, setDocumentsCollapsed] = createSignal(false);
+  const [leftPaneWidth, setLeftPaneWidth] = createSignal(LEFT_PANEL_DEFAULT_WIDTH);
+  const [rightPaneWidth, setRightPaneWidth] = createSignal(RIGHT_PANEL_DEFAULT_WIDTH);
+  const [resizingPane, setResizingPane] = createSignal<"left" | "right" | null>(null);
   const [configSeq, setConfigSeq] = createSignal(0);
   const [archiveBusy, setArchiveBusy] = createSignal(false);
   const [otherDocsExpanded, setOtherDocsExpanded] = createSignal(false);
   const [lastSessionStatus, setLastSessionStatus] = createSignal(props.sessionStatus ?? "idle");
   const [refsExpanded, setRefsExpanded] = createSignal<Record<string, boolean>>({});
+  const [refsFolderExpanded, setRefsFolderExpanded] = createSignal<Record<string, boolean>>({});
+  const [refsActionMenuKey, setRefsActionMenuKey] = createSignal<string | null>(null);
   const [refsBusy, setRefsBusy] = createSignal(false);
   const [refsError, setRefsError] = createSignal<string | null>(null);
   const [refsUploadProgress, setRefsUploadProgress] = createSignal<{ categoryId: string; done: number; total: number } | null>(null);
   const [refsDeleteBusyId, setRefsDeleteBusyId] = createSignal<string | null>(null);
   const [refsOpenBusyId, setRefsOpenBusyId] = createSignal<string | null>(null);
-  const [sectionCopyOpen, setSectionCopyOpen] = createSignal(false);
-  const [sectionCopySource, setSectionCopySource] = createSignal<InboxItem | null>(null);
-  const [sectionCopySourceHeading, setSectionCopySourceHeading] = createSignal<HeadingChoice | null>(null);
-  const [sectionCopyTargetHeading, setSectionCopyTargetHeading] = createSignal<HeadingChoice | null>(null);
-  const [sectionCopyExcludeHeading, setSectionCopyExcludeHeading] = createSignal(true);
-  const [sectionCopyBusy, setSectionCopyBusy] = createSignal(false);
-  const [sectionCopyError, setSectionCopyError] = createSignal<string | null>(null);
-  const [sectionCopySourceQuery, setSectionCopySourceQuery] = createSignal("");
-  const [sectionCopyTargetQuery, setSectionCopyTargetQuery] = createSignal("");
 
   const [modulesExpanded, setModulesExpanded] = createSignal(true);
   const [moduleModal, setModuleModal] = createSignal<null | "assemble" | "facts" | "fill" | "dedupe" | "qc" | "preview">(null);
@@ -227,6 +285,8 @@ export default function DocumentWriterView(props: SessionViewProps) {
   const [qcError, setQcError] = createSignal<string | null>(null);
   const [qcMode, setQcMode] = createSignal<"draft" | "submit">("draft");
   const [reportsExpanded, setReportsExpanded] = createSignal(false);
+  const [nearBottom, setNearBottom] = createSignal(true);
+  let paneResizeCleanup: (() => void) | null = null;
 
   const [documents, { refetch: refetchDocuments }] = createResource(apiConfig, async (cfg) => {
     if (!cfg) return [] as DocumentItem[];
@@ -280,8 +340,17 @@ export default function DocumentWriterView(props: SessionViewProps) {
 
   const [refs, { refetch: refetchRefs }] = createResource(refsFetchInput, async (input) => {
     if (!input) return [] as InboxItem[];
-    const data = await input.client.listInbox(input.workspaceId, { prefix: input.prefix });
-    return Array.isArray(data.items) ? (data.items as InboxItem[]) : [];
+    const primary = await input.client.listInbox(input.workspaceId, { prefix: input.prefix });
+    const primaryItems = Array.isArray(primary.items) ? (primary.items as InboxItem[]) : [];
+    if (primaryItems.length > 0) return primaryItems;
+    try {
+      const fallback = await input.client.listInbox(input.workspaceId);
+      const allItems = Array.isArray(fallback.items) ? (fallback.items as InboxItem[]) : [];
+      const rootPrefix = `${input.prefix}/`;
+      return allItems.filter((item) => normalizeInboxPath(item.path).startsWith(rootPrefix));
+    } catch {
+      return primaryItems;
+    }
   });
 
   const reportsInboxPrefix = createMemo(() => {
@@ -305,10 +374,34 @@ export default function DocumentWriterView(props: SessionViewProps) {
     return { client, workspaceId: w, prefix };
   });
 
+  const refsSessionRemainder = (itemPath: string) => {
+    const prefix = refsInboxPrefix();
+    if (!prefix) return "";
+    const normalized = normalizeInboxPath(itemPath);
+    const rootPrefix = `${prefix}/`;
+    if (!normalized.startsWith(rootPrefix)) return "";
+    return normalized.slice(rootPrefix.length);
+  };
+
+  const inboxWorkspacePath = (itemPath: string) => `.opencode/openwork/inbox/${normalizeInboxPath(itemPath)}`;
+
   const [reports, { refetch: refetchReports }] = createResource(reportsFetchInput, async (input) => {
     if (!input) return [] as InboxItem[];
-    const data = await input.client.listInbox(input.workspaceId, { prefix: input.prefix });
-    const items = Array.isArray(data.items) ? (data.items as InboxItem[]) : [];
+    const primary = await input.client.listInbox(input.workspaceId, { prefix: input.prefix });
+    const primaryItems = Array.isArray(primary.items) ? (primary.items as InboxItem[]) : [];
+    const items =
+      primaryItems.length > 0
+        ? primaryItems
+        : await (async () => {
+          try {
+            const fallback = await input.client.listInbox(input.workspaceId);
+            const allItems = Array.isArray(fallback.items) ? (fallback.items as InboxItem[]) : [];
+            const rootPrefix = `${input.prefix}/`;
+            return allItems.filter((item) => normalizeInboxPath(item.path).startsWith(rootPrefix));
+          } catch {
+            return primaryItems;
+          }
+        })();
     items.sort((a, b) => b.updatedAt - a.updatedAt);
     return items;
   });
@@ -319,10 +412,9 @@ export default function DocumentWriterView(props: SessionViewProps) {
     const result: Record<string, InboxItem[]> = Object.fromEntries(REF_CATEGORIES.map((c) => [c.id, []]));
     if (!prefix) return result;
 
-    const rootPrefix = `${prefix}/`;
     for (const item of items) {
-      if (!item.path.startsWith(rootPrefix)) continue;
-      const remainder = item.path.slice(rootPrefix.length);
+      const remainder = refsSessionRemainder(item.path);
+      if (!remainder) continue;
       const categoryId = remainder.split("/")[0] ?? "";
       if (!categoryId) continue;
       const bucket = result[categoryId];
@@ -410,9 +502,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
       }));
 
     const inboxCandidates: DedupeCandidate[] = moduleSources().map((item) => {
-      const prefix = refsInboxPrefix();
-      const rootPrefix = prefix ? `${prefix}/` : "";
-      const remainder = rootPrefix && item.path.startsWith(rootPrefix) ? item.path.slice(rootPrefix.length) : item.path;
+      const remainder = refsSessionRemainder(item.path);
       const categoryId = (remainder.split("/")[0] ?? "other").trim() || "other";
       const categoryLabel = REF_CATEGORIES.find((c) => c.id === categoryId)?.label ?? "Reference";
       return {
@@ -496,16 +586,205 @@ export default function DocumentWriterView(props: SessionViewProps) {
     setRefsExpanded((current) => ({ ...current, [categoryId]: !current[categoryId] }));
   };
 
+  const refsItemRelativePath = (categoryId: string, itemPath: string) => {
+    const remainder = refsSessionRemainder(itemPath);
+    if (!remainder) return normalizeInboxPath(itemPath);
+    const categoryPrefix = `${categoryId}/`;
+    if (remainder.startsWith(categoryPrefix)) {
+      return remainder.slice(categoryPrefix.length);
+    }
+    return remainder;
+  };
+
+  const buildRefsFolderTree = (categoryId: string, items: InboxItem[]) => {
+    const root = createRefFolderNode("", "");
+    const folderByPath = new Map<string, RefFolderNode>([["", root]]);
+    for (const item of items) {
+      const relative = normalizeRelativePath(refsItemRelativePath(categoryId, item.path), item.path.split("/").pop() ?? "file");
+      const segments = relative.split("/").filter(Boolean);
+      const fileName = segments.pop();
+      if (!fileName) continue;
+
+      let parent = root;
+      let currentPath = "";
+      for (const segment of segments) {
+        const nextPath = currentPath ? `${currentPath}/${segment}` : segment;
+        let folder = folderByPath.get(nextPath);
+        if (!folder) {
+          folder = createRefFolderNode(segment, nextPath);
+          parent.folders.push(folder);
+          folderByPath.set(nextPath, folder);
+        }
+        parent = folder;
+        currentPath = nextPath;
+      }
+      parent.files.push(item);
+    }
+
+    const sortTree = (node: RefFolderNode) => {
+      node.folders.sort((a, b) => a.name.localeCompare(b.name, "zh-Hans-CN"));
+      node.files.sort((a, b) => {
+        const an = refsItemRelativePath(categoryId, a.path);
+        const bn = refsItemRelativePath(categoryId, b.path);
+        return an.localeCompare(bn, "zh-Hans-CN");
+      });
+      for (const child of node.folders) sortTree(child);
+    };
+    sortTree(root);
+    return root;
+  };
+
+  const refsFolderExpandedKey = (categoryId: string, path: string) => `${categoryId}:${path}`;
+
+  const isRefsFolderExpanded = (categoryId: string, path: string) => {
+    const key = refsFolderExpandedKey(categoryId, path);
+    const value = refsFolderExpanded()[key];
+    return value === undefined ? true : value;
+  };
+
+  const toggleRefsFolder = (categoryId: string, path: string) => {
+    const key = refsFolderExpandedKey(categoryId, path);
+    setRefsFolderExpanded((current) => {
+      const next = { ...current };
+      const value = next[key];
+      next[key] = value === undefined ? false : !value;
+      return next;
+    });
+  };
+
+  const refsFileMenuKey = (categoryId: string, itemId: string) => `file:${categoryId}:${itemId}`;
+  const refsFolderMenuKey = (categoryId: string, folderPath: string) => `folder:${categoryId}:${folderPath}`;
+  const folderPromptPath = (categoryId: string, folderPath: string) => {
+    const prefix = refsInboxPrefix();
+    const normalized = normalizeRelativePath(folderPath, "");
+    const suffix = normalized ? `/${normalized}` : "";
+    return `.opencode/openwork/inbox/${prefix}/${categoryId}${suffix}/`;
+  };
+
+  const scrollToLatest = (behavior: ScrollBehavior = "auto") => {
+    messagesEndEl?.scrollIntoView({ behavior, block: "end" });
+  };
+
+  const scheduleScrollToLatest = (behavior: ScrollBehavior = "auto") => {
+    if (behavior === "smooth") {
+      pendingScrollBehavior = "smooth";
+    }
+    if (scrollFrame !== undefined) return;
+    scrollFrame = window.requestAnimationFrame(() => {
+      scrollFrame = undefined;
+      const nextBehavior = pendingScrollBehavior;
+      pendingScrollBehavior = "auto";
+      const now = Date.now();
+      if (nextBehavior === "auto" && now - lastAutoScrollAt < STREAM_SCROLL_MIN_INTERVAL_MS) {
+        return;
+      }
+      lastAutoScrollAt = now;
+      scrollToLatest(nextBehavior);
+    });
+  };
+
+  const leftPaneDisplayWidth = createMemo(() =>
+    documentsCollapsed() ? LEFT_PANEL_COLLAPSED_WIDTH : leftPaneWidth(),
+  );
+
+  const getViewportWidth = () => {
+    if (typeof window === "undefined") {
+      return LEFT_PANEL_DEFAULT_WIDTH + RIGHT_PANEL_DEFAULT_WIDTH + CENTER_PANEL_MIN_WIDTH;
+    }
+    return window.innerWidth || LEFT_PANEL_DEFAULT_WIDTH + RIGHT_PANEL_DEFAULT_WIDTH + CENTER_PANEL_MIN_WIDTH;
+  };
+
+  const clampPaneWidthsToViewport = () => {
+    const viewport = getViewportWidth();
+    const effectiveLeft = leftPaneDisplayWidth();
+
+    const maxRight = Math.max(RIGHT_PANEL_MIN_WIDTH, viewport - effectiveLeft - CENTER_PANEL_MIN_WIDTH);
+    const nextRight = clampNumber(rightPaneWidth(), RIGHT_PANEL_MIN_WIDTH, maxRight);
+    if (nextRight !== rightPaneWidth()) {
+      setRightPaneWidth(nextRight);
+    }
+
+    if (documentsCollapsed()) return;
+    const maxLeft = Math.max(LEFT_PANEL_MIN_WIDTH, viewport - nextRight - CENTER_PANEL_MIN_WIDTH);
+    const nextLeft = clampNumber(leftPaneWidth(), LEFT_PANEL_MIN_WIDTH, maxLeft);
+    if (nextLeft !== leftPaneWidth()) {
+      setLeftPaneWidth(nextLeft);
+    }
+  };
+
+  const beginPaneResize = (pane: "left" | "right", event: MouseEvent) => {
+    if (typeof window === "undefined") return;
+    if (pane === "left" && documentsCollapsed()) return;
+    paneResizeCleanup?.();
+    event.preventDefault();
+
+    const startX = event.clientX;
+    const startLeft = leftPaneWidth();
+    const startRight = rightPaneWidth();
+    const collapsed = documentsCollapsed();
+
+    setRefsActionMenuKey(null);
+    setResizingPane(pane);
+
+    const previousUserSelect = document.body.style.userSelect;
+    const previousCursor = document.body.style.cursor;
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "col-resize";
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      const delta = moveEvent.clientX - startX;
+      const viewport = getViewportWidth();
+      if (pane === "left") {
+        const maxLeft = Math.max(LEFT_PANEL_MIN_WIDTH, viewport - startRight - CENTER_PANEL_MIN_WIDTH);
+        const next = clampNumber(startLeft + delta, LEFT_PANEL_MIN_WIDTH, maxLeft);
+        setLeftPaneWidth(next);
+        return;
+      }
+
+      const effectiveLeft = collapsed ? LEFT_PANEL_COLLAPSED_WIDTH : startLeft;
+      const maxRight = Math.max(RIGHT_PANEL_MIN_WIDTH, viewport - effectiveLeft - CENTER_PANEL_MIN_WIDTH);
+      const next = clampNumber(startRight - delta, RIGHT_PANEL_MIN_WIDTH, maxRight);
+      setRightPaneWidth(next);
+    };
+
+    const cleanup = () => {
+      setResizingPane(null);
+      document.body.style.userSelect = previousUserSelect;
+      document.body.style.cursor = previousCursor;
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+      window.removeEventListener("blur", onWindowBlur);
+      paneResizeCleanup = null;
+    };
+
+    const onMouseUp = () => {
+      cleanup();
+    };
+
+    const onWindowBlur = () => {
+      cleanup();
+    };
+
+    paneResizeCleanup = cleanup;
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    window.addEventListener("blur", onWindowBlur);
+  };
+
+  onCleanup(() => {
+    paneResizeCleanup?.();
+  });
+
   const editorSource = createMemo(() => {
     const cfg = apiConfig();
     const doc = activeDoc();
-    const target = targetDoc();
-    if (!cfg || !doc) return null;
+    if (!cfg || !doc || activeDocKind() !== "onlyoffice") return null;
+    const manualEditable = isTemplateDocName(doc);
     return {
       ...cfg,
       doc,
       seq: configSeq(),
-      readonly: isAgentRunning() || !target || doc !== target,
+      readonly: isAgentRunning() || !manualEditable,
     } satisfies EditorSource;
   });
 
@@ -566,17 +845,36 @@ export default function DocumentWriterView(props: SessionViewProps) {
     if (refsBusy()) return;
     setRefsBusy(true);
     setRefsError(null);
-    setRefsUploadProgress({ categoryId, done: 0, total: files.length });
+    let skippedHiddenCount = 0;
     try {
+      const uploadEntries = files
+        .map((file) => ({ file, relative: uploadRelativePath(file) }))
+        .filter((entry) => {
+          if (hasHiddenPathSegment(entry.relative)) {
+            skippedHiddenCount += 1;
+            return false;
+          }
+          return true;
+        });
+
+      if (!uploadEntries.length) {
+        setRefsError(`Skipped ${skippedHiddenCount} hidden files (for example .DS_Store).`);
+        return;
+      }
+
+      setRefsUploadProgress({ categoryId, done: 0, total: uploadEntries.length });
       let done = 0;
-      for (const file of files) {
-        const dest = `${prefix}/${categoryId}/${file.name}`;
-        await client.uploadInbox(w, file, { path: dest });
+      for (const entry of uploadEntries) {
+        const dest = `${prefix}/${categoryId}/${entry.relative}`;
+        await client.uploadInbox(w, entry.file, { path: dest });
         done += 1;
-        setRefsUploadProgress({ categoryId, done, total: files.length });
+        setRefsUploadProgress({ categoryId, done, total: uploadEntries.length });
       }
       await refetchRefs();
       setRefsExpanded((current) => ({ ...current, [categoryId]: true }));
+      if (skippedHiddenCount > 0) {
+        setRefsError(`Skipped ${skippedHiddenCount} hidden files (for example .DS_Store).`);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to upload files";
       setRefsError(message);
@@ -606,7 +904,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
     }
   };
 
-  const downloadReferenceFile = async (item: InboxItem) => {
+  const downloadReferenceItem = async (item: InboxItem, suggestedFilename?: string) => {
     const client = props.openworkServerClient;
     const w = workspaceId();
     if (!client || !w) return;
@@ -616,7 +914,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = result.filename ?? item.path.split("/").pop() ?? "download";
+      a.download = suggestedFilename ?? result.filename ?? item.path.split("/").pop() ?? "download";
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -624,6 +922,45 @@ export default function DocumentWriterView(props: SessionViewProps) {
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to download file";
       setRefsError(message);
+    }
+  };
+
+  const downloadReferenceFile = async (item: InboxItem) => {
+    await downloadReferenceItem(item);
+  };
+
+  const downloadReferenceFolder = async (categoryId: string, folderPath: string, items: InboxItem[]) => {
+    if (!items.length) return;
+    for (const item of items) {
+      const relative = refsItemRelativePath(categoryId, item.path);
+      const suffix = folderPath && relative.startsWith(`${folderPath}/`) ? relative.slice(folderPath.length + 1) : relative;
+      const filename = normalizeRelativePath(suffix, item.path.split("/").pop() ?? "download").replace(/\//g, "__");
+      await downloadReferenceItem(item, filename);
+    }
+  };
+
+  const deleteReferenceFolder = async (folderPath: string, items: InboxItem[]) => {
+    const client = props.openworkServerClient;
+    const w = workspaceId();
+    if (!client || !w) return;
+    if (refsBusy()) return;
+    if (!items.length) return;
+    const label = folderPath || "(root)";
+    const ok = window.confirm(`Delete folder and all files?\n\n${label}\n\nFiles: ${items.length}`);
+    if (!ok) return;
+
+    setRefsBusy(true);
+    setRefsError(null);
+    try {
+      for (const item of items) {
+        await client.deleteInbox(w, item.id);
+      }
+      await refetchRefs();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to delete folder";
+      setRefsError(message);
+    } finally {
+      setRefsBusy(false);
     }
   };
 
@@ -641,12 +978,11 @@ export default function DocumentWriterView(props: SessionViewProps) {
     setRefsOpenBusyId(item.id);
     setRefsError(null);
     try {
-      const prefix = refsInboxPrefix();
-      const rootPrefix = prefix ? `${prefix}/` : "";
-      const remainder = rootPrefix && item.path.startsWith(rootPrefix) ? item.path.slice(rootPrefix.length) : item.path;
-      const categoryId = (remainder.split("/")[0] ?? "other").trim() || "other";
-      const filename = item.path.split("/").pop() ?? "reference";
-      const dest = `.refs/${categoryId}/${filename}`;
+      const remainder = refsSessionRemainder(item.path) || normalizeInboxPath(item.path);
+      const segments = remainder.split("/").filter(Boolean);
+      const categoryId = (segments[0] ?? "other").trim() || "other";
+      const relative = normalizeRelativePath(segments.slice(1).join("/"), item.path.split("/").pop() ?? "reference");
+      const dest = `.refs/${categoryId}/${relative}`;
 
       const query = new URLSearchParams();
       query.set("inboxId", item.id);
@@ -657,6 +993,9 @@ export default function DocumentWriterView(props: SessionViewProps) {
       const result = (await fetchJson(url, cfg.token, { method: "POST" })) as { doc?: string };
       const doc = typeof result?.doc === "string" ? result.doc.trim() : "";
       if (!doc) throw new Error("Failed to import document");
+      if (categoryId === "templates" || isTemplateDocName(doc)) {
+        setTargetDoc(doc);
+      }
       setActiveDoc(doc);
       setConfigSeq((v) => v + 1);
     } catch (error) {
@@ -664,147 +1003,6 @@ export default function DocumentWriterView(props: SessionViewProps) {
       setRefsError(message);
     } finally {
       setRefsOpenBusyId(null);
-    }
-  };
-
-  const withHeadingOccurrences = (items: DocHeading[]): HeadingChoice[] => {
-    const seen = new Map<string, number>();
-    return items.map((item) => {
-      const prev = seen.get(item.text) ?? 0;
-      const next = prev + 1;
-      seen.set(item.text, next);
-      return { ...item, occurrence: next };
-    });
-  };
-
-  const sectionCopySourceHeadingsRequest = createMemo(() => {
-    const cfg = apiConfig();
-    const source = sectionCopySource();
-    if (!cfg || !source || !sectionCopyOpen()) return null;
-    const query = new URLSearchParams();
-    query.set("inboxId", source.id);
-    query.set("session", cfg.sessionId);
-    const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/headings", query);
-    return { url, token: cfg.token };
-  });
-
-  const sectionCopyTargetHeadingsRequest = createMemo(() => {
-    const cfg = apiConfig();
-    const doc = targetDoc();
-    if (!cfg || !doc || !sectionCopyOpen()) return null;
-    if (!isDocxSectionCopyTarget(doc)) return null;
-    const query = new URLSearchParams();
-    query.set("doc", doc);
-    query.set("session", cfg.sessionId);
-    const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/headings", query);
-    return { url, token: cfg.token };
-  });
-
-  const [sectionCopySourceHeadings] = createResource(sectionCopySourceHeadingsRequest, async (input) => {
-    if (!input) return [] as HeadingChoice[];
-    const data = (await fetchJson(input.url, input.token)) as { items?: DocHeading[] };
-    const items = Array.isArray(data.items) ? data.items : [];
-    return withHeadingOccurrences(items);
-  });
-
-  const [sectionCopyTargetHeadings] = createResource(sectionCopyTargetHeadingsRequest, async (input) => {
-    if (!input) return [] as HeadingChoice[];
-    const data = (await fetchJson(input.url, input.token)) as { items?: DocHeading[] };
-    const items = Array.isArray(data.items) ? data.items : [];
-    return withHeadingOccurrences(items);
-  });
-
-  const filteredSectionCopySourceHeadings = createMemo(() => {
-    const query = sectionCopySourceQuery().trim().toLowerCase();
-    const items = sectionCopySourceHeadings() ?? [];
-    if (!query) return items;
-    return items.filter((item) => item.text.toLowerCase().includes(query));
-  });
-
-  const filteredSectionCopyTargetHeadings = createMemo(() => {
-    const query = sectionCopyTargetQuery().trim().toLowerCase();
-    const items = sectionCopyTargetHeadings() ?? [];
-    if (!query) return items;
-    return items.filter((item) => item.text.toLowerCase().includes(query));
-  });
-
-  const openSectionCopyModal = (item: InboxItem) => {
-    if (!serverReady()) return;
-    const doc = targetDoc();
-    if (!doc) {
-      setToastMessage("Select a target document first.");
-      return;
-    }
-    if (!isDocxSectionCopyTarget(doc)) {
-      setToastMessage("Target document must be .docx/.docm/.dotx/.dotm for section copy.");
-      return;
-    }
-    if (!isDocxSectionCopySource(item.path)) {
-      setToastMessage("Source file must be .docx/.docm/.dotx/.dotm (or .doc with LibreOffice).");
-      return;
-    }
-    setSectionCopySource(item);
-    setSectionCopySourceHeading(null);
-    setSectionCopyTargetHeading(null);
-    setSectionCopyExcludeHeading(true);
-    setSectionCopySourceQuery("");
-    setSectionCopyTargetQuery("");
-    setSectionCopyError(null);
-    setSectionCopyOpen(true);
-  };
-
-  const closeSectionCopyModal = () => {
-    setSectionCopyOpen(false);
-    setSectionCopyError(null);
-  };
-
-  const runSectionCopy = async () => {
-    const cfg = apiConfig();
-    const doc = targetDoc();
-    const source = sectionCopySource();
-    const sourceHeading = sectionCopySourceHeading();
-    if (!cfg || !doc || !source || !sourceHeading) return;
-    if (sectionCopyBusy()) return;
-    setSectionCopyBusy(true);
-    setSectionCopyError(null);
-
-    try {
-      const query = new URLSearchParams();
-      query.set("doc", doc);
-      query.set("session", cfg.sessionId);
-      const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/copy-section", query);
-      const payload: Record<string, unknown> = {
-        sourceInboxId: source.id,
-        sourceHeading: sourceHeading.text,
-        sourceHeadingIndex: sourceHeading.occurrence,
-        matchMode: "exact",
-        excludeSourceHeading: sectionCopyExcludeHeading(),
-      };
-      const targetHeading = sectionCopyTargetHeading();
-      if (targetHeading) {
-        payload.targetHeading = targetHeading.text;
-        payload.targetHeadingIndex = targetHeading.occurrence;
-      }
-
-      const result = (await fetchJson(url, cfg.token, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      })) as { stats?: { paragraphs: number; tables: number; images: number; styles: number } | null; warnings?: string[] };
-
-      const stats = result?.stats ?? null;
-      const summary = stats
-        ? `Inserted (${stats.paragraphs}p, ${stats.tables}t, ${stats.images}i)`
-        : "Inserted section";
-      setToastMessage(summary);
-      closeSectionCopyModal();
-      setConfigSeq((v) => v + 1);
-      await refetchDocuments();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to insert section";
-      setSectionCopyError(message);
-    } finally {
-      setSectionCopyBusy(false);
     }
   };
 
@@ -1119,6 +1317,22 @@ export default function DocumentWriterView(props: SessionViewProps) {
     if (!session) return "";
     return `documents/sessions/${session}/${normalized}`;
   });
+  const activeDocKind = createMemo<"none" | "image" | "onlyoffice" | "unsupported">(() => {
+    const doc = activeDoc();
+    if (!doc) return "none";
+    if (isImagePreviewable(doc)) return "image";
+    if (isOnlyOfficeImportable(doc)) return "onlyoffice";
+    return "unsupported";
+  });
+  const activeDocDownloadUrl = createMemo(() => {
+    const cfg = apiConfig();
+    const doc = activeDoc();
+    if (!cfg || !doc) return "";
+    const query = new URLSearchParams();
+    query.set("docId", doc);
+    query.set("session", cfg.sessionId);
+    return buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/file", query);
+  });
 
   createEffect(() => {
     sessionId();
@@ -1135,56 +1349,84 @@ export default function DocumentWriterView(props: SessionViewProps) {
     setPreviewError(null);
     setQcError(null);
     setReportsExpanded(false);
+    setRefsFolderExpanded({});
+    setRefsActionMenuKey(null);
+    setResizingPane(null);
   });
 
   createEffect(() => {
     const key = docWriterStateKey();
     if (!key) return;
     const state = readDocWriterState(key);
-    const nextTarget = typeof state?.targetDoc === "string" ? state.targetDoc.trim() : "";
+    if (!state) {
+      setLeftPaneWidth(LEFT_PANEL_DEFAULT_WIDTH);
+      setRightPaneWidth(RIGHT_PANEL_DEFAULT_WIDTH);
+      return;
+    }
     const nextActive = typeof state?.activeDoc === "string" ? state.activeDoc.trim() : "";
-    if (nextTarget) setTargetDoc(nextTarget);
     if (nextActive) setActiveDoc(nextActive);
+    const nextLeft = typeof state?.leftPaneWidth === "number" ? state.leftPaneWidth : Number.NaN;
+    if (Number.isFinite(nextLeft) && nextLeft > 0) setLeftPaneWidth(nextLeft);
+    const nextRight = typeof state?.rightPaneWidth === "number" ? state.rightPaneWidth : Number.NaN;
+    if (Number.isFinite(nextRight) && nextRight > 0) setRightPaneWidth(nextRight);
   });
 
   createEffect(() => {
     const key = docWriterStateKey();
     if (!key) return;
-    const t = targetDoc();
     const a = activeDoc();
     writeDocWriterState(key, {
       schemaVersion: 1,
-      targetDoc: t ? t : undefined,
       activeDoc: a ? a : undefined,
+      leftPaneWidth: Math.round(leftPaneWidth()),
+      rightPaneWidth: Math.round(rightPaneWidth()),
     });
   });
 
   createEffect(() => {
-    const items = documents() ?? [];
-    if (!items.length) return;
+    leftPaneWidth();
+    rightPaneWidth();
+    documentsCollapsed();
+    clampPaneWidthsToViewport();
+  });
 
-    if (!targetDoc()) {
-      const preferred =
-        items.find((doc) => {
-          const normalized = doc.name.replace(/^\/+/, "");
-          return (
-            normalized.startsWith(".refs/templates/") ||
-            normalized.startsWith("refs/templates/") ||
-            normalized.startsWith("templates/")
-          );
-        }) ??
-        items.find((doc) => {
-          const normalized = doc.name.replace(/^\/+/, "");
-          return !normalized.startsWith(".refs/") && !normalized.startsWith("refs/");
-        }) ??
-        items[0];
-      setTargetDoc(preferred.name);
-      if (!activeDoc()) setActiveDoc(preferred.name);
+  createEffect(() => {
+    if (typeof window === "undefined") return;
+    const onResize = () => clampPaneWidthsToViewport();
+    window.addEventListener("resize", onResize);
+    onCleanup(() => window.removeEventListener("resize", onResize));
+  });
+
+  createEffect(() => {
+    const items = documents() ?? [];
+    if (!items.length) {
+      setTargetDoc(null);
+      setActiveDoc(null);
       return;
     }
 
-    if (targetDoc() && !activeDoc()) {
-      setActiveDoc(targetDoc());
+    const previousTarget = targetDoc();
+    const currentActive = activeDoc();
+    const activeExists = currentActive ? items.some((doc) => doc.name === currentActive) : false;
+    const targetExists =
+      previousTarget && isTemplateDocName(previousTarget)
+        ? items.some((doc) => doc.name === previousTarget)
+        : false;
+
+    let nextTarget: string | null = targetExists ? previousTarget : null;
+    if (!nextTarget && activeExists && currentActive && isTemplateDocName(currentActive)) {
+      nextTarget = currentActive;
+    }
+    if (!nextTarget) {
+      nextTarget = items.find((doc) => isTemplateDocName(doc.name))?.name ?? null;
+    }
+    if (previousTarget !== nextTarget) {
+      setTargetDoc(nextTarget);
+    }
+
+    if (!currentActive || !activeExists) {
+      setActiveDoc(nextTarget ?? items[0].name);
+      return;
     }
   });
 
@@ -1197,6 +1439,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
     if (!serverReady()) return;
     setConfigSeq((v) => v + 1);
     void refetchDocuments();
+    void refetchRefs();
   });
 
   createEffect(() => {
@@ -1214,6 +1457,13 @@ export default function DocumentWriterView(props: SessionViewProps) {
     onCleanup(() => window.clearInterval(timer));
   });
 
+  onCleanup(() => {
+    if (scrollFrame !== undefined) {
+      window.cancelAnimationFrame(scrollFrame);
+      scrollFrame = undefined;
+    }
+  });
+
   // Composer state (copied in spirit from SessionView but simplified)
   let agentPickerRef: HTMLDivElement | undefined;
   const [toastMessage, setToastMessage] = createSignal<string | null>(null);
@@ -1222,6 +1472,12 @@ export default function DocumentWriterView(props: SessionViewProps) {
   const [agentPickerReady, setAgentPickerReady] = createSignal(false);
   const [agentPickerError, setAgentPickerError] = createSignal<string | null>(null);
   const [agentOptions, setAgentOptions] = createSignal<Agent[]>([]);
+
+  createEffect(() => {
+    if (!toastMessage()) return;
+    const id = window.setTimeout(() => setToastMessage(null), 2800);
+    onCleanup(() => window.clearTimeout(id));
+  });
 
   const agentLabel = createMemo(() => props.selectedSessionAgent ?? "Default agent");
 
@@ -1272,6 +1528,59 @@ export default function DocumentWriterView(props: SessionViewProps) {
     window.addEventListener("mousedown", handler);
     onCleanup(() => window.removeEventListener("mousedown", handler));
   });
+
+  createEffect(() => {
+    const menuKey = refsActionMenuKey();
+    if (!menuKey) return;
+    const handler = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("[data-refs-action-menu]")) return;
+      setRefsActionMenuKey(null);
+    };
+    window.addEventListener("mousedown", handler);
+    onCleanup(() => window.removeEventListener("mousedown", handler));
+  });
+
+  createEffect(() => {
+    const container = chatContainerEl;
+    const sentinel = bottomVisibilityEl;
+    if (!container || !sentinel) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        setNearBottom(Boolean(entry?.isIntersecting));
+      },
+      {
+        root: container,
+        rootMargin: "0px 0px 96px 0px",
+        threshold: 0,
+      },
+    );
+    observer.observe(sentinel);
+    onCleanup(() => observer.disconnect());
+  });
+
+  const chatPartCount = createMemo(() =>
+    props.messages.reduce((count, message) => count + message.parts.length, 0),
+  );
+
+  createEffect(
+    on(
+      () => [sessionId(), props.messages.length, chatPartCount()] as const,
+      ([nextSessionId], previous) => {
+        const previousSessionId = previous?.[0] ?? "";
+        if (!nextSessionId) return;
+        if (nextSessionId !== previousSessionId) {
+          queueMicrotask(() => scheduleScrollToLatest("auto"));
+          return;
+        }
+        if (nearBottom()) {
+          scheduleScrollToLatest("auto");
+        }
+      },
+      { defer: true },
+    ),
+  );
 
   const isSandboxWorkspace = createMemo(() =>
     Boolean((props.activeWorkspaceDisplay as any)?.sandboxContainerName?.trim()),
@@ -1334,8 +1643,9 @@ export default function DocumentWriterView(props: SessionViewProps) {
     <div class="relative isolate flex h-screen w-full bg-dls-surface text-dls-text font-sans overflow-hidden">
       {/* Left: Document list */}
       <div
-        class={`relative z-20 shrink-0 border-r border-dls-border flex flex-col bg-dls-sidebar transition-[width] duration-200 ease-out ${documentsCollapsed() ? "w-14" : "w-64"
+        class={`relative z-20 shrink-0 border-r border-dls-border flex flex-col bg-dls-sidebar ${resizingPane() === "left" ? "" : "transition-[width] duration-150 ease-out"
           }`}
+        style={{ width: `${leftPaneDisplayWidth()}px` }}
       >
         <Show
           when={!documentsCollapsed()}
@@ -1613,7 +1923,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
                       <div class="px-2 pb-2 space-y-1">
                         <For each={visibleReports()}>
                           {(item) => {
-                            const workspacePath = () => `.opencode/openwork/inbox/${item.path}`;
+                            const workspacePath = () => inboxWorkspacePath(item.path);
                             const name = () => item.path.split("/").slice(-2).join("/");
                             return (
                               <div class="flex items-center gap-2 rounded-md px-2 py-1 hover:bg-dls-hover">
@@ -1700,6 +2010,185 @@ export default function DocumentWriterView(props: SessionViewProps) {
                   {(category) => {
                     const expanded = () => Boolean(refsExpanded()[category.id]);
                     const items = () => refsByCategory()[category.id] ?? [];
+                    const tree = createMemo(() => buildRefsFolderTree(category.id, items()));
+
+                    const fileRow = (item: InboxItem, depth: number) => {
+                      const workspacePath = () => inboxWorkspacePath(item.path);
+                      const relativePath = () => refsItemRelativePath(category.id, item.path);
+                      const name = () => relativePath().split("/").pop() ?? item.path.split("/").pop() ?? item.path;
+                      const importable = () => isOnlyOfficeImportable(item.path);
+                      const menuKey = refsFileMenuKey(category.id, item.id);
+                      const menuOpen = () => refsActionMenuKey() === menuKey;
+                      return (
+                        <div class="flex items-center gap-2 rounded-md px-2 py-1 hover:bg-dls-hover" style={{ "padding-left": `${8 + depth * 14}px` }}>
+                          <FileText size={14} class="text-dls-secondary shrink-0" />
+                          <div class="min-w-0 flex-1 text-[12px] text-dls-text truncate" title={workspacePath()}>
+                            {name()}
+                          </div>
+                          <button
+                            type="button"
+                            class="p-1.5 rounded hover:bg-dls-active text-dls-secondary hover:text-dls-text"
+                            onClick={() => insertRefInPrompt(workspacePath())}
+                            title="Use in prompt"
+                            aria-label="Use in prompt"
+                          >
+                            <AtSign size={14} />
+                          </button>
+                          <div class="relative" data-refs-action-menu>
+                            <button
+                              type="button"
+                              class="p-1.5 rounded hover:bg-dls-active text-dls-secondary hover:text-dls-text"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setRefsActionMenuKey(menuOpen() ? null : menuKey);
+                              }}
+                              title="More"
+                              aria-label="More"
+                            >
+                              <MoreHorizontal size={14} />
+                            </button>
+                            <Show when={menuOpen()}>
+                              <div class="absolute right-0 top-8 z-20 min-w-[140px] rounded-md border border-dls-border bg-dls-surface shadow-lg p-1">
+                                <button
+                                  type="button"
+                                  class="w-full text-left rounded px-2 py-1.5 text-xs text-dls-secondary hover:bg-dls-hover hover:text-dls-text disabled:opacity-50"
+                                  onClick={() => {
+                                    setRefsActionMenuKey(null);
+                                    void openReferenceInEditor(item);
+                                  }}
+                                  disabled={!serverReady() || refsOpenBusyId() === item.id || !importable()}
+                                  title={importable() ? "Preview" : "Unsupported file type"}
+                                >
+                                  Preview
+                                </button>
+                                <button
+                                  type="button"
+                                  class="w-full text-left rounded px-2 py-1.5 text-xs text-dls-secondary hover:bg-dls-hover hover:text-dls-text"
+                                  onClick={() => {
+                                    setRefsActionMenuKey(null);
+                                    void downloadReferenceFile(item);
+                                  }}
+                                >
+                                  Download
+                                </button>
+                                <button
+                                  type="button"
+                                  class="w-full text-left rounded px-2 py-1.5 text-xs text-red-11 hover:bg-red-3/30 disabled:opacity-50"
+                                  onClick={() => {
+                                    setRefsActionMenuKey(null);
+                                    void deleteReferenceFile(item);
+                                  }}
+                                  disabled={refsDeleteBusyId() === item.id}
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            </Show>
+                          </div>
+                        </div>
+                      );
+                    };
+
+                    const collectFolderItems = (folder: RefFolderNode): InboxItem[] => [
+                      ...folder.files,
+                      ...folder.folders.flatMap((child) => collectFolderItems(child)),
+                    ];
+
+                    const folderTotalFiles = (folder: RefFolderNode): number =>
+                      collectFolderItems(folder).length;
+
+                    const folderBlock = (folder: RefFolderNode, depth: number) => {
+                      const expandedFolder = () => isRefsFolderExpanded(category.id, folder.path);
+                      const menuKey = refsFolderMenuKey(category.id, folder.path);
+                      const menuOpen = () => refsActionMenuKey() === menuKey;
+                      const folderItems = () => collectFolderItems(folder);
+                      const promptPath = () => folderPromptPath(category.id, folder.path);
+                      return (
+                        <div class="space-y-1">
+                          <div
+                            class="w-full flex items-center gap-1 rounded-md px-1 py-0.5 hover:bg-dls-hover text-dls-secondary"
+                            style={{ "padding-left": `${8 + depth * 14}px` }}
+                          >
+                            <button
+                              type="button"
+                              class="min-w-0 flex-1 flex items-center gap-2 rounded-md px-1 py-1 text-left hover:text-dls-text"
+                              onClick={() => toggleRefsFolder(category.id, folder.path)}
+                              aria-expanded={expandedFolder()}
+                              title={folder.path}
+                            >
+                              <ChevronDown
+                                size={14}
+                                class={`shrink-0 transition-transform ${expandedFolder() ? "rotate-180" : "-rotate-90"}`}
+                              />
+                              <Folder size={14} class="shrink-0" />
+                              <span class="text-[12px] truncate">{folder.name}</span>
+                              <span class="ml-auto text-[10px] text-dls-secondary">{folderTotalFiles(folder)}</span>
+                            </button>
+                            <button
+                              type="button"
+                              class="p-1.5 rounded hover:bg-dls-active text-dls-secondary hover:text-dls-text"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                insertRefInPrompt(promptPath());
+                              }}
+                              title="Use in prompt"
+                              aria-label="Use in prompt"
+                            >
+                              <AtSign size={14} />
+                            </button>
+                            <div class="relative" data-refs-action-menu>
+                              <button
+                                type="button"
+                                class="p-1.5 rounded hover:bg-dls-active text-dls-secondary hover:text-dls-text"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  setRefsActionMenuKey(menuOpen() ? null : menuKey);
+                                }}
+                                title="More"
+                                aria-label="More"
+                              >
+                                <MoreHorizontal size={14} />
+                              </button>
+                              <Show when={menuOpen()}>
+                                <div class="absolute right-0 top-8 z-20 min-w-[140px] rounded-md border border-dls-border bg-dls-surface shadow-lg p-1">
+                                  <button
+                                    type="button"
+                                    class="w-full text-left rounded px-2 py-1.5 text-xs text-dls-secondary hover:bg-dls-hover hover:text-dls-text disabled:opacity-50"
+                                    onClick={() => {
+                                      setRefsActionMenuKey(null);
+                                      void downloadReferenceFolder(category.id, folder.path, folderItems());
+                                    }}
+                                    disabled={refsBusy() || folderItems().length === 0}
+                                  >
+                                    Download
+                                  </button>
+                                  <button
+                                    type="button"
+                                    class="w-full text-left rounded px-2 py-1.5 text-xs text-red-11 hover:bg-red-3/30 disabled:opacity-50"
+                                    onClick={() => {
+                                      setRefsActionMenuKey(null);
+                                      void deleteReferenceFolder(folder.path, folderItems());
+                                    }}
+                                    disabled={refsBusy() || folderItems().length === 0}
+                                  >
+                                    Delete
+                                  </button>
+                                </div>
+                              </Show>
+                            </div>
+                          </div>
+                          <Show when={expandedFolder()}>
+                            <For each={folder.folders}>
+                              {(child) => folderBlock(child, depth + 1)}
+                            </For>
+                            <For each={folder.files}>
+                              {(item) => fileRow(item, depth + 1)}
+                            </For>
+                          </Show>
+                        </div>
+                      );
+                    };
+
                     return (
                       <div class="rounded-lg border border-dls-border bg-dls-surface">
                         <div class="flex items-center justify-between px-2 py-1.5">
@@ -1735,87 +2224,40 @@ export default function DocumentWriterView(props: SessionViewProps) {
                               }}
                             />
                           </label>
+                          <label
+                            class={`ml-1 cursor-pointer p-1.5 rounded hover:bg-dls-hover ${!serverReady() || refsBusy() ? "opacity-50 cursor-not-allowed" : ""
+                              }`}
+                            title={`Upload folder to ${category.label}`}
+                          >
+                            <Folder size={14} class="text-dls-secondary" />
+                            <input
+                              ref={(el) => {
+                                const directoryInput = el as HTMLInputElement & { webkitdirectory?: boolean; directory?: boolean };
+                                directoryInput.webkitdirectory = true;
+                                directoryInput.directory = true;
+                              }}
+                              type="file"
+                              multiple
+                              class="hidden"
+                              disabled={!serverReady() || refsBusy()}
+                              onChange={(event: Event) => {
+                                const target = event.currentTarget as HTMLInputElement;
+                                const files = Array.from(target.files ?? []);
+                                if (files.length) void uploadReferenceFiles(category.id, files);
+                                target.value = "";
+                              }}
+                            />
+                          </label>
                         </div>
 
                         <Show when={expanded()}>
                           <div class="px-2 pb-2 space-y-1">
                             <Show when={items().length > 0} fallback={<div class="py-1 text-[11px] text-dls-secondary">No files.</div>}>
-                              <For each={items()}>
-                                {(item) => {
-                                  const workspacePath = () => `.opencode/openwork/inbox/${item.path}`;
-                                  const name = () => item.path.split("/").pop() ?? item.path;
-                                  const importable = () => isOnlyOfficeImportable(item.path);
-                                  return (
-                                    <div class="flex items-center gap-2 rounded-md px-2 py-1 hover:bg-dls-hover">
-                                      <FileText size={14} class="text-dls-secondary shrink-0" />
-                                      <button
-                                        type="button"
-                                        class="min-w-0 flex-1 text-left"
-                                        onClick={() => insertRefInPrompt(workspacePath())}
-                                        title={workspacePath()}
-                                      >
-                                        <div class="text-[12px] text-dls-text truncate">{name()}</div>
-                                        <div class="text-[10px] text-dls-secondary">
-                                          {formatBytes(item.size)}
-                                        </div>
-                                      </button>
-                                      <button
-                                        type="button"
-                                        class="p-1.5 rounded hover:bg-dls-active text-dls-secondary hover:text-dls-text"
-                                        onClick={() => insertRefInPrompt(workspacePath())}
-                                        title="Use in prompt"
-                                        aria-label="Use in prompt"
-                                      >
-                                        <AtSign size={14} />
-                                      </button>
-                                      <button
-                                        type="button"
-                                        class="p-1.5 rounded hover:bg-dls-active text-dls-secondary hover:text-dls-text disabled:opacity-50"
-                                        onClick={() => void openReferenceInEditor(item)}
-                                        disabled={!serverReady() || refsOpenBusyId() === item.id || !importable()}
-                                        title={importable() ? "Open in editor" : "Unsupported file type"}
-                                        aria-label="Open in editor"
-                                      >
-                                        <ArrowRight size={14} />
-                                      </button>
-                                      <button
-                                        type="button"
-                                        class="p-1.5 rounded hover:bg-dls-active text-dls-secondary hover:text-dls-text disabled:opacity-50"
-                                        onClick={() => openSectionCopyModal(item)}
-                                        disabled={
-                                          !serverReady() ||
-                                          isAgentRunning() ||
-                                          !targetDoc() ||
-                                          !isDocxSectionCopyTarget(targetDoc() ?? "") ||
-                                          !isDocxSectionCopySource(item.path)
-                                        }
-                                        title="Insert section into target"
-                                        aria-label="Insert section into target"
-                                      >
-                                        <Copy size={14} />
-                                      </button>
-                                      <button
-                                        type="button"
-                                        class="p-1.5 rounded hover:bg-dls-active text-dls-secondary hover:text-dls-text"
-                                        onClick={() => void downloadReferenceFile(item)}
-                                        title="Download"
-                                        aria-label="Download"
-                                      >
-                                        <Download size={14} />
-                                      </button>
-                                      <button
-                                        type="button"
-                                        class="p-1.5 rounded hover:bg-dls-active text-dls-secondary hover:text-red-11 disabled:opacity-50"
-                                        onClick={() => void deleteReferenceFile(item)}
-                                        disabled={refsDeleteBusyId() === item.id}
-                                        title="Delete"
-                                        aria-label="Delete"
-                                      >
-                                        <Trash2 size={14} />
-                                      </button>
-                                    </div>
-                                  );
-                                }}
+                              <For each={tree().folders}>
+                                {(folder) => folderBlock(folder, 0)}
+                              </For>
+                              <For each={tree().files}>
+                                {(item) => fileRow(item, 0)}
                               </For>
                             </Show>
                           </div>
@@ -1829,6 +2271,19 @@ export default function DocumentWriterView(props: SessionViewProps) {
           </Show>
         </div>
       </div>
+
+      <Show when={!documentsCollapsed()}>
+        <div
+          class={`relative z-30 shrink-0 w-1.5 cursor-col-resize ${resizingPane() === "left" ? "bg-dls-border/80" : "bg-transparent hover:bg-dls-border/60"
+            }`}
+          onMouseDown={(event) => beginPaneResize("left", event)}
+          role="separator"
+          aria-label="Resize documents panel"
+          aria-orientation="vertical"
+        >
+          <div class="absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-dls-border/60" />
+        </div>
+      </Show>
 
       {/* Middle: OnlyOffice */}
       <div class="relative z-0 flex-1 min-w-0 flex flex-col">
@@ -1875,7 +2330,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
               type="button"
               class="rounded-lg border border-dls-border bg-dls-surface px-2 py-1 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover disabled:opacity-50"
               onClick={() => setConfigSeq((v) => v + 1)}
-              disabled={!activeDoc()}
+              disabled={!activeDoc() || activeDocKind() !== "onlyoffice"}
               title="Reload OnlyOffice config"
             >
               Reload
@@ -1902,11 +2357,39 @@ export default function DocumentWriterView(props: SessionViewProps) {
             fallback={<div class="h-full flex items-center justify-center text-dls-secondary">Select a document to edit</div>}
           >
             <div class="relative h-full w-full">
-              <Show when={editorPayload()} fallback={<div class="p-4 text-xs text-dls-secondary">Loading editor...</div>}>
-                <OnlyOfficeEditor
-                  documentServerUrl={editorPayload()!.documentServerUrl}
-                  config={editorPayload()!.config}
-                />
+              <Show when={activeDocKind() === "image"}>
+                <div class="h-full w-full overflow-auto bg-dls-surface flex items-center justify-center p-4">
+                  <img
+                    src={activeDocDownloadUrl()}
+                    alt={activeDoc() ?? "image"}
+                    class="max-h-full max-w-full object-contain rounded-lg border border-dls-border bg-white"
+                  />
+                </div>
+              </Show>
+              <Show when={activeDocKind() === "onlyoffice"}>
+                <Show when={editorPayload()} fallback={<div class="p-4 text-xs text-dls-secondary">Loading editor...</div>}>
+                  <OnlyOfficeEditor
+                    documentServerUrl={editorPayload()!.documentServerUrl}
+                    config={editorPayload()!.config}
+                  />
+                </Show>
+              </Show>
+              <Show when={activeDocKind() === "unsupported"}>
+                <div class="h-full w-full flex items-center justify-center px-6">
+                  <div class="max-w-xl rounded-xl border border-dls-border bg-dls-surface p-4 text-center space-y-3">
+                    <div class="text-sm text-dls-text">This file type can't be previewed in the editor.</div>
+                    <div class="text-xs text-dls-secondary">OnlyOffice supports office-style formats. Download the file to view it in a compatible app.</div>
+                    <Show when={activeDocDownloadUrl()}>
+                      <a
+                        href={activeDocDownloadUrl()}
+                        download={activeDoc() ?? "download"}
+                        class="inline-flex items-center rounded-lg border border-dls-border bg-dls-surface px-3 py-1.5 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover"
+                      >
+                        Download file
+                      </a>
+                    </Show>
+                  </div>
+                </div>
               </Show>
               <Show when={targetDoc() && activeDoc() && activeDoc() !== targetDoc()}>
                 <div
@@ -1948,8 +2431,19 @@ export default function DocumentWriterView(props: SessionViewProps) {
         </div>
       </div>
 
+      <div
+        class={`relative z-30 shrink-0 w-1.5 cursor-col-resize ${resizingPane() === "right" ? "bg-dls-border/80" : "bg-transparent hover:bg-dls-border/60"
+          }`}
+        onMouseDown={(event) => beginPaneResize("right", event)}
+        role="separator"
+        aria-label="Resize chat panel"
+        aria-orientation="vertical"
+      >
+        <div class="absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-dls-border/60" />
+      </div>
+
       {/* Right: Chat */}
-      <div class="relative z-30 shrink-0 w-[500px] border-l border-dls-border flex flex-col bg-dls-surface">
+      <div class="relative z-30 shrink-0 border-l border-dls-border flex flex-col bg-dls-surface" style={{ width: `${rightPaneWidth()}px` }}>
         <div class="h-12 border-b border-dls-border px-3 flex items-center justify-between">
           <div class="min-w-0">
             <div class="text-sm font-medium text-dls-text truncate">Chat</div>
@@ -1964,13 +2458,19 @@ export default function DocumentWriterView(props: SessionViewProps) {
           </div>
         </div>
 
-        <div class="flex-1 min-h-0 overflow-y-auto">
+        <div class="flex-1 min-h-0 overflow-y-auto" ref={(el) => (chatContainerEl = el)}>
           <MessageList
             messages={props.messages}
             developerMode={props.developerMode}
             showThinking={props.showThinking}
             expandedStepIds={props.expandedStepIds}
             setExpandedStepIds={props.setExpandedStepIds}
+          />
+          <div
+            ref={(el) => {
+              messagesEndEl = el;
+              bottomVisibilityEl = el;
+            }}
           />
         </div>
 
@@ -2016,214 +2516,13 @@ export default function DocumentWriterView(props: SessionViewProps) {
         />
       </div>
 
-      <Show when={sectionCopyOpen()}>
+      <Show when={Boolean(resizingPane())}>
         <div
-          class="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) closeSectionCopyModal();
-          }}
-        >
-          <div
-            class="w-full max-w-4xl rounded-2xl border border-dls-border bg-dls-surface shadow-2xl overflow-hidden"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <div class="flex items-center justify-between px-4 py-3 border-b border-dls-border">
-              <div class="min-w-0">
-                <div class="text-sm font-semibold text-dls-text truncate">Insert section</div>
-                <div class="mt-1 text-[11px] text-dls-secondary truncate">
-                  Target: {targetDoc() ?? "—"}
-                </div>
-              </div>
-              <button
-                type="button"
-                class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text"
-                onClick={closeSectionCopyModal}
-                aria-label="Close"
-                title="Close"
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            <div class="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div class="min-w-0">
-                <div class="text-xs font-medium text-dls-text">Source heading</div>
-                <div class="mt-2">
-                  <input
-                    type="text"
-                    value={sectionCopySourceQuery()}
-                    onInput={(event) => setSectionCopySourceQuery(event.currentTarget.value)}
-                    placeholder="Search headings…"
-                    class="w-full rounded-lg border border-dls-border bg-dls-surface px-3 py-2 text-xs text-dls-text placeholder:text-dls-secondary focus:outline-none focus:ring-2 focus:ring-dls-accent/40"
-                  />
-                </div>
-                <div class="mt-2 rounded-lg border border-dls-border overflow-hidden max-h-[360px] overflow-y-auto">
-                  <Show when={!sectionCopySourceHeadings.loading} fallback={<div class="p-3 text-xs text-dls-secondary">Loading…</div>}>
-                    <Show
-                      when={filteredSectionCopySourceHeadings().length > 0}
-                      fallback={<div class="p-3 text-xs text-dls-secondary">No headings found.</div>}
-                    >
-                      <For each={filteredSectionCopySourceHeadings()}>
-                        {(heading) => {
-                          const selected = createMemo(() => {
-                            const current = sectionCopySourceHeading();
-                            if (!current) return false;
-                            return current.text === heading.text && current.occurrence === heading.occurrence;
-                          });
-                          return (
-                            <button
-                              type="button"
-                              class={`w-full text-left px-3 py-2 border-b border-dls-border/50 last:border-b-0 hover:bg-dls-hover ${selected() ? "bg-dls-active" : ""
-                                }`}
-                              onClick={() => setSectionCopySourceHeading(heading)}
-                              title={heading.text}
-                            >
-                              <div class="flex items-start gap-2">
-                                <div class="shrink-0 text-[10px] text-dls-secondary w-6 pt-0.5">
-                                  {heading.level}
-                                </div>
-                                <div class="min-w-0 flex-1">
-                                  <div
-                                    class="text-xs text-dls-text truncate"
-                                    style={{ "padding-left": `${Math.max(0, heading.level - 1) * 12}px` }}
-                                  >
-                                    {heading.text}
-                                  </div>
-                                  <div class="mt-1 text-[10px] text-dls-secondary">
-                                    {heading.elementCount} elements
-                                    <Show when={heading.occurrence > 1}>
-                                      {" "}
-                                      · #{heading.occurrence}
-                                    </Show>
-                                  </div>
-                                </div>
-                              </div>
-                            </button>
-                          );
-                        }}
-                      </For>
-                    </Show>
-                  </Show>
-                </div>
-              </div>
-
-              <div class="min-w-0">
-                <div class="flex items-center justify-between">
-                  <div class="text-xs font-medium text-dls-text">Insert after (optional)</div>
-                  <button
-                    type="button"
-                    class="text-[11px] text-dls-secondary hover:text-dls-text disabled:opacity-50"
-                    disabled={!sectionCopyTargetHeading()}
-                    onClick={() => setSectionCopyTargetHeading(null)}
-                  >
-                    Clear
-                  </button>
-                </div>
-                <div class="mt-2">
-                  <input
-                    type="text"
-                    value={sectionCopyTargetQuery()}
-                    onInput={(event) => setSectionCopyTargetQuery(event.currentTarget.value)}
-                    placeholder="Search target headings…"
-                    class="w-full rounded-lg border border-dls-border bg-dls-surface px-3 py-2 text-xs text-dls-text placeholder:text-dls-secondary focus:outline-none focus:ring-2 focus:ring-dls-accent/40"
-                    disabled={!targetDoc() || !isDocxSectionCopyTarget(targetDoc() ?? "")}
-                  />
-                </div>
-                <div class="mt-2 rounded-lg border border-dls-border overflow-hidden max-h-[360px] overflow-y-auto">
-                  <Show when={!sectionCopyTargetHeadings.loading} fallback={<div class="p-3 text-xs text-dls-secondary">Loading…</div>}>
-                    <Show
-                      when={filteredSectionCopyTargetHeadings().length > 0}
-                      fallback={<div class="p-3 text-xs text-dls-secondary">No headings found.</div>}
-                    >
-                      <For each={filteredSectionCopyTargetHeadings()}>
-                        {(heading) => {
-                          const selected = createMemo(() => {
-                            const current = sectionCopyTargetHeading();
-                            if (!current) return false;
-                            return current.text === heading.text && current.occurrence === heading.occurrence;
-                          });
-                          return (
-                            <button
-                              type="button"
-                              class={`w-full text-left px-3 py-2 border-b border-dls-border/50 last:border-b-0 hover:bg-dls-hover ${selected() ? "bg-dls-active" : ""
-                                }`}
-                              onClick={() => setSectionCopyTargetHeading(heading)}
-                              title={heading.text}
-                            >
-                              <div class="flex items-start gap-2">
-                                <div class="shrink-0 text-[10px] text-dls-secondary w-6 pt-0.5">
-                                  {heading.level}
-                                </div>
-                                <div class="min-w-0 flex-1">
-                                  <div
-                                    class="text-xs text-dls-text truncate"
-                                    style={{ "padding-left": `${Math.max(0, heading.level - 1) * 12}px` }}
-                                  >
-                                    {heading.text}
-                                  </div>
-                                  <div class="mt-1 text-[10px] text-dls-secondary">
-                                    {heading.elementCount} elements
-                                    <Show when={heading.occurrence > 1}>
-                                      {" "}
-                                      · #{heading.occurrence}
-                                    </Show>
-                                  </div>
-                                </div>
-                              </div>
-                            </button>
-                          );
-                        }}
-                      </For>
-                    </Show>
-                  </Show>
-                </div>
-              </div>
-            </div>
-
-            <div class="px-4 pb-4 space-y-3">
-              <label class="flex items-center gap-2 text-xs text-dls-secondary">
-                <input
-                  type="checkbox"
-                  checked={sectionCopyExcludeHeading()}
-                  onChange={(event) => setSectionCopyExcludeHeading(event.currentTarget.checked)}
-                />
-                Exclude source heading (copy content only)
-              </label>
-
-              <Show when={sectionCopyError() || sectionCopySourceHeadings.error || sectionCopyTargetHeadings.error}>
-                <div class="rounded-lg border border-red-11/30 bg-red-3/20 px-3 py-2 text-xs text-red-11">
-                  {sectionCopyError() ||
-                    (sectionCopySourceHeadings.error instanceof Error
-                      ? sectionCopySourceHeadings.error.message
-                      : sectionCopyTargetHeadings.error instanceof Error
-                        ? sectionCopyTargetHeadings.error.message
-                        : "Something went wrong.")}
-                </div>
-              </Show>
-            </div>
-
-            <div class="px-4 py-3 border-t border-dls-border flex items-center justify-end gap-2">
-              <button
-                type="button"
-                class="rounded-lg border border-dls-border bg-dls-surface px-3 py-1.5 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover"
-                onClick={closeSectionCopyModal}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                class="rounded-lg border border-dls-border bg-dls-surface px-3 py-1.5 text-xs text-dls-text hover:bg-dls-hover disabled:opacity-50"
-                onClick={() => void runSectionCopy()}
-                disabled={sectionCopyBusy() || !sectionCopySourceHeading()}
-                title={!sectionCopySourceHeading() ? "Select a source heading" : "Insert"}
-              >
-                <Show when={!sectionCopyBusy()} fallback={"Working…"}>
-                  Insert
-                </Show>
-              </button>
-            </div>
-          </div>
-        </div>
+          class="fixed inset-0 z-40 cursor-col-resize select-none"
+          onMouseDown={(event) => event.preventDefault()}
+          onMouseMove={(event) => event.preventDefault()}
+          onMouseUp={() => paneResizeCleanup?.()}
+        />
       </Show>
 
       <Show when={moduleModal() === "assemble"}>

@@ -658,9 +658,12 @@ export function hydrateOpenworkServerSettingsFromEnv() {
 
     const currentUrlNormalized = normalizeOpenworkServerUrl(current.urlOverride ?? "") ?? "";
     const envUrlNormalized = normalizeOpenworkServerUrl(envUrl) ?? "";
-    const allowEnvTokenOverride = Boolean(import.meta.env?.DEV);
+    const isDevMode = Boolean(import.meta.env?.DEV);
+    const allowEnvTokenOverride = isDevMode;
 
-    if (envUrl && currentUrlNormalized !== envUrlNormalized) {
+    // In web dev mode (e.g. pod + vite), always trust env URL so stale browser
+    // localStorage cannot keep the app pointed at an old worker endpoint.
+    if (envUrl && (isDevMode || currentUrlNormalized !== envUrlNormalized)) {
       next.urlOverride = normalizeOpenworkServerUrl(envUrl) ?? undefined;
       changed = true;
     }
@@ -674,10 +677,22 @@ export function hydrateOpenworkServerSettingsFromEnv() {
     }
 
     if (envToken) {
+      // In web dev mode, always refresh token from env to avoid "Limited access"
+      // after worker restarts or when browser cache has an old token.
+      if (isDevMode) {
+        if ((current.token?.trim() ?? "") !== envToken) {
+          next.token = envToken;
+          changed = true;
+        }
+      }
+
       const sameTarget =
         Boolean(envUrlNormalized) &&
         (!currentUrlNormalized || currentUrlNormalized === envUrlNormalized);
-      if (!current.token || (allowEnvTokenOverride && sameTarget && current.token?.trim() !== envToken)) {
+      if (
+        !isDevMode &&
+        (!current.token || (allowEnvTokenOverride && sameTarget && current.token?.trim() !== envToken))
+      ) {
         next.token = envToken;
         changed = true;
       }

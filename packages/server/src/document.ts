@@ -434,7 +434,8 @@ function jsonResponse(data: unknown, status = 200) {
 
 const LOCAL_ONLYOFFICE_URL = "http://localhost:8080";
 const POD_IP = process.env.OPENWORK_POD_IP ?? "192.168.5.250";
-const POD_ONLYOFFICE_URL = `http://${POD_IP}:30080`;
+// const POD_ONLYOFFICE_URL = `http://${POD_IP}:30080`;
+const POD_ONLYOFFICE_URL = `http://onlyoffice:80`;
 const LOCAL_ONLYOFFICE_PUBLIC_BASE_URL = "http://host.docker.internal:8789";
 const POD_ONLYOFFICE_PUBLIC_BASE_URL = `http://${POD_IP}:30789`;
 
@@ -902,15 +903,15 @@ export function createDocumentRoutes(routes: unknown[]) {
                 throw new ApiError(400, "invalid_payload", "Expected JSON body");
             }
 
-	            const partnerInboxId = typeof body.partnerInboxId === "string" ? body.partnerInboxId.trim() : "";
-	            const matchMode = typeof body.matchMode === "string" ? body.matchMode.trim().toLowerCase() : "contains";
-	            const force = Boolean(body.force);
-	            const seedTarget = Boolean(body.seedTarget);
-	            if (!["exact", "contains", "startswith"].includes(matchMode)) {
-	                throw new ApiError(400, "invalid_request", "Invalid matchMode");
-	            }
-	            if (!partnerInboxId) {
-	                throw new ApiError(400, "invalid_request", "partnerInboxId is required");
+            const partnerInboxId = typeof body.partnerInboxId === "string" ? body.partnerInboxId.trim() : "";
+            const matchMode = typeof body.matchMode === "string" ? body.matchMode.trim().toLowerCase() : "contains";
+            const force = Boolean(body.force);
+            const seedTarget = Boolean(body.seedTarget);
+            if (!["exact", "contains", "startswith"].includes(matchMode)) {
+                throw new ApiError(400, "invalid_request", "Invalid matchMode");
+            }
+            if (!partnerInboxId) {
+                throw new ApiError(400, "invalid_request", "partnerInboxId is required");
             }
 
             const scriptPath = resolveDocxSectionCopyScriptPath(workspace.path);
@@ -980,24 +981,24 @@ export function createDocumentRoutes(routes: unknown[]) {
                 return { occurrence: occurrence > 0 ? occurrence : 1, item: best.item };
             };
 
-	            const partnerHeadings = listHeadings(partnerAbs);
+            const partnerHeadings = listHeadings(partnerAbs);
 
-	            const tmpDir = join(docsDir, ".tmp");
-	            await ensureDir(tmpDir);
-	            const workAbs = join(tmpDir, `assemble-${shortId()}.docx`);
-	            let seedSnapshotRel: string | null = null;
-	            if (seedTarget) {
-	                const historyDir = join(docsDir, ".history");
-	                await ensureDir(historyDir);
-	                const snapshotName = `${basename(targetAbs, ".docx")}-seed-${new Date().toISOString().replace(/[:.]/g, "-")}.docx`;
-	                const snapshotAbs = join(historyDir, snapshotName);
-	                await copyFile(targetAbs, snapshotAbs);
-	                seedSnapshotRel = `.history/${snapshotName}`;
-	                await copyFile(partnerAbs, workAbs);
-	            } else {
-	                await copyFile(targetAbs, workAbs);
-	            }
-	            const targetHeadings = listHeadings(workAbs);
+            const tmpDir = join(docsDir, ".tmp");
+            await ensureDir(tmpDir);
+            const workAbs = join(tmpDir, `assemble-${shortId()}.docx`);
+            let seedSnapshotRel: string | null = null;
+            if (seedTarget) {
+                const historyDir = join(docsDir, ".history");
+                await ensureDir(historyDir);
+                const snapshotName = `${basename(targetAbs, ".docx")}-seed-${new Date().toISOString().replace(/[:.]/g, "-")}.docx`;
+                const snapshotAbs = join(historyDir, snapshotName);
+                await copyFile(targetAbs, snapshotAbs);
+                seedSnapshotRel = `.history/${snapshotName}`;
+                await copyFile(partnerAbs, workAbs);
+            } else {
+                await copyFile(targetAbs, workAbs);
+            }
+            const targetHeadings = listHeadings(workAbs);
 
             type StepResult = { heading: string; skipped?: boolean; stats?: { paragraphs: number; tables: number; images: number; styles: number } | null; warnings: string[]; };
             const steps: StepResult[] = [];
@@ -1098,13 +1099,13 @@ export function createDocumentRoutes(routes: unknown[]) {
             reportLines.push("");
             reportLines.push(`- session: \`${sessionId}\``);
             reportLines.push(`- target: \`${targetDoc}\``);
-	            reportLines.push(`- partner: \`${basename(partnerAbs)}\``);
-	            reportLines.push(`- matchMode: \`${matchMode}\``);
-	            reportLines.push(`- force: \`${force}\``);
-	            reportLines.push(`- seedTarget: \`${seedTarget}\``);
-	            if (seedSnapshotRel) reportLines.push(`- seedSnapshot: \`${seedSnapshotRel}\``);
-	            reportLines.push("");
-	            reportLines.push("## Steps");
+            reportLines.push(`- partner: \`${basename(partnerAbs)}\``);
+            reportLines.push(`- matchMode: \`${matchMode}\``);
+            reportLines.push(`- force: \`${force}\``);
+            reportLines.push(`- seedTarget: \`${seedTarget}\``);
+            if (seedSnapshotRel) reportLines.push(`- seedSnapshot: \`${seedSnapshotRel}\``);
+            reportLines.push("");
+            reportLines.push("## Steps");
             for (const step of steps) {
                 if (step.skipped) {
                     reportLines.push(`- ${step.heading}: skipped${step.warnings.length ? ` (${step.warnings.join("; ")})` : ""}`);
@@ -1391,30 +1392,30 @@ export function createDocumentRoutes(routes: unknown[]) {
         },
     });
 
-	    routes.push({
-	        method: "POST",
-	        regex: /^\/w\/([^/]+)\/bid\/qc$/,
-	        keys: ["id"],
-	        auth: "client",
-	        handler: async (ctx: RequestContext) => {
-	            const workspaceId = ctx.params.id;
-	            const sessionId = parseDocumentSessionId(ctx.url.searchParams.get("session"));
-	            if (!sessionId) throw new ApiError(400, "invalid_request", "session is required");
+    routes.push({
+        method: "POST",
+        regex: /^\/w\/([^/]+)\/bid\/qc$/,
+        keys: ["id"],
+        auth: "client",
+        handler: async (ctx: RequestContext) => {
+            const workspaceId = ctx.params.id;
+            const sessionId = parseDocumentSessionId(ctx.url.searchParams.get("session"));
+            if (!sessionId) throw new ApiError(400, "invalid_request", "session is required");
 
-	            const targetDoc = (ctx.url.searchParams.get("doc") ?? "").trim();
-	            if (!targetDoc) throw new ApiError(400, "invalid_request", "doc is required");
+            const targetDoc = (ctx.url.searchParams.get("doc") ?? "").trim();
+            if (!targetDoc) throw new ApiError(400, "invalid_request", "doc is required");
 
-	            const body = (await ctx.request.json().catch(() => null)) as any;
-	            const requestedMode =
-	                (typeof ctx.url.searchParams.get("mode") === "string" ? (ctx.url.searchParams.get("mode") ?? "") : "").trim() ||
-	                (typeof body?.mode === "string" ? body.mode.trim() : "");
-	            const mode = requestedMode === "submit" ? "submit" : "draft";
+            const body = (await ctx.request.json().catch(() => null)) as any;
+            const requestedMode =
+                (typeof ctx.url.searchParams.get("mode") === "string" ? (ctx.url.searchParams.get("mode") ?? "") : "").trim() ||
+                (typeof body?.mode === "string" ? body.mode.trim() : "");
+            const mode = requestedMode === "submit" ? "submit" : "draft";
 
-	            const workspace = ctx.config.workspaces.find((w: WorkspaceInfo) => w.id === workspaceId);
-	            if (!workspace) throw new ApiError(404, "not_found", "Workspace not found");
+            const workspace = ctx.config.workspaces.find((w: WorkspaceInfo) => w.id === workspaceId);
+            if (!workspace) throw new ApiError(404, "not_found", "Workspace not found");
 
-	            const docsDir = resolveDocumentsDir(workspace.path, sessionId);
-	            const targetAbs = resolveDocumentPathSafe(docsDir, targetDoc);
+            const docsDir = resolveDocumentsDir(workspace.path, sessionId);
+            const targetAbs = resolveDocumentPathSafe(docsDir, targetDoc);
             if (!(await exists(targetAbs))) throw new ApiError(404, "not_found", "Target document not found");
             const targetExt = extname(targetAbs).toLowerCase();
             if (targetExt !== ".docx") {
@@ -1426,45 +1427,45 @@ export function createDocumentRoutes(routes: unknown[]) {
                 throw new ApiError(500, "missing_dependency", "qc_bid_mvp.py is missing in this workspace");
             }
 
-	            const factsAbs = join(docsDir, ".bid", "facts.json");
-	            const args = [scriptPath, "--docx", targetAbs];
-	            args.push("--mode", mode);
-	            const hasFacts = await exists(factsAbs);
-	            if (hasFacts) {
-	                args.push("--facts", factsAbs);
-	            }
+            const factsAbs = join(docsDir, ".bid", "facts.json");
+            const args = [scriptPath, "--docx", targetAbs];
+            args.push("--mode", mode);
+            const hasFacts = await exists(factsAbs);
+            if (hasFacts) {
+                args.push("--facts", factsAbs);
+            }
 
             const result = spawnSync("python3", args, { encoding: "utf8", cwd: workspace.path });
             const stdout = String(result.stdout || "").trim();
             const stderr = String(result.stderr || "").trim();
             const passed = result.status === 0;
 
-	            const reportText = [
-	                `# QC report: ${basename(targetAbs)}`,
-	                "",
-	                `- session: \`${sessionId}\``,
-	                `- target: \`${targetDoc}\``,
-	                `- mode: \`${mode}\``,
-	                `- facts: \`${hasFacts ? ".bid/facts.json" : "—"}\``,
-	                `- result: **${passed ? "PASS" : "FAIL"}**`,
-	                "",
-	                "## Output",
-	                "",
+            const reportText = [
+                `# QC report: ${basename(targetAbs)}`,
+                "",
+                `- session: \`${sessionId}\``,
+                `- target: \`${targetDoc}\``,
+                `- mode: \`${mode}\``,
+                `- facts: \`${hasFacts ? ".bid/facts.json" : "—"}\``,
+                `- result: **${passed ? "PASS" : "FAIL"}**`,
+                "",
+                "## Output",
+                "",
                 stdout || "(no stdout)",
                 stderr ? `\n\n[stderr]\n${stderr}` : "",
                 "",
             ].join("\n");
 
-	            const report = await writeSessionReport({
-	                workspace,
-	                sessionId,
-	                moduleId: "qc",
-	                content: reportText,
-	            });
+            const report = await writeSessionReport({
+                workspace,
+                sessionId,
+                moduleId: "qc",
+                content: reportText,
+            });
 
-	            return jsonResponse({ ok: true, passed, mode, report, stdout, stderr });
-	        },
-	    });
+            return jsonResponse({ ok: true, passed, mode, report, stdout, stderr });
+        },
+    });
 
     routes.push({
         method: "POST",

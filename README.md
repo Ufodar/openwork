@@ -162,6 +162,59 @@ pnpm build:ui
 pnpm test:e2e
 ```
 
+## Pod Workflow (Gitee Mirror)
+
+Use this when the Pod cannot access GitHub directly and only pulls from your Gitee mirror.
+
+### One-time setup on Pod
+
+```bash
+cd /root/ai_staff/openwork
+bash scripts/pod-init-secrets.sh
+bash scripts/start-pod.sh
+```
+
+`scripts/pod-init-secrets.sh` writes Pod-local secrets to:
+
+`~/.config/openwork/secrets.env`
+
+This file is not part of the repo and is loaded automatically by:
+
+- `scripts/start-pod.sh`
+- `scripts/restart-pod.sh`
+
+### Daily update on Pod (after syncing GitHub -> Gitee)
+
+```bash
+cd /root/ai_staff/openwork
+bash scripts/pod-pull-restart.sh
+```
+
+This does:
+
+1. `git pull --ff-only`
+2. `pnpm install` when revisions changed
+3. restart OpenWork
+
+### Local tunnel for browser testing
+
+```bash
+cd <your-openwork-repo>
+bash scripts/openwork-pod-tunnel.sh
+```
+
+Then open locally:
+
+- `http://127.0.0.1:5173` (OpenWork web UI)
+- `http://127.0.0.1:8789/health` (OpenWork API)
+
+### Local sync of workspace skills to Pod (optional)
+
+```bash
+cd <your-openwork-repo>
+bash scripts/sync-skills-to-pod.sh
+```
+
 ## Troubleshooting
 
 ### Linux / Wayland (Hyprland)

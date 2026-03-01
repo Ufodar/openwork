@@ -1,11 +1,134 @@
 {
   "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "my-company": {
+      "options": {
+        "baseURL": "http://192.168.5.10:3000/v1",
+        "apiKey": "${MY_COMPANY_API_KEY}"
+      },
+      "models": {
+        "Kimi-K2.5": {
+          "name": "Kimi-K2.5",
+          "capabilities": {
+            "input": {
+              "text": true,
+              "image": true,
+              "audio": true,
+              "video": true,
+              "pdf": true
+            },
+            "output": {
+              "text": true,
+              "image": true,
+              "audio": false,
+              "video": false,
+              "pdf": false
+            },
+            "attachment": true,
+            "interleaved": true,
+            "toolcall": true
+          }
+        }
+      }
+    }
+  },
   "mcp": {
     "control-chrome": {
       "type": "local",
       "command": [
+        "npx",
+        "-y",
         "chrome-devtools-mcp"
       ]
+    },
+    "filesystem": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/root/ai_staff/openwork"
+      ]
+    },
+    "git": {
+      "type": "local",
+      "command": [
+        "uvx",
+        "mcp-server-git"
+      ],
+      "enabled": false
+    },
+    "sqlite": {
+      "type": "local",
+      "command": [
+        "uvx",
+        "mcp-server-sqlite",
+        "--db-path",
+        "/root/.config/opencode/mcp-global.db"
+      ],
+      "enabled": false
+    },
+    "fetch": {
+      "type": "local",
+      "command": [
+        "uvx",
+        "mcp-server-fetch"
+      ],
+      "enabled": false
+    },
+    "memory": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@modelcontextprotocol/server-memory"
+      ]
+    },
+    "sequential-thinking": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@modelcontextprotocol/server-sequential-thinking"
+      ]
+    },
+    "github": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@modelcontextprotocol/server-github"
+      ],
+      "environment": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
+      },
+      "enabled": false
+    },
+    "brave-search": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@modelcontextprotocol/server-brave-search"
+      ],
+      "environment": {
+        "BRAVE_API_KEY": "${BRAVE_API_KEY}"
+      },
+      "enabled": false
+    },
+    "bocha-search": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@iflow-mcp/yoko19191-bocha-ai-mcp-server"
+      ],
+      "environment": {
+        "BOCHA_API_KEY": "${BOCAI_API_KEY}",
+        "BOCHA_API_URL": "${BOCAI_API_URL}",
+        "BOCAI_API_KEY": "${BOCAI_API_KEY}",
+        "BOCAI_API_URL": "${BOCAI_API_URL}"
+      }
     }
   },
   "model": "my-company/Kimi-K2.5",

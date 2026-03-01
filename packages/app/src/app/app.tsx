@@ -3808,7 +3808,7 @@ export default function App() {
     skills: true,
     authorizedFolders: false,
   });
-  const [autoConnectAttempted, setAutoConnectAttempted] = createSignal(false);
+  let autoConnectInFlight = false;
 
   const [appVersion, setAppVersion] = createSignal<string | null>(null);
   const [launchUpdateCheckTriggered, setLaunchUpdateCheckTriggered] = createSignal(false);
@@ -3844,15 +3844,40 @@ export default function App() {
 
   createEffect(() => {
     if (isTauriRuntime()) return;
-    if (autoConnectAttempted()) return;
     if (client()) return;
     if (openworkServerStatus() !== "connected") return;
 
     const settings = openworkServerSettings();
     if (!settings.urlOverride || !settings.token) return;
 
-    setAutoConnectAttempted(true);
-    void workspaceStore.onConnectClient();
+    let active = true;
+    let timer: number | undefined;
+
+    const attemptConnect = async () => {
+      if (!active) return;
+      if (autoConnectInFlight) return;
+      if (client()) return;
+      if (openworkServerStatus() !== "connected") return;
+
+      autoConnectInFlight = true;
+      try {
+        await workspaceStore.onConnectClient();
+      } finally {
+        autoConnectInFlight = false;
+        if (active && !client()) {
+          timer = window.setTimeout(() => {
+            void attemptConnect();
+          }, 12_000);
+        }
+      }
+    };
+
+    void attemptConnect();
+
+    onCleanup(() => {
+      active = false;
+      if (timer) window.clearTimeout(timer);
+    });
   });
 
   createEffect(() => {

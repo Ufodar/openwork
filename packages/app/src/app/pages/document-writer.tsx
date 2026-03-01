@@ -277,6 +277,14 @@ const createRefFolderNode = (name: string, path: string): RefFolderNode => ({
 export default function DocumentWriterView(props: SessionViewProps) {
   const navigate = useNavigate();
   const tr = (key: string) => i18n(key, currentLocale());
+  const trf = (key: string, vars?: Record<string, string | number>) => {
+    let template = tr(key);
+    if (!vars) return template;
+    for (const [name, value] of Object.entries(vars)) {
+      template = template.replaceAll(`{${name}}`, String(value));
+    }
+    return template;
+  };
   let chatContainerEl: HTMLDivElement | undefined;
   let messagesEndEl: HTMLDivElement | undefined;
   let bottomVisibilityEl: HTMLDivElement | undefined;
@@ -332,10 +340,10 @@ export default function DocumentWriterView(props: SessionViewProps) {
           parsed?.details?.report?.inboxPath && typeof parsed.details.report.inboxPath === "string"
             ? parsed.details.report.inboxPath
             : "";
-        const suffix = reportPath ? `\n\nReport: ${reportPath}` : "";
-        throw new Error((message || `Request failed (${response.status})`) + suffix);
+        const suffix = reportPath ? `\n\n${trf("docwriter.report_suffix", { path: reportPath })}` : "";
+        throw new Error((message || trf("docwriter.request_failed_with_status", { status: response.status })) + suffix);
       } catch {
-        throw new Error(text || `Request failed (${response.status})`);
+        throw new Error(text || trf("docwriter.request_failed_with_status", { status: response.status }));
       }
     }
     return await response.json();
@@ -408,12 +416,12 @@ export default function DocumentWriterView(props: SessionViewProps) {
   const [factsError, setFactsError] = createSignal<string | null>(null);
   const [fillTechXlsx, setFillTechXlsx] = createSignal<string>("");
   const [fillEquipXlsx, setFillEquipXlsx] = createSignal<string>("");
-  const [fillBrand, setFillBrand] = createSignal("新华三");
-  const [fillManufacturer, setFillManufacturer] = createSignal("新华三技术有限公司");
-  const [fillOrigin, setFillOrigin] = createSignal("中国");
-  const [fillUnit, setFillUnit] = createSignal("台");
-  const [fillPricePlaceholder, setFillPricePlaceholder] = createSignal("详见报价文件");
-  const [fillSpecPlaceholder, setFillSpecPlaceholder] = createSignal("详见开标分项一览表");
+  const [fillBrand, setFillBrand] = createSignal(tr("docwriter.fill_default_brand"));
+  const [fillManufacturer, setFillManufacturer] = createSignal(tr("docwriter.fill_default_manufacturer"));
+  const [fillOrigin, setFillOrigin] = createSignal(tr("docwriter.fill_default_origin"));
+  const [fillUnit, setFillUnit] = createSignal(tr("docwriter.fill_default_unit"));
+  const [fillPricePlaceholder, setFillPricePlaceholder] = createSignal(tr("docwriter.fill_default_price_placeholder"));
+  const [fillSpecPlaceholder, setFillSpecPlaceholder] = createSignal(tr("docwriter.fill_default_spec_placeholder"));
   const [fillBusy, setFillBusy] = createSignal(false);
   const [fillError, setFillError] = createSignal<string | null>(null);
   const [dedupeSelected, setDedupeSelected] = createSignal<Set<string>>(new Set());
@@ -453,15 +461,17 @@ export default function DocumentWriterView(props: SessionViewProps) {
   });
 
   const REF_CATEGORIES = [
-    { id: "tender", label: "招标文件" },
-    { id: "templates", label: "模板/格式" },
-    { id: "business", label: "商务资料" },
-    { id: "technical", label: "技术资料" },
-    { id: "history", label: "历史标书" },
-    { id: "partners", label: "合作方材料" },
-    { id: "images", label: "图片/图纸" },
-    { id: "other", label: "其他" },
+    { id: "tender", labelKey: "docwriter.ref_category_tender" },
+    { id: "templates", labelKey: "docwriter.ref_category_templates" },
+    { id: "business", labelKey: "docwriter.ref_category_business" },
+    { id: "technical", labelKey: "docwriter.ref_category_technical" },
+    { id: "history", labelKey: "docwriter.ref_category_history" },
+    { id: "partners", labelKey: "docwriter.ref_category_partners" },
+    { id: "images", labelKey: "docwriter.ref_category_images" },
+    { id: "other", labelKey: "docwriter.ref_category_other" },
   ] as const;
+  const refCategoryLabel = (categoryId: string) =>
+    tr(REF_CATEGORIES.find((c) => c.id === categoryId)?.labelKey ?? "docwriter.ref_category_reference");
 
   const refsInboxPrefix = createMemo(() => {
     const id = sessionId();
@@ -644,13 +654,13 @@ export default function DocumentWriterView(props: SessionViewProps) {
         kind: "doc" as const,
         name: doc.name,
         updatedAt: doc.updatedAt,
-        sourceLabel: "Session document",
+        sourceLabel: tr("docwriter.source_session_document"),
       }));
 
     const inboxCandidates: DedupeCandidate[] = moduleSources().map((item) => {
       const remainder = refsSessionRemainder(item.path);
       const categoryId = (remainder.split("/")[0] ?? "other").trim() || "other";
-      const categoryLabel = REF_CATEGORIES.find((c) => c.id === categoryId)?.label ?? "Reference";
+      const categoryLabel = refCategoryLabel(categoryId);
       return {
         key: `inbox:${item.id}`,
         kind: "inbox" as const,
@@ -723,7 +733,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
       a.remove();
       URL.revokeObjectURL(url);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to download file";
+      const message = error instanceof Error ? error.message : tr("docagent.failed_download_file");
       onError(message);
     }
   };
@@ -955,9 +965,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
     const keep = targetDoc();
     if (!cfg || !keep) return;
     if (archiveBusy()) return;
-    const ok = window.confirm(
-      `Archive all other documents in this session?\n\nKeep: ${keep}\n\nThis moves files into a hidden .archive/ folder (they will disappear from the list).`,
-    );
+    const ok = window.confirm(trf("docagent.archive_confirm", { keep }));
     if (!ok) return;
 
     setArchiveBusy(true);
@@ -972,10 +980,10 @@ export default function DocumentWriterView(props: SessionViewProps) {
         body: JSON.stringify({ keep }),
       })) as { archived?: unknown[] };
       const count = Array.isArray(result.archived) ? result.archived.length : 0;
-      setToastMessage(count ? `Archived ${count} documents.` : "No documents to archive.");
+      setToastMessage(count ? trf("docagent.archived_documents", { count }) : tr("docagent.no_documents_to_archive"));
       await refetchDocuments();
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to archive documents";
+      const message = error instanceof Error ? error.message : tr("docagent.failed_archive_documents");
       setToastMessage(message);
     } finally {
       setArchiveBusy(false);
@@ -1004,7 +1012,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
         });
 
       if (!uploadEntries.length) {
-        setRefsError(`Skipped ${skippedHiddenCount} hidden files (for example .DS_Store).`);
+        setRefsError(trf("docagent.skipped_hidden_documents_count", { count: skippedHiddenCount }));
         return;
       }
 
@@ -1019,10 +1027,10 @@ export default function DocumentWriterView(props: SessionViewProps) {
       await refetchRefs();
       setRefsExpanded((current) => ({ ...current, [categoryId]: true }));
       if (skippedHiddenCount > 0) {
-        setRefsError(`Skipped ${skippedHiddenCount} hidden files (for example .DS_Store).`);
+        setRefsError(trf("docagent.skipped_hidden_documents_count", { count: skippedHiddenCount }));
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to upload files";
+      const message = error instanceof Error ? error.message : tr("docwriter.failed_upload_reference_files");
       setRefsError(message);
     } finally {
       setRefsUploadProgress(null);
@@ -1035,7 +1043,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
     const w = workspaceId();
     if (!client || !w) return;
     if (refsDeleteBusyId()) return;
-    const ok = window.confirm(`Delete from reference library?\n\n${item.path}`);
+    const ok = window.confirm(trf("docwriter.confirm_delete_reference_file", { path: item.path }));
     if (!ok) return;
     setRefsDeleteBusyId(item.id);
     setRefsError(null);
@@ -1043,7 +1051,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
       await client.deleteInbox(w, item.id);
       await refetchRefs();
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to delete file";
+      const message = error instanceof Error ? error.message : tr("docagent.failed_delete_file");
       setRefsError(message);
     } finally {
       setRefsDeleteBusyId(null);
@@ -1066,7 +1074,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
       a.remove();
       URL.revokeObjectURL(url);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to download file";
+      const message = error instanceof Error ? error.message : tr("docagent.failed_download_file");
       setRefsError(message);
     }
   };
@@ -1091,8 +1099,8 @@ export default function DocumentWriterView(props: SessionViewProps) {
     if (!client || !w) return;
     if (refsBusy()) return;
     if (!items.length) return;
-    const label = folderPath || "(root)";
-    const ok = window.confirm(`Delete folder and all files?\n\n${label}\n\nFiles: ${items.length}`);
+    const label = folderPath || tr("docwriter.ref_folder_root");
+    const ok = window.confirm(trf("docagent.delete_folder_confirm", { path: label, count: items.length }));
     if (!ok) return;
 
     setRefsBusy(true);
@@ -1103,7 +1111,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
       }
       await refetchRefs();
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to delete folder";
+      const message = error instanceof Error ? error.message : tr("docagent.failed_delete_folder");
       setRefsError(message);
     } finally {
       setRefsBusy(false);
@@ -1138,14 +1146,14 @@ export default function DocumentWriterView(props: SessionViewProps) {
       const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/import", query);
       const result = (await fetchJson(url, cfg.token, { method: "POST" })) as { doc?: string };
       const doc = typeof result?.doc === "string" ? result.doc.trim() : "";
-      if (!doc) throw new Error("Failed to import document");
+      if (!doc) throw new Error(tr("docwriter.failed_import_document"));
       if (categoryId === "templates" || isTemplateDocName(doc)) {
         setTargetDoc(doc);
       }
       setActiveDoc(doc);
       setConfigSeq((v) => v + 1);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to open file in editor";
+      const message = error instanceof Error ? error.message : tr("docwriter.failed_open_in_editor");
       setRefsError(message);
     } finally {
       setRefsOpenBusyId(null);
@@ -1155,7 +1163,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
   const openModule = (key: "assemble" | "facts" | "fill" | "dedupe" | "qc" | "preview") => {
     if (!serverReady()) return;
     if (!targetDoc()) {
-      setToastMessage("Select a target document first.");
+      setToastMessage(tr("docwriter.select_target_first"));
       return;
     }
     setAssembleError(null);
@@ -1208,9 +1216,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
       query.set("doc", doc);
       const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/bid/assemble", query);
       if (assembleSeedTarget()) {
-        const ok = window.confirm(
-          "This will overwrite the target document by seeding it with the selected source. A hidden snapshot will be saved for rollback.\n\nContinue?",
-        );
+        const ok = window.confirm(tr("docwriter.assemble_seed_confirm"));
         if (!ok) return;
       }
       const payload = {
@@ -1225,14 +1231,14 @@ export default function DocumentWriterView(props: SessionViewProps) {
         body: JSON.stringify(payload),
       })) as { steps?: unknown[]; report?: { inboxId?: string; inboxPath?: string } };
       const reportPath = typeof result?.report?.inboxPath === "string" ? result.report.inboxPath : "";
-      setToastMessage(reportPath ? "Assemble complete (report saved)." : "Assemble complete.");
+      setToastMessage(reportPath ? tr("docwriter.assemble_complete_saved") : tr("docwriter.assemble_complete"));
       closeModule();
       setConfigSeq((v) => v + 1);
       await refetchDocuments();
       await refetchReports();
       setReportsExpanded(true);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to assemble bid forms";
+      const message = error instanceof Error ? error.message : tr("docwriter.failed_assemble");
       setAssembleError(message);
     } finally {
       setAssembleBusy(false);
@@ -1271,14 +1277,14 @@ export default function DocumentWriterView(props: SessionViewProps) {
         body: JSON.stringify(payload),
       })) as { report?: { inboxId?: string; inboxPath?: string } };
       const reportPath = typeof result?.report?.inboxPath === "string" ? result.report.inboxPath : "";
-      setToastMessage(reportPath ? "Fill complete (report saved)." : "Fill complete.");
+      setToastMessage(reportPath ? tr("docwriter.fill_complete_saved") : tr("docwriter.fill_complete"));
       closeModule();
       setConfigSeq((v) => v + 1);
       await refetchDocuments();
       await refetchReports();
       setReportsExpanded(true);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to fill bid tables";
+      const message = error instanceof Error ? error.message : tr("docwriter.failed_fill");
       setFillError(message);
     } finally {
       setFillBusy(false);
@@ -1314,14 +1320,14 @@ export default function DocumentWriterView(props: SessionViewProps) {
         body: JSON.stringify(payload),
       })) as { report?: { inboxId?: string; inboxPath?: string } };
       const reportPath = typeof result?.report?.inboxPath === "string" ? result.report.inboxPath : "";
-      setToastMessage(reportPath ? "Facts complete (report saved)." : "Facts complete.");
+      setToastMessage(reportPath ? tr("docwriter.facts_complete_saved") : tr("docwriter.facts_complete"));
       closeModule();
       setConfigSeq((v) => v + 1);
       await refetchDocuments();
       await refetchReports();
       setReportsExpanded(true);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to extract tender facts";
+      const message = error instanceof Error ? error.message : tr("docwriter.failed_facts");
       setFactsError(message);
     } finally {
       setFactsBusy(false);
@@ -1336,7 +1342,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
 
     const selected = Array.from(dedupeSelected());
     if (selected.length < 1) {
-      setDedupeError("Select at least one document to compare with the target.");
+      setDedupeError(tr("docwriter.dedupe_select_at_least_one"));
       return;
     }
 
@@ -1380,7 +1386,10 @@ export default function DocumentWriterView(props: SessionViewProps) {
 
       const reportPath = typeof result?.report?.inboxPath === "string" ? result.report.inboxPath : "";
       const mediaPath = typeof result?.mediaZip?.inboxPath === "string" ? result.mediaZip.inboxPath : "";
-      const hint = [reportPath ? "Dedupe report saved." : "Dedupe complete.", mediaPath ? "Media zip saved." : ""]
+      const hint = [
+        reportPath ? tr("docwriter.dedupe_report_saved") : tr("docwriter.dedupe_complete"),
+        mediaPath ? tr("docwriter.dedupe_media_saved") : "",
+      ]
         .filter(Boolean)
         .join(" ");
       setToastMessage(hint);
@@ -1388,7 +1397,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
       await refetchReports();
       setReportsExpanded(true);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to run dedupe";
+      const message = error instanceof Error ? error.message : tr("docwriter.failed_dedupe");
       setDedupeError(message);
     } finally {
       setDedupeBusy(false);
@@ -1411,13 +1420,17 @@ export default function DocumentWriterView(props: SessionViewProps) {
       const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/bid/qc", query);
       const result = (await fetchJson(url, cfg.token, { method: "POST" })) as { passed?: boolean; report?: { inboxPath?: string } };
       const passed = Boolean(result?.passed);
-      const label = qcMode() === "submit" ? "submit" : "draft";
-      setToastMessage(passed ? `QC PASS (${label}, report saved).` : `QC FAIL (${label}, report saved).`);
+      const label = qcMode() === "submit" ? tr("docwriter.qc_mode_submit") : tr("docwriter.qc_mode_draft");
+      setToastMessage(
+        passed
+          ? trf("docwriter.qc_pass_saved", { mode: label })
+          : trf("docwriter.qc_fail_saved", { mode: label }),
+      );
       closeModule();
       await refetchReports();
       setReportsExpanded(true);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to run QC";
+      const message = error instanceof Error ? error.message : tr("docwriter.failed_qc");
       setQcError(message);
     } finally {
       setQcBusy(false);
@@ -1442,12 +1455,12 @@ export default function DocumentWriterView(props: SessionViewProps) {
       const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/bid/preview-pdf", query);
       const result = (await fetchJson(url, cfg.token, { method: "POST" })) as { pdf?: { inboxPath?: string }; report?: { inboxPath?: string } };
       const pdfPath = typeof result?.pdf?.inboxPath === "string" ? result.pdf.inboxPath : "";
-      setToastMessage(pdfPath ? "PDF preview saved." : "PDF preview complete.");
+      setToastMessage(pdfPath ? tr("docwriter.preview_pdf_saved") : tr("docwriter.preview_pdf_complete"));
       closeModule();
       await refetchReports();
       setReportsExpanded(true);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to export PDF preview";
+      const message = error instanceof Error ? error.message : tr("docwriter.failed_preview_pdf");
       setPreviewError(message);
     } finally {
       setPreviewBusy(false);
@@ -1689,7 +1702,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
     onCleanup(() => window.clearTimeout(id));
   });
 
-  const agentLabel = createMemo(() => props.selectedSessionAgent ?? "Default agent");
+  const agentLabel = createMemo(() => props.selectedSessionAgent ?? tr("docwriter.default_agent"));
 
   const loadAgentOptions = async (force = false) => {
     if (agentPickerBusy()) return agentOptions();
@@ -1703,7 +1716,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
       setAgentPickerReady(true);
       return sorted;
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to load agents";
+      const message = error instanceof Error ? error.message : tr("docagent.failed_load_agents");
       setAgentPickerError(message);
       setAgentOptions([]);
       return [];
@@ -1722,7 +1735,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
   const applySessionAgent = (agent: string | null) => {
     const id = sessionId();
     if (!id) {
-      setToastMessage("No session selected");
+      setToastMessage(tr("docagent.no_session_selected"));
       return;
     }
     props.setSessionAgent(id, agent);
@@ -1803,9 +1816,9 @@ export default function DocumentWriterView(props: SessionViewProps) {
   const attachmentsDisabledReason = createMemo(() => {
     if (attachmentsEnabled()) return null;
     if (props.openworkServerStatus === "limited") {
-      return "Add a server token to attach files.";
+      return tr("docagent.add_server_token_to_attach_files");
     }
-    return "Connect to OpenWork server to attach files.";
+    return tr("docagent.connect_server_to_attach_files");
   });
 
   const handleDraftChange = (draft: ComposerDraft) => {
@@ -1820,7 +1833,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
       return;
     }
 
-    const prefix = `Target document: ${path}`;
+    const prefix = trf("docagent.target_document_prompt_prefix", { path });
     const baseText = draft.text ?? "";
     const baseResolvedText = draft.resolvedText ?? null;
     const already =
@@ -1865,8 +1878,8 @@ export default function DocumentWriterView(props: SessionViewProps) {
                 type="button"
                 class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text"
                 onClick={() => setDocumentsCollapsed(false)}
-                title="Expand"
-                aria-label="Expand documents"
+                title={tr("docagent.expand_documents")}
+                aria-label={tr("docagent.expand_documents")}
               >
                 <PanelLeftOpen size={16} />
               </button>
@@ -1875,8 +1888,8 @@ export default function DocumentWriterView(props: SessionViewProps) {
                 class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
                 onClick={() => void refetchDocuments()}
                 disabled={!serverReady() || documents.loading}
-                title="Refresh"
-                aria-label="Refresh documents"
+                title={tr("docagent.refresh_documents")}
+                aria-label={tr("docagent.refresh_documents")}
               >
                 <RefreshCw size={16} class={documents.loading ? "animate-spin" : ""} />
               </button>
@@ -1885,8 +1898,8 @@ export default function DocumentWriterView(props: SessionViewProps) {
                 class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
                 onClick={() => void archiveOtherDocuments()}
                 disabled={!serverReady() || !targetDoc() || archiveBusy()}
-                title="Archive other documents"
-                aria-label="Archive other documents"
+                title={tr("docagent.archive_other_documents")}
+                aria-label={tr("docagent.archive_other_documents")}
               >
                 <FolderArchive size={16} />
               </button>
@@ -1895,7 +1908,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
         >
           <div class="h-12 px-3 border-b border-dls-border flex justify-between items-center">
             <div class="min-w-0">
-              <h2 class="text-sm font-semibold text-dls-text leading-none">文档编写</h2>
+              <h2 class="text-sm font-semibold text-dls-text leading-none">{tr("docwriter.title")}</h2>
               {/* <Show when={activeDocPath()}>
                 <div class="mt-1 text-[11px] text-dls-secondary truncate" title={activeDocPath()}>
                   {activeDocPath()}
@@ -1907,8 +1920,8 @@ export default function DocumentWriterView(props: SessionViewProps) {
                 type="button"
                 class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text"
                 onClick={() => setDocumentsCollapsed(true)}
-                title="Collapse"
-                aria-label="Collapse documents"
+                title={tr("docagent.collapse_documents")}
+                aria-label={tr("docagent.collapse_documents")}
               >
                 <PanelLeftClose size={16} />
               </button>
@@ -1917,8 +1930,8 @@ export default function DocumentWriterView(props: SessionViewProps) {
                 class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
                 onClick={() => void refetchDocuments()}
                 disabled={!serverReady() || documents.loading}
-                title="Refresh"
-                aria-label="Refresh documents"
+                title={tr("docagent.refresh_documents")}
+                aria-label={tr("docagent.refresh_documents")}
               >
                 <RefreshCw size={16} class={documents.loading ? "animate-spin" : ""} />
               </button>
@@ -1927,8 +1940,8 @@ export default function DocumentWriterView(props: SessionViewProps) {
                 class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
                 onClick={() => void archiveOtherDocuments()}
                 disabled={!serverReady() || !targetDoc() || archiveBusy()}
-                title="Archive other documents"
-                aria-label="Archive other documents"
+                title={tr("docagent.archive_other_documents")}
+                aria-label={tr("docagent.archive_other_documents")}
               >
                 <FolderArchive size={16} />
               </button>
@@ -1938,13 +1951,13 @@ export default function DocumentWriterView(props: SessionViewProps) {
         <div class="flex-1 min-h-0 overflow-y-auto p-2">
           <Show
             when={serverReady()}
-            fallback={<div class="p-2 text-xs text-dls-secondary">OpenWork server not connected.</div>}
+            fallback={<div class="p-2 text-xs text-dls-secondary">{tr("docagent.server_not_connected")}</div>}
           >
             <Show
               when={!documents.error}
               fallback={
                 <div class="p-2 text-xs text-red-11 whitespace-pre-wrap break-words">
-                  {documents.error instanceof Error ? documents.error.message : "Failed to load documents"}
+                  {documents.error instanceof Error ? documents.error.message : tr("docagent.failed_load_documents")}
                 </div>
               }
             >
@@ -1962,7 +1975,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
                   <Show when={!documentsCollapsed()}>
                     <span class="truncate">
                       {targetDocName()}
-                      <span class="ml-2 text-[10px] text-dls-secondary">(target)</span>
+                      <span class="ml-2 text-[10px] text-dls-secondary">({tr("docwriter.target_badge")})</span>
                     </span>
                   </Show>
                 </button>
@@ -1975,7 +1988,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
                   onClick={() => setOtherDocsExpanded((v) => !v)}
                   aria-expanded={otherDocsExpanded()}
                 >
-                  <span>{targetDocName() ? "Other documents" : "Session documents"}</span>
+                  <span>{targetDocName() ? tr("docwriter.other_documents") : tr("docwriter.session_documents")}</span>
                   <span class="flex items-center gap-2">
                     <span class="text-[10px]">{otherDocsList().length}</span>
                     <ChevronDown size={14} class={`transition-transform ${otherDocsExpanded() ? "rotate-180" : ""}`} />
@@ -2176,14 +2189,14 @@ export default function DocumentWriterView(props: SessionViewProps) {
               </div> */}
 
               <div class="flex items-center justify-between px-2">
-                <div class="text-[10px] uppercase tracking-wider text-dls-secondary">Reference materials</div>
+                <div class="text-[10px] uppercase tracking-wider text-dls-secondary">{tr("docwriter.reference_materials")}</div>
                 <button
                   type="button"
                   class="p-1.5 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
                   onClick={() => void refetchRefs()}
                   disabled={!serverReady() || refs.loading}
-                  title="Refresh reference files"
-                  aria-label="Refresh reference files"
+                  title={tr("docwriter.refresh_reference_files")}
+                  aria-label={tr("docwriter.refresh_reference_files")}
                 >
                   <RefreshCw size={14} class={refs.loading ? "animate-spin" : ""} />
                 </button>
@@ -2198,20 +2211,24 @@ export default function DocumentWriterView(props: SessionViewProps) {
                   type="button"
                   class="mt-2 mx-2 w-[calc(100%-16px)] rounded-md border border-dls-border bg-dls-surface px-2 py-1 text-[11px] text-dls-secondary hover:text-dls-text hover:bg-dls-hover flex items-center gap-2"
                   onClick={() => insertRefInPrompt(refsWorkspaceRoot() + "/")}
-                  title="Insert reference library root (directory) into the prompt"
+                  title={tr("docwriter.insert_reference_root_in_prompt")}
                 >
                   <Folder size={14} />
                   <span class="truncate">{refsWorkspaceRoot()}/</span>
                   <span class="ml-auto text-[10px] text-dls-secondary flex items-center gap-1">
                     <AtSign size={12} />
-                    Use
+                    {tr("docwriter.use_short")}
                   </span>
                 </button>
               </Show>
 
               <Show when={refsUploadProgress()}>
                 <div class="mt-2 px-2 text-[11px] text-dls-secondary">
-                  Uploading <span class="text-dls-text">{refsUploadProgress()!.categoryId}</span>: {refsUploadProgress()!.done}/{refsUploadProgress()!.total}
+                  {trf("docwriter.uploading_category", {
+                    category: refCategoryLabel(refsUploadProgress()!.categoryId),
+                    done: refsUploadProgress()!.done,
+                    total: refsUploadProgress()!.total,
+                  })}
                 </div>
               </Show>
 
@@ -2226,7 +2243,6 @@ export default function DocumentWriterView(props: SessionViewProps) {
                       const workspacePath = () => inboxWorkspacePath(item.path);
                       const relativePath = () => refsItemRelativePath(category.id, item.path);
                       const name = () => relativePath().split("/").pop() ?? item.path.split("/").pop() ?? item.path;
-                      const importable = () => isOnlyOfficeImportable(item.path);
                       const menuKey = refsFileMenuKey(category.id, item.id);
                       const menuOpen = () => refsActionMenuKey() === menuKey;
                       return (
@@ -2239,8 +2255,8 @@ export default function DocumentWriterView(props: SessionViewProps) {
                             type="button"
                             class="p-1.5 rounded hover:bg-dls-active text-dls-secondary hover:text-dls-text"
                             onClick={() => insertRefInPrompt(workspacePath())}
-                            title="Use in prompt"
-                            aria-label="Use in prompt"
+                            title={tr("docagent.use_in_prompt")}
+                            aria-label={tr("docagent.use_in_prompt")}
                           >
                             <AtSign size={14} />
                           </button>
@@ -2252,8 +2268,8 @@ export default function DocumentWriterView(props: SessionViewProps) {
                                 event.stopPropagation();
                                 setRefsActionMenuKey(menuOpen() ? null : menuKey);
                               }}
-                              title="More"
-                              aria-label="More"
+                              title={tr("docwriter.more")}
+                              aria-label={tr("docwriter.more")}
                             >
                               <MoreHorizontal size={14} />
                             </button>
@@ -2266,10 +2282,10 @@ export default function DocumentWriterView(props: SessionViewProps) {
                                     setRefsActionMenuKey(null);
                                     void openReferenceInEditor(item);
                                   }}
-                                  disabled={!serverReady() || refsOpenBusyId() === item.id || !importable()}
-                                  title={importable() ? "Preview" : "Unsupported file type"}
+                                  disabled={!serverReady() || refsOpenBusyId() === item.id}
+                                  title={tr("docwriter.preview")}
                                 >
-                                  Preview
+                                  {tr("docwriter.preview")}
                                 </button>
                                 <button
                                   type="button"
@@ -2279,7 +2295,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
                                     void downloadReferenceFile(item);
                                   }}
                                 >
-                                  Download
+                                  {tr("docagent.download_file")}
                                 </button>
                                 <button
                                   type="button"
@@ -2290,7 +2306,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
                                   }}
                                   disabled={refsDeleteBusyId() === item.id}
                                 >
-                                  Delete
+                                  {tr("docagent.delete_file")}
                                 </button>
                               </div>
                             </Show>
@@ -2341,8 +2357,8 @@ export default function DocumentWriterView(props: SessionViewProps) {
                                 event.stopPropagation();
                                 insertRefInPrompt(promptPath());
                               }}
-                              title="Use in prompt"
-                              aria-label="Use in prompt"
+                              title={tr("docagent.use_in_prompt")}
+                              aria-label={tr("docagent.use_in_prompt")}
                             >
                               <AtSign size={14} />
                             </button>
@@ -2354,8 +2370,8 @@ export default function DocumentWriterView(props: SessionViewProps) {
                                   event.stopPropagation();
                                   setRefsActionMenuKey(menuOpen() ? null : menuKey);
                                 }}
-                                title="More"
-                                aria-label="More"
+                                title={tr("docwriter.more")}
+                                aria-label={tr("docwriter.more")}
                               >
                                 <MoreHorizontal size={14} />
                               </button>
@@ -2370,7 +2386,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
                                     }}
                                     disabled={refsBusy() || folderItems().length === 0}
                                   >
-                                    Download
+                                    {tr("docagent.download_folder")}
                                   </button>
                                   <button
                                     type="button"
@@ -2381,7 +2397,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
                                     }}
                                     disabled={refsBusy() || folderItems().length === 0}
                                   >
-                                    Delete
+                                    {tr("docagent.delete_folder")}
                                   </button>
                                 </div>
                               </Show>
@@ -2412,13 +2428,13 @@ export default function DocumentWriterView(props: SessionViewProps) {
                               size={14}
                               class={`shrink-0 transition-transform ${expanded() ? "rotate-180" : ""}`}
                             />
-                            <span class="truncate text-[12px]">{category.label}</span>
+                            <span class="truncate text-[12px]">{tr(category.labelKey)}</span>
                             <span class="ml-auto text-[10px] text-dls-secondary">{items().length}</span>
                           </button>
                           <label
                             class={`ml-2 cursor-pointer p-1.5 rounded hover:bg-dls-hover ${!serverReady() || refsBusy() ? "opacity-50 cursor-not-allowed" : ""
                               }`}
-                            title={`Upload to ${category.label}`}
+                            title={trf("docwriter.upload_to_category", { category: tr(category.labelKey) })}
                           >
                             <Plus size={14} class="text-dls-secondary" />
                             <input
@@ -2437,7 +2453,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
                           <label
                             class={`ml-1 cursor-pointer p-1.5 rounded hover:bg-dls-hover ${!serverReady() || refsBusy() ? "opacity-50 cursor-not-allowed" : ""
                               }`}
-                            title={`Upload folder to ${category.label}`}
+                            title={trf("docwriter.upload_folder_to_category", { category: tr(category.labelKey) })}
                           >
                             <Folder size={14} class="text-dls-secondary" />
                             <input
@@ -2462,7 +2478,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
 
                         <Show when={expanded()}>
                           <div class="px-2 pb-2 space-y-1">
-                            <Show when={items().length > 0} fallback={<div class="py-1 text-[11px] text-dls-secondary">No files.</div>}>
+                            <Show when={items().length > 0} fallback={<div class="py-1 text-[11px] text-dls-secondary">{tr("docwriter.no_files")}</div>}>
                               <For each={tree().folders}>
                                 {(folder) => folderBlock(folder, 0)}
                               </For>
@@ -2488,7 +2504,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
             }`}
           onMouseDown={(event) => beginPaneResize("left", event)}
           role="separator"
-          aria-label="Resize documents panel"
+          aria-label={tr("docagent.resize_documents_panel")}
           aria-orientation="vertical"
         >
           <div class="absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-dls-border/60" />
@@ -2503,18 +2519,18 @@ export default function DocumentWriterView(props: SessionViewProps) {
               type="button"
               class="p-2 -ml-1 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text"
               onClick={() => setDocumentsCollapsed((v) => !v)}
-              title={documentsCollapsed() ? "Show documents" : "Hide documents"}
-              aria-label={documentsCollapsed() ? "Show documents" : "Hide documents"}
+              title={documentsCollapsed() ? tr("docagent.show_documents") : tr("docagent.hide_documents")}
+              aria-label={documentsCollapsed() ? tr("docagent.show_documents") : tr("docagent.hide_documents")}
             >
               <Show when={documentsCollapsed()} fallback={<PanelLeftClose size={16} />}>
                 <PanelLeftOpen size={16} />
               </Show>
             </button>
             <div class="text-xs text-dls-secondary truncate">
-              <Show when={targetDoc()} fallback={"Select a target document from 模板/格式"}>
-                Target: <span class="text-dls-text">{targetDoc()}</span>
+              <Show when={targetDoc()} fallback={tr("docwriter.select_target_from_templates")}>
+                {tr("docagent.target_prefix")} <span class="text-dls-text">{targetDoc()}</span>
                 <Show when={activeDoc() && activeDoc() !== targetDoc()}>
-                  <span class="ml-2 text-dls-secondary">· Viewing:</span>{" "}
+                  <span class="ml-2 text-dls-secondary">· {tr("docagent.viewing_prefix")}</span>{" "}
                   <span class="text-dls-text">{activeDoc()}</span>
                 </Show>
               </Show>
@@ -2528,22 +2544,23 @@ export default function DocumentWriterView(props: SessionViewProps) {
                 const path = activeDocPath();
                 if (!path) return;
                 const existing = props.prompt.trim();
-                const next = existing ? `${existing}\n\nTarget document: ${path}\n` : `Target document: ${path}\n`;
+                const targetPrompt = trf("docagent.target_document_prompt_prefix", { path });
+                const next = existing ? `${existing}\n\n${targetPrompt}\n` : `${targetPrompt}\n`;
                 props.setPrompt(next);
               }}
               disabled={!activeDocPath()}
-              title="Insert document path into the prompt"
+              title={tr("docagent.insert_document_path_into_prompt")}
             >
-              Use in prompt
+              {tr("docagent.use_in_prompt")}
             </button>
             <button
               type="button"
               class="rounded-lg border border-dls-border bg-dls-surface px-2 py-1 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover disabled:opacity-50"
               onClick={() => setConfigSeq((v) => v + 1)}
               disabled={!activeDoc() || activeDocKind() !== "onlyoffice"}
-              title="Reload OnlyOffice config"
+              title={tr("docagent.reload_onlyoffice_config")}
             >
-              Reload
+              {tr("docagent.reload")}
             </button>
             <button
               type="button"
@@ -2554,9 +2571,9 @@ export default function DocumentWriterView(props: SessionViewProps) {
                 navigate(`/session/${id}/view/session`);
               }}
               disabled={!sessionId()}
-              title="Open session view"
+              title={tr("docagent.open_session_view")}
             >
-              Session
+              {tr("docagent.session")}
             </button>
           </div>
         </div>
@@ -2571,7 +2588,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
                 <div class="h-full w-full overflow-auto bg-dls-surface flex items-center justify-center p-4">
                   <img
                     src={activeDocDownloadUrl()}
-                    alt={activeDoc() ?? "image"}
+                    alt={activeDoc() ?? tr("docwriter.image_alt")}
                     class="max-h-full max-w-full object-contain rounded-lg border border-dls-border bg-white"
                   />
                 </div>
@@ -2644,14 +2661,14 @@ export default function DocumentWriterView(props: SessionViewProps) {
                 >
                   <div class="max-w-lg rounded-xl border border-dls-border bg-dls-surface/90 px-4 py-2 shadow-lg backdrop-blur">
                     <div class="text-xs text-dls-secondary">
-                      <span class="font-medium text-dls-text">Preview mode</span>{" "}
-                      (chat edits <span class="text-dls-text">{targetDoc()}</span>).{" "}
+                      <span class="font-medium text-dls-text">{tr("docagent.preview_mode")}</span>{" "}
+                      {trf("docagent.preview_mode_desc", { target: targetDoc() ?? "" })}{" "}
                       <button
                         type="button"
                         class="pointer-events-auto ml-2 underline text-dls-secondary hover:text-dls-text"
                         onClick={() => setActiveDoc(targetDoc())}
                       >
-                        Back to target
+                        {tr("docagent.back_to_target")}
                       </button>
                     </div>
                   </div>
@@ -2665,8 +2682,8 @@ export default function DocumentWriterView(props: SessionViewProps) {
                 >
                   <div class="max-w-lg rounded-xl border border-dls-border bg-dls-surface/90 px-4 py-2 shadow-lg backdrop-blur">
                     <div class="text-xs text-dls-secondary">
-                      <span class="font-medium text-dls-text">AI is editing…</span>{" "}
-                      You can keep scrolling/previewing, but editing is locked to prevent conflicts. The document will reload when the run finishes.
+                      <span class="font-medium text-dls-text">{tr("docagent.ai_is_editing")}</span>{" "}
+                      {tr("docagent.ai_is_editing_desc")}
                     </div>
                   </div>
                 </div>
@@ -2681,7 +2698,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
           }`}
         onMouseDown={(event) => beginPaneResize("right", event)}
         role="separator"
-        aria-label="Resize chat panel"
+        aria-label={tr("docagent.resize_chat_panel")}
         aria-orientation="vertical"
       >
         <div class="absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-dls-border/60" />
@@ -2691,15 +2708,15 @@ export default function DocumentWriterView(props: SessionViewProps) {
       <div class="relative z-30 shrink-0 border-l border-dls-border flex flex-col bg-dls-surface" style={{ width: `${rightPaneWidth()}px` }}>
         <div class="h-12 border-b border-dls-border px-3 flex items-center justify-between">
           <div class="min-w-0">
-            <div class="text-sm font-medium text-dls-text truncate">Chat</div>
+            <div class="text-sm font-medium text-dls-text truncate">{tr("docagent.chat")}</div>
             <div class="text-[11px] text-dls-secondary truncate">
-              <Show when={props.selectedSessionAgent} fallback={"Default agent"}>
+              <Show when={props.selectedSessionAgent} fallback={tr("docwriter.default_agent")}>
                 @{props.selectedSessionAgent}
               </Show>
             </div>
           </div>
           <div class="text-[11px] text-dls-secondary truncate" title={sessionId()}>
-            {sessionId() ? `#${sessionId()}` : "No session"}
+            {sessionId() ? `#${sessionId()}` : tr("docagent.no_session")}
           </div>
         </div>
 
@@ -2727,7 +2744,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
           onSend={handleSendPrompt}
           onStop={cancelRun}
           onDraftChange={handleDraftChange}
-          selectedModelLabel={props.selectedSessionModelLabel || "Model"}
+          selectedModelLabel={props.selectedSessionModelLabel || tr("session.model")}
           onModelClick={props.openSessionModelPicker}
           modelVariantLabel={props.modelVariantLabel}
           modelVariant={props.modelVariant}
@@ -2783,17 +2800,17 @@ export default function DocumentWriterView(props: SessionViewProps) {
           >
             <div class="flex items-center justify-between px-4 py-3 border-b border-dls-border">
               <div class="min-w-0">
-                <div class="text-sm font-semibold text-dls-text truncate">Assemble forms</div>
+                <div class="text-sm font-semibold text-dls-text truncate">{tr("docwriter.assemble_title")}</div>
                 <div class="mt-1 text-[11px] text-dls-secondary truncate">
-                  Target: {targetDoc() ?? "—"}
+                  {tr("docagent.target_prefix")} {targetDoc() ?? "—"}
                 </div>
               </div>
               <button
                 type="button"
                 class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text"
                 onClick={closeModule}
-                aria-label="Close"
-                title="Close"
+                aria-label={tr("docwriter.close")}
+                title={tr("docwriter.close")}
               >
                 <X size={16} />
               </button>
@@ -2801,19 +2818,19 @@ export default function DocumentWriterView(props: SessionViewProps) {
 
             <div class="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
               <div class="min-w-0">
-                <div class="text-xs font-medium text-dls-text">Source document</div>
+                <div class="text-xs font-medium text-dls-text">{tr("docwriter.source_document")}</div>
                 <div class="mt-2">
                   <input
                     type="text"
                     value={assembleQuery()}
                     onInput={(event) => setAssembleQuery(event.currentTarget.value)}
-                    placeholder="Search DOCX sources…"
+                    placeholder={tr("docwriter.search_docx_sources")}
                     class="w-full rounded-lg border border-dls-border bg-dls-surface px-3 py-2 text-xs text-dls-text placeholder:text-dls-secondary focus:outline-none focus:ring-2 focus:ring-dls-accent/40"
                   />
                 </div>
                 <div class="mt-2 rounded-lg border border-dls-border overflow-hidden max-h-[360px] overflow-y-auto">
-                  <Show when={!refs.loading} fallback={<div class="p-3 text-xs text-dls-secondary">Loading…</div>}>
-                    <Show when={filteredModuleSources().length > 0} fallback={<div class="p-3 text-xs text-dls-secondary">No DOCX sources found.</div>}>
+                  <Show when={!refs.loading} fallback={<div class="p-3 text-xs text-dls-secondary">{tr("docwriter.loading")}</div>}>
+                    <Show when={filteredModuleSources().length > 0} fallback={<div class="p-3 text-xs text-dls-secondary">{tr("docwriter.no_docx_sources")}</div>}>
                       <For each={filteredModuleSources()}>
                         {(item) => {
                           const selected = createMemo(() => assembleSource()?.id === item.id);
@@ -2843,20 +2860,20 @@ export default function DocumentWriterView(props: SessionViewProps) {
 
               <div class="min-w-0 space-y-4">
                 <div>
-                  <div class="text-xs font-medium text-dls-text">Match mode</div>
+                  <div class="text-xs font-medium text-dls-text">{tr("docwriter.match_mode")}</div>
                   <div class="mt-2">
                     <select
                       class="w-full rounded-lg border border-dls-border bg-dls-surface px-3 py-2 text-xs text-dls-text focus:outline-none focus:ring-2 focus:ring-dls-accent/40"
                       value={assembleMatchMode()}
                       onChange={(event) => setAssembleMatchMode(event.currentTarget.value as any)}
                     >
-                      <option value="contains">contains (recommended)</option>
-                      <option value="exact">exact</option>
-                      <option value="startswith">startsWith</option>
+                      <option value="contains">{tr("docwriter.match_mode_contains_recommended")}</option>
+                      <option value="exact">{tr("docwriter.match_mode_exact")}</option>
+                      <option value="startswith">{tr("docwriter.match_mode_startswith")}</option>
                     </select>
                   </div>
                   <div class="mt-2 text-[11px] text-dls-secondary">
-                    Copies baseline forms (开标一览表/开标分项一览表/点对点/配置清单/售后服务承诺) into the target.
+                    {tr("docwriter.assemble_description")}
                   </div>
                 </div>
 
@@ -2866,7 +2883,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
                     checked={assembleForce()}
                     onChange={(event) => setAssembleForce(event.currentTarget.checked)}
                   />
-                  Force insert even if the target section appears non-empty
+                  {tr("docwriter.assemble_force")}
                 </label>
 
                 <label class="flex items-start gap-2 text-xs text-dls-secondary">
@@ -2876,9 +2893,9 @@ export default function DocumentWriterView(props: SessionViewProps) {
                     onChange={(event) => setAssembleSeedTarget(event.currentTarget.checked)}
                   />
                   <span class="min-w-0">
-                    Seed target from source (overwrite target first)
+                    {tr("docwriter.assemble_seed_target")}
                     <div class="mt-1 text-[11px] text-dls-secondary">
-                      Recommended when your target template is blank or lacks a professional skeleton. A hidden snapshot is saved for rollback.
+                      {tr("docwriter.assemble_seed_target_help")}
                     </div>
                   </span>
                 </label>
@@ -2897,17 +2914,17 @@ export default function DocumentWriterView(props: SessionViewProps) {
                 class="rounded-lg border border-dls-border bg-dls-surface px-3 py-1.5 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover"
                 onClick={closeModule}
               >
-                Cancel
+                {tr("docwriter.cancel")}
               </button>
               <button
                 type="button"
                 class="rounded-lg border border-dls-border bg-dls-surface px-3 py-1.5 text-xs text-dls-text hover:bg-dls-hover disabled:opacity-50"
                 onClick={() => void runAssemble()}
                 disabled={assembleBusy() || !assembleSource()}
-                title={!assembleSource() ? "Select a source document" : "Assemble"}
+                title={!assembleSource() ? tr("docwriter.select_source_document") : tr("docwriter.assemble_action")}
               >
-                <Show when={!assembleBusy()} fallback={"Working…"}>
-                  Assemble
+                <Show when={!assembleBusy()} fallback={tr("docwriter.working")}>
+                  {tr("docwriter.assemble_action")}
                 </Show>
               </button>
             </div>
@@ -2928,17 +2945,17 @@ export default function DocumentWriterView(props: SessionViewProps) {
           >
             <div class="flex items-center justify-between px-4 py-3 border-b border-dls-border">
               <div class="min-w-0">
-                <div class="text-sm font-semibold text-dls-text truncate">Tender facts</div>
+                <div class="text-sm font-semibold text-dls-text truncate">{tr("docwriter.facts_title")}</div>
                 <div class="mt-1 text-[11px] text-dls-secondary truncate">
-                  Target: {targetDoc() ?? "—"}
+                  {tr("docagent.target_prefix")} {targetDoc() ?? "—"}
                 </div>
               </div>
               <button
                 type="button"
                 class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text"
                 onClick={closeModule}
-                aria-label="Close"
-                title="Close"
+                aria-label={tr("docwriter.close")}
+                title={tr("docwriter.close")}
               >
                 <X size={16} />
               </button>
@@ -2946,12 +2963,12 @@ export default function DocumentWriterView(props: SessionViewProps) {
 
             <div class="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
               <div class="min-w-0">
-                <div class="text-xs font-medium text-dls-text">Tender document (source of truth)</div>
+                <div class="text-xs font-medium text-dls-text">{tr("docwriter.facts_tender_source_label")}</div>
                 <div class="mt-2 rounded-lg border border-dls-border overflow-hidden max-h-[360px] overflow-y-auto">
-                  <Show when={!refs.loading} fallback={<div class="p-3 text-xs text-dls-secondary">Loading…</div>}>
+                  <Show when={!refs.loading} fallback={<div class="p-3 text-xs text-dls-secondary">{tr("docwriter.loading")}</div>}>
                     <Show
                       when={tenderSources().length > 0}
-                      fallback={<div class="p-3 text-xs text-dls-secondary">Upload the tender file to 招标文件.</div>}
+                      fallback={<div class="p-3 text-xs text-dls-secondary">{tr("docwriter.facts_upload_tender_hint")}</div>}
                     >
                       <For each={tenderSources()}>
                         {(item) => {
@@ -2983,10 +3000,9 @@ export default function DocumentWriterView(props: SessionViewProps) {
 
               <div class="min-w-0 space-y-4">
                 <div>
-                  <div class="text-xs font-medium text-dls-text">What it does</div>
+                  <div class="text-xs font-medium text-dls-text">{tr("docwriter.what_it_does")}</div>
                   <div class="mt-2 text-[11px] text-dls-secondary">
-                    Extracts project name/code, deadlines, amounts, and other hard facts from the tender file, then fills the project info table in your template (optional).
-                    Saves a facts.json + markdown report to Reports.
+                    {tr("docwriter.facts_description")}
                   </div>
                 </div>
 
@@ -2996,7 +3012,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
                     checked={factsApplyToTarget()}
                     onChange={(event) => setFactsApplyToTarget(event.currentTarget.checked)}
                   />
-                  Apply to target (fill project info table)
+                  {tr("docwriter.facts_apply_target")}
                 </label>
 
                 <label class="flex items-center gap-2 text-xs text-dls-secondary">
@@ -3006,7 +3022,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
                     onChange={(event) => setFactsForce(event.currentTarget.checked)}
                     disabled={!factsApplyToTarget()}
                   />
-                  Force overwrite existing values
+                  {tr("docwriter.facts_force_overwrite")}
                 </label>
 
                 <label class="flex items-center gap-2 text-xs text-dls-secondary">
@@ -3016,7 +3032,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
                     onChange={(event) => setFactsInsertBlock(event.currentTarget.checked)}
                     disabled={!factsApplyToTarget()}
                   />
-                  Insert a filled project info block if the template has no placeholders (recommended)
+                  {tr("docwriter.facts_insert_block")}
                 </label>
 
                 <Show when={factsError()}>
@@ -3033,17 +3049,17 @@ export default function DocumentWriterView(props: SessionViewProps) {
                 class="rounded-lg border border-dls-border bg-dls-surface px-3 py-1.5 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover"
                 onClick={closeModule}
               >
-                Cancel
+                {tr("docwriter.cancel")}
               </button>
               <button
                 type="button"
                 class="rounded-lg border border-dls-border bg-dls-surface px-3 py-1.5 text-xs text-dls-text hover:bg-dls-hover disabled:opacity-50"
                 onClick={() => void runFacts()}
                 disabled={factsBusy() || !factsTenderSource()}
-                title={!factsTenderSource() ? "Select a tender document" : "Run facts extraction"}
+                title={!factsTenderSource() ? tr("docwriter.select_tender_document") : tr("docwriter.run_facts")}
               >
-                <Show when={!factsBusy()} fallback={"Working…"}>
-                  Run facts
+                <Show when={!factsBusy()} fallback={tr("docwriter.working")}>
+                  {tr("docwriter.run_facts")}
                 </Show>
               </button>
             </div>
@@ -3064,17 +3080,17 @@ export default function DocumentWriterView(props: SessionViewProps) {
           >
             <div class="flex items-center justify-between px-4 py-3 border-b border-dls-border">
               <div class="min-w-0">
-                <div class="text-sm font-semibold text-dls-text truncate">Fill tables</div>
+                <div class="text-sm font-semibold text-dls-text truncate">{tr("docwriter.fill_title")}</div>
                 <div class="mt-1 text-[11px] text-dls-secondary truncate">
-                  Target: {targetDoc() ?? "—"}
+                  {tr("docagent.target_prefix")} {targetDoc() ?? "—"}
                 </div>
               </div>
               <button
                 type="button"
                 class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text"
                 onClick={closeModule}
-                aria-label="Close"
-                title="Close"
+                aria-label={tr("docwriter.close")}
+                title={tr("docwriter.close")}
               >
                 <X size={16} />
               </button>
@@ -3083,7 +3099,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
             <div class="p-4 space-y-4">
               <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <div class="text-xs font-medium text-dls-text">Tech response XLSX (optional)</div>
+                  <div class="text-xs font-medium text-dls-text">{tr("docwriter.fill_tech_xlsx")}</div>
                   <select
                     class="mt-2 w-full rounded-lg border border-dls-border bg-dls-surface px-3 py-2 text-xs text-dls-text focus:outline-none focus:ring-2 focus:ring-dls-accent/40"
                     value={fillTechXlsx()}
@@ -3100,7 +3116,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
                   </select>
                 </div>
                 <div>
-                  <div class="text-xs font-medium text-dls-text">Equipment list XLSX (optional)</div>
+                  <div class="text-xs font-medium text-dls-text">{tr("docwriter.fill_equip_xlsx")}</div>
                   <select
                     class="mt-2 w-full rounded-lg border border-dls-border bg-dls-surface px-3 py-2 text-xs text-dls-text focus:outline-none focus:ring-2 focus:ring-dls-accent/40"
                     value={fillEquipXlsx()}
@@ -3120,7 +3136,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
 
               <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <div class="text-xs font-medium text-dls-text">Brand</div>
+                  <div class="text-xs font-medium text-dls-text">{tr("docwriter.fill_brand")}</div>
                   <input
                     type="text"
                     value={fillBrand()}
@@ -3129,7 +3145,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
                   />
                 </div>
                 <div>
-                  <div class="text-xs font-medium text-dls-text">Manufacturer</div>
+                  <div class="text-xs font-medium text-dls-text">{tr("docwriter.fill_manufacturer")}</div>
                   <input
                     type="text"
                     value={fillManufacturer()}
@@ -3138,7 +3154,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
                   />
                 </div>
                 <div>
-                  <div class="text-xs font-medium text-dls-text">Origin</div>
+                  <div class="text-xs font-medium text-dls-text">{tr("docwriter.fill_origin")}</div>
                   <input
                     type="text"
                     value={fillOrigin()}
@@ -3147,7 +3163,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
                   />
                 </div>
                 <div>
-                  <div class="text-xs font-medium text-dls-text">Unit</div>
+                  <div class="text-xs font-medium text-dls-text">{tr("docwriter.fill_unit")}</div>
                   <input
                     type="text"
                     value={fillUnit()}
@@ -3159,7 +3175,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
 
               <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <div class="text-xs font-medium text-dls-text">Price placeholder</div>
+                  <div class="text-xs font-medium text-dls-text">{tr("docwriter.fill_price_placeholder")}</div>
                   <input
                     type="text"
                     value={fillPricePlaceholder()}
@@ -3168,7 +3184,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
                   />
                 </div>
                 <div>
-                  <div class="text-xs font-medium text-dls-text">Spec placeholder</div>
+                  <div class="text-xs font-medium text-dls-text">{tr("docwriter.fill_spec_placeholder")}</div>
                   <input
                     type="text"
                     value={fillSpecPlaceholder()}
@@ -3191,7 +3207,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
                 class="rounded-lg border border-dls-border bg-dls-surface px-3 py-1.5 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover"
                 onClick={closeModule}
               >
-                Cancel
+                {tr("docwriter.cancel")}
               </button>
               <button
                 type="button"
@@ -3199,8 +3215,8 @@ export default function DocumentWriterView(props: SessionViewProps) {
                 onClick={() => void runFill()}
                 disabled={fillBusy()}
               >
-                <Show when={!fillBusy()} fallback={"Working…"}>
-                  Fill
+                <Show when={!fillBusy()} fallback={tr("docwriter.working")}>
+                  {tr("docwriter.fill_action")}
                 </Show>
               </button>
             </div>
@@ -3221,17 +3237,17 @@ export default function DocumentWriterView(props: SessionViewProps) {
           >
             <div class="flex items-center justify-between px-4 py-3 border-b border-dls-border">
               <div class="min-w-0">
-                <div class="text-sm font-semibold text-dls-text truncate">Dedupe</div>
+                <div class="text-sm font-semibold text-dls-text truncate">{tr("docwriter.dedupe_title")}</div>
                 <div class="mt-1 text-[11px] text-dls-secondary truncate">
-                  Target: {targetDoc() ?? "—"} (always included)
+                  {trf("docwriter.dedupe_target_always_included", { target: targetDoc() ?? "—" })}
                 </div>
               </div>
               <button
                 type="button"
                 class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text"
                 onClick={closeModule}
-                aria-label="Close"
-                title="Close"
+                aria-label={tr("docwriter.close")}
+                title={tr("docwriter.close")}
               >
                 <X size={16} />
               </button>
@@ -3240,23 +3256,23 @@ export default function DocumentWriterView(props: SessionViewProps) {
             <div class="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
               <div class="min-w-0">
                 <div class="flex items-center justify-between">
-                  <div class="text-xs font-medium text-dls-text">Compare with</div>
-                  <div class="text-[11px] text-dls-secondary">{dedupeSelected().size} selected</div>
+                  <div class="text-xs font-medium text-dls-text">{tr("docwriter.dedupe_compare_with")}</div>
+                  <div class="text-[11px] text-dls-secondary">{trf("docwriter.dedupe_selected_count", { count: dedupeSelected().size })}</div>
                 </div>
                 <div class="mt-2">
                   <input
                     type="text"
                     value={dedupeQuery()}
                     onInput={(event) => setDedupeQuery(event.currentTarget.value)}
-                    placeholder="Search documents…"
+                    placeholder={tr("docwriter.search_documents")}
                     class="w-full rounded-lg border border-dls-border bg-dls-surface px-3 py-2 text-xs text-dls-text placeholder:text-dls-secondary focus:outline-none focus:ring-2 focus:ring-dls-accent/40"
                   />
                 </div>
                 <div class="mt-2 rounded-lg border border-dls-border overflow-hidden max-h-[420px] overflow-y-auto">
-                  <Show when={!refs.loading && !documents.loading} fallback={<div class="p-3 text-xs text-dls-secondary">Loading…</div>}>
+                  <Show when={!refs.loading && !documents.loading} fallback={<div class="p-3 text-xs text-dls-secondary">{tr("docwriter.loading")}</div>}>
                     <Show
                       when={filteredDedupeCandidates().length > 0}
-                      fallback={<div class="p-3 text-xs text-dls-secondary">No DOCX sources found.</div>}
+                      fallback={<div class="p-3 text-xs text-dls-secondary">{tr("docwriter.no_docx_sources")}</div>}
                     >
                       <For each={filteredDedupeCandidates()}>
                         {(item) => {
@@ -3291,9 +3307,9 @@ export default function DocumentWriterView(props: SessionViewProps) {
 
               <div class="min-w-0 space-y-4">
                 <div>
-                  <div class="text-xs font-medium text-dls-text">Settings</div>
+                  <div class="text-xs font-medium text-dls-text">{tr("docwriter.settings")}</div>
                   <div class="mt-2 text-[11px] text-dls-secondary">
-                    Finds duplicate text blocks (simhash + similarity) and duplicate images (SHA256 / dHash) across documents.
+                    {tr("docwriter.dedupe_description")}
                   </div>
                 </div>
 
@@ -3303,11 +3319,11 @@ export default function DocumentWriterView(props: SessionViewProps) {
                     checked={dedupeExcludeTables()}
                     onChange={(event) => setDedupeExcludeTables(event.currentTarget.checked)}
                   />
-                  Exclude tables (recommended to reduce form noise)
+                  {tr("docwriter.dedupe_exclude_tables")}
                 </label>
 
                 <div>
-                  <div class="text-xs font-medium text-dls-text">Similarity threshold</div>
+                  <div class="text-xs font-medium text-dls-text">{tr("docwriter.dedupe_similarity_threshold")}</div>
                   <div class="mt-2 flex items-center gap-2">
                     <input
                       type="number"
@@ -3318,7 +3334,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
                       onInput={(event) => setDedupeSimThreshold(Number(event.currentTarget.value))}
                       class="w-28 rounded-lg border border-dls-border bg-dls-surface px-3 py-2 text-xs text-dls-text focus:outline-none focus:ring-2 focus:ring-dls-accent/40"
                     />
-                    <div class="text-[11px] text-dls-secondary">Default 0.92. Lower = more matches.</div>
+                    <div class="text-[11px] text-dls-secondary">{tr("docwriter.dedupe_similarity_help")}</div>
                   </div>
                 </div>
 
@@ -3328,19 +3344,19 @@ export default function DocumentWriterView(props: SessionViewProps) {
                     checked={dedupeExportMedia()}
                     onChange={(event) => setDedupeExportMedia(event.currentTarget.checked)}
                   />
-                  Export media contact sheet (zip)
+                  {tr("docwriter.dedupe_export_media")}
                 </label>
 
                 <div class="rounded-lg border border-dls-border bg-dls-surface px-3 py-2">
                   <div class="flex items-center justify-between gap-2">
-                    <div class="text-xs font-medium text-dls-text">Title filters (optional)</div>
+                    <div class="text-xs font-medium text-dls-text">{tr("docwriter.dedupe_title_filters")}</div>
                     <div class="flex items-center gap-2">
                       <button
                         type="button"
                         class="text-[11px] underline text-dls-secondary hover:text-dls-text"
                         onClick={() => setDedupeIncludeTitles("技术|方案|实施|架构|服务|运维|安全|偏离")}
                       >
-                        Tech preset
+                        {tr("docwriter.dedupe_tech_preset")}
                       </button>
                       <button
                         type="button"
@@ -3349,7 +3365,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
                           setDedupeExcludeTitles("开标|一览表|分项|清单|点对点|授权|资质|证明|商务|报价|保证金|合同")
                         }
                       >
-                        Form preset
+                        {tr("docwriter.dedupe_form_preset")}
                       </button>
                       <button
                         type="button"
@@ -3359,31 +3375,31 @@ export default function DocumentWriterView(props: SessionViewProps) {
                           setDedupeExcludeTitles("");
                         }}
                       >
-                        Clear
+                        {tr("docwriter.clear")}
                       </button>
                     </div>
                   </div>
                   <div class="mt-1 text-[11px] text-dls-secondary">
-                    Filters match detected heading titles. Separate multiple regex with newlines or commas.
+                    {tr("docwriter.dedupe_title_filters_help")}
                   </div>
                   <div class="mt-2 grid grid-cols-1 gap-2">
                     <div>
-                      <div class="text-[11px] text-dls-secondary">Include</div>
+                      <div class="text-[11px] text-dls-secondary">{tr("docwriter.include")}</div>
                       <textarea
                         rows={2}
                         value={dedupeIncludeTitles()}
                         onInput={(event) => setDedupeIncludeTitles(event.currentTarget.value)}
-                        placeholder="e.g. 技术|方案"
+                        placeholder={tr("docwriter.dedupe_include_placeholder")}
                         class="mt-1 w-full rounded-lg border border-dls-border bg-dls-surface px-3 py-2 text-xs text-dls-text placeholder:text-dls-secondary focus:outline-none focus:ring-2 focus:ring-dls-accent/40"
                       />
                     </div>
                     <div>
-                      <div class="text-[11px] text-dls-secondary">Exclude</div>
+                      <div class="text-[11px] text-dls-secondary">{tr("docwriter.exclude")}</div>
                       <textarea
                         rows={2}
                         value={dedupeExcludeTitles()}
                         onInput={(event) => setDedupeExcludeTitles(event.currentTarget.value)}
-                        placeholder="e.g. 开标|商务"
+                        placeholder={tr("docwriter.dedupe_exclude_placeholder")}
                         class="mt-1 w-full rounded-lg border border-dls-border bg-dls-surface px-3 py-2 text-xs text-dls-text placeholder:text-dls-secondary focus:outline-none focus:ring-2 focus:ring-dls-accent/40"
                       />
                     </div>
@@ -3404,17 +3420,17 @@ export default function DocumentWriterView(props: SessionViewProps) {
                 class="rounded-lg border border-dls-border bg-dls-surface px-3 py-1.5 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover"
                 onClick={closeModule}
               >
-                Cancel
+                {tr("docwriter.cancel")}
               </button>
               <button
                 type="button"
                 class="rounded-lg border border-dls-border bg-dls-surface px-3 py-1.5 text-xs text-dls-text hover:bg-dls-hover disabled:opacity-50"
                 onClick={() => void runDedupe()}
                 disabled={dedupeBusy() || dedupeSelected().size < 1}
-                title={dedupeSelected().size < 1 ? "Select at least 1 document to compare" : "Run dedupe"}
+                title={dedupeSelected().size < 1 ? tr("docwriter.dedupe_select_at_least_one_short") : tr("docwriter.run_dedupe")}
               >
-                <Show when={!dedupeBusy()} fallback={"Working…"}>
-                  Run dedupe
+                <Show when={!dedupeBusy()} fallback={tr("docwriter.working")}>
+                  {tr("docwriter.run_dedupe")}
                 </Show>
               </button>
             </div>
@@ -3435,17 +3451,17 @@ export default function DocumentWriterView(props: SessionViewProps) {
           >
             <div class="flex items-center justify-between px-4 py-3 border-b border-dls-border">
               <div class="min-w-0">
-                <div class="text-sm font-semibold text-dls-text truncate">PDF preview</div>
+                <div class="text-sm font-semibold text-dls-text truncate">{tr("docwriter.preview_pdf_title")}</div>
                 <div class="mt-1 text-[11px] text-dls-secondary truncate">
-                  Target: {targetDoc() ?? "—"}
+                  {tr("docagent.target_prefix")} {targetDoc() ?? "—"}
                 </div>
               </div>
               <button
                 type="button"
                 class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text"
                 onClick={closeModule}
-                aria-label="Close"
-                title="Close"
+                aria-label={tr("docwriter.close")}
+                title={tr("docwriter.close")}
               >
                 <X size={16} />
               </button>
@@ -3453,7 +3469,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
 
             <div class="p-4 space-y-3">
               <div class="text-xs text-dls-secondary">
-                Exports a PDF using LibreOffice (headless) and saves it to the session inbox for download/printing. This helps spot layout issues that OnlyOffice may render differently from Word.
+                {tr("docwriter.preview_pdf_description")}
               </div>
               <Show when={previewError()}>
                 <div class="rounded-lg border border-red-11/30 bg-red-3/20 px-3 py-2 text-xs text-red-11 whitespace-pre-wrap break-words">
@@ -3468,7 +3484,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
                 class="rounded-lg border border-dls-border bg-dls-surface px-3 py-1.5 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover"
                 onClick={closeModule}
               >
-                Cancel
+                {tr("docwriter.cancel")}
               </button>
               <button
                 type="button"
@@ -3476,8 +3492,8 @@ export default function DocumentWriterView(props: SessionViewProps) {
                 onClick={() => void runPreviewPdf()}
                 disabled={previewBusy()}
               >
-                <Show when={!previewBusy()} fallback={"Working…"}>
-                  Export PDF
+                <Show when={!previewBusy()} fallback={tr("docwriter.working")}>
+                  {tr("docwriter.export_pdf")}
                 </Show>
               </button>
             </div>
@@ -3498,17 +3514,17 @@ export default function DocumentWriterView(props: SessionViewProps) {
           >
             <div class="flex items-center justify-between px-4 py-3 border-b border-dls-border">
               <div class="min-w-0">
-                <div class="text-sm font-semibold text-dls-text truncate">QC gate</div>
+                <div class="text-sm font-semibold text-dls-text truncate">{tr("docwriter.qc_title")}</div>
                 <div class="mt-1 text-[11px] text-dls-secondary truncate">
-                  Target: {targetDoc() ?? "—"}
+                  {tr("docagent.target_prefix")} {targetDoc() ?? "—"}
                 </div>
               </div>
               <button
                 type="button"
                 class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text"
                 onClick={closeModule}
-                aria-label="Close"
-                title="Close"
+                aria-label={tr("docwriter.close")}
+                title={tr("docwriter.close")}
               >
                 <X size={16} />
               </button>
@@ -3516,25 +3532,25 @@ export default function DocumentWriterView(props: SessionViewProps) {
 
             <div class="p-4 space-y-3">
               <div class="text-xs text-dls-secondary">
-                Runs deterministic checks (missing core forms, empty critical cells, unresolved &lt;&lt;TBD&gt;&gt; placeholders). Saves a report to the session inbox.
+                {tr("docwriter.qc_description")}
               </div>
               <div class="grid grid-cols-1 gap-2 rounded-xl border border-dls-border bg-dls-surface p-3">
                 <div class="flex items-center justify-between gap-3">
                   <div class="min-w-0">
-                    <div class="text-xs font-semibold text-dls-text truncate">Mode</div>
+                    <div class="text-xs font-semibold text-dls-text truncate">{tr("docwriter.mode")}</div>
                     <div class="mt-1 text-[11px] text-dls-secondary">
-                      Draft mode is for iteration; Submit mode is strict for final export.
+                      {tr("docwriter.qc_mode_description")}
                     </div>
                   </div>
                   <select
                     value={qcMode()}
                     onChange={(event) => setQcMode(event.currentTarget.value === "submit" ? "submit" : "draft")}
                     class="shrink-0 rounded-lg border border-dls-border bg-dls-surface px-3 py-1.5 text-xs text-dls-text focus:outline-none focus:ring-2 focus:ring-dls-accent/40"
-                    aria-label="QC mode"
-                    title="QC strictness mode"
+                    aria-label={tr("docwriter.qc_mode_label")}
+                    title={tr("docwriter.qc_mode_strictness")}
                   >
-                    <option value="draft">Draft</option>
-                    <option value="submit">Submit</option>
+                    <option value="draft">{tr("docwriter.qc_mode_draft")}</option>
+                    <option value="submit">{tr("docwriter.qc_mode_submit")}</option>
                   </select>
                 </div>
               </div>
@@ -3551,7 +3567,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
                 class="rounded-lg border border-dls-border bg-dls-surface px-3 py-1.5 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover"
                 onClick={closeModule}
               >
-                Cancel
+                {tr("docwriter.cancel")}
               </button>
               <button
                 type="button"
@@ -3559,8 +3575,8 @@ export default function DocumentWriterView(props: SessionViewProps) {
                 onClick={() => void runQc()}
                 disabled={qcBusy()}
               >
-                <Show when={!qcBusy()} fallback={"Working…"}>
-                  Run QC
+                <Show when={!qcBusy()} fallback={tr("docwriter.working")}>
+                  {tr("docwriter.run_qc")}
                 </Show>
               </button>
             </div>

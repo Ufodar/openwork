@@ -71,8 +71,8 @@ install_system_deps() {
 # Phase 1b: Install Python packages (for skills)
 # ============================================
 install_python_deps() {
-    if ! command -v pip3 &>/dev/null; then
-        echo "[start-pod] pip3 not found, skipping Python packages."
+    if ! command -v python3 &>/dev/null; then
+        echo "[start-pod] python3 not found, skipping Python packages."
         return
     fi
 
@@ -82,11 +82,57 @@ install_python_deps() {
         return
     fi
 
+    local pip_cmd=(python3 -m pip)
+    local break_system_packages=()
+    if "${pip_cmd[@]}" install --help 2>/dev/null | grep -q -- "--break-system-packages"; then
+        break_system_packages+=(--break-system-packages)
+    fi
+
+    local index_url="${OPENWORK_PIP_INDEX_URL:-${PIP_INDEX_URL:-}}"
+    local index_args=()
+    if [ -n "$index_url" ]; then
+        index_args+=(--index-url "$index_url")
+    fi
+
+    local common_args=(
+        --disable-pip-version-check
+        --progress-bar on
+        --no-cache-dir
+        --retries 5
+        --timeout 60
+        --prefer-binary
+    )
+    local core_packages=(
+        pypdf
+        pdfplumber
+        reportlab
+        pytesseract
+        pdf2image
+        openpyxl
+        pandas
+        pillow
+    )
+
     echo "[start-pod] Installing Python packages for skills..."
-    pip3 install --quiet --break-system-packages \
-        --no-cache-dir --retries 5 --timeout 60 \
-        pypdf pdfplumber reportlab pytesseract pdf2image \
-        openpyxl pandas pillow \
+    echo "[start-pod] Python: $(python3 -V 2>&1)"
+    echo "[start-pod] Pip: $(${pip_cmd[@]} --version 2>&1)"
+    if [ -n "$index_url" ]; then
+        echo "[start-pod] Pip index: $index_url"
+    else
+        echo "[start-pod] Pip index: default (set OPENWORK_PIP_INDEX_URL if network to pypi is slow)"
+    fi
+    echo "[start-pod] Installing core Python packages..."
+    "${pip_cmd[@]}" install \
+        "${break_system_packages[@]}" \
+        "${common_args[@]}" \
+        "${index_args[@]}" \
+        "${core_packages[@]}"
+
+    echo "[start-pod] Installing markitdown[pptx]..."
+    "${pip_cmd[@]}" install \
+        "${break_system_packages[@]}" \
+        "${common_args[@]}" \
+        "${index_args[@]}" \
         "markitdown[pptx]"
 }
 

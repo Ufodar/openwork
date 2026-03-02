@@ -39,3 +39,32 @@ Target document: documents/sessions/<sessionId>/xxx.docx
 1. **文件可见**：所有产出物都写入工作区，确保用户在左侧面板能看到。
 2. **格式匹配**：编辑已有文档时，保持其原有样式（字体、字号、段落格式）。
 3. **先了解再操作**：操作文件前先读取其结构，不盲目修改。
+
+---
+
+## Office 文档编辑护栏（性能与稳定性）
+
+以下规则用于避免“执行很慢、反复试错、OnlyOffice 打不开文件”的问题，必须严格执行：
+
+1. **禁止把二进制 Office 文件当文本读写**  
+   对 `.doc/.docx/.xls/.xlsx/.ppt/.pptx/.pdf` 等文件，禁止使用 `filesystem_read_text_file` / `filesystem_write_file` 直接读写正文内容。  
+   仅可使用对应技能或文档工具链处理（`docx` / `xlsx` / `pptx` / LibreOffice / pandoc 等）。
+
+2. **旧版格式（.doc/.xls/.ppt）先转 OOXML 再编辑**  
+   - `.doc -> .docx`，`.xls -> .xlsx`，`.ppt -> .pptx`  
+   - 在 OOXML 文件上完成编辑后，再按需转回旧格式。
+
+3. **绝不删除目标文件再重建**  
+   例如禁止：`rm target.doc && ...`。  
+   必须使用“临时文件 + 原子替换”：
+   - 先生成临时结果：`target.__tmp__.doc`  
+   - 校验成功后：`mv -f target.__tmp__.doc target.doc`  
+   这样可避免 OnlyOffice 在编辑中遇到文件短暂消失（404/打开失败）。
+
+4. **最少步骤原则（避免慢）**  
+   - 禁止在任务中反复安装依赖（`pip install` / `npm install`）。  
+   - 优先复用已存在的技能与系统工具。  
+   - 若环境缺少关键依赖，明确报错并请求用户安装，不要进入多轮试探式命令循环。
+
+5. **用户指定“必须改原文件”时**  
+   允许使用临时中间文件，但最终必须回写到用户指定的原路径；且回写过程不得先删除原文件。

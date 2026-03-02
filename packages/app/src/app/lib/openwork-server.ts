@@ -450,6 +450,10 @@ const STORAGE_TOKEN = "openwork.server.token";
 export function normalizeOpenworkServerUrl(input: string) {
   const trimmed = input.trim();
   if (!trimmed) return null;
+  if (trimmed.startsWith("/")) {
+    if (typeof window === "undefined") return null;
+    return `${window.location.origin}${trimmed}`.replace(/\/+$/, "");
+  }
   const withProtocol = /^https?:\/\//.test(trimmed) ? trimmed : `http://${trimmed}`;
   return withProtocol.replace(/\/+$/, "");
 }

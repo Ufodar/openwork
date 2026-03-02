@@ -6,6 +6,8 @@ import devtools from "solid-devtools/vite";
 
 const portValue = Number.parseInt(process.env.PORT ?? "", 10);
 const devPort = Number.isFinite(portValue) && portValue > 0 ? portValue : 5173;
+const openworkPortValue = Number.parseInt(process.env.OPENWORK_PORT ?? "", 10);
+const openworkPort = Number.isFinite(openworkPortValue) && openworkPortValue > 0 ? openworkPortValue : 8789;
 const allowedHosts = new Set<string>();
 const envAllowedHosts = process.env.VITE_ALLOWED_HOSTS ?? "";
 
@@ -40,6 +42,14 @@ export default defineConfig({
   server: {
     port: devPort,
     strictPort: true,
+    proxy: {
+      "/openwork": {
+        target: `http://127.0.0.1:${openworkPort}`,
+        changeOrigin: true,
+        ws: true,
+        rewrite: (path) => path.replace(/^\/openwork/, ""),
+      },
+    },
     ...(allowedHosts.size > 0 ? { allowedHosts: Array.from(allowedHosts) } : {}),
   },
   build: {

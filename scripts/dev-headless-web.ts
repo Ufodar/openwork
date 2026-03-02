@@ -296,11 +296,6 @@ const viteHost = process.env.VITE_HOST ?? process.env.HOST ?? host;
 const publicHost = process.env.OPENWORK_PUBLIC_HOST ?? null;
 const clientHost = publicHost ?? (host === "0.0.0.0" ? (detectExternalIp() ?? "127.0.0.1") : host);
 
-const OPENWORK_NETWORK_MODE = (process.env.OPENWORK_NETWORK_MODE ?? "local").trim().toLowerCase();
-const LOCAL_OPENWORK_URL = "http://127.0.0.1:8789";
-const POD_IP = process.env.OPENWORK_POD_IP ?? "192.168.5.250";
-const POD_OPENWORK_URL = `http://${POD_IP}:30789`;
-const selectedOpenworkUrl = OPENWORK_NETWORK_MODE === "pod" ? POD_OPENWORK_URL : LOCAL_OPENWORK_URL;
 // Resolve ports on the actual bind host to avoid false positives (e.g. a port
 // may be free on 127.0.0.1 but already taken on another interface, which would
 // make binding to 0.0.0.0 fail with EADDRINUSE).
@@ -456,7 +451,9 @@ const viteEnv = {
   ...process.env,
   HOST: viteHost,
   PORT: String(webPort),
-  VITE_OPENWORK_URL: process.env.VITE_OPENWORK_URL ?? selectedOpenworkUrl,
+  // Use same-origin proxy by default so browser access through SSH tunnel
+  // works without exposing a separate API port.
+  VITE_OPENWORK_URL: process.env.VITE_OPENWORK_URL ?? "/openwork",
   VITE_OPENWORK_PORT: process.env.VITE_OPENWORK_PORT ?? String(openworkPort),
   VITE_OPENWORK_TOKEN: process.env.VITE_OPENWORK_TOKEN ?? openworkToken,
 };

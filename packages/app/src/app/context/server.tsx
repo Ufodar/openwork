@@ -7,6 +7,10 @@ import { isTauriRuntime } from "../utils";
 export function normalizeServerUrl(input: string) {
   const trimmed = input.trim();
   if (!trimmed) return;
+  if (trimmed.startsWith("/")) {
+    if (typeof window === "undefined") return;
+    return `${window.location.origin}${trimmed}`.replace(/\/+$/, "");
+  }
   const withProtocol = /^https?:\/\//.test(trimmed) ? trimmed : `http://${trimmed}`;
   return withProtocol.replace(/\/+$/, "");
 }

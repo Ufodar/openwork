@@ -26,6 +26,11 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 RUNTIME_ENV_DIR_DEFAULT="$HOME/.config/openwork"
 
+if [ "${OPENWORK_PULL_BEFORE_RESTART:-0}" = "1" ]; then
+    echo "[restart-pod] OPENWORK_PULL_BEFORE_RESTART=1, delegating to pod-pull-restart.sh"
+    OPENWORK_PULL_BEFORE_RESTART=0 exec "$SCRIPT_DIR/pod-pull-restart.sh"
+fi
+
 load_runtime_env() {
     local env_dir="${OPENWORK_RUNTIME_ENV_DIR:-$RUNTIME_ENV_DIR_DEFAULT}"
     local env_files=(

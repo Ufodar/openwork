@@ -3,8 +3,58 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+RUNTIME_ENV_DIR_DEFAULT="$HOME/.config/openwork"
 
 cd "$PROJECT_DIR"
+
+load_runtime_env() {
+    local env_dir="${OPENWORK_RUNTIME_ENV_DIR:-$RUNTIME_ENV_DIR_DEFAULT}"
+    local env_files=(
+        "$env_dir/pod.env"
+        "$env_dir/secrets.env"
+        "$PROJECT_DIR/.env.pod.local"
+    )
+
+    for env_file in "${env_files[@]}"; do
+        if [ -f "$env_file" ]; then
+            echo "[pod-pull-restart] Loading env file: $env_file"
+            set -a
+            # shellcheck disable=SC1090
+            . "$env_file"
+            set +a
+        fi
+    done
+}
+
+git_pull_ff_only() {
+    local remote="${OPENWORK_GIT_REMOTE:-origin}"
+    local branch="${OPENWORK_GIT_BRANCH:-$(git rev-parse --abbrev-ref HEAD)}"
+    local password="${OPENWORK_GIT_TOKEN:-${OPENWORK_GIT_PASSWORD:-}}"
+
+    if [ -n "${OPENWORK_GIT_USERNAME:-}" ] && [ -n "$password" ]; then
+        local askpass
+        askpass="$(mktemp)"
+        cat >"$askpass" <<'EOF'
+#!/bin/sh
+case "$1" in
+  *sername*) printf '%s\n' "${OPENWORK_GIT_USERNAME}" ;;
+  *assword*) printf '%s\n' "${OPENWORK_GIT_TOKEN:-${OPENWORK_GIT_PASSWORD:-}}" ;;
+  *) printf '\n' ;;
+esac
+EOF
+        chmod 700 "$askpass"
+        if ! GIT_TERMINAL_PROMPT=0 GIT_ASKPASS="$askpass" git pull --ff-only "$remote" "$branch"; then
+            rm -f "$askpass"
+            return 1
+        fi
+        rm -f "$askpass"
+        return 0
+    fi
+
+    git pull --ff-only "$remote" "$branch"
+}
+
+load_runtime_env
 
 if ! git diff --quiet || ! git diff --cached --quiet; then
     echo "[pod-pull-restart] Working tree has local changes. Aborting to avoid conflicts."
@@ -14,7 +64,11 @@ fi
 
 before_rev="$(git rev-parse HEAD)"
 echo "[pod-pull-restart] Pulling latest code..."
-git pull --ff-only
+if ! git_pull_ff_only; then
+    echo "[pod-pull-restart] git pull failed."
+    echo "[pod-pull-restart] If this is a non-interactive run, set OPENWORK_GIT_USERNAME and OPENWORK_GIT_TOKEN in ~/.config/openwork/secrets.env"
+    exit 1
+fi
 after_rev="$(git rev-parse HEAD)"
 
 if [ "$before_rev" != "$after_rev" ]; then
@@ -28,4 +82,4 @@ else
     echo "[pod-pull-restart] No code changes pulled."
 fi
 
-exec "$SCRIPT_DIR/restart-pod.sh"
+OPENWORK_PULL_BEFORE_RESTART=0 exec "$SCRIPT_DIR/restart-pod.sh"

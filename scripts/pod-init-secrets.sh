@@ -77,6 +77,8 @@ lines = [
     "# Optional:",
     "export BRAVE_API_KEY=''",
     "export GITHUB_TOKEN=''",
+    "export OPENWORK_GIT_USERNAME=''",
+    "export OPENWORK_GIT_TOKEN=''",
     "",
 ]
 

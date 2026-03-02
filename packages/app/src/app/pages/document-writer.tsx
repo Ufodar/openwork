@@ -833,8 +833,14 @@ export default function DocumentWriterView(props: SessionViewProps) {
 
   const refsFileMenuKey = (categoryId: string, itemId: string) => `file:${categoryId}:${itemId}`;
   const refsFolderMenuKey = (categoryId: string, folderPath: string) => `folder:${categoryId}:${folderPath}`;
+  const categoryPromptPath = (categoryId: string) => {
+    const prefix = refsInboxPrefix();
+    if (!prefix) return "";
+    return `.opencode/openwork/inbox/${prefix}/${categoryId}/`;
+  };
   const folderPromptPath = (categoryId: string, folderPath: string) => {
     const prefix = refsInboxPrefix();
+    if (!prefix) return "";
     const normalized = normalizeRelativePath(folderPath, "");
     const suffix = normalized ? `/${normalized}` : "";
     return `.opencode/openwork/inbox/${prefix}/${categoryId}${suffix}/`;
@@ -2461,6 +2467,20 @@ export default function DocumentWriterView(props: SessionViewProps) {
                             />
                             <span class="truncate text-[12px]">{tr(category.labelKey)}</span>
                             <span class="ml-auto text-[10px] text-dls-secondary">{items().length}</span>
+                          </button>
+                          <button
+                            type="button"
+                            class="ml-2 p-1.5 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
+                            onClick={() => {
+                              const path = categoryPromptPath(category.id);
+                              if (!path) return;
+                              insertRefInPrompt(path);
+                            }}
+                            disabled={!serverReady() || refsBusy() || !categoryPromptPath(category.id)}
+                            title={tr("docagent.use_in_prompt")}
+                            aria-label={tr("docagent.use_in_prompt")}
+                          >
+                            <AtSign size={14} />
                           </button>
                           <label
                             class={`ml-2 cursor-pointer p-1.5 rounded hover:bg-dls-hover ${!serverReady() || refsBusy() ? "opacity-50 cursor-not-allowed" : ""

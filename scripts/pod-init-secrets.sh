@@ -79,6 +79,8 @@ lines = [
     "export GITHUB_TOKEN=''",
     "export OPENWORK_GIT_USERNAME=''",
     "export OPENWORK_GIT_TOKEN=''",
+    "# Set to 1 to auto git pull before each restart-pod.sh run",
+    "export OPENWORK_PULL_BEFORE_RESTART='1'",
     "",
 ]
 

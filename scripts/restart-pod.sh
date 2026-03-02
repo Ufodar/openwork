@@ -6,30 +6,12 @@ set -euo pipefail
 # No environment installation — assumes start-pod.sh has been run once.
 # ============================================
 
-# ---- Pod IP (change this when deploying to a new pod) ----
-export OPENWORK_POD_IP="${OPENWORK_POD_IP:-192.168.5.250}"
-
-# ---- Network ----
-export OPENWORK_NETWORK_MODE="${OPENWORK_NETWORK_MODE:-pod}"
-export OPENWORK_HOST="${OPENWORK_HOST:-0.0.0.0}"
-export VITE_HOST="${VITE_HOST:-0.0.0.0}"
-
-# ---- Ports ----
-export OPENWORK_PORT="${OPENWORK_PORT:-8789}"
-export PORT="${PORT:-5173}"
-export OPENWORK_ONLYOFFICE_URL="${OPENWORK_ONLYOFFICE_URL:-http://${OPENWORK_POD_IP}:30080}"
-
-# ---- Bun path ----
-export PATH=$HOME/.bun/bin:$PATH
-
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 RUNTIME_ENV_DIR_DEFAULT="$HOME/.config/openwork"
 
-if [ "${OPENWORK_PULL_BEFORE_RESTART:-0}" = "1" ]; then
-    echo "[restart-pod] OPENWORK_PULL_BEFORE_RESTART=1, delegating to pod-pull-restart.sh"
-    OPENWORK_PULL_BEFORE_RESTART=0 exec "$SCRIPT_DIR/pod-pull-restart.sh"
-fi
+# ---- Bun path ----
+export PATH="$HOME/.bun/bin:$PATH"
 
 load_runtime_env() {
     local env_dir="${OPENWORK_RUNTIME_ENV_DIR:-$RUNTIME_ENV_DIR_DEFAULT}"
@@ -75,6 +57,26 @@ sync_opencode_config_files() {
     fi
 }
 
+load_runtime_env
+
+# ---- Pod IP (change this when deploying to a new pod) ----
+export OPENWORK_POD_IP="${OPENWORK_POD_IP:-192.168.5.250}"
+
+# ---- Network ----
+export OPENWORK_NETWORK_MODE="${OPENWORK_NETWORK_MODE:-pod}"
+export OPENWORK_HOST="${OPENWORK_HOST:-0.0.0.0}"
+export VITE_HOST="${VITE_HOST:-0.0.0.0}"
+
+# ---- Ports ----
+export OPENWORK_PORT="${OPENWORK_PORT:-8789}"
+export PORT="${PORT:-5173}"
+export OPENWORK_ONLYOFFICE_URL="${OPENWORK_ONLYOFFICE_URL:-http://${OPENWORK_POD_IP}:30080}"
+
+if [ "${OPENWORK_PULL_BEFORE_RESTART:-0}" = "1" ]; then
+    echo "[restart-pod] OPENWORK_PULL_BEFORE_RESTART=1, delegating to pod-pull-restart.sh"
+    OPENWORK_PULL_BEFORE_RESTART=0 exec "$SCRIPT_DIR/pod-pull-restart.sh"
+fi
+
 # ============================================
 # Kill old processes
 # ============================================
@@ -97,7 +99,6 @@ sleep 1
 # ============================================
 # Start
 # ============================================
-load_runtime_env
 sync_opencode_config_files
 echo "[restart-pod] Starting OpenWork (POD_IP=$OPENWORK_POD_IP)..."
 cd "$PROJECT_DIR"

@@ -461,6 +461,7 @@ function jsonResponse(data: unknown, status = 200) {
 const LOCAL_ONLYOFFICE_URL = "http://localhost:8080";
 const POD_IP = process.env.OPENWORK_POD_IP ?? "192.168.5.250";
 const POD_ONLYOFFICE_URL = process.env.OPENWORK_ONLYOFFICE_URL?.trim() || `http://${POD_IP}:30080`;
+const POD_ONLYOFFICE_INTERNAL_URL = process.env.OPENWORK_ONLYOFFICE_INTERNAL_URL?.trim() || "http://onlyoffice:80";
 const LOCAL_ONLYOFFICE_PUBLIC_BASE_URL = "http://host.docker.internal:8789";
 const POD_ONLYOFFICE_PUBLIC_BASE_URL =
     process.env.OPENWORK_ONLYOFFICE_PUBLIC_BASE_URL?.trim() ||
@@ -481,6 +482,10 @@ function resolveOnlyOfficeNetworkMode(): "local" | "pod" {
 
 function getOnlyOfficeUrl(_request?: Request): string {
     return resolveOnlyOfficeNetworkMode() === "pod" ? POD_ONLYOFFICE_URL : LOCAL_ONLYOFFICE_URL;
+}
+
+function getOnlyOfficeInternalUrl(): string {
+    return resolveOnlyOfficeNetworkMode() === "pod" ? POD_ONLYOFFICE_INTERNAL_URL : LOCAL_ONLYOFFICE_URL;
 }
 
 function getOnlyOfficeJwtSecret(): string {
@@ -513,6 +518,51 @@ function getCallbackUrl(host: string, port: number, workspaceId: string, docId: 
 function getDownloadUrl(host: string, port: number, workspaceId: string, docId: string, sessionId?: string | null): string {
     const baseUrl = resolveOnlyOfficePublicBaseUrl(host, port);
     return `${baseUrl}/w/${workspaceId}/document/file?${buildDocumentQuery(docId, sessionId)}`;
+}
+
+function buildOnlyOfficeDownloadCandidates(rawUrl: string): string[] {
+    const candidates: string[] = [];
+    const push = (value: string | null | undefined) => {
+        const normalized = typeof value === "string" ? value.trim() : "";
+        if (!normalized) return;
+        if (!candidates.includes(normalized)) candidates.push(normalized);
+    };
+
+    push(rawUrl);
+
+    let parsed: URL;
+    try {
+        parsed = new URL(rawUrl);
+    } catch {
+        return candidates;
+    }
+
+    const replaceOrigin = (baseUrl: string | null | undefined) => {
+        if (!baseUrl) return;
+        try {
+            const base = new URL(baseUrl);
+            const next = new URL(rawUrl);
+            next.protocol = base.protocol;
+            next.host = base.host;
+            push(next.toString());
+        } catch {
+            // Ignore invalid fallback URL
+        }
+    };
+
+    const host = parsed.hostname.toLowerCase();
+    const isLoopbackHost = host === "localhost" || host === "127.0.0.1" || host === "::1";
+    const internalBaseUrl = getOnlyOfficeInternalUrl();
+    const publicBaseUrl = getOnlyOfficeUrl();
+
+    if (isLoopbackHost) {
+        replaceOrigin(internalBaseUrl);
+        replaceOrigin(publicBaseUrl);
+    }
+
+    replaceOrigin(internalBaseUrl);
+
+    return candidates;
 }
 
 export function createDocumentRoutes(routes: unknown[]) {
@@ -1951,16 +2001,31 @@ export function createDocumentRoutes(routes: unknown[]) {
             if (body.status === 2 || body.status === 6) {
                 console.log("你要保存啦！！！！！Callback received for document:", docName, "Status:", body.status);
                 if (body.url) {
+                    const docsDir = resolveDocumentsDir(workspace.path, sessionId);
+                    await ensureDir(docsDir);
+                    const filePath = resolveDocumentPathSafe(docsDir, docName);
+                    const candidateUrls = buildOnlyOfficeDownloadCandidates(body.url);
+                    let lastError: unknown = null;
+
                     try {
-                        const resp = await fetch(body.url);
-                        if (!resp.ok) throw new Error("Failed to download");
-
-                        const buffer = await resp.arrayBuffer();
-                        const docsDir = resolveDocumentsDir(workspace.path, sessionId);
-                        await ensureDir(docsDir);
-                        const filePath = resolveDocumentPathSafe(docsDir, docName);
-
-                        await writeFile(filePath, Buffer.from(buffer));
+                        let saved = false;
+                        for (const candidateUrl of candidateUrls) {
+                            try {
+                                const resp = await fetch(candidateUrl);
+                                if (!resp.ok) {
+                                    throw new Error(`Failed to download (HTTP ${resp.status})`);
+                                }
+                                const buffer = await resp.arrayBuffer();
+                                await writeFile(filePath, Buffer.from(buffer));
+                                saved = true;
+                                break;
+                            } catch (error) {
+                                lastError = error;
+                            }
+                        }
+                        if (!saved) {
+                            throw lastError ?? new Error("Failed to download OnlyOffice callback file");
+                        }
                     } catch (error) {
                         console.error("Failed to save document:", error);
                         return jsonResponse({ error: 1 });

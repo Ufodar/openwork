@@ -71,6 +71,7 @@ export VITE_HOST="${VITE_HOST:-0.0.0.0}"
 export OPENWORK_PORT="${OPENWORK_PORT:-8789}"
 export PORT="${PORT:-5173}"
 export OPENWORK_ONLYOFFICE_URL="${OPENWORK_ONLYOFFICE_URL:-http://${OPENWORK_POD_IP}:30080}"
+export OPENWORK_ONLYOFFICE_INTERNAL_URL="${OPENWORK_ONLYOFFICE_INTERNAL_URL:-http://onlyoffice:80}"
 
 if [ "${OPENWORK_PULL_BEFORE_RESTART:-0}" = "1" ]; then
     echo "[restart-pod] OPENWORK_PULL_BEFORE_RESTART=1, delegating to pod-pull-restart.sh"

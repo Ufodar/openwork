@@ -318,7 +318,11 @@ export default function DocumentWriterView(props: SessionViewProps) {
   });
 
   const buildUrl = (baseUrl: string, workspace: string, pathname: string, query?: URLSearchParams) => {
-    const url = new URL(`/w/${encodeURIComponent(workspace)}${pathname}`, baseUrl);
+    const normalizedPath = pathname.startsWith("/") ? pathname : `/${pathname}`;
+    const parsed = new URL(baseUrl);
+    const basePath = parsed.pathname.replace(/\/+$/, "");
+    parsed.pathname = `${basePath}/w/${encodeURIComponent(workspace)}${normalizedPath}`.replace(/\/{2,}/g, "/");
+    const url = parsed;
     if (query) {
       url.search = query.toString();
     }

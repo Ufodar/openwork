@@ -183,6 +183,18 @@ This file is not part of the repo and is loaded automatically by:
 - `scripts/start-pod.sh`
 - `scripts/restart-pod.sh`
 
+`scripts/start-pod.sh` will preinstall document-processing deps (if missing), including:
+
+- System: LibreOffice / Pandoc / Poppler / qpdf / ffmpeg / tesseract
+- Python: pypdf / pdfplumber / openpyxl / pandas / python-docx / markitdown[pptx]
+- Node (global): docx / pptxgenjs / sharp / react-icons / exceljs / xlsx / mammoth / jszip / pdf-lib / pdfjs-dist
+
+If your Pod uses a mirror, set this in `~/.config/openwork/secrets.env`:
+
+```bash
+export OPENWORK_NPM_REGISTRY="https://registry.npmmirror.com"
+```
+
 ### Daily update on Pod (after syncing GitHub -> Gitee)
 
 ```bash

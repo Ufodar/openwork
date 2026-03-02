@@ -192,13 +192,78 @@ install_node_skill_deps() {
         return
     fi
 
-    if npm list -g docx --depth=0 &>/dev/null; then
-        echo "[start-pod] Global Node package 'docx' already installed."
+    local default_packages=(
+        docx
+        pptxgenjs
+        react
+        react-dom
+        react-icons
+        sharp
+        exceljs
+        xlsx
+        mammoth
+        jszip
+        pdf-lib
+        pdfjs-dist
+    )
+
+    local configured="${OPENWORK_NODE_SKILL_PACKAGES:-}"
+    local packages=()
+    if [ -n "$configured" ]; then
+        # Space-delimited package list override.
+        read -r -a packages <<<"$configured"
+    else
+        packages=("${default_packages[@]}")
+    fi
+
+    local missing=()
+    local pkg
+    for pkg in "${packages[@]}"; do
+        if [ -z "$pkg" ]; then
+            continue
+        fi
+        if ! npm list -g "$pkg" --depth=0 &>/dev/null; then
+            missing+=("$pkg")
+        fi
+    done
+
+    if [ ${#missing[@]} -eq 0 ]; then
+        echo "[start-pod] Global Node document packages already installed."
         return
     fi
 
-    echo "[start-pod] Installing global Node package for document skills: docx"
-    npm install -g docx
+    local npm_args=(install -g --no-fund --no-audit)
+    local npm_registry="${OPENWORK_NPM_REGISTRY:-${NPM_CONFIG_REGISTRY:-}}"
+    if [ -n "$npm_registry" ]; then
+        npm_args+=(--registry "$npm_registry")
+        echo "[start-pod] npm registry: $npm_registry"
+    fi
+
+    echo "[start-pod] Installing global Node document packages: ${missing[*]}"
+    set +e
+    npm "${npm_args[@]}" "${missing[@]}"
+    local bulk_status=$?
+    local failed=()
+    if [ $bulk_status -ne 0 ]; then
+        echo "[start-pod] Bulk npm install failed. Retrying one-by-one..."
+        for pkg in "${missing[@]}"; do
+            if npm list -g "$pkg" --depth=0 &>/dev/null; then
+                continue
+            fi
+            echo "[start-pod] Installing npm package: $pkg"
+            npm "${npm_args[@]}" "$pkg"
+            if [ $? -ne 0 ]; then
+                failed+=("$pkg")
+            fi
+        done
+    fi
+    set -e
+
+    if [ ${#failed[@]} -gt 0 ]; then
+        echo "[start-pod] WARNING: Failed to install some Node packages: ${failed[*]}"
+        echo "[start-pod] Startup continues. You can retry manually with:"
+        echo "[start-pod]   npm install -g ${failed[*]}"
+    fi
 }
 
 # ============================================

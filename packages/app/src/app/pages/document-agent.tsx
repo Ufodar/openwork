@@ -1455,7 +1455,7 @@ export default function DocumentAgentView(props: SessionViewProps) {
   };
 
   return (
-    <div class="relative isolate flex h-full min-h-0 w-full bg-dls-surface text-dls-text font-sans overflow-hidden">
+    <div class="relative isolate flex h-screen w-full bg-dls-surface text-dls-text font-sans overflow-hidden">
       <input
         ref={(el) => {
           uploadInputEl = el;

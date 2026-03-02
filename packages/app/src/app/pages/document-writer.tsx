@@ -1890,7 +1890,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
   };
 
   return (
-    <div class="relative isolate flex h-full min-h-0 w-full bg-dls-surface text-dls-text font-sans overflow-hidden">
+    <div class="relative isolate flex h-screen w-full bg-dls-surface text-dls-text font-sans overflow-hidden">
       {/* Left: Document list */}
       <div
         class={`relative z-20 shrink-0 border-r border-dls-border flex flex-col bg-dls-sidebar ${resizingPane() === "left" ? "" : "transition-[width] duration-150 ease-out"

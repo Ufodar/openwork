@@ -17,9 +17,14 @@ description: 分析招标文件，提取评标方法、评分标准、资质要�
 ### Step 3: 确定点对点应答表结构
 根据提取的要求条目，确定应答表的行列结构（参见下方"点对点应答表结构"）。
 
-### Step 4: 写入 requirements.csv
-将提取结果写入 `requirements.csv`（列定义参见 `references/requirements-matrix-template.csv`）。
-如果之前已有 requirements.csv，在其上追加/更新，不要重建。
+### Step 4: 外化分析结果
+- 始终生成 `requirements.csv`（列定义参见 `references/requirements-matrix-template.csv`），方便用户在 Excel 中查看。
+- 如提取出 ≥ 10 条要求 → 同时构建 `.worktree/`（结构参见 `references/worktree-schema.json`）：
+  1. 创建 `.worktree/index.json`（总览 + children 列表）
+  2. 为每条要求创建 `nodes/<id>.json`（含招标原文、定位、优先级、评分机制）
+  3. 创建 `conventions.md`（空模板，待撰写阶段填充）
+  4. 两者的 status 字段保持同步
+- 如 < 10 条 → 只写 requirements.csv，不创建工作树。
 
 ### Step 5: 向用户汇报分析摘要
 简要汇报：评标方法、分值分布、★ 项数量、关键时间节点。指出需要用户确认的不确定项。
@@ -94,7 +99,7 @@ description: 分析招标文件，提取评标方法、评分标准、资质要�
 1. 读取 PDF，发现 82 页，含技术需求 + 商务要求 + 评分标准
 2. 提取：综合评分法，技术 60 分 / 商务 20 分 / 价格 20 分
 3. 识别 12 个 ★ 项、8 个 # 项、2 个 ● 项
-4. 写入 requirements.csv（47 行需求）
+4. 提取出 47 条（≥10）→ 构建 .worktree/（47 个节点）+ requirements.csv
 5. 汇报："本项目采用综合评分法，共 47 项要求（12 项★实质性条款），技术标占 60 分..."
 
 ### 参考文件

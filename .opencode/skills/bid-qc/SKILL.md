@@ -6,7 +6,9 @@ description: 检查投标文件质量，合规审查，查找错误和遗漏。�
 ## Workflow
 
 ### Step 1: 确认检查范围
-必须有：目标文档（投标文件 .docx） + 招标文件（校验基线）。可选：requirements.csv（检查清单骨架）、facts.json（事实校验基线）。
+必须有：目标文档（投标文件 .docx） + 招标文件（校验基线）。
+可选：`.worktree/index.json` 或 `requirements.csv`（检查清单骨架）、`facts.json`（事实校验基线）。
+如有工作树 → 利用节点信息定位每条要求在目标文档中的位置，提高检查精度。
 
 ### Step 2: 按 7 维度逐项检查
 按下方"7 个检查维度"逐项执行。对每个发现的问题记录：级别 + 维度 + 位置 + 描述 + 修复建议。
@@ -20,7 +22,8 @@ description: 检查投标文件质量，合规审查，查找错误和遗漏。�
 每个问题必须有"位置"（文件 + 章节/页码）和具体描述。
 
 ### Step 4: 同步状态
-如有 requirements.csv，将检查结果同步更新到 csv 对应条目的状态。
+- 如有 `.worktree/` → 更新对应节点的 status + index.json summary + requirements.csv
+- 如仅有 requirements.csv → 更新 csv 对应条目的状态
 
 ---
 

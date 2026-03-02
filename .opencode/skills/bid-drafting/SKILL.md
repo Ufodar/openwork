@@ -5,17 +5,22 @@ description: 撰写/组装商务标或技术标内容，包括点对点应答表
 
 ## Workflow
 
-### Step 1: 确认前置条件
-检查是否有 requirements.csv（由 bid-analysis 生成）。如有，以其为任务清单；如无，向用户确认先做分析还是直接撰写。
+### Step 1: 确认前置条件 + 恢复进度
+1. 检查 `.worktree/index.json` 是否存在：
+   - 如有 → 读取 index.json 获取总览和 current_focus，读取 conventions.md 恢复写作约定，以此为任务清单
+   - 如无 → 检查 requirements.csv，如有则以其为任务清单
+   - 都无 → 向用户确认先做分析还是直接撰写
+2. 恢复工作树后，从 current_focus 指向的节点继续，不要从头开始
 
 ### Step 2: 确定写作范围
 与用户确认本轮要写的部分（整个商务标？整个技术标？某几个章节？某张应答表？）。
 
 ### Step 3: 逐项撰写
-按 requirements.csv 中的行逐项处理：
+按工作树节点（或 csv 行）逐项处理：
 - 组装优先于生成：先从源材料中找可用内容
 - 每条应答使用下方"点对点应答 Output Template"的格式
-- 完成一项立即更新 csv 状态
+- 完成一项立即更新状态（工作树：更新节点 + index.json + csv；无工作树：更新 csv）
+- 如有工作树，更新 index.json 的 current_focus 指向下一个待处理节点
 
 ### Step 4: 完整性检查
 撰写完成后，用下方"完整性检查清单"核对是否遗漏。
@@ -85,16 +90,16 @@ description: 撰写/组装商务标或技术标内容，包括点对点应答表
 
 ### 状态外化（长任务保障）
 
-遵循 agent 层的状态外化原则。补充要求：
-- 维护 requirements.csv 记录每项完成状态（pending / in_progress / done / blocked）
-- 完成一个子任务后，立即更新 csv 状态
-- 在进度文件中记录已确定的写作约定（视角、术语、详略程度），确保跨 context compression 后风格不漂移
+遵循 agent 层的工作树协议：
+- 如有 `.worktree/` → 每完成一个节点，更新节点 status + index.json summary/current_focus + requirements.csv
+- 如无工作树 → 维护 requirements.csv 记录每项完成状态
+- 写作约定记录在 `.worktree/conventions.md`（或无工作树时在进度文件中注明）
 
 ## Example
 
 用户："把技术应答表填一下，参考 @厂商数据手册.pdf"
 
-1. 读取 requirements.csv，筛选技术类待处理项（status=pending）共 23 条
+1. 读取 .worktree/index.json（或 requirements.csv），筛选技术类待处理项（status=pending）共 23 条
 2. 确认范围：用户要求填技术应答表，聚焦技术指标类条目
 3. 逐条处理：读取厂商数据手册提取参数 → 按 output template 格式写入应答表 → 更新 csv 状态
 4. 完成 18 条，5 条因缺少厂商数据标记为 `<<TBD: 需厂商确认>>`

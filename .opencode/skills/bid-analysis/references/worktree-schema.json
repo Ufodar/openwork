@@ -1,0 +1,113 @@
+{
+  "_doc": "Work-Tree schema reference. Two structures: index.json (tree root) and node files (nodes/<id>.json).",
+
+  "index.json": {
+    "version": 1,
+    "project": "XX市智慧城市信息化项目",
+    "tender_file": "refs/tender/招标文件.pdf",
+    "phase": "需求分析",
+    "summary": {
+      "total": 47,
+      "done": 0,
+      "in_progress": 0,
+      "blocked": 0,
+      "pending": 47
+    },
+    "current_focus": null,
+    "conventions_ref": "conventions.md",
+    "children": [
+      {
+        "id": "req-3.1.1",
+        "title": "处理器不低于8核心",
+        "status": "pending",
+        "priority": "star",
+        "node_ref": "nodes/req-3.1.1.json"
+      },
+      {
+        "id": "req-3.1.2",
+        "title": "内存不低于64GB",
+        "status": "pending",
+        "priority": "normal",
+        "node_ref": "nodes/req-3.1.2.json"
+      },
+      {
+        "id": "req-3.1.3",
+        "title": "网络带宽不低于10Gbps",
+        "status": "pending",
+        "priority": "hash",
+        "materials": { "collected": 0, "total": 2 },
+        "node_ref": "nodes/req-3.1.3.json"
+      }
+    ]
+  },
+
+  "node.json (nodes/<id>.json)": {
+    "id": "req-3.1.3",
+    "tender_text": "核心交换机上行带宽不低于10Gbps，需提供产品截图证明#",
+    "tender_location": "招标文件.pdf p.34 第3.1.3条",
+    "priority": "hash",
+    "scoring": "逐项扣减型，-1分/项",
+    "status": "pending",
+    "materials": [
+      {
+        "name": "H3C S6860 数据手册",
+        "source": null,
+        "status": "pending",
+        "search_scope": ["refs/technical/", "refs/partners/"]
+      },
+      {
+        "name": "性能测试报告",
+        "source": null,
+        "status": "pending",
+        "search_scope": ["refs/technical/"]
+      }
+    ],
+    "response": {
+      "status": "pending",
+      "blocked_by": null,
+      "draft": null,
+      "deviation": null
+    }
+  },
+
+  "field_definitions": {
+    "index.json": {
+      "version": "Schema version, always 1",
+      "project": "Project name from tender document",
+      "tender_file": "Relative path to the tender file in refs/",
+      "phase": "Current phase: 需求分析 | 材料搜集 | 技术标撰写 | 商务标撰写 | 质量检查",
+      "summary": "Aggregate counts by status, must stay in sync with children",
+      "current_focus": "ID of the node currently being worked on, null if none",
+      "conventions_ref": "Relative path to conventions.md",
+      "children[]": {
+        "id": "Unique identifier, format: req-<section>.<number>",
+        "title": "Short title summarizing the requirement",
+        "status": "pending | in_progress | done | blocked",
+        "priority": "star (★=废标) | hash (#=需截图) | dot (●=需演示) | triangle (▲=核心产品) | normal",
+        "materials": "Optional: { collected: N, total: M } progress of material collection",
+        "node_ref": "Relative path to the node detail file"
+      }
+    },
+    "node.json": {
+      "id": "Must match the id in index.json children",
+      "tender_text": "Original text from tender document",
+      "tender_location": "File + page + clause reference for traceability",
+      "priority": "Same as in index.json child entry",
+      "scoring": "Scoring mechanism: 逐项扣减型 or 档次评分型, with details",
+      "status": "pending | in_progress | done | blocked",
+      "materials[]": {
+        "name": "Descriptive name of the material",
+        "source": "Relative path to materials/<id>-<name>.md, null if not yet collected",
+        "status": "pending | collected",
+        "key_facts": "Optional: key facts extracted from the material",
+        "search_scope": "Optional: directories to search for this material"
+      },
+      "response": {
+        "status": "pending | in_progress | done | blocked",
+        "blocked_by": "Reason if blocked, null otherwise",
+        "draft": "Draft response text, null if not yet written",
+        "deviation": "正偏离 | 无偏离 | 负偏离, null if not yet determined"
+      }
+    }
+  }
+}

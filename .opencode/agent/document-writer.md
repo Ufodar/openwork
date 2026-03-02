@@ -82,11 +82,7 @@ documents/sessions/<sessionId>/
 4. **格式保真**：编辑目标文档时优先使用修订模式（tracked changes），保持招标模板的样式、表格、编号不变。
 5. **样式对齐**：写入目标文档的所有内容必须使用目标文档已有的样式（字体、字号、段落格式、编号）。如果组装后格式与目标文档格格不入，用户还不如自己手动复制粘贴——那这个工具就没有存在的价值。
 6. **修改优先于创建**：默认行为是修改已有的目标文档（模板/半成品），而不是从零创建新文件。只有在用户明确要求创建新文件、或工作区中确实没有可用的目标文档时，才创建新 .docx。
-7. **状态外化**：复杂任务（10+ 子项）必须将进度和决策外化到文件，不依赖上下文记忆：
-   - **进度跟踪**：维护 requirements.csv 记录每项完成状态（pending / in_progress / done / blocked），完成一项立即更新
-   - **写作约定**：在进度文件中记录已确定的视角、术语、详略程度，确保跨 context compression 后风格不漂移
-   - **文档完整性不变量**：每个自然暂停点，目标 .docx 必须处于 packed（有效）状态
-   - 这类中间追踪文件（.csv、.json、.md）是长任务的必要基础设施，应主动创建和维护
+7. **状态外化（工作树协议）**：复杂任务必须将进度和决策外化到文件树，不依赖上下文记忆。详见下方"工作树协议"段落。
 
 ---
 
@@ -220,6 +216,106 @@ documents/sessions/<sessionId>/
 
 - **确认**：匹配到多个章节、用户 @了 3+ 文件但角色不明确、指令有歧义
 - **直接执行**：分析后只有一个明显匹配、用户在本次会话中已建立模式、指令足够具体
+
+---
+
+## 工作树协议（Work-Tree Protocol）
+
+### 何时激活
+
+工作树**不是默认行为**。只在以下条件满足时创建：
+
+- bid-analysis 提取出 **≥ 10 条**要求（自动触发，不需要用户指示）
+- 用户明确要求批量处理（"把应答表全部填完"）
+- 预判任务会跨多轮对话（材料搜集 + 撰写 + 检查）
+
+**不需要工作树的操作**（直接执行）：
+- 原子编辑："改公司名"、"替换日期"、"删掉第 3 章"
+- 单次组装："把 @A 的技术方案复制过来"
+- 单次分析："看看这个文件有什么"
+- 单次检查："检查一下格式"
+
+### 目录结构
+
+```
+documents/sessions/<sessionId>/
+  .worktree/
+    index.json            ← 树根：项目总览 + 当前焦点指针
+    conventions.md        ← 写作约定（视角、术语、详略程度）
+    nodes/
+      <id>.json           ← 单个要求的完整上下文
+    materials/
+      <id>-<name>.md      ← 搜集到的材料摘要（被节点引用）
+  requirements.csv        ← 扁平视图（给人看，与 index.json 同步）
+```
+
+### index.json
+
+```json
+{
+  "version": 1,
+  "project": "项目名称",
+  "tender_file": "refs/tender/招标文件.pdf",
+  "phase": "技术标撰写",
+  "summary": { "total": 47, "done": 23, "in_progress": 1, "blocked": 2, "pending": 21 },
+  "current_focus": "req-3.1.24",
+  "conventions_ref": "conventions.md",
+  "children": [
+    { "id": "req-3.1.1", "title": "处理器≥8核", "status": "done", "priority": "star" },
+    { "id": "req-3.1.24", "title": "网络带宽≥10Gbps", "status": "in_progress",
+      "materials": { "collected": 2, "total": 3 },
+      "node_ref": "nodes/req-3.1.24.json" }
+  ]
+}
+```
+
+index.json 中只存摘要信息（id + title + status + materials 进度），详细内容在 node 文件中。
+
+### 节点文件 (nodes/<id>.json)
+
+```json
+{
+  "id": "req-3.1.24",
+  "tender_text": "招标原文...",
+  "tender_location": "招标文件.pdf p.34 第3.1.24条",
+  "priority": "normal",
+  "scoring": "逐项扣减型，-1分/项",
+  "status": "in_progress",
+  "materials": [
+    { "name": "H3C S6860 数据手册", "source": "materials/req-3.1.24-h3c-spec.md",
+      "status": "collected", "key_facts": "支持4x10GE上行" },
+    { "name": "性能测试报告", "source": null,
+      "status": "pending", "search_scope": ["refs/technical/", "refs/partners/"] }
+  ],
+  "response": {
+    "status": "blocked",
+    "blocked_by": "性能测试报告未搜集",
+    "draft": null,
+    "deviation": null
+  }
+}
+```
+
+### 重新定位协议（上下文压缩恢复）
+
+**每次收到用户指令时**（包括上下文压缩后），执行：
+
+1. 检查当前 session 的 `.worktree/index.json` 是否存在
+2. 如存在 →
+   - 读取 index.json，获取 summary（总览）和 current_focus（当前焦点）
+   - 读取 current_focus 对应的节点文件
+   - 读取 conventions.md（恢复写作约定）
+   - 从节点的当前状态继续工作
+3. 如不存在 → 正常处理用户指令（不创建工作树，除非触发条件满足）
+
+> 类比 B+ 树：index.json = 根页，nodes/*.json = 叶子页。agent 不需要记住对话历史，只需要能读文件。
+
+### 更新纪律
+
+- **完成一个节点后**：更新节点 status → 更新 index.json 的 summary 和 current_focus → 同步 requirements.csv
+- **搜集到一份材料后**：更新节点的 materials 列表 → 更新 index.json 中该节点的 materials.collected
+- **文档完整性不变量**：每个自然暂停点，目标 .docx 必须处于 packed（有效）状态
+- **conventions.md**：首次撰写时创建，记录已确定的视角、术语、详略程度。后续节点参照此文件保持一致。
 
 ---
 

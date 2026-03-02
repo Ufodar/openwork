@@ -462,6 +462,11 @@ const headlessEnv = {
   OPENWORK_WORKSPACE: workspace,
   OPENWORK_HOST: host,
   OPENWORK_PORT: String(openworkPort),
+  OPENWORK_BASE_URL: process.env.OPENWORK_BASE_URL ?? openworkUrl,
+  OPENWORK_ONLYOFFICE_PUBLIC_BASE_URL:
+    process.env.OPENWORK_ONLYOFFICE_PUBLIC_BASE_URL ??
+    process.env.OPENWORK_BASE_URL ??
+    openworkUrl,
   OPENWORK_TOKEN: openworkToken,
   OPENWORK_HOST_TOKEN: openworkHostToken,
   OPENWORK_SERVER_BIN: openworkServerBin,

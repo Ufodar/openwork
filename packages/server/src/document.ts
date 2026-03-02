@@ -434,8 +434,7 @@ function jsonResponse(data: unknown, status = 200) {
 
 const LOCAL_ONLYOFFICE_URL = "http://localhost:8080";
 const POD_IP = process.env.OPENWORK_POD_IP ?? "192.168.5.250";
-// const POD_ONLYOFFICE_URL = `http://${POD_IP}:30080`;
-const POD_ONLYOFFICE_URL = `http://onlyoffice:80`;
+const POD_ONLYOFFICE_URL = process.env.OPENWORK_ONLYOFFICE_URL?.trim() || `http://${POD_IP}:30080`;
 const LOCAL_ONLYOFFICE_PUBLIC_BASE_URL = "http://host.docker.internal:8789";
 const POD_ONLYOFFICE_PUBLIC_BASE_URL = `http://${POD_IP}:30789`;
 

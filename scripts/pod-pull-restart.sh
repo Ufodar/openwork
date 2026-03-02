@@ -26,6 +26,39 @@ load_runtime_env() {
     done
 }
 
+auto_restore_common_pod_local_changes() {
+    if [ "${OPENWORK_AUTO_RESTORE_POD_LOCAL_CHANGES:-1}" != "1" ]; then
+        return 0
+    fi
+
+    local restore_paths=(
+        "scripts/pod-init-secrets.sh"
+        "scripts/pod-pull-restart.sh"
+        "scripts/restart-pod.sh"
+        "scripts/secrets.env.example"
+    )
+    local status_output
+    status_output="$(git status --porcelain -- "${restore_paths[@]}" || true)"
+    if [ -z "$status_output" ]; then
+        return 0
+    fi
+
+    local backup_dir="${OPENWORK_RUNTIME_ENV_DIR:-$RUNTIME_ENV_DIR_DEFAULT}/backups"
+    local stamp
+    stamp="$(date +%Y%m%d-%H%M%S)"
+    mkdir -p "$backup_dir"
+    local patch_file="$backup_dir/pod-local-script-changes-$stamp.patch"
+
+    git diff -- "${restore_paths[@]}" >"$patch_file" || true
+    git restore --staged --worktree -- "${restore_paths[@]}" || true
+    if [ ! -s "$patch_file" ]; then
+        rm -f "$patch_file"
+    fi
+
+    echo "[pod-pull-restart] Auto-restored local changes in common pod scripts to avoid pull conflicts."
+    echo "[pod-pull-restart] Controlled by OPENWORK_AUTO_RESTORE_POD_LOCAL_CHANGES=1 (default)."
+}
+
 git_pull_ff_only() {
     local remote="${OPENWORK_GIT_REMOTE:-origin}"
     local branch="${OPENWORK_GIT_BRANCH:-$(git rev-parse --abbrev-ref HEAD)}"
@@ -55,6 +88,7 @@ EOF
 }
 
 load_runtime_env
+auto_restore_common_pod_local_changes
 
 if ! git diff --quiet || ! git diff --cached --quiet; then
     echo "[pod-pull-restart] Working tree has local changes. Aborting to avoid conflicts."

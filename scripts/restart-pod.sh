@@ -59,8 +59,16 @@ sync_opencode_config_files() {
 
 load_runtime_env
 
-# ---- Pod IP (change this when deploying to a new pod) ----
-export OPENWORK_POD_IP="${OPENWORK_POD_IP:-192.168.5.250}"
+# ---- Pod IP (prefer OPENWORK_POD_IP in ~/.config/openwork/pod.env) ----
+detect_default_pod_ip() {
+    local detected=""
+    detected="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
+    if [ -z "$detected" ]; then
+        detected="127.0.0.1"
+    fi
+    printf '%s\n' "$detected"
+}
+export OPENWORK_POD_IP="${OPENWORK_POD_IP:-$(detect_default_pod_ip)}"
 
 # ---- Network ----
 export OPENWORK_NETWORK_MODE="${OPENWORK_NETWORK_MODE:-pod}"

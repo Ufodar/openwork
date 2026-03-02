@@ -81,6 +81,14 @@ lines = [
     "export OPENWORK_GIT_TOKEN=''",
     "# Set to 1 to auto git pull before each restart-pod.sh run",
     "export OPENWORK_PULL_BEFORE_RESTART='1'",
+    "# Set to 1 to auto-clean common pod-local script edits before pull",
+    "export OPENWORK_AUTO_RESTORE_POD_LOCAL_CHANGES='1'",
+    "# Optional runtime overrides (avoid editing scripts on pod)",
+    "export OPENWORK_POD_IP=''",
+    "export OPENWORK_PORT='8789'",
+    "export PORT='5173'",
+    "export OPENWORK_ONLYOFFICE_URL=''",
+    "export OPENWORK_ONLYOFFICE_INTERNAL_URL='http://onlyoffice:80'",
     "",
 ]
 

@@ -770,7 +770,7 @@ export default function MessageList(props: MessageListProps) {
         {/* Expanded content */}
         <Show when={expanded()}>
           <div
-            class={`mt-1 ml-1 pl-3 border-l-2 max-h-[480px] overflow-y-auto ${containerProps.isUser
+            class={`mt-1 ml-1 pl-3 border-l-2 ${containerProps.isUser
                 ? "border-gray-6"
                 : "border-gray-6/60"
               }`}

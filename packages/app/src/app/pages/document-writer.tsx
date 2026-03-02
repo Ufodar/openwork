@@ -841,7 +841,14 @@ export default function DocumentWriterView(props: SessionViewProps) {
   };
 
   const scrollToLatest = (behavior: ScrollBehavior = "auto") => {
-    messagesEndEl?.scrollIntoView({ behavior, block: "end" });
+    const container = chatContainerEl;
+    if (!container) return;
+    const top = Math.max(0, container.scrollHeight - container.clientHeight);
+    if (behavior === "smooth") {
+      container.scrollTo({ top, behavior: "smooth" });
+      return;
+    }
+    container.scrollTop = top;
   };
 
   const scheduleScrollToLatest = (behavior: ScrollBehavior = "auto") => {
@@ -2744,7 +2751,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
           </div>
         </div>
 
-        <div class="flex-1 min-h-0 overflow-y-auto" ref={(el) => (chatContainerEl = el)}>
+        <div class="flex-1 min-h-0 overflow-y-auto overscroll-contain" ref={(el) => (chatContainerEl = el)}>
           <MessageList
             messages={props.messages}
             developerMode={props.developerMode}

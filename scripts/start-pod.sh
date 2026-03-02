@@ -124,7 +124,7 @@ install_python_deps() {
     fi
 
     # Check if key packages are already installed
-    if python3 -c "import pypdf, pdfplumber, openpyxl, pandas" &>/dev/null; then
+    if python3 -c "import pypdf, pdfplumber, openpyxl, pandas, defusedxml, lxml, docx" &>/dev/null; then
         echo "[start-pod] Python packages already installed."
         return
     fi
@@ -158,6 +158,9 @@ install_python_deps() {
         openpyxl
         pandas
         pillow
+        defusedxml
+        lxml
+        python-docx
     )
 
     echo "[start-pod] Installing Python packages for skills..."
@@ -181,6 +184,21 @@ install_python_deps() {
         "${common_args[@]}" \
         "${index_args[@]}" \
         "markitdown[pptx]"
+}
+
+install_node_skill_deps() {
+    if ! command -v npm &>/dev/null; then
+        echo "[start-pod] npm not found, skipping global Node skill deps."
+        return
+    fi
+
+    if npm list -g docx --depth=0 &>/dev/null; then
+        echo "[start-pod] Global Node package 'docx' already installed."
+        return
+    fi
+
+    echo "[start-pod] Installing global Node package for document skills: docx"
+    npm install -g docx
 }
 
 # ============================================
@@ -266,6 +284,7 @@ install_python_deps
 install_node
 install_pnpm
 install_bun
+install_node_skill_deps
 install_project_deps
 kill_old_processes
 

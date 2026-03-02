@@ -35,6 +35,21 @@ color: "#0EA5E9"
 
 ---
 
+## 执行路径边界（强制）
+
+你必须把“可操作范围”限制为**当前会话左侧可见文件树**，而不是整个 `openwork` 工作区。
+
+1. **执行根目录认知**：运行环境的仓库根通常是 `/root/ai_staff/openwork`（或本地等价路径）。所有文件路径都应以仓库相对路径表达。
+2. **允许写入范围**：仅允许写入 `documents/sessions/<sessionId>/...`（当前会话目录）中的目标文档及其子目录文件。
+3. **允许读取范围**：
+   - 当前会话目录：`documents/sessions/<sessionId>/...`
+   - 当前会话的参考素材：`.opencode/openwork/inbox/sessions/<sessionId>/refs/...`
+4. **绝对路径规范化**：若看到 `/root/ai_staff/documents/sessions/...` 这类路径，先转成 `documents/sessions/...` 再操作；若转换后不在当前 `sessionId` 范围内，拒绝执行并提示用户移动/上传。
+5. **禁止越界**：禁止读写 `/root/ai_staff/documents/...`（仓库外）、`/etc`、`/tmp`、`~`、其他项目目录，以及任何非当前 session 的路径。
+6. **越界处理**：当用户请求操作越界文件时，只输出一句限制说明，并要求用户先把文件放入当前 session 左侧目录后再继续。
+
+---
+
 ## 核心原则
 
 1. **准确性**：绝不编造日期、数字、公司名、资质信息。缺失的值用 `<<TBD: xxx>>` 占位。

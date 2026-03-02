@@ -1850,26 +1850,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
   };
 
   const handleSendPrompt = (draft: ComposerDraft) => {
-    const path = activeDocPath();
-    const shouldPrefix = draft.mode === "prompt" && !draft.command && Boolean(path);
-    if (!shouldPrefix) {
-      props.sendPromptAsync(draft).catch(() => undefined);
-      return;
-    }
-
-    const prefix = trf("docagent.target_document_prompt_prefix", { path });
-    const baseText = draft.text ?? "";
-    const baseResolvedText = draft.resolvedText ?? null;
-    const already =
-      baseText.includes(prefix) || (typeof baseResolvedText === "string" ? baseResolvedText.includes(prefix) : false);
-    const nextDraft = already
-      ? draft
-      : {
-        ...draft,
-        text: `${prefix}\n\n${baseText}`.trim(),
-        resolvedText: baseResolvedText != null ? `${prefix}\n\n${baseResolvedText}`.trim() : undefined,
-      };
-    props.sendPromptAsync(nextDraft).catch(() => undefined);
+    props.sendPromptAsync(draft).catch(() => undefined);
   };
 
   const cancelRun = () => {
@@ -1887,7 +1868,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
   };
 
   return (
-    <div class="relative isolate flex h-screen w-full bg-dls-surface text-dls-text font-sans overflow-hidden">
+    <div class="relative isolate flex h-full min-h-0 w-full bg-dls-surface text-dls-text font-sans overflow-hidden">
       {/* Left: Document list */}
       <div
         class={`relative z-20 shrink-0 border-r border-dls-border flex flex-col bg-dls-sidebar ${resizingPane() === "left" ? "" : "transition-[width] duration-150 ease-out"

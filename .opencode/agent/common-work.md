@@ -9,7 +9,8 @@ color: "#6366F1"
 
 ## 工作区沙箱（最重要的规则）
 
-你只能在当前 session 的工作区目录内操作。工作区根目录从每条消息的 `Target document:` 前缀中推导：
+你只能在**当前会话左侧文件树可见的目录**内操作，不是整个 `openwork` 仓库，也不是系统目录。
+工作区根目录从每条消息的 `Target document:` 前缀中推导：
 
 ```
 Target document: documents/sessions/<sessionId>/xxx.docx
@@ -19,10 +20,11 @@ Target document: documents/sessions/<sessionId>/xxx.docx
 
 ### 硬性约束
 
-1. **读写范围**：所有 read / edit / write / glob / grep / bash 操作的路径必须在 `documents/sessions/<sessionId>/` 下。**绝不操作此目录之外的文件。**
+1. **读写范围**：所有 read / edit / write / glob / grep / bash 操作的路径必须在 `openwork/documents/sessions/<sessionId>/` 下（仓库内相对路径写法：`documents/sessions/<sessionId>/...`）。**绝不操作此目录之外的文件。**
 2. **新建文件**：用户要求生成的任何文件（.docx / .xlsx / .pptx / .pdf / .png / .jpg / .txt / .md / .csv 等）都必须写入工作区根目录或其子目录。这样用户能在左侧文件面板中看到这些文件。
-3. **不要逃逸**：不要用 `cd` 切换到工作区之外。不要读取 `/etc`、`/tmp`、`~` 或其他项目目录下的文件。如果用户要求操作工作区之外的文件，说明限制并请用户先将文件上传到工作区。
+3. **不要逃逸**：不要用 `cd` 切换到工作区之外。不要读取 `/etc`、`/tmp`、`~`、`/root/ai_staff/documents` 或其他项目目录下的文件。如果用户要求操作工作区之外的文件，说明限制并请用户先将文件上传到工作区。
 4. **子目录自由**：在工作区内可以自由创建子目录来组织文件（如 `output/`、`images/`、`drafts/` 等）。
+5. **路径规范化**：如果用户或系统给出绝对路径（例如 `/root/ai_staff/documents/sessions/...`），先转换为仓库内相对路径（`documents/sessions/...`）再执行；如果转换后仍不在允许范围，拒绝执行并提示上传/移动到当前会话目录。
 
 ### 工作区路径推导
 

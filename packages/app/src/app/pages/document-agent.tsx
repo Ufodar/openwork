@@ -334,6 +334,7 @@ export default function DocumentAgentView(props: SessionViewProps) {
   };
   let uploadInputEl: HTMLInputElement | undefined;
   let uploadFolderInputEl: HTMLInputElement | undefined;
+  let documentsScrollEl: HTMLDivElement | undefined;
   let chatContainerEl: HTMLDivElement | undefined;
   let messagesEndEl: HTMLDivElement | undefined;
   let bottomVisibilityEl: HTMLDivElement | undefined;
@@ -501,6 +502,15 @@ export default function DocumentAgentView(props: SessionViewProps) {
 
   const documentsList = createMemo(() => documents()?.items ?? []);
   const documentDirs = createMemo(() => documents()?.dirs ?? []);
+  const refreshDocumentsKeepingScroll = async () => {
+    const previousScrollTop = documentsScrollEl?.scrollTop ?? 0;
+    await refetchDocuments();
+    if (!documentsScrollEl) return;
+    requestAnimationFrame(() => {
+      if (!documentsScrollEl) return;
+      documentsScrollEl.scrollTop = previousScrollTop;
+    });
+  };
   const uploadProgressLabel = createMemo(() => {
     const progress = uploadProgress();
     if (!progress) return "";
@@ -1427,26 +1437,7 @@ export default function DocumentAgentView(props: SessionViewProps) {
   };
 
   const handleSendPrompt = (draft: ComposerDraft) => {
-    const path = activeDocPath();
-    const shouldPrefix = draft.mode === "prompt" && !draft.command && Boolean(path);
-    if (!shouldPrefix) {
-      props.sendPromptAsync(draft).catch(() => undefined);
-      return;
-    }
-
-    const prefix = tr("docagent.target_document_prompt_prefix").replace("{path}", path);
-    const baseText = draft.text ?? "";
-    const baseResolvedText = draft.resolvedText ?? null;
-    const already =
-      baseText.includes(prefix) || (typeof baseResolvedText === "string" ? baseResolvedText.includes(prefix) : false);
-    const nextDraft = already
-      ? draft
-      : {
-        ...draft,
-        text: `${prefix}\n\n${baseText}`.trim(),
-        resolvedText: baseResolvedText != null ? `${prefix}\n\n${baseResolvedText}`.trim() : undefined,
-      };
-    props.sendPromptAsync(nextDraft).catch(() => undefined);
+    props.sendPromptAsync(draft).catch(() => undefined);
   };
 
   const cancelRun = () => {
@@ -1464,7 +1455,7 @@ export default function DocumentAgentView(props: SessionViewProps) {
   };
 
   return (
-    <div class="relative isolate flex h-screen w-full bg-dls-surface text-dls-text font-sans overflow-hidden">
+    <div class="relative isolate flex h-full min-h-0 w-full bg-dls-surface text-dls-text font-sans overflow-hidden">
       <input
         ref={(el) => {
           uploadInputEl = el;
@@ -1551,7 +1542,7 @@ export default function DocumentAgentView(props: SessionViewProps) {
               <button
                 type="button"
                 class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
-                onClick={() => void refetchDocuments()}
+                onClick={() => void refreshDocumentsKeepingScroll()}
                 disabled={!serverReady() || documents.loading}
                 title={tr("docagent.refresh_documents")}
                 aria-label={tr("docagent.refresh_documents")}
@@ -1624,7 +1615,7 @@ export default function DocumentAgentView(props: SessionViewProps) {
               <button
                 type="button"
                 class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
-                onClick={() => void refetchDocuments()}
+                onClick={() => void refreshDocumentsKeepingScroll()}
                 disabled={!serverReady() || documents.loading}
                 title={tr("docagent.refresh_documents")}
                 aria-label={tr("docagent.refresh_documents")}
@@ -1640,7 +1631,7 @@ export default function DocumentAgentView(props: SessionViewProps) {
             </Show>
           </div>
         </Show>
-        <div class="overflow-y-auto flex-1 py-2">
+        <div class="overflow-y-auto flex-1 py-2" ref={(el) => (documentsScrollEl = el)}>
           <Show
             when={serverReady()}
             fallback={<div class="p-2 text-xs text-dls-secondary">{tr("docagent.server_not_connected")}</div>}

@@ -39,6 +39,13 @@ type RefFolderNode = {
   files: InboxItem[];
 };
 
+type RefsUploadProgress = {
+  categoryId: string;
+  done: number;
+  total: number;
+  phase: "uploading" | "processing";
+};
+
 type OnlyOfficePayload = { documentServerUrl: string; config: any };
 type EditorSource = {
   baseUrl: string;
@@ -399,7 +406,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
   const [refsActionMenuKey, setRefsActionMenuKey] = createSignal<string | null>(null);
   const [refsBusy, setRefsBusy] = createSignal(false);
   const [refsError, setRefsError] = createSignal<string | null>(null);
-  const [refsUploadProgress, setRefsUploadProgress] = createSignal<{ categoryId: string; done: number; total: number } | null>(null);
+  const [refsUploadProgress, setRefsUploadProgress] = createSignal<RefsUploadProgress | null>(null);
   const [refsDeleteBusyId, setRefsDeleteBusyId] = createSignal<string | null>(null);
   const [refsOpenBusyId, setRefsOpenBusyId] = createSignal<string | null>(null);
 
@@ -476,6 +483,18 @@ export default function DocumentWriterView(props: SessionViewProps) {
   ] as const;
   const refCategoryLabel = (categoryId: string) =>
     tr(REF_CATEGORIES.find((c) => c.id === categoryId)?.labelKey ?? "docwriter.ref_category_reference");
+  const refsUploadStatusText = createMemo(() => {
+    const progress = refsUploadProgress();
+    if (!progress) return "";
+    if (progress.phase === "processing") {
+      return trf("docwriter.processing_category", { category: refCategoryLabel(progress.categoryId) });
+    }
+    return trf("docwriter.uploading_category", {
+      category: refCategoryLabel(progress.categoryId),
+      done: progress.done,
+      total: progress.total,
+    });
+  });
 
   const refsInboxPrefix = createMemo(() => {
     const id = sessionId();
@@ -1020,14 +1039,15 @@ export default function DocumentWriterView(props: SessionViewProps) {
         return;
       }
 
-      setRefsUploadProgress({ categoryId, done: 0, total: uploadEntries.length });
+      setRefsUploadProgress({ categoryId, done: 0, total: uploadEntries.length, phase: "uploading" });
       let done = 0;
       for (const entry of uploadEntries) {
         const dest = `${prefix}/${categoryId}/${entry.relative}`;
         await client.uploadInbox(w, entry.file, { path: dest });
         done += 1;
-        setRefsUploadProgress({ categoryId, done, total: uploadEntries.length });
+        setRefsUploadProgress({ categoryId, done, total: uploadEntries.length, phase: "uploading" });
       }
+      setRefsUploadProgress({ categoryId, done: uploadEntries.length, total: uploadEntries.length, phase: "processing" });
       await refetchRefs();
       setRefsExpanded((current) => ({ ...current, [categoryId]: true }));
       if (skippedHiddenCount > 0) {
@@ -2227,12 +2247,9 @@ export default function DocumentWriterView(props: SessionViewProps) {
               </Show>
 
               <Show when={refsUploadProgress()}>
-                <div class="mt-2 px-2 text-[11px] text-dls-secondary">
-                  {trf("docwriter.uploading_category", {
-                    category: refCategoryLabel(refsUploadProgress()!.categoryId),
-                    done: refsUploadProgress()!.done,
-                    total: refsUploadProgress()!.total,
-                  })}
+                <div class="mt-2 px-2 text-[11px] text-dls-secondary flex items-center gap-1.5">
+                  <RefreshCw size={12} class="animate-spin" />
+                  <span class="truncate">{refsUploadStatusText()}</span>
                 </div>
               </Show>
 

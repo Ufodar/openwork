@@ -23,6 +23,13 @@ type DocumentListResult = {
   dirs: string[];
 };
 
+type UploadProgressState = {
+  phase: "preparing" | "uploading" | "processing";
+  done: number;
+  total: number;
+  preserveRelativePath: boolean;
+};
+
 type DocumentWriterUiState = {
   schemaVersion: 1;
   activeDoc?: string;
@@ -174,6 +181,8 @@ const getFileBaseName = (value: string) => (value.split("/").pop() ?? value).toL
 const isOnlyOfficeImportable = (path: string) => ONLYOFFICE_IMPORT_EXTENSIONS.has(getFileExtension(path));
 const isImagePreviewable = (path: string) => IMAGE_PREVIEW_EXTENSIONS.has(getFileExtension(path));
 const isMarkdownPreviewable = (path: string) => MARKDOWN_PREVIEW_EXTENSIONS.has(getFileExtension(path));
+const isTargetDocumentCandidate = (path: string) =>
+  isOnlyOfficeImportable(path) || isMarkdownPreviewable(path) || isTextPreviewable(path);
 const isTextPreviewable = (path: string) => {
   const ext = getFileExtension(path);
   if (TEXT_PREVIEW_EXTENSIONS.has(ext)) return true;
@@ -314,6 +323,15 @@ function buildFileTree(items: DocumentItem[], directories: string[]): FileTreeNo
 export default function DocumentAgentView(props: SessionViewProps) {
   const navigate = useNavigate();
   const tr = (key: string) => i18n(key, currentLocale());
+  const trf = (key: string, vars?: Record<string, string | number>) => {
+    let value = tr(key);
+    if (vars) {
+      for (const [name, token] of Object.entries(vars)) {
+        value = value.replaceAll(`{${name}}`, String(token));
+      }
+    }
+    return value;
+  };
   let uploadInputEl: HTMLInputElement | undefined;
   let uploadFolderInputEl: HTMLInputElement | undefined;
   let chatContainerEl: HTMLDivElement | undefined;
@@ -461,6 +479,7 @@ export default function DocumentAgentView(props: SessionViewProps) {
   const [resizingPane, setResizingPane] = createSignal<"left" | "right" | null>(null);
   const [configSeq, setConfigSeq] = createSignal(0);
   const [uploadBusy, setUploadBusy] = createSignal(false);
+  const [uploadProgress, setUploadProgress] = createSignal<UploadProgressState | null>(null);
   const [deleteBusyPath, setDeleteBusyPath] = createSignal<string | null>(null);
   const [downloadBusyPath, setDownloadBusyPath] = createSignal<string | null>(null);
   const [activeFolder, setActiveFolder] = createSignal("");
@@ -482,6 +501,19 @@ export default function DocumentAgentView(props: SessionViewProps) {
 
   const documentsList = createMemo(() => documents()?.items ?? []);
   const documentDirs = createMemo(() => documents()?.dirs ?? []);
+  const uploadProgressLabel = createMemo(() => {
+    const progress = uploadProgress();
+    if (!progress) return "";
+    if (progress.phase === "preparing") {
+      return trf("docagent.preparing_upload_count", { count: progress.total });
+    }
+    if (progress.phase === "processing") {
+      return tr("docagent.processing_uploaded_documents");
+    }
+    return progress.preserveRelativePath
+      ? trf("docagent.uploading_folder_progress", { done: progress.done, total: progress.total })
+      : trf("docagent.uploading_documents_progress", { done: progress.done, total: progress.total });
+  });
 
   const fileTree = createMemo(() => buildFileTree(documentsList(), documentDirs()));
   const [expandedFolders, setExpandedFolders] = createSignal<Set<string>>(new Set());
@@ -535,7 +567,9 @@ export default function DocumentAgentView(props: SessionViewProps) {
               } else {
                 setActiveFolder(parentDirPath(nodeProps.node.path));
                 setActiveDoc(nodeProps.node.path);
-                setTargetDoc(nodeProps.node.path);
+                if (isTargetDocumentCandidate(nodeProps.node.path)) {
+                  setTargetDoc(nodeProps.node.path);
+                }
                 setConfigSeq((v) => v + 1);
               }
             }}
@@ -783,6 +817,7 @@ export default function DocumentAgentView(props: SessionViewProps) {
       tr("docagent.skipped_hidden_documents_count").replace("{count}", String(count));
 
     setUploadBusy(true);
+    setUploadProgress({ phase: "preparing", done: 0, total: files.length, preserveRelativePath });
     setToastMessage(null);
     let skippedHiddenCount = 0;
     try {
@@ -806,10 +841,18 @@ export default function DocumentAgentView(props: SessionViewProps) {
         });
 
       if (!uploadEntries.length) {
+        setUploadProgress(null);
         setToastMessage(hiddenSkipMessage(skippedHiddenCount));
         return;
       }
 
+      setUploadProgress({
+        phase: "uploading",
+        done: 0,
+        total: uploadEntries.length,
+        preserveRelativePath,
+      });
+      let done = 0;
       for (const entry of uploadEntries) {
         const form = new FormData();
         form.append("file", entry.file);
@@ -820,7 +863,20 @@ export default function DocumentAgentView(props: SessionViewProps) {
           method: "POST",
           body: form,
         });
+        done += 1;
+        setUploadProgress({
+          phase: "uploading",
+          done,
+          total: uploadEntries.length,
+          preserveRelativePath,
+        });
       }
+      setUploadProgress({
+        phase: "processing",
+        done: uploadEntries.length,
+        total: uploadEntries.length,
+        preserveRelativePath,
+      });
       await refetchDocuments();
       const uploadedMessage =
         uploadEntries.length === 1
@@ -833,6 +889,7 @@ export default function DocumentAgentView(props: SessionViewProps) {
       const message = error instanceof Error ? error.message : tr("docagent.failed_upload_documents");
       setToastMessage(skippedHiddenCount > 0 ? `${message}\n${hiddenSkipMessage(skippedHiddenCount)}` : message);
     } finally {
+      setUploadProgress(null);
       setUploadBusy(false);
     }
   };
@@ -1174,14 +1231,17 @@ export default function DocumentAgentView(props: SessionViewProps) {
     const previousTarget = targetDoc();
     const currentActive = activeDoc();
     const activeExists = currentActive ? items.some((doc) => doc.name === currentActive) : false;
-    const targetExists = previousTarget ? items.some((doc) => doc.name === previousTarget) : false;
+    const targetExists =
+      previousTarget && isTargetDocumentCandidate(previousTarget)
+        ? items.some((doc) => doc.name === previousTarget)
+        : false;
 
     let nextTarget: string | null = targetExists ? previousTarget : null;
-    if (!nextTarget && activeExists && currentActive) {
+    if (!nextTarget && activeExists && currentActive && isTargetDocumentCandidate(currentActive)) {
       nextTarget = currentActive;
     }
     if (!nextTarget) {
-      nextTarget = items[0]?.name ?? null;
+      nextTarget = items.find((doc) => isTargetDocumentCandidate(doc.name))?.name ?? null;
     }
     if (previousTarget !== nextTarget) {
       setTargetDoc(nextTarget);
@@ -1498,6 +1558,15 @@ export default function DocumentAgentView(props: SessionViewProps) {
               >
                 <RefreshCw size={16} class={documents.loading ? "animate-spin" : ""} />
               </button>
+              <Show when={uploadProgressLabel()}>
+                <div
+                  class="p-2 rounded bg-dls-hover text-dls-secondary"
+                  title={uploadProgressLabel()}
+                  aria-label={uploadProgressLabel()}
+                >
+                  <RefreshCw size={16} class="animate-spin" />
+                </div>
+              </Show>
             </div>
           }
         >
@@ -1563,6 +1632,12 @@ export default function DocumentAgentView(props: SessionViewProps) {
                 <RefreshCw size={16} class={documents.loading ? "animate-spin" : ""} />
               </button>
             </div>
+            <Show when={uploadProgressLabel()}>
+              <div class="flex items-center gap-1.5 text-[11px] text-dls-secondary">
+                <RefreshCw size={12} class="animate-spin" />
+                <span class="truncate">{uploadProgressLabel()}</span>
+              </div>
+            </Show>
           </div>
         </Show>
         <div class="overflow-y-auto flex-1 py-2">

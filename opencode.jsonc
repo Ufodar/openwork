@@ -4,7 +4,7 @@
     "my-company": {
       "options": {
         "baseURL": "http://192.168.5.10:3000/v1",
-        "apiKey": "${MY_COMPANY_API_KEY}"
+        "apiKey": "{env:MY_COMPANY_API_KEY}"
       },
       "models": {
         "Kimi-K2.5": {
@@ -100,7 +100,7 @@
         "@modelcontextprotocol/server-github"
       ],
       "environment": {
-        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "{env:GITHUB_TOKEN}"
       },
       "enabled": false
     },
@@ -112,7 +112,7 @@
         "@modelcontextprotocol/server-brave-search"
       ],
       "environment": {
-        "BRAVE_API_KEY": "${BRAVE_API_KEY}"
+        "BRAVE_API_KEY": "{env:BRAVE_API_KEY}"
       },
       "enabled": false
     },
@@ -124,10 +124,10 @@
         "@iflow-mcp/yoko19191-bocha-ai-mcp-server"
       ],
       "environment": {
-        "BOCHA_API_KEY": "${BOCAI_API_KEY}",
-        "BOCHA_API_URL": "${BOCAI_API_URL}",
-        "BOCAI_API_KEY": "${BOCAI_API_KEY}",
-        "BOCAI_API_URL": "${BOCAI_API_URL}"
+        "BOCHA_API_KEY": "{env:BOCAI_API_KEY}",
+        "BOCHA_API_URL": "{env:BOCAI_API_URL}",
+        "BOCAI_API_KEY": "{env:BOCAI_API_KEY}",
+        "BOCAI_API_URL": "{env:BOCAI_API_URL}"
       }
     }
   },

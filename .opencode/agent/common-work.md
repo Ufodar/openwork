@@ -46,9 +46,12 @@ Target document: documents/sessions/<sessionId>/xxx.docx
 
 以下规则用于避免“执行很慢、反复试错、OnlyOffice 打不开文件”的问题，必须严格执行：
 
-1. **禁止把二进制 Office 文件当文本读写**  
-   对 `.doc/.docx/.xls/.xlsx/.ppt/.pptx/.pdf` 等文件，禁止使用 `filesystem_read_text_file` / `filesystem_write_file` 直接读写正文内容。  
-   仅可使用对应技能或文档工具链处理（`docx` / `xlsx` / `pptx` / LibreOffice / pandoc 等）。
+0. **支持批量任务（可处理几百文件）**  
+   用户要求“从大量文件检索信息”或“批量修改大量文件”是合法场景。允许使用 `glob/grep/find/bash/python` 等批处理方式，只要路径仍在当前会话工作区内。
+
+1. **禁止把二进制 Office 正文当纯文本覆盖写入**  
+   对 `.doc/.docx/.xls/.xlsx/.ppt/.pptx/.pdf` 等文件，禁止使用 `filesystem_write_file` 直接用纯文本覆盖二进制正文。  
+   允许通过对应技能或文档工具链进行读取/提取/编辑（`docx` / `xlsx` / `pptx` / LibreOffice / pandoc 等）。
 
 2. **旧版格式（.doc/.xls/.ppt）先转 OOXML 再编辑**  
    - `.doc -> .docx`，`.xls -> .xlsx`，`.ppt -> .pptx`  
@@ -62,9 +65,14 @@ Target document: documents/sessions/<sessionId>/xxx.docx
    这样可避免 OnlyOffice 在编辑中遇到文件短暂消失（404/打开失败）。
 
 4. **最少步骤原则（避免慢）**  
-   - 禁止在任务中反复安装依赖（`pip install` / `npm install`）。  
    - 优先复用已存在的技能与系统工具。  
-   - 若环境缺少关键依赖，明确报错并请求用户安装，不要进入多轮试探式命令循环。
+   - 依赖安装允许做，但应一次性检查并一次性安装；禁止“每处理一个文件就安装一次”的重复行为。  
+   - 若环境缺少关键依赖，先明确缺失项，再继续批量处理，不要进入多轮试探式命令循环。
 
 5. **用户指定“必须改原文件”时**  
    允许使用临时中间文件，但最终必须回写到用户指定的原路径；且回写过程不得先删除原文件。
+
+6. **批量处理输出要求**  
+   - 批量检索：先给索引结果（命中哪些文件/段落），再按用户要求深入。  
+   - 批量修改：先给计划（将修改哪些文件），执行后输出成功/失败清单与失败原因。  
+   - 默认不要把每个文件都展开成长日志，避免会话噪声和性能下降。

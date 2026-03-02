@@ -359,6 +359,32 @@ async function writeSessionArtifactFromFile({
     return { inboxId: encodeInboxId(relPath), inboxPath: relPath };
 }
 
+async function writeSessionVisibleArtifactFromFile({
+    workspace,
+    sessionId,
+    moduleId,
+    filename,
+    absSourcePath,
+}: {
+    workspace: WorkspaceInfo;
+    sessionId: string;
+    moduleId: string;
+    filename: string;
+    absSourcePath: string;
+}): Promise<{ docPath: string }> {
+    const docsDir = resolveDocumentsDir(workspace.path, sessionId);
+    await ensureDir(docsDir);
+    const stamp = nowStampForFilename();
+    const safeName = (filename || "artifact").trim().replace(/[\\/]+/g, "-");
+    const relPath = `artifacts/${moduleId}/${stamp}-${safeName}`;
+    const absPath = resolveDocumentPathSafe(docsDir, relPath);
+    await ensureDir(dirname(absPath));
+    const tmp = `${absPath}.tmp-${shortId()}`;
+    await copyFile(absSourcePath, tmp);
+    await rename(tmp, absPath);
+    return { docPath: relPath };
+}
+
 function resolveDocumentPathSafe(docsDir: string, relPath: string): string {
     const root = resolve(docsDir);
     const trimmed = relPath.trim();
@@ -1609,6 +1635,7 @@ export function createDocumentRoutes(routes: unknown[]) {
             const stderr = String(result.stderr || "").trim();
 
             let mediaZip: { inboxId: string; inboxPath: string } | null = null;
+            let mediaDoc: { docPath: string } | null = null;
             if (tmpMediaDir && tmpMediaZip) {
                 const zipResult = spawnSync("zip", ["-r", tmpMediaZip, "."], {
                     cwd: tmpMediaDir,
@@ -1616,6 +1643,13 @@ export function createDocumentRoutes(routes: unknown[]) {
                 });
                 if (zipResult.status === 0 && (await exists(tmpMediaZip))) {
                     mediaZip = await writeSessionArtifactFromFile({
+                        workspace,
+                        sessionId,
+                        moduleId: "dedupe",
+                        filename: "media.zip",
+                        absSourcePath: tmpMediaZip,
+                    });
+                    mediaDoc = await writeSessionVisibleArtifactFromFile({
                         workspace,
                         sessionId,
                         moduleId: "dedupe",
@@ -1666,7 +1700,7 @@ export function createDocumentRoutes(routes: unknown[]) {
                 });
             }
 
-            return jsonResponse({ ok: true, report, mediaZip, stdout, stderr });
+            return jsonResponse({ ok: true, report, mediaZip, mediaDoc, stdout, stderr });
         },
     });
 
@@ -1745,13 +1779,20 @@ export function createDocumentRoutes(routes: unknown[]) {
                     filename: `${basename(targetAbs, targetExt)}.pdf`,
                     absSourcePath: pdfAbs,
                 });
+                const pdfDoc = await writeSessionVisibleArtifactFromFile({
+                    workspace,
+                    sessionId,
+                    moduleId: "preview",
+                    filename: `${basename(targetAbs, targetExt)}.pdf`,
+                    absSourcePath: pdfAbs,
+                });
 
                 const reportText = [
                     `# PDF preview: ${basename(targetAbs)}`,
                     "",
                     `- session: \`${sessionId}\``,
                     `- target: \`${targetDoc}\``,
-                    `- pdf: \`${pdf.inboxPath}\``,
+                    `- pdf: \`${pdfDoc.docPath}\``,
                     "",
                     "## Notes",
                     "",
@@ -1766,7 +1807,7 @@ export function createDocumentRoutes(routes: unknown[]) {
                     content: reportText,
                 });
 
-                return jsonResponse({ ok: true, pdf, report });
+                return jsonResponse({ ok: true, pdf, pdfDoc, report });
             } finally {
                 await rm(outputDir, { recursive: true, force: true }).catch(() => undefined);
             }

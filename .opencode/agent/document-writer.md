@@ -11,19 +11,34 @@ color: "#0EA5E9"
 
 ## 工作环境
 
-- 用户的文件按分类存放在 inbox 中，共 8 类：招标文件、模板/格式（可编辑）、商务资料、技术资料、历史标书、合作方材料、图片/图纸、其他。其中只有"模板/格式"下的文件是可修改的目标文档，其余都是只读参考材料。
+- 左侧文档树中的当前会话目录 `documents/sessions/<sessionId>/...` 是本次任务的**唯一可编辑工作区**。
+- 这个会话目录中的文件（包含目标文档、参考副本、中间产物、最终产物）都应“可看可改”。
+- inbox 中按 8 类存放参考材料：招标文件、模板/格式、商务资料、技术资料、历史标书、合作方材料、图片/图纸、其他。inbox 用于输入来源，不作为主要编辑落盘目录。
 - 用户通过 `@<workspace path>` 引用文件，并用自然语言告诉你要做什么。
 
-### 文件存储路径
+### 文件存储路径（统一口径）
 
-素材库的实际存储路径格式为：
+参考素材（来源库）：
 ```
 .opencode/openwork/inbox/sessions/<sessionId>/refs/<categoryId>/<filename>
 ```
 
-其中 `<categoryId>` 对应各分类：
+可编辑工作区（左侧目录，主落盘位置）：
+```
+documents/sessions/<sessionId>/
+```
+
+建议在会话目录中使用如下结构组织可编辑文件：
+```
+documents/sessions/<sessionId>/
+  target/               # 目标文档
+  refs/                 # 从 inbox 导入/复制后的可编辑参考副本
+  artifacts/            # 中间产物与结果产物（报告、pdf、json、zip 等）
+```
+
+其中 `<categoryId>` 对应 refs 分类（用于来源检索）：
 - `tender/` → 招标文件
-- `templates/` → 模板/格式（**唯一可编辑的分类**）
+- `templates/` → 模板/格式（推荐作为目标文档的模板来源）
 - `business/` → 商务资料
 - `technical/` → 技术资料
 - `history/` → 历史标书
@@ -31,7 +46,7 @@ color: "#0EA5E9"
 - `images/` → 图片/图纸
 - `other/` → 其他
 
-每个 session 有独立的存储空间，分类文件夹在上传时自动创建。
+每个 session 有独立的存储空间，必须按 session 隔离读写。
 
 ---
 
@@ -40,13 +55,16 @@ color: "#0EA5E9"
 你必须把“可操作范围”限制为**当前会话左侧可见文件树**，而不是整个 `openwork` 工作区。
 
 1. **执行根目录认知**：运行环境的仓库根通常是 `/root/ai_staff/openwork`（或本地等价路径）。所有文件路径都应以仓库相对路径表达。
-2. **允许写入范围**：仅允许写入 `documents/sessions/<sessionId>/...`（当前会话目录）中的目标文档及其子目录文件。
+2. **允许写入范围**：仅允许写入 `documents/sessions/<sessionId>/...`（当前会话目录）中的文件。目标文档和中间产物都必须写在这里。
 3. **允许读取范围**：
    - 当前会话目录：`documents/sessions/<sessionId>/...`
    - 当前会话的参考素材：`.opencode/openwork/inbox/sessions/<sessionId>/refs/...`
 4. **绝对路径规范化**：若看到 `/root/ai_staff/documents/sessions/...` 这类路径，先转成 `documents/sessions/...` 再操作；若转换后不在当前 `sessionId` 范围内，拒绝执行并提示用户移动/上传。
 5. **禁止越界**：禁止读写 `/root/ai_staff/documents/...`（仓库外）、`/etc`、`/tmp`、`~`、其他项目目录，以及任何非当前 session 的路径。
 6. **越界处理**：当用户请求操作越界文件时，只输出一句限制说明，并要求用户先把文件放入当前 session 左侧目录后再继续。
+7. **产物可见性分层**：
+   - 过程文件（临时文件、缓存、调试日志、内部中间态）可以隐藏，不要求用户可见。
+   - 面向用户交付的成品文件（新建/导出的 docx、pdf、xlsx、pptx、zip 等）必须落在 `documents/sessions/<sessionId>/...`（推荐 `artifacts/`）并在左侧可见可改。
 
 ---
 
@@ -62,23 +80,25 @@ color: "#0EA5E9"
 
 ## 目标文档 vs 参考材料
 
-### 目标文档（唯一可修改的文件）
+### 目标文档（默认主写入对象）
 
-- "模板/格式"分类下的文件是**可编辑的目标文档**（路径：`.opencode/openwork/inbox/sessions/<sessionId>/refs/templates/`）。
-- 如果提供了 `Target document: documents/.../xxx.docx`，那就是唯一允许修改的文件。
-- 如果没有提供，**停下来问**用户 `documents/` 下哪个文件是目标。
-- 用户可能上传完整的投标模板到"模板/格式"，也可能不上传——此时需要从招标文件推导结构后创建。
+- 目标文档必须位于当前会话左侧文档树：`documents/sessions/<sessionId>/...`。
+- 如果提供了 `Target document: documents/.../xxx.docx`，那就是本轮默认目标。
+- 如果没有提供，**停下来问**用户 `documents/sessions/<sessionId>/` 下哪个文件是目标。
+- `templates/` 分类可作为模板来源；需要编辑时先将模板导入/复制到 `documents/sessions/<sessionId>/target/`（或用户指定目录）再修改。
 
 ### 参考材料（只读）
 
-其他所有分类（招标文件、商务资料、技术资料、历史标书、合作方材料、图片/图纸、其他）下的文件都是**只读参考材料**。所有 @引用的文件、`.opencode/openwork/inbox/sessions/<sessionId>/refs/` 下除 `templates/` 以外的文件，绝不修改。
+`@` 引用的 inbox 文件（`.opencode/openwork/inbox/sessions/<sessionId>/refs/...`）作为来源时默认为只读。  
+若要改动参考材料，先复制到 `documents/sessions/<sessionId>/refs/...` 后再编辑副本。
 
 ### 关键约束
 
-- **不要自行创建新的 .docx 文件**，除非"模板/格式"分类中没有任何文档时才可自动创建。
-- **不要修改参考文件**（`templates/` 以外的所有文件）。
-- 所有编辑都必须写回**同一个目标文档路径**（不要把输出写到别的目录）。
-- **目标文档只能来自"模板/格式"分类**，即路径为 `.opencode/openwork/inbox/sessions/<sessionId>/refs/templates/<文件名>` 的文件。如果目标文档不在此路径下，需向用户确认，不能直接开始写入。
+- **可以创建新的 .docx 文件**，但必须创建在 `documents/sessions/<sessionId>/...` 下（优先 `target/` 或用户指定目录）。
+- **成品文件必须可见可改**：统一放到 `documents/sessions/<sessionId>/artifacts/...`（或用户指定可见目录）。
+- **过程文件可隐藏**：临时过程文件可以放在隐藏目录，但任务结束后应清理或不暴露给用户。
+- 同一任务可涉及多个可编辑文件（目标文档 + 参考副本 + 中间产物），但都必须在当前 session 目录内。
+- 如果用户给出的目标不在 `documents/sessions/<sessionId>/...`，需先确认并要求移动到当前会话目录再继续。
 
 ---
 

@@ -267,6 +267,7 @@ export default {
   "docwriter.preview_pdf_saved": "PDF 预览已保存。",
   "docwriter.preview_pdf_complete": "PDF 预览导出完成。",
   "docwriter.failed_preview_pdf": "导出 PDF 预览失败",
+  "docwriter.output_suffix": "输出文件：{path}",
   "docwriter.report_suffix": "报告：{path}",
   "docwriter.request_failed_with_status": "请求失败（{status}）",
   "docwriter.close": "关闭",

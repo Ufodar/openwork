@@ -1406,18 +1406,24 @@ export default function DocumentWriterView(props: SessionViewProps) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
-      })) as { report?: { inboxPath?: string }; mediaZip?: { inboxPath?: string } };
+      })) as { report?: { inboxPath?: string }; mediaZip?: { inboxPath?: string }; mediaDoc?: { docPath?: string } };
 
       const reportPath = typeof result?.report?.inboxPath === "string" ? result.report.inboxPath : "";
       const mediaPath = typeof result?.mediaZip?.inboxPath === "string" ? result.mediaZip.inboxPath : "";
+      const mediaDocPath = typeof result?.mediaDoc?.docPath === "string" ? result.mediaDoc.docPath : "";
+      const mediaDocWorkspacePath = mediaDocPath ? `documents/sessions/${cfg.sessionId}/${mediaDocPath}` : "";
       const hint = [
         reportPath ? tr("docwriter.dedupe_report_saved") : tr("docwriter.dedupe_complete"),
         mediaPath ? tr("docwriter.dedupe_media_saved") : "",
+        mediaDocWorkspacePath ? trf("docwriter.output_suffix", { path: mediaDocWorkspacePath }) : "",
       ]
         .filter(Boolean)
         .join(" ");
       setToastMessage(hint);
       closeModule();
+      if (mediaDocPath) {
+        await refetchDocuments();
+      }
       await refetchReports();
       setReportsExpanded(true);
     } catch (error) {
@@ -1477,10 +1483,26 @@ export default function DocumentWriterView(props: SessionViewProps) {
       query.set("session", cfg.sessionId);
       query.set("doc", doc);
       const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/bid/preview-pdf", query);
-      const result = (await fetchJson(url, cfg.token, { method: "POST" })) as { pdf?: { inboxPath?: string }; report?: { inboxPath?: string } };
+      const result = (await fetchJson(url, cfg.token, { method: "POST" })) as {
+        pdf?: { inboxPath?: string };
+        pdfDoc?: { docPath?: string };
+        report?: { inboxPath?: string };
+      };
       const pdfPath = typeof result?.pdf?.inboxPath === "string" ? result.pdf.inboxPath : "";
-      setToastMessage(pdfPath ? tr("docwriter.preview_pdf_saved") : tr("docwriter.preview_pdf_complete"));
+      const pdfDocPath = typeof result?.pdfDoc?.docPath === "string" ? result.pdfDoc.docPath : "";
+      const pdfDocWorkspacePath = pdfDocPath ? `documents/sessions/${cfg.sessionId}/${pdfDocPath}` : "";
+      setToastMessage(
+        pdfPath || pdfDocPath
+          ? [tr("docwriter.preview_pdf_saved"), pdfDocWorkspacePath ? trf("docwriter.output_suffix", { path: pdfDocWorkspacePath }) : ""]
+            .filter(Boolean)
+            .join(" ")
+          : tr("docwriter.preview_pdf_complete"),
+      );
       closeModule();
+      await refetchDocuments();
+      if (pdfDocPath) {
+        setActiveDoc(pdfDocPath);
+      }
       await refetchReports();
       setReportsExpanded(true);
     } catch (error) {

@@ -267,6 +267,7 @@ export default {
   "docwriter.preview_pdf_saved": "PDF preview saved.",
   "docwriter.preview_pdf_complete": "PDF preview complete.",
   "docwriter.failed_preview_pdf": "Failed to export PDF preview",
+  "docwriter.output_suffix": "Output file: {path}",
   "docwriter.report_suffix": "Report: {path}",
   "docwriter.request_failed_with_status": "Request failed ({status})",
   "docwriter.close": "Close",

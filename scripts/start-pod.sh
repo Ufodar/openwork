@@ -353,6 +353,12 @@ install_node_skill_deps
 install_project_deps
 kill_old_processes
 
+# ---- Clean up inbox violations (AI agent may have written scripts/deps there) ----
+if [ -x "$PROJECT_DIR/scripts/inbox-guard.sh" ]; then
+    echo "[start-pod] Running inbox guard (cleanup)..."
+    "$PROJECT_DIR/scripts/inbox-guard.sh" --clean || true
+fi
+
 echo "[start-pod] Starting OpenWork (POD_IP=$OPENWORK_POD_IP)..."
 cd "$PROJECT_DIR"
 exec bun scripts/dev-headless-web.ts

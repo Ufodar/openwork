@@ -267,6 +267,16 @@ export function startServer(config: ServerConfig) {
   const routes = createRoutes(config, approvals, tokens);
   const logger = createServerLogger(config);
 
+  // Run inbox guard on startup — clean up any AI-written files in inbox
+  for (const ws of config.workspaces) {
+    const inboxRoot = resolveInboxDir(ws.path);
+    cleanInboxViolations(inboxRoot, logger).then((count) => {
+      if (count > 0) {
+        logger.info(`[inbox-guard] Cleaned ${count} unauthorized file(s) from inbox at startup`);
+      }
+    }).catch(() => {/* ignore */});
+  }
+
   const serverOptions: {
     hostname: string;
     port: number;
@@ -856,6 +866,65 @@ function resolveBrowserProvider(): Capabilities["toolProviders"]["browser"] {
 
 function resolveInboxDir(workspaceRoot: string): string {
   return join(workspaceRoot, ".opencode", "openwork", "inbox");
+}
+
+// ---------------------------------------------------------------------------
+// Inbox guard — detect and clean up unauthorized files written by AI agents
+// ---------------------------------------------------------------------------
+// The AI agent sometimes writes scripts, npm packages, or generated documents
+// directly into the inbox directory instead of the documents workspace.
+// These patterns are always unauthorized in inbox:
+const INBOX_VIOLATION_PATTERNS = [
+  /\.js$/,              // Scripts created by AI
+  /\.py$/,              // Python scripts
+  /\.sh$/,              // Shell scripts
+  /\.ts$/,              // TypeScript scripts
+  /^node_modules$/,     // npm install artifacts
+  /^package\.json$/,    // npm config
+  /^package-lock\.json$/, // npm lockfile
+  /^\.tmp-/,            // Leftover temp files
+];
+
+async function scanInboxViolations(inboxRoot: string): Promise<string[]> {
+  const violations: string[] = [];
+  async function walk(dir: string) {
+    let entries: Awaited<ReturnType<typeof readdir>>;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const fullPath = join(dir, entry.name);
+      if (INBOX_VIOLATION_PATTERNS.some((p) => p.test(entry.name))) {
+        violations.push(fullPath);
+        continue; // Don't recurse into node_modules etc.
+      }
+      if (entry.isDirectory()) {
+        await walk(fullPath);
+      }
+    }
+  }
+  await walk(inboxRoot);
+  return violations;
+}
+
+async function cleanInboxViolations(inboxRoot: string, logger?: { info: (...args: unknown[]) => void }): Promise<number> {
+  const violations = await scanInboxViolations(inboxRoot);
+  for (const v of violations) {
+    try {
+      const s = await stat(v);
+      if (s.isDirectory()) {
+        await rm(v, { recursive: true, force: true });
+      } else {
+        await unlink(v);
+      }
+      logger?.info(`[inbox-guard] Removed unauthorized file: ${v}`);
+    } catch {
+      // ignore cleanup errors
+    }
+  }
+  return violations.length;
 }
 
 function resolveOutboxDir(workspaceRoot: string): string {
@@ -2472,6 +2541,25 @@ function createRoutes(config: ServerConfig, approvals: ApprovalService, tokens: 
     });
 
     return jsonResponse({ ok: true });
+  });
+
+  // ---- Inbox guard: scan & clean unauthorized files written by AI agents ----
+  addRoute(routes, "POST", "/workspace/:id/inbox/guard", "client", async (ctx) => {
+    requireClientScope(ctx, "collaborator");
+    const workspace = await resolveWorkspace(config, ctx.params.id);
+    const inboxRoot = resolveInboxDir(workspace.path);
+    const mode = ctx.url.searchParams.get("mode") ?? "scan";
+    const violations = await scanInboxViolations(inboxRoot);
+    if (mode === "clean" && violations.length > 0) {
+      const cleaned = await cleanInboxViolations(inboxRoot, logger);
+      return jsonResponse({ ok: true, mode: "clean", violations: violations.length, cleaned });
+    }
+    return jsonResponse({
+      ok: true,
+      mode: "scan",
+      violations: violations.length,
+      files: violations.map((v) => relative(inboxRoot, v)),
+    });
   });
 
   addRoute(routes, "GET", "/workspace/:id/artifacts", "client", async (ctx) => {

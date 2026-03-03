@@ -109,6 +109,13 @@ sleep 1
 # Start
 # ============================================
 sync_opencode_config_files
+
+# ---- Clean up inbox violations ----
+if [ -x "$PROJECT_DIR/scripts/inbox-guard.sh" ]; then
+    echo "[restart-pod] Running inbox guard (cleanup)..."
+    "$PROJECT_DIR/scripts/inbox-guard.sh" --clean || true
+fi
+
 echo "[restart-pod] Starting OpenWork (POD_IP=$OPENWORK_POD_IP)..."
 cd "$PROJECT_DIR"
 exec bun scripts/dev-headless-web.ts

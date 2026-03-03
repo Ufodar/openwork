@@ -4755,10 +4755,15 @@ export default function App() {
       }
 
       const session = unwrap(rawResult);
-      // Immediately select and show the new session before background list refresh.
+      // For a brand-new session, skip the full selectSession() round-trip
+      // (health + messages + todos + permissions = 4 sequential HTTP requests
+      // that can block navigation for several seconds).
+      // Just set the selected ID and navigate immediately.
+      // The route handler's ensureRouteSessionHydrated() will call selectSession()
+      // to hydrate messages/todos in the background after the page renders.
       setBusyLabel("status.loading_session");
       mark("session:select:start", { sessionID: session.id });
-      await selectSession(session.id);
+      setSelectedSessionId(session.id);
       mark("session:select:ok", { sessionID: session.id });
 
       // Inject the new session into the reactive sessions() store so

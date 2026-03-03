@@ -421,7 +421,15 @@ export default function App() {
   );
   const [openworkServerUrl, setOpenworkServerUrl] = createSignal("");
   const [openworkServerStatus, setOpenworkServerStatus] = createSignal<OpenworkServerStatus>("disconnected");
-  const [openworkServerCapabilities, setOpenworkServerCapabilities] = createSignal<OpenworkServerCapabilities | null>(null);
+  const [openworkServerCapabilities, setOpenworkServerCapabilities] = createSignal<OpenworkServerCapabilities | null>(null, {
+    equals: (prev, next) => {
+      if (prev === next) return true;
+      if (!prev || !next) return false;
+      // Deep-compare to avoid re-triggering downstream effects when the
+      // health-check polls return the same capability set.
+      try { return JSON.stringify(prev) === JSON.stringify(next); } catch { return false; }
+    },
+  });
   const [openworkServerCheckedAt, setOpenworkServerCheckedAt] = createSignal<number | null>(null);
   const [openworkServerWorkspaceId, setOpenworkServerWorkspaceId] = createSignal<string | null>(null);
   const [openworkServerHostInfo, setOpenworkServerHostInfo] = createSignal<OpenworkServerInfo | null>(null);
@@ -2738,6 +2746,12 @@ export default function App() {
 
   const [openworkSessionPrefsById, setOpenworkSessionPrefsById] = createSignal<Record<string, OpenworkSessionPrefs>>(
     readLocalOpenworkSessionPrefs(),
+    {
+      equals: (prev, next) => {
+        if (prev === next) return true;
+        try { return JSON.stringify(prev) === JSON.stringify(next); } catch { return false; }
+      },
+    },
   );
   const [openworkSessionPrefsLoaded, setOpenworkSessionPrefsLoaded] = createSignal(false);
   const [openworkSessionPrefsWorkspaceId, setOpenworkSessionPrefsWorkspaceId] = createSignal<string | null>(null);

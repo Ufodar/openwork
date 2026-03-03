@@ -960,6 +960,9 @@ export function createOpenworkServerClient(options: { baseUrl: string; token?: s
   const token = options.token;
   const hostToken = options.hostToken;
 
+  // Shared reference so patchConfig can invalidate the getConfig cache.
+  let configCache: Map<string, { value: unknown; expiresAt: number }> | null = null;
+
   const timeouts = {
     // Keep these generous to avoid UI flapping during heavy server-side work (Python tools, file IO).
     // The server health endpoint itself is fast, but the event loop can be busy.
@@ -1031,14 +1034,47 @@ export function createOpenworkServerClient(options: { baseUrl: string; token?: s
         body: payload,
         timeoutMs: timeouts.workspaceImport,
       }),
-    getConfig: (workspaceId: string) =>
-      requestJson<{ opencode: Record<string, unknown>; openwork: Record<string, unknown>; updatedAt?: number | null }>(
-        baseUrl,
-        `/workspace/${encodeURIComponent(workspaceId)}/config`,
-        { token, hostToken, timeoutMs: timeouts.config },
-      ),
-    patchConfig: (workspaceId: string, payload: { opencode?: Record<string, unknown>; openwork?: Record<string, unknown> }) =>
-      requestJson<{ updatedAt?: number | null }>(
+    getConfig: (() => {
+      // Dedup: concurrent calls for the same workspaceId share one in-flight
+      // request. After resolution the cached value lives for a short TTL so
+      // rapid-fire reactive re-triggers don't each hit the network.
+      const CONFIG_CACHE_TTL_MS = 2_000;
+      const inflight = new Map<string, Promise<{ opencode: Record<string, unknown>; openwork: Record<string, unknown>; updatedAt?: number | null }>>();
+      const cached = new Map<string, { value: { opencode: Record<string, unknown>; openwork: Record<string, unknown>; updatedAt?: number | null }; expiresAt: number }>();
+
+      // Expose cache for invalidation by patchConfig.
+      configCache = cached;
+
+      return (workspaceId: string) => {
+        const key = workspaceId;
+
+        // Return from short-lived cache if still valid.
+        const hit = cached.get(key);
+        if (hit && Date.now() < hit.expiresAt) return Promise.resolve(hit.value);
+
+        // Coalesce with any in-flight request.
+        const existing = inflight.get(key);
+        if (existing) return existing;
+
+        const promise = requestJson<{ opencode: Record<string, unknown>; openwork: Record<string, unknown>; updatedAt?: number | null }>(
+          baseUrl,
+          `/workspace/${encodeURIComponent(workspaceId)}/config`,
+          { token, hostToken, timeoutMs: timeouts.config },
+        ).then((result) => {
+          cached.set(key, { value: result, expiresAt: Date.now() + CONFIG_CACHE_TTL_MS });
+          return result;
+        }).finally(() => {
+          inflight.delete(key);
+        });
+
+        inflight.set(key, promise);
+        return promise;
+      };
+    })(),
+    patchConfig: (workspaceId: string, payload: { opencode?: Record<string, unknown>; openwork?: Record<string, unknown> }) => {
+      // Invalidate getConfig cache so next read gets fresh data.
+      configCache?.delete(workspaceId);
+      return requestJson<{ updatedAt?: number | null }>(
         baseUrl,
         `/workspace/${encodeURIComponent(workspaceId)}/config`,
         {
@@ -1048,7 +1084,8 @@ export function createOpenworkServerClient(options: { baseUrl: string; token?: s
           body: payload,
           timeoutMs: timeouts.config,
         },
-      ),
+      );
+    },
     setOpenCodeRouterTelegramToken: (
       workspaceId: string,
       tokenValue: string,

@@ -38,6 +38,27 @@ export default defineConfig({
     }),
     tailwindcss(),
     solid(),
+    // Force pre-bundle lucide-solid. The vite-plugin-solid auto-detects
+    // packages with Solid exports and adds them to optimizeDeps.exclude,
+    // but lucide-solid ships pre-compiled JS (no JSX) and has ~3300 icon
+    // modules. Without pre-bundling, each icon is a separate HTTP request
+    // that saturates the browser's 6-connection HTTP/1.1 limit.
+    {
+      name: "force-prebundle-lucide",
+      config() {
+        return { optimizeDeps: { include: ["lucide-solid"] } };
+      },
+      configResolved(resolvedConfig) {
+        // The solid plugin adds lucide-solid to optimizeDeps.exclude because
+        // its package.json exports have a "solid" condition. Remove it here
+        // so Vite's esbuild optimizer can bundle the pre-compiled ESM icons.
+        const exclude = resolvedConfig.optimizeDeps.exclude;
+        if (Array.isArray(exclude)) {
+          const idx = exclude.indexOf("lucide-solid");
+          if (idx >= 0) exclude.splice(idx, 1);
+        }
+      },
+    },
   ],
   server: {
     port: devPort,

@@ -310,19 +310,37 @@ export default function DocumentWriterView(props: SessionViewProps) {
       Boolean(workspaceId()),
   );
 
-  const apiConfig = createMemo(() => {
-    const client = props.openworkServerClient;
-    if (!client) return null;
-    const workspace = workspaceId();
-    const session = sessionId();
-    if (!workspace || !session) return null;
-    return {
-      baseUrl: client.baseUrl,
-      token: client.token?.trim() ?? "",
-      workspaceId: workspace,
-      sessionId: session,
-    };
-  });
+  const apiConfig = createMemo(
+    () => {
+      const client = props.openworkServerClient;
+      if (!client) return null;
+      const workspace = workspaceId();
+      const session = sessionId();
+      if (!workspace || !session) return null;
+      return {
+        baseUrl: client.baseUrl,
+        token: client.token?.trim() ?? "",
+        workspaceId: workspace,
+        sessionId: session,
+      };
+    },
+    null,
+    {
+      // Only trigger downstream refetches when the actual values change,
+      // not just the object reference (which changes on every parent render
+      // because spread props create new getter closures).
+      equals: (prev, next) => {
+        if (prev === next) return true;
+        if (!prev || !next) return false;
+        return (
+          prev.baseUrl === next.baseUrl &&
+          prev.token === next.token &&
+          prev.workspaceId === next.workspaceId &&
+          prev.sessionId === next.sessionId
+        );
+      },
+    },
+  );
 
   const buildUrl = (baseUrl: string, workspace: string, pathname: string, query?: URLSearchParams) => {
     const normalizedPath = pathname.startsWith("/") ? pathname : `/${pathname}`;
@@ -502,10 +520,16 @@ export default function DocumentWriterView(props: SessionViewProps) {
     return `sessions/${id}/refs`;
   });
 
+  const sessionDocumentsRoot = createMemo(() => {
+    const id = sessionId();
+    if (!id) return "";
+    return `documents/sessions/${id}`;
+  });
+
   const refsWorkspaceRoot = createMemo(() => {
-    const prefix = refsInboxPrefix();
-    if (!prefix) return "";
-    return `.opencode/openwork/inbox/${prefix}`;
+    const root = sessionDocumentsRoot();
+    if (!root) return "";
+    return `${root}/refs`;
   });
 
   const refsFetchInput = createMemo(() => {
@@ -562,7 +586,19 @@ export default function DocumentWriterView(props: SessionViewProps) {
     return normalized.slice(rootPrefix.length);
   };
 
-  const inboxWorkspacePath = (itemPath: string) => `.opencode/openwork/inbox/${normalizeInboxPath(itemPath)}`;
+  const inboxWorkspacePath = (itemPath: string) => {
+    const docsRoot = sessionDocumentsRoot();
+    const refsPrefix = refsInboxPrefix();
+    const normalized = normalizeInboxPath(itemPath);
+    if (docsRoot && refsPrefix) {
+      const rootPrefix = `${refsPrefix}/`;
+      if (normalized.startsWith(rootPrefix)) {
+        const remainder = normalizeRelativePath(normalized.slice(rootPrefix.length), "");
+        if (remainder) return `${docsRoot}/refs/${remainder}`;
+      }
+    }
+    return `.opencode/openwork/inbox/${normalized}`;
+  };
 
   const [reports, { refetch: refetchReports }] = createResource(reportsFetchInput, async (input) => {
     if (!input) return [] as InboxItem[];
@@ -834,16 +870,54 @@ export default function DocumentWriterView(props: SessionViewProps) {
   const refsFileMenuKey = (categoryId: string, itemId: string) => `file:${categoryId}:${itemId}`;
   const refsFolderMenuKey = (categoryId: string, folderPath: string) => `folder:${categoryId}:${folderPath}`;
   const categoryPromptPath = (categoryId: string) => {
-    const prefix = refsInboxPrefix();
-    if (!prefix) return "";
-    return `.opencode/openwork/inbox/${prefix}/${categoryId}/`;
+    const root = refsWorkspaceRoot();
+    if (!root) return "";
+    return `${root}/${categoryId}/`;
   };
   const folderPromptPath = (categoryId: string, folderPath: string) => {
-    const prefix = refsInboxPrefix();
-    if (!prefix) return "";
+    const root = refsWorkspaceRoot();
+    if (!root) return "";
     const normalized = normalizeRelativePath(folderPath, "");
     const suffix = normalized ? `/${normalized}` : "";
-    return `.opencode/openwork/inbox/${prefix}/${categoryId}${suffix}/`;
+    return `${root}/${categoryId}${suffix}/`;
+  };
+
+  const importReferenceToWorkspace = async (item: InboxItem, mode: "reuse" | "overwrite" | "copy" = "reuse") => {
+    const cfg = apiConfig();
+    if (!cfg) throw new Error(tr("docagent.openwork_server_not_ready"));
+    const remainder = refsSessionRemainder(item.path) || normalizeInboxPath(item.path);
+    const segments = remainder.split("/").filter(Boolean);
+    const categoryId = (segments[0] ?? "other").trim() || "other";
+    const relative = normalizeRelativePath(segments.slice(1).join("/"), item.path.split("/").pop() ?? "reference");
+    const dest = `refs/${categoryId}/${relative}`;
+
+    const query = new URLSearchParams();
+    query.set("inboxId", item.id);
+    query.set("session", cfg.sessionId);
+    query.set("dest", dest);
+    query.set("mode", mode);
+    const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/import", query);
+    const result = (await fetchJson(url, cfg.token, { method: "POST" })) as { doc?: string };
+    const doc = typeof result?.doc === "string" ? result.doc.trim() : "";
+    if (!doc) throw new Error(tr("docwriter.failed_import_document"));
+    return doc;
+  };
+
+  const useReferenceInPrompt = async (item: InboxItem) => {
+    if (refsOpenBusyId()) return;
+    setRefsOpenBusyId(item.id);
+    setRefsError(null);
+    try {
+      const doc = await importReferenceToWorkspace(item, "reuse");
+      const root = sessionDocumentsRoot();
+      if (!root) throw new Error(tr("docagent.no_session_selected"));
+      insertRefInPrompt(`${root}/${doc}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : tr("docwriter.failed_import_document");
+      setRefsError(message);
+    } finally {
+      setRefsOpenBusyId(null);
+    }
   };
 
   const scrollToLatest = (behavior: ScrollBehavior = "auto") => {
@@ -1163,8 +1237,6 @@ export default function DocumentWriterView(props: SessionViewProps) {
   };
 
   const openReferenceInEditor = async (item: InboxItem) => {
-    const cfg = apiConfig();
-    if (!cfg) return;
     if (refsOpenBusyId()) return;
     setRefsOpenBusyId(item.id);
     setRefsError(null);
@@ -1172,18 +1244,11 @@ export default function DocumentWriterView(props: SessionViewProps) {
       const remainder = refsSessionRemainder(item.path) || normalizeInboxPath(item.path);
       const segments = remainder.split("/").filter(Boolean);
       const categoryId = (segments[0] ?? "other").trim() || "other";
-      const relative = normalizeRelativePath(segments.slice(1).join("/"), item.path.split("/").pop() ?? "reference");
-      const dest = `.refs/${categoryId}/${relative}`;
-
-      const query = new URLSearchParams();
-      query.set("inboxId", item.id);
-      query.set("session", cfg.sessionId);
-      query.set("dest", dest);
-      query.set("mode", "overwrite");
-      const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/import", query);
-      const result = (await fetchJson(url, cfg.token, { method: "POST" })) as { doc?: string };
-      const doc = typeof result?.doc === "string" ? result.doc.trim() : "";
-      if (!doc) throw new Error(tr("docwriter.failed_import_document"));
+      const doc = await importReferenceToWorkspace(item, "overwrite");
+      // Refresh document list so the imported file is known before we select it.
+      // Without this the document-sync effect would reset activeDoc on the next
+      // reactivity pass because the file wouldn't exist in documentsList().
+      await refetchDocuments();
       if (categoryId === "templates" || isTemplateDocName(doc)) {
         setTargetDoc(doc);
       }
@@ -2301,9 +2366,10 @@ export default function DocumentWriterView(props: SessionViewProps) {
                           <button
                             type="button"
                             class="p-1.5 rounded hover:bg-dls-active text-dls-secondary hover:text-dls-text"
-                            onClick={() => insertRefInPrompt(workspacePath())}
+                            onClick={() => void useReferenceInPrompt(item)}
                             title={tr("docagent.use_in_prompt")}
                             aria-label={tr("docagent.use_in_prompt")}
+                            disabled={refsOpenBusyId() === item.id}
                           >
                             <AtSign size={14} />
                           </button>

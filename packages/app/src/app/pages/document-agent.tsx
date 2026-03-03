@@ -353,19 +353,34 @@ export default function DocumentAgentView(props: SessionViewProps) {
       Boolean(workspaceId()),
   );
 
-  const apiConfig = createMemo(() => {
-    const client = props.openworkServerClient;
-    if (!client) return null;
-    const workspace = workspaceId();
-    const session = sessionId();
-    if (!workspace || !session) return null;
-    return {
-      baseUrl: client.baseUrl,
-      token: client.token?.trim() ?? "",
-      workspaceId: workspace,
-      sessionId: session,
-    };
-  });
+  const apiConfig = createMemo(
+    () => {
+      const client = props.openworkServerClient;
+      if (!client) return null;
+      const workspace = workspaceId();
+      const session = sessionId();
+      if (!workspace || !session) return null;
+      return {
+        baseUrl: client.baseUrl,
+        token: client.token?.trim() ?? "",
+        workspaceId: workspace,
+        sessionId: session,
+      };
+    },
+    null,
+    {
+      equals: (prev, next) => {
+        if (prev === next) return true;
+        if (!prev || !next) return false;
+        return (
+          prev.baseUrl === next.baseUrl &&
+          prev.token === next.token &&
+          prev.workspaceId === next.workspaceId &&
+          prev.sessionId === next.sessionId
+        );
+      },
+    },
+  );
 
   const buildUrl = (baseUrl: string, workspace: string, pathname: string, query?: URLSearchParams) => {
     const normalizedPath = pathname.startsWith("/") ? pathname : `/${pathname}`;

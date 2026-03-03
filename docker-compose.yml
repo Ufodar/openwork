@@ -8,6 +8,10 @@ services:
       # Keep JWT disabled by default for local development. If you want JWT,
       # set ONLYOFFICE_JWT_SECRET in the OpenWork server env and enable JWT here.
       - JWT_ENABLED=false
+      # Allow OnlyOffice to download files from private IPs (host.docker.internal).
+      # Required for local development where the OpenWork server runs on the host.
+      - ALLOW_PRIVATE_IP_ADDRESS=true
+      - ALLOW_META_IP_ADDRESS=true
     restart: always
     volumes:
       - onlyoffice_data:/var/www/onlyoffice/Data

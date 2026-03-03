@@ -723,6 +723,7 @@ export function createDocumentRoutes(routes: unknown[]) {
 
             const initialDestRel = deriveDestRel().replace(/^\/+/, "");
             let destRel = initialDestRel;
+            validateDocumentMutationPath(destRel, { allowHiddenLeafFile: true });
             let destAbs = resolveDocumentPathSafe(docsDir, destRel);
             if (await exists(destAbs)) {
                 const destInfo = await stat(destAbs).catch(() => null);
@@ -738,6 +739,7 @@ export function createDocumentRoutes(routes: unknown[]) {
                     const base = basename(destRel, ext);
                     const unique = `${base}-${shortId()}${ext}`;
                     destRel = dirRel && dirRel !== "." ? `${dirRel}/${unique}` : unique;
+                    validateDocumentMutationPath(destRel, { allowHiddenLeafFile: true });
                     destAbs = resolveDocumentPathSafe(docsDir, destRel);
                 }
             }

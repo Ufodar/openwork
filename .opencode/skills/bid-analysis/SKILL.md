@@ -27,11 +27,12 @@ description: 分析招标文件，提取评标方法、评分标准、资质要�
      - **二、关键决策日志**：空表格框架（决策ID | 决策内容 | 影响节点 | 决策依据 | 记录时间）
      - **三、一致性检查点**：空检查清单框架，待首个关键决策产生后填充
   4. 两者的 status 字段保持同步
+  5. 如有需要，在会话根目录生成 `facts.json`（schema 参见 `references/facts-template.json`），记录项目关键事实（公司名、项目名、项目编号、截止日期、预算等）。此文件供后续 bid-qc 确定性脚本使用。
 - 如 < 10 条 → 只写 requirements.csv，不创建工作树。
 
-### Step 4.5: 构建材料索引（当 refs/ 目录含 >= 5 个文件时）
+### Step 4.5: 构建材料索引（当会话目录下的参考文件 >= 5 个时）
 
-浏览 refs/ 下所有子目录的文件列表，对每个文件快速了解其内容概要（读取前几页/首 sheet/首 slide），构建 `.worktree/material-registry.json`（schema 参见 `references/material-registry-template.json`）：
+浏览会话目录下的参考文件（通常在 refs/ 下，但用户可能直接上传到根目录或其他子目录），对每个文件快速了解其内容概要（读取前几页/首 sheet/首 slide），构建 `.worktree/material-registry.json`（schema 参见 `references/material-registry-template.json`）：
 
 - 每个文件一个条目：type、format、covers、useful_for_reqs、quality、caveats
 - useful_for_reqs 可在此阶段粗略填写（基于文件内容和 requirements.csv 的匹配），后续阶段逐步精确化

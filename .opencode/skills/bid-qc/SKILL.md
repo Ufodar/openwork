@@ -7,7 +7,7 @@ description: 检查投标文件质量，合规审查，查找错误和遗漏。�
 
 ### Step 1: 确认检查范围
 必须有：目标文档（投标文件 .docx） + 招标文件（校验基线）。
-可选：`.worktree/index.json` 或 `requirements.csv`（检查清单骨架）、`facts.json`（事实校验基线）。
+可选：`.worktree/index.json` 或 `requirements.csv`（检查清单骨架）、`facts.json`（事实校验基线，位于会话根目录，由 bid-analysis 阶段生成）。
 如有工作树 → 利用节点信息定位每条要求在目标文档中的位置，提高检查精度。
 
 ### Step 2a: 确定性初筛（硬规则预检层）
@@ -16,10 +16,10 @@ description: 检查投标文件质量，合规审查，查找错误和遗漏。�
 
 ```bash
 python .opencode/skills/bid-qc/scripts/check_deterministic.py \
-  --unpacked /path/to/unpacked/ \
-  --facts facts.json \
-  --requirements requirements.csv \
-  --output reports/qc-deterministic.json
+  --unpacked documents/sessions/<sessionId>/.tmp/unpacked/<docname>/ \
+  --facts documents/sessions/<sessionId>/facts.json \
+  --requirements documents/sessions/<sessionId>/requirements.csv \
+  --output documents/sessions/<sessionId>/reports/qc-deterministic.json
 ```
 
 此步骤是**预检**，不是完整检查。脚本输出中每个 check 包含 `scope`（实际验证了什么）和 `uncovered`（需要 Step 2c 补充什么）。

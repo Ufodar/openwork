@@ -308,6 +308,34 @@ async function resolveSessionInboxFilePath({
     return { absPath: inboxAbs, relPath: decoded };
 }
 
+/**
+ * Resolve a file reference that may come as either a docPath (relative to session docs dir)
+ * or a legacy inboxId. Prefers docPath; falls back to inboxId for backward compatibility.
+ */
+async function resolveSessionFileRef({
+    workspace,
+    sessionId,
+    docPath,
+    inboxId,
+}: {
+    workspace: WorkspaceInfo;
+    sessionId: string;
+    docPath?: string;
+    inboxId?: string;
+}): Promise<{ absPath: string }> {
+    if (docPath) {
+        const docsDir = resolveDocumentsDir(workspace.path, sessionId);
+        const absPath = resolveDocumentPathSafe(docsDir, docPath);
+        if (!(await exists(absPath))) throw new ApiError(404, "not_found", `Document file not found: ${docPath}`);
+        return { absPath };
+    }
+    if (inboxId) {
+        const { absPath } = await resolveSessionInboxFilePath({ workspace, sessionId, inboxId });
+        return { absPath };
+    }
+    throw new ApiError(400, "invalid_request", "Either docPath or inboxId is required");
+}
+
 function nowStampForFilename(): string {
     return new Date().toISOString().replace(/[:.]/g, "-");
 }
@@ -322,16 +350,16 @@ async function writeSessionReport({
     sessionId: string;
     moduleId: string;
     content: string;
-}): Promise<{ inboxId: string; inboxPath: string }> {
-    const inboxRoot = resolveInboxDir(workspace.path);
+}): Promise<{ docPath: string }> {
+    const docsDir = resolveDocumentsDir(workspace.path, sessionId);
     const stamp = nowStampForFilename();
-    const relPath = `sessions/${sessionId}/reports/${moduleId}/${stamp}.md`;
-    const absPath = resolveDocumentPathSafe(inboxRoot, relPath);
+    const relPath = `reports/${moduleId}/${stamp}.md`;
+    const absPath = resolveDocumentPathSafe(docsDir, relPath);
     await ensureDir(dirname(absPath));
     const tmp = `${absPath}.tmp-${shortId()}`;
     await writeFile(tmp, content, "utf8");
     await rename(tmp, absPath);
-    return { inboxId: encodeInboxId(relPath), inboxPath: relPath };
+    return { docPath: relPath };
 }
 
 async function writeSessionArtifactFromFile({
@@ -346,17 +374,17 @@ async function writeSessionArtifactFromFile({
     moduleId: string;
     filename: string;
     absSourcePath: string;
-}): Promise<{ inboxId: string; inboxPath: string }> {
-    const inboxRoot = resolveInboxDir(workspace.path);
+}): Promise<{ docPath: string }> {
+    const docsDir = resolveDocumentsDir(workspace.path, sessionId);
     const stamp = nowStampForFilename();
     const safeName = (filename || "artifact").trim().replace(/[\\/]+/g, "-");
-    const relPath = `sessions/${sessionId}/reports/${moduleId}/${stamp}-${safeName}`;
-    const absPath = resolveDocumentPathSafe(inboxRoot, relPath);
+    const relPath = `reports/${moduleId}/${stamp}-${safeName}`;
+    const absPath = resolveDocumentPathSafe(docsDir, relPath);
     await ensureDir(dirname(absPath));
     const tmp = `${absPath}.tmp-${shortId()}`;
     await copyFile(absSourcePath, tmp);
     await rename(tmp, absPath);
-    return { inboxId: encodeInboxId(relPath), inboxPath: relPath };
+    return { docPath: relPath };
 }
 
 async function writeSessionVisibleArtifactFromFile({
@@ -984,14 +1012,15 @@ export function createDocumentRoutes(routes: unknown[]) {
             }
 
             const partnerInboxId = typeof body.partnerInboxId === "string" ? body.partnerInboxId.trim() : "";
+            const partnerDocPath = typeof body.partnerDocPath === "string" ? body.partnerDocPath.trim() : "";
             const matchMode = typeof body.matchMode === "string" ? body.matchMode.trim().toLowerCase() : "contains";
             const force = Boolean(body.force);
             const seedTarget = Boolean(body.seedTarget);
             if (!["exact", "contains", "startswith"].includes(matchMode)) {
                 throw new ApiError(400, "invalid_request", "Invalid matchMode");
             }
-            if (!partnerInboxId) {
-                throw new ApiError(400, "invalid_request", "partnerInboxId is required");
+            if (!partnerInboxId && !partnerDocPath) {
+                throw new ApiError(400, "invalid_request", "partnerDocPath or partnerInboxId is required");
             }
 
             const scriptPath = resolveDocxSectionCopyScriptPath(workspace.path);
@@ -999,12 +1028,13 @@ export function createDocumentRoutes(routes: unknown[]) {
                 throw new ApiError(500, "missing_dependency", "copy_docx_section.py is missing in this workspace");
             }
 
-            const { absPath: partnerInboxAbs } = await resolveSessionInboxFilePath({
+            const { absPath: partnerFileAbs } = await resolveSessionFileRef({
                 workspace,
                 sessionId,
-                inboxId: partnerInboxId,
+                docPath: partnerDocPath || undefined,
+                inboxId: partnerInboxId || undefined,
             });
-            const partnerAbs = await ensureDocxZipPath(workspace.path, partnerInboxAbs);
+            const partnerAbs = await ensureDocxZipPath(workspace.path, partnerFileAbs);
 
             const listHeadings = (sourcePath: string) => {
                 const result = spawnSync(
@@ -1251,7 +1281,9 @@ export function createDocumentRoutes(routes: unknown[]) {
             }
 
             const techXlsxInboxId = typeof body.techXlsxInboxId === "string" ? body.techXlsxInboxId.trim() : "";
+            const techXlsxDocPath = typeof body.techXlsxDocPath === "string" ? body.techXlsxDocPath.trim() : "";
             const equipXlsxInboxId = typeof body.equipXlsxInboxId === "string" ? body.equipXlsxInboxId.trim() : "";
+            const equipXlsxDocPath = typeof body.equipXlsxDocPath === "string" ? body.equipXlsxDocPath.trim() : "";
             const brand = typeof body.brand === "string" ? body.brand.trim() : "";
             const manufacturer = typeof body.manufacturer === "string" ? body.manufacturer.trim() : "";
             const origin = typeof body.origin === "string" ? body.origin.trim() : "";
@@ -1269,19 +1301,21 @@ export function createDocumentRoutes(routes: unknown[]) {
             let techAbs: string | null = null;
             let equipAbs: string | null = null;
             try {
-                if (techXlsxInboxId) {
-                    const { absPath } = await resolveSessionInboxFilePath({
+                if (techXlsxDocPath || techXlsxInboxId) {
+                    const { absPath } = await resolveSessionFileRef({
                         workspace,
                         sessionId,
-                        inboxId: techXlsxInboxId,
+                        docPath: techXlsxDocPath || undefined,
+                        inboxId: techXlsxInboxId || undefined,
                     });
                     techAbs = absPath;
                 }
-                if (equipXlsxInboxId) {
-                    const { absPath } = await resolveSessionInboxFilePath({
+                if (equipXlsxDocPath || equipXlsxInboxId) {
+                    const { absPath } = await resolveSessionFileRef({
                         workspace,
                         sessionId,
-                        inboxId: equipXlsxInboxId,
+                        docPath: equipXlsxDocPath || undefined,
+                        inboxId: equipXlsxInboxId || undefined,
                     });
                     equipAbs = absPath;
                 }
@@ -1377,15 +1411,17 @@ export function createDocumentRoutes(routes: unknown[]) {
             }
 
             const tenderInboxId = typeof body.tenderInboxId === "string" ? body.tenderInboxId.trim() : "";
+            const tenderDocPath = typeof body.tenderDocPath === "string" ? body.tenderDocPath.trim() : "";
             const applyToTarget = body.applyToTarget === undefined ? true : Boolean(body.applyToTarget);
             const force = Boolean(body.force);
             const ensureProjectInfoBlock = body.ensureProjectInfoBlock === undefined ? true : Boolean(body.ensureProjectInfoBlock);
-            if (!tenderInboxId) throw new ApiError(400, "invalid_request", "tenderInboxId is required");
+            if (!tenderInboxId && !tenderDocPath) throw new ApiError(400, "invalid_request", "tenderDocPath or tenderInboxId is required");
 
-            const { absPath: tenderAbs } = await resolveSessionInboxFilePath({
+            const { absPath: tenderAbs } = await resolveSessionFileRef({
                 workspace,
                 sessionId,
-                inboxId: tenderInboxId,
+                docPath: tenderDocPath || undefined,
+                inboxId: tenderInboxId || undefined,
             });
             const tenderDocxAbs = await ensureDocxZipPath(workspace.path, tenderAbs);
 
@@ -1457,7 +1493,7 @@ export function createDocumentRoutes(routes: unknown[]) {
                     "",
                 ].join("\n");
             }
-            reportContent += `\n\n## Artifacts\n\n- facts.json: \`${facts.inboxPath}\`\n`;
+            reportContent += `\n\n## Artifacts\n\n- facts.json: \`${facts.docPath}\`\n`;
 
             const report = await writeSessionReport({
                 workspace,
@@ -1686,7 +1722,7 @@ export function createDocumentRoutes(routes: unknown[]) {
             const stdout = String(result.stdout || "").trim();
             const stderr = String(result.stderr || "").trim();
 
-            let mediaZip: { inboxId: string; inboxPath: string } | null = null;
+            let mediaZip: { docPath: string } | null = null;
             let mediaDoc: { docPath: string } | null = null;
             if (tmpMediaDir && tmpMediaZip) {
                 const zipResult = spawnSync("zip", ["-r", tmpMediaZip, "."], {
@@ -1726,10 +1762,10 @@ export function createDocumentRoutes(routes: unknown[]) {
             if (mediaZip) {
                 reportContent = reportContent.replace(
                     /- Contact sheet \(HTML\): `[^`]+`/g,
-                    `- Media contact sheet (download zip): \`${mediaZip.inboxPath}\``,
+                    `- Media contact sheet (download zip): \`${mediaZip.docPath}\``,
                 );
                 if (!/Media contact sheet/.test(reportContent)) {
-                    reportContent += `\n\n## Media exports\n\n- Media contact sheet (download zip): \`${mediaZip.inboxPath}\`\n`;
+                    reportContent += `\n\n## Media exports\n\n- Media contact sheet (download zip): \`${mediaZip.docPath}\`\n`;
                 }
             }
 

@@ -406,8 +406,8 @@ export default function DocumentAgentView(props: SessionViewProps) {
         const parsed = JSON.parse(text) as { message?: unknown; details?: any } | null;
         const message = parsed && typeof parsed.message === "string" ? parsed.message : "";
         const reportPath =
-          parsed?.details?.report?.inboxPath && typeof parsed.details.report.inboxPath === "string"
-            ? parsed.details.report.inboxPath
+          parsed?.details?.report?.docPath && typeof parsed.details.report.docPath === "string"
+            ? parsed.details.report.docPath
             : "";
         const suffix = reportPath ? `\n\nReport: ${reportPath}` : "";
         throw new Error((message || `Request failed (${response.status})`) + suffix);

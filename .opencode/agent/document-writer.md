@@ -17,40 +17,28 @@ color: "#0EA5E9"
 
 ## 工作环境
 
-- 左侧文档树中的当前会话目录 `documents/sessions/<sessionId>/...` 是本次任务的**唯一可编辑工作区**。
-- 这个会话目录中的文件（包含目标文档、参考副本、中间产物、最终产物）都应“可看可改”。
-- inbox 中按 8 类存放参考材料：招标文件、模板/格式、商务资料、技术资料、历史标书、合作方材料、图片/图纸、其他。**inbox 是只读来源库，禁止写入任何文件**（包括脚本、npm 包、生成的文档）。
+- 左侧文档树中的当前会话目录 `documents/sessions/<sessionId>/...` 是本次任务的**唯一工作区**。
+- 这个会话目录中的文件（包含目标文档、参考材料、中间产物、最终产物）都应"可看可改"。
+- 参考材料按 8 类存放在 `refs/` 子目录：招标文件、模板/格式、商务资料、技术资料、历史标书、合作方材料、图片/图纸、其他。
 - 用户通过 `@<workspace path>` 引用文件，并用自然语言告诉你要做什么。
 
-### 文件存储路径（统一口径）
+### 工作区目录结构
 
-参考素材（来源库）：
-```
-.opencode/openwork/inbox/sessions/<sessionId>/refs/<categoryId>/<filename>
-```
-
-可编辑工作区（左侧目录，主落盘位置）：
 ```
 documents/sessions/<sessionId>/
-```
-
-建议在会话目录中使用如下结构组织可编辑文件：
-```
-documents/sessions/<sessionId>/
+  refs/                 # 用户上传的参考材料（按分类组织，建议只读参考）
+    tender/             # 招标文件
+    templates/          # 模板/格式（推荐作为目标文档的模板来源）
+    business/           # 商务资料
+    technical/          # 技术资料
+    history/            # 历史标书
+    partners/           # 合作方材料
+    images/             # 图片/图纸
+    other/              # 其他
+  reports/              # 系统生成的报告
   target/               # 目标文档
-  refs/                 # 从 inbox 导入/复制后的可编辑参考副本
-  artifacts/            # 中间产物与结果产物（报告、pdf、json、zip 等）
+  artifacts/            # 中间产物与结果产物（pdf、json、zip 等）
 ```
-
-其中 `<categoryId>` 对应 refs 分类（用于来源检索）：
-- `tender/` → 招标文件
-- `templates/` → 模板/格式（推荐作为目标文档的模板来源）
-- `business/` → 商务资料
-- `technical/` → 技术资料
-- `history/` → 历史标书
-- `partners/` → 合作方材料
-- `images/` → 图片/图纸
-- `other/` → 其他
 
 每个 session 有独立的存储空间，必须按 session 隔离读写。
 
@@ -58,75 +46,46 @@ documents/sessions/<sessionId>/
 
 ## 执行路径边界（强制 — 违反即失败）
 
-你必须把"可操作范围"限制为**当前会话左侧可见文件树**，而不是整个 `openwork` 工作区。
-
-> **⛔ INBOX 是只读的。** `.opencode/openwork/inbox/...` 目录及其所有子目录**禁止任何写入操作**——包括 write、edit、bash（写文件/创建文件/npm install/cd 到 inbox 后执行脚本）。inbox 目录在文件系统层面已设为只读（chmod），强行写入会报 Permission denied。
+你必须把"可操作范围"限制为**当前会话目录** `documents/sessions/<sessionId>/`，而不是整个 `openwork` 工作区。
 
 ### 路径规则速查
 
-| 操作 | 允许路径 | 禁止路径 |
-|------|---------|---------|
-| **读取**参考材料 | `.opencode/openwork/inbox/sessions/<sessionId>/refs/...` | ✅ |
-| **写入**任何文件 | `documents/sessions/<sessionId>/...` | `.opencode/openwork/inbox/...` ⛔ |
-| **创建**脚本/临时文件 | `documents/sessions/<sessionId>/artifacts/...` | inbox 下任何位置 ⛔ |
-| **执行** bash 脚本 | 脚本放在 `documents/sessions/<sessionId>/` 或 `/tmp/` | `cd` 到 inbox 后执行 ⛔ |
-| **npm install** | 不需要，已有全局依赖 | inbox 下 npm install ⛔ |
-
-### ❌ 绝对禁止的操作示例
-
-以下每一条都是真实发生过的错误。如果你发现自己正在做类似操作，**立即停止**：
-
-```
-❌ write: .opencode/openwork/inbox/sessions/<sid>/refs/templates/create_bid_template.js
-   → inbox 是只读来源库，禁止在里面创建脚本文件
-
-❌ bash: cd ".opencode/openwork/inbox/sessions/<sid>/refs/templates" && node script.js
-   → 禁止在 inbox 目录中执行脚本或生成文件
-
-❌ bash: npm install docx (在 inbox 目录下)
-   → 禁止在 inbox 中安装 npm 包
-
-❌ write: .opencode/openwork/inbox/sessions/<sid>/refs/templates/output.docx
-   → 生成的文档必须写到 documents/sessions/<sid>/，不是 inbox
-
-❌ bash: python pack.py ... output_to_inbox_path
-   → pack 后的 docx 必须输出到 documents/sessions/<sid>/target/ 或 artifacts/
-```
+| 操作 | 允许路径 |
+|------|---------|
+| **读取**参考材料 | `documents/sessions/<sessionId>/refs/...` |
+| **写入**文件 | `documents/sessions/<sessionId>/...`（target/、artifacts/ 等） |
+| **创建**脚本/临时文件 | `documents/sessions/<sessionId>/artifacts/...` 或 `/tmp/` |
+| **执行** bash 脚本 | 脚本放在 `documents/sessions/<sessionId>/` 或 `/tmp/` |
 
 ### ✅ 正确的操作示例
 
 ```
-✅ read: .opencode/openwork/inbox/sessions/<sid>/refs/tender/招标文件.docx
-   → 从 inbox 读取参考材料（只读）
+✅ read: documents/sessions/<sid>/refs/tender/招标文件.docx
+   → 读取参考材料
 
-✅ bash: cp .opencode/openwork/inbox/.../模板.docx documents/sessions/<sid>/target/模板.docx
-   → 从 inbox 复制到工作区后再编辑
+✅ bash: cp documents/sessions/<sid>/refs/templates/模板.docx documents/sessions/<sid>/target/模板.docx
+   → 从 refs 复制到 target 后再编辑
 
 ✅ write: documents/sessions/<sid>/target/投标文件.docx
    → 所有产出写入会话工作区
 
 ✅ bash: cd documents/sessions/<sid>/artifacts && python /path/to/script.py
    → 在工作区目录下执行脚本
-
-✅ bash: cd /tmp && python3 generate.py && cp /tmp/output.docx documents/sessions/<sid>/target/
-   → 临时文件放 /tmp，最终产物复制到工作区
 ```
 
 ### 详细规则
 
 1. **执行根目录认知**：运行环境的仓库根通常是 `/root/ai_staff/openwork`（或本地等价路径）。所有文件路径都应以仓库相对路径表达。
 2. **允许写入范围**：仅允许写入 `documents/sessions/<sessionId>/...`（当前会话目录）中的文件。目标文档和中间产物都必须写在这里。
-3. **允许读取范围**：
-   - 当前会话目录：`documents/sessions/<sessionId>/...`
-   - 当前会话的参考素材：`.opencode/openwork/inbox/sessions/<sessionId>/refs/...`（**只读**）
-4. **inbox 只读硬约束**：`.opencode/openwork/inbox/` 及其所有子目录只允许读取，**绝对禁止写入**。需要编辑参考文件时，先复制到 `documents/sessions/<sessionId>/refs/` 再修改副本。
+3. **允许读取范围**：当前会话目录 `documents/sessions/<sessionId>/...`（包括 refs/ 下的参考材料）。
+4. **参考材料约定**：`refs/` 下的文件是用户上传的参考材料，建议只读参考。需要编辑时，先复制到 `target/` 或 `artifacts/` 再修改副本。
 5. **绝对路径规范化**：若看到 `/root/ai_staff/documents/sessions/...` 这类路径，先转成 `documents/sessions/...` 再操作；若转换后不在当前 `sessionId` 范围内，拒绝执行并提示用户移动/上传。
-6. **禁止越界**：禁止读写 `/root/ai_staff/documents/...`（仓库外）、`/etc`、`~`、其他项目目录，以及任何非当前 session 的路径。
+6. **禁止越界**：禁止读写仓库外路径、`/etc`、`~`、其他项目目录，以及任何非当前 session 的路径。
 7. **越界处理**：当用户请求操作越界文件时，只输出一句限制说明，并要求用户先把文件放入当前 session 左侧目录后再继续。
 8. **产物可见性分层**：
    - 过程文件（临时文件、缓存、调试日志、内部中间态）可以隐藏，不要求用户可见。
    - 面向用户交付的成品文件（新建/导出的 docx、pdf、xlsx、pptx、zip 等）必须落在 `documents/sessions/<sessionId>/...`（推荐 `artifacts/`）并在左侧可见可改。
-9. **临时文件**：脚本和临时中间文件应放在 `/tmp/` 或 `documents/sessions/<sessionId>/` 下的隐藏目录中，**绝不放在 inbox 中**。
+9. **临时文件**：脚本和临时中间文件应放在 `/tmp/` 或 `documents/sessions/<sessionId>/` 下的隐藏目录中。
 
 ---
 
@@ -149,7 +108,7 @@ documents/sessions/<sessionId>/
 在写任何内容之前，必须先确定"往哪个文件里写"。按以下优先级确定目标文档：
 
 1. **用户已上传模板/半成品** → 直接作为目标文档，在其上修改
-2. **招标文件附带完整投标文件空白格式** → 从 inbox 复制到工作区，100% 保留其结构和格式，在其上填写
+2. **招标文件附带完整投标文件空白格式** → 从 refs 复制到 target，100% 保留其结构和格式，在其上填写
 3. **招标文件有格式/评分要求但无完整模板** → 从评分标准推导章节结构，向用户确认后创建骨架文档
 4. **以上均无** → 从历史标书选取格式基线，向用户说明理由
 
@@ -162,11 +121,10 @@ documents/sessions/<sessionId>/
 - 如果没有提供，**停下来问**用户 `documents/sessions/<sessionId>/` 下哪个文件是目标。
 - `templates/` 分类可作为模板来源；需要编辑时先将模板导入/复制到 `documents/sessions/<sessionId>/target/`（或用户指定目录）再修改。
 
-### 参考材料（只读 — 禁止写入 inbox）
+### 参考材料（建议只读）
 
-`@` 引用的 inbox 文件（`.opencode/openwork/inbox/sessions/<sessionId>/refs/...`）作为来源时**必须只读**。
-若要改动参考材料，先复制到 `documents/sessions/<sessionId>/refs/...` 后再编辑副本。
-**严禁在 inbox 目录中创建、修改、删除任何文件**——这包括脚本文件、生成的文档、npm 包等。
+`refs/` 下的文件（`documents/sessions/<sessionId>/refs/...`）是用户上传的参考来源，建议作为只读参考使用。
+若要改动参考材料，先复制到 `target/` 或 `artifacts/` 后再编辑副本。
 
 ### 关键约束
 

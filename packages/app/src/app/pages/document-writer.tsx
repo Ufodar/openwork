@@ -25,18 +25,11 @@ type DocumentWriterUiState = {
   rightPaneWidth?: number;
 };
 
-type InboxItem = {
-  id: string;
-  path: string;
-  size: number;
-  updatedAt: number;
-};
-
 type RefFolderNode = {
   name: string;
   path: string;
   folders: RefFolderNode[];
-  files: InboxItem[];
+  files: DocumentItem[];
 };
 
 type RefsUploadProgress = {
@@ -188,18 +181,8 @@ const RIGHT_PANEL_DEFAULT_WIDTH = 500;
 const RIGHT_PANEL_MIN_WIDTH = 360;
 const CENTER_PANEL_MIN_WIDTH = 520;
 const STREAM_SCROLL_MIN_INTERVAL_MS = 90;
-const INBOX_PATH_PREFIXES = [".opencode/openwork/inbox/", "opencode/openwork/inbox/", "openwork/inbox/"] as const;
 
 const clampNumber = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
-const normalizeInboxPath = (value: string) => {
-  const normalized = value.replace(/\\/g, "/").replace(/^\/+/, "").replace(/^\.\//, "");
-  for (const prefix of INBOX_PATH_PREFIXES) {
-    if (normalized.startsWith(prefix)) {
-      return normalized.slice(prefix.length);
-    }
-  }
-  return normalized;
-};
 
 const getFileExtension = (value: string) => {
   const base = value.split("/").pop() ?? value;
@@ -366,8 +349,8 @@ export default function DocumentWriterView(props: SessionViewProps) {
         const parsed = JSON.parse(text) as { message?: unknown; details?: any } | null;
         const message = parsed && typeof parsed.message === "string" ? parsed.message : "";
         const reportPath =
-          parsed?.details?.report?.inboxPath && typeof parsed.details.report.inboxPath === "string"
-            ? parsed.details.report.inboxPath
+          parsed?.details?.report?.docPath && typeof parsed.details.report.docPath === "string"
+            ? parsed.details.report.docPath
             : "";
         const suffix = reportPath ? `\n\n${trf("docwriter.report_suffix", { path: reportPath })}` : "";
         throw new Error((message || trf("docwriter.request_failed_with_status", { status: response.status })) + suffix);
@@ -430,14 +413,14 @@ export default function DocumentWriterView(props: SessionViewProps) {
 
   const [modulesExpanded, setModulesExpanded] = createSignal(true);
   const [moduleModal, setModuleModal] = createSignal<null | "assemble" | "facts" | "fill" | "dedupe" | "qc" | "preview">(null);
-  const [assembleSource, setAssembleSource] = createSignal<InboxItem | null>(null);
+  const [assembleSource, setAssembleSource] = createSignal<DocumentItem | null>(null);
   const [assembleMatchMode, setAssembleMatchMode] = createSignal<"contains" | "exact" | "startswith">("contains");
   const [assembleForce, setAssembleForce] = createSignal(false);
   const [assembleSeedTarget, setAssembleSeedTarget] = createSignal(false);
   const [assembleBusy, setAssembleBusy] = createSignal(false);
   const [assembleError, setAssembleError] = createSignal<string | null>(null);
   const [assembleQuery, setAssembleQuery] = createSignal("");
-  const [factsTenderSource, setFactsTenderSource] = createSignal<InboxItem | null>(null);
+  const [factsTenderSource, setFactsTenderSource] = createSignal<DocumentItem | null>(null);
   const [factsApplyToTarget, setFactsApplyToTarget] = createSignal(true);
   const [factsForce, setFactsForce] = createSignal(false);
   const [factsInsertBlock, setFactsInsertBlock] = createSignal(true);
@@ -514,12 +497,6 @@ export default function DocumentWriterView(props: SessionViewProps) {
     });
   });
 
-  const refsInboxPrefix = createMemo(() => {
-    const id = sessionId();
-    if (!id) return "";
-    return `sessions/${id}/refs`;
-  });
-
   const sessionDocumentsRoot = createMemo(() => {
     const id = sessionId();
     if (!id) return "";
@@ -532,103 +509,37 @@ export default function DocumentWriterView(props: SessionViewProps) {
     return `${root}/refs`;
   });
 
-  const refsFetchInput = createMemo(() => {
-    const client = props.openworkServerClient;
-    const w = workspaceId();
-    const prefix = refsInboxPrefix();
-    if (!client || !w || !prefix) return null;
-    if (props.openworkServerStatus !== "connected") return null;
-    return { client, workspaceId: w, prefix };
+  const refsList = createMemo(() => {
+    const items = documentsList();
+    return items.filter((item) => item.name.startsWith("refs/"));
   });
 
-  const [refs, { refetch: refetchRefs }] = createResource(refsFetchInput, async (input) => {
-    if (!input) return [] as InboxItem[];
-    const primary = await input.client.listInbox(input.workspaceId, { prefix: input.prefix });
-    const primaryItems = Array.isArray(primary.items) ? (primary.items as InboxItem[]) : [];
-    if (primaryItems.length > 0) return primaryItems;
-    try {
-      const fallback = await input.client.listInbox(input.workspaceId);
-      const allItems = Array.isArray(fallback.items) ? (fallback.items as InboxItem[]) : [];
-      const rootPrefix = `${input.prefix}/`;
-      return allItems.filter((item) => normalizeInboxPath(item.path).startsWith(rootPrefix));
-    } catch {
-      return primaryItems;
-    }
-  });
-
-  const reportsInboxPrefix = createMemo(() => {
-    const id = sessionId();
-    if (!id) return "";
-    return `sessions/${id}/reports`;
-  });
+  const refsLoading = () => documents.loading;
 
   const reportsWorkspaceRoot = createMemo(() => {
-    const prefix = reportsInboxPrefix();
-    if (!prefix) return "";
-    return `.opencode/openwork/inbox/${prefix}`;
+    const root = sessionDocumentsRoot();
+    if (!root) return "";
+    return `${root}/reports`;
   });
 
-  const reportsFetchInput = createMemo(() => {
-    const client = props.openworkServerClient;
-    const w = workspaceId();
-    const prefix = reportsInboxPrefix();
-    if (!client || !w || !prefix) return null;
-    if (props.openworkServerStatus !== "connected") return null;
-    return { client, workspaceId: w, prefix };
-  });
-
-  const refsSessionRemainder = (itemPath: string) => {
-    const prefix = refsInboxPrefix();
-    if (!prefix) return "";
-    const normalized = normalizeInboxPath(itemPath);
-    const rootPrefix = `${prefix}/`;
-    if (!normalized.startsWith(rootPrefix)) return "";
-    return normalized.slice(rootPrefix.length);
+  const refsItemRemainder = (itemName: string) => {
+    if (!itemName.startsWith("refs/")) return "";
+    return itemName.slice("refs/".length);
   };
 
-  const inboxWorkspacePath = (itemPath: string) => {
-    const docsRoot = sessionDocumentsRoot();
-    const refsPrefix = refsInboxPrefix();
-    const normalized = normalizeInboxPath(itemPath);
-    if (docsRoot && refsPrefix) {
-      const rootPrefix = `${refsPrefix}/`;
-      if (normalized.startsWith(rootPrefix)) {
-        const remainder = normalizeRelativePath(normalized.slice(rootPrefix.length), "");
-        if (remainder) return `${docsRoot}/refs/${remainder}`;
-      }
-    }
-    return `.opencode/openwork/inbox/${normalized}`;
-  };
-
-  const [reports, { refetch: refetchReports }] = createResource(reportsFetchInput, async (input) => {
-    if (!input) return [] as InboxItem[];
-    const primary = await input.client.listInbox(input.workspaceId, { prefix: input.prefix });
-    const primaryItems = Array.isArray(primary.items) ? (primary.items as InboxItem[]) : [];
-    const items =
-      primaryItems.length > 0
-        ? primaryItems
-        : await (async () => {
-          try {
-            const fallback = await input.client.listInbox(input.workspaceId);
-            const allItems = Array.isArray(fallback.items) ? (fallback.items as InboxItem[]) : [];
-            const rootPrefix = `${input.prefix}/`;
-            return allItems.filter((item) => normalizeInboxPath(item.path).startsWith(rootPrefix));
-          } catch {
-            return primaryItems;
-          }
-        })();
-    items.sort((a, b) => b.updatedAt - a.updatedAt);
-    return items;
+  const reportsList = createMemo(() => {
+    const items = documentsList();
+    const filtered = items.filter((item) => item.name.startsWith("reports/"));
+    filtered.sort((a, b) => b.updatedAt - a.updatedAt);
+    return filtered;
   });
 
   const refsByCategory = createMemo(() => {
-    const items = refs() ?? [];
-    const prefix = refsInboxPrefix();
-    const result: Record<string, InboxItem[]> = Object.fromEntries(REF_CATEGORIES.map((c) => [c.id, []]));
-    if (!prefix) return result;
+    const items = refsList();
+    const result: Record<string, DocumentItem[]> = Object.fromEntries(REF_CATEGORIES.map((c) => [c.id, []]));
 
     for (const item of items) {
-      const remainder = refsSessionRemainder(item.path);
+      const remainder = refsItemRemainder(item.name);
       if (!remainder) continue;
       const categoryId = remainder.split("/")[0] ?? "";
       if (!categoryId) continue;
@@ -645,94 +556,80 @@ export default function DocumentWriterView(props: SessionViewProps) {
 
   const moduleSources = createMemo(() => {
     const byCategory = refsByCategory();
-    const pool: InboxItem[] = [];
+    const pool: DocumentItem[] = [];
     for (const key of ["partners", "history", "templates", "tender", "other"] as const) {
       pool.push(...(byCategory[key] ?? []));
     }
     const seen = new Set<string>();
     return pool
       .filter((item) => {
-        if (seen.has(item.id)) return false;
-        seen.add(item.id);
+        if (seen.has(item.name)) return false;
+        seen.add(item.name);
         return true;
       })
-      .filter((item) => isDocxSectionCopySource(item.path));
+      .filter((item) => isDocxSectionCopySource(item.name));
   });
 
   const tenderSources = createMemo(() => {
     const byCategory = refsByCategory();
-    return (byCategory.tender ?? []).filter((item) => isDocxSectionCopySource(item.path));
+    return (byCategory.tender ?? []).filter((item) => isDocxSectionCopySource(item.name));
   });
 
   const filteredModuleSources = createMemo(() => {
     const query = assembleQuery().trim().toLowerCase();
     const items = moduleSources();
     if (!query) return items;
-    return items.filter((item) => (item.path.split("/").pop() ?? item.path).toLowerCase().includes(query));
+    return items.filter((item) => (item.name.split("/").pop() ?? item.name).toLowerCase().includes(query));
   });
 
   const xlsxRefs = createMemo(() => {
-    const items = refs() ?? [];
+    const items = refsList();
     return items.filter((item) => {
-      const ext = getFileExtension(item.path);
+      const ext = getFileExtension(item.name);
       return ext === ".xlsx" || ext === ".xlsm";
     });
   });
 
   const xlsxRefsById = createMemo(() => {
-    const map = new Map<string, InboxItem>();
-    for (const item of xlsxRefs()) map.set(item.id, item);
+    const map = new Map<string, DocumentItem>();
+    for (const item of xlsxRefs()) map.set(item.name, item);
     return map;
   });
 
-  type DedupeCandidate =
-    | {
-      key: string;
-      kind: "doc";
-      name: string;
-      updatedAt: number;
-      sourceLabel: string;
-    }
-    | {
-      key: string;
-      kind: "inbox";
-      inboxId: string;
-      path: string;
-      updatedAt: number;
-      sourceLabel: string;
-    };
+  type DedupeCandidate = {
+    key: string;
+    kind: "doc";
+    name: string;
+    updatedAt: number;
+    sourceLabel: string;
+  };
 
   const dedupeCandidates = createMemo(() => {
     const target = targetDoc();
 
+    const refNames = new Set(refsList().map((r) => r.name));
+
     const docCandidates: DedupeCandidate[] = (documentsList() ?? [])
       .filter((doc) => doc.name !== target)
       .filter((doc) => isDocxSectionCopySource(doc.name))
-      .map((doc) => ({
-        key: `doc:${doc.name}`,
-        kind: "doc" as const,
-        name: doc.name,
-        updatedAt: doc.updatedAt,
-        sourceLabel: tr("docwriter.source_session_document"),
-      }));
+      .map((doc) => {
+        let sourceLabel = tr("docwriter.source_session_document");
+        if (refNames.has(doc.name)) {
+          const remainder = refsItemRemainder(doc.name);
+          const categoryId = (remainder.split("/")[0] ?? "other").trim() || "other";
+          sourceLabel = refCategoryLabel(categoryId);
+        }
+        return {
+          key: `doc:${doc.name}`,
+          kind: "doc" as const,
+          name: doc.name,
+          updatedAt: doc.updatedAt,
+          sourceLabel,
+        };
+      });
 
-    const inboxCandidates: DedupeCandidate[] = moduleSources().map((item) => {
-      const remainder = refsSessionRemainder(item.path);
-      const categoryId = (remainder.split("/")[0] ?? "other").trim() || "other";
-      const categoryLabel = refCategoryLabel(categoryId);
-      return {
-        key: `inbox:${item.id}`,
-        kind: "inbox" as const,
-        inboxId: item.id,
-        path: item.path,
-        updatedAt: item.updatedAt,
-        sourceLabel: categoryLabel,
-      };
-    });
-
-    const combined = [...docCandidates, ...inboxCandidates];
-    combined.sort((a, b) => b.updatedAt - a.updatedAt);
-    return combined;
+    docCandidates.sort((a, b) => b.updatedAt - a.updatedAt);
+    return docCandidates;
   });
 
   const filteredDedupeCandidates = createMemo(() => {
@@ -740,10 +637,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
     const items = dedupeCandidates();
     if (!query) return items;
     return items.filter((item) => {
-      const name =
-        item.kind === "doc"
-          ? item.name.split("/").pop() ?? item.name
-          : item.path.split("/").pop() ?? item.path;
+      const name = item.name.split("/").pop() ?? item.name;
       return name.toLowerCase().includes(query) || item.sourceLabel.toLowerCase().includes(query);
     });
   });
@@ -758,7 +652,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
   };
 
   const visibleReports = createMemo(() => {
-    const items = reports() ?? [];
+    const items = reportsList();
     if (reportsExpanded()) return items;
     return items.slice(0, 6);
   });
@@ -776,21 +670,25 @@ export default function DocumentWriterView(props: SessionViewProps) {
     return `${shown} ${units[idx]}`;
   };
 
-  const downloadInboxFile = async (item: InboxItem, onError: (message: string) => void) => {
-    const client = props.openworkServerClient;
-    const w = workspaceId();
-    if (!client || !w) return;
+  const downloadDocumentFile = async (item: DocumentItem, onError: (message: string) => void) => {
+    const cfg = apiConfig();
+    if (!cfg) return;
     try {
-      const result = await client.downloadInbox(w, item.id);
-      const blob = new Blob([result.data], { type: result.contentType ?? "application/octet-stream" });
-      const url = URL.createObjectURL(blob);
+      const query = new URLSearchParams();
+      query.set("session", cfg.sessionId);
+      query.set("docId", item.name);
+      const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/file", query);
+      const response = await fetch(url, { headers: { Authorization: `Bearer ${cfg.token}` } });
+      if (!response.ok) throw new Error(trf("docwriter.request_failed_with_status", { status: response.status }));
+      const blob = await response.blob();
+      const dlUrl = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url;
-      a.download = result.filename ?? item.path.split("/").pop() ?? "download";
+      a.href = dlUrl;
+      a.download = item.name.split("/").pop() ?? "download";
       document.body.appendChild(a);
       a.click();
       a.remove();
-      URL.revokeObjectURL(url);
+      URL.revokeObjectURL(dlUrl);
     } catch (error) {
       const message = error instanceof Error ? error.message : tr("docagent.failed_download_file");
       onError(message);
@@ -801,9 +699,9 @@ export default function DocumentWriterView(props: SessionViewProps) {
     setRefsExpanded((current) => ({ ...current, [categoryId]: !current[categoryId] }));
   };
 
-  const refsItemRelativePath = (categoryId: string, itemPath: string) => {
-    const remainder = refsSessionRemainder(itemPath);
-    if (!remainder) return normalizeInboxPath(itemPath);
+  const refsItemRelativePath = (categoryId: string, itemName: string) => {
+    const remainder = refsItemRemainder(itemName);
+    if (!remainder) return itemName;
     const categoryPrefix = `${categoryId}/`;
     if (remainder.startsWith(categoryPrefix)) {
       return remainder.slice(categoryPrefix.length);
@@ -811,11 +709,11 @@ export default function DocumentWriterView(props: SessionViewProps) {
     return remainder;
   };
 
-  const buildRefsFolderTree = (categoryId: string, items: InboxItem[]) => {
+  const buildRefsFolderTree = (categoryId: string, items: DocumentItem[]) => {
     const root = createRefFolderNode("", "");
     const folderByPath = new Map<string, RefFolderNode>([["", root]]);
     for (const item of items) {
-      const relative = normalizeRelativePath(refsItemRelativePath(categoryId, item.path), item.path.split("/").pop() ?? "file");
+      const relative = normalizeRelativePath(refsItemRelativePath(categoryId, item.name), item.name.split("/").pop() ?? "file");
       const segments = relative.split("/").filter(Boolean);
       const fileName = segments.pop();
       if (!fileName) continue;
@@ -839,8 +737,8 @@ export default function DocumentWriterView(props: SessionViewProps) {
     const sortTree = (node: RefFolderNode) => {
       node.folders.sort((a, b) => a.name.localeCompare(b.name, "zh-Hans-CN"));
       node.files.sort((a, b) => {
-        const an = refsItemRelativePath(categoryId, a.path);
-        const bn = refsItemRelativePath(categoryId, b.path);
+        const an = refsItemRelativePath(categoryId, a.name);
+        const bn = refsItemRelativePath(categoryId, b.name);
         return an.localeCompare(bn, "zh-Hans-CN");
       });
       for (const child of node.folders) sortTree(child);
@@ -882,36 +780,14 @@ export default function DocumentWriterView(props: SessionViewProps) {
     return `${root}/${categoryId}${suffix}/`;
   };
 
-  const importReferenceToWorkspace = async (item: InboxItem, mode: "reuse" | "overwrite" | "copy" = "reuse") => {
-    const cfg = apiConfig();
-    if (!cfg) throw new Error(tr("docagent.openwork_server_not_ready"));
-    const remainder = refsSessionRemainder(item.path) || normalizeInboxPath(item.path);
-    const segments = remainder.split("/").filter(Boolean);
-    const categoryId = (segments[0] ?? "other").trim() || "other";
-    const relative = normalizeRelativePath(segments.slice(1).join("/"), item.path.split("/").pop() ?? "reference");
-    const dest = `refs/${categoryId}/${relative}`;
-
-    const query = new URLSearchParams();
-    query.set("inboxId", item.id);
-    query.set("session", cfg.sessionId);
-    query.set("dest", dest);
-    query.set("mode", mode);
-    const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/import", query);
-    const result = (await fetchJson(url, cfg.token, { method: "POST" })) as { doc?: string };
-    const doc = typeof result?.doc === "string" ? result.doc.trim() : "";
-    if (!doc) throw new Error(tr("docwriter.failed_import_document"));
-    return doc;
-  };
-
-  const useReferenceInPrompt = async (item: InboxItem) => {
+  const useReferenceInPrompt = async (item: DocumentItem) => {
     if (refsOpenBusyId()) return;
-    setRefsOpenBusyId(item.id);
+    setRefsOpenBusyId(item.name);
     setRefsError(null);
     try {
-      const doc = await importReferenceToWorkspace(item, "reuse");
       const root = sessionDocumentsRoot();
       if (!root) throw new Error(tr("docagent.no_session_selected"));
-      insertRefInPrompt(`${root}/${doc}`);
+      insertRefInPrompt(`${root}/${item.name}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : tr("docwriter.failed_import_document");
       setRefsError(message);
@@ -1101,10 +977,8 @@ export default function DocumentWriterView(props: SessionViewProps) {
   };
 
   const uploadReferenceFiles = async (categoryId: string, files: File[]) => {
-    const client = props.openworkServerClient;
-    const w = workspaceId();
-    const prefix = refsInboxPrefix();
-    if (!client || !w || !prefix) return;
+    const cfg = apiConfig();
+    if (!cfg) return;
     if (!files.length) return;
     if (refsBusy()) return;
     setRefsBusy(true);
@@ -1129,13 +1003,23 @@ export default function DocumentWriterView(props: SessionViewProps) {
       setRefsUploadProgress({ categoryId, done: 0, total: uploadEntries.length, phase: "uploading" });
       let done = 0;
       for (const entry of uploadEntries) {
-        const dest = `${prefix}/${categoryId}/${entry.relative}`;
-        await client.uploadInbox(w, entry.file, { path: dest });
+        const dest = `refs/${categoryId}/${entry.relative}`;
+        const query = new URLSearchParams();
+        query.set("session", cfg.sessionId);
+        const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/upload", query);
+        const formData = new FormData();
+        formData.append("file", entry.file);
+        formData.append("path", dest);
+        await fetch(url, {
+          method: "POST",
+          body: formData,
+          headers: { Authorization: `Bearer ${cfg.token}` },
+        });
         done += 1;
         setRefsUploadProgress({ categoryId, done, total: uploadEntries.length, phase: "uploading" });
       }
       setRefsUploadProgress({ categoryId, done: uploadEntries.length, total: uploadEntries.length, phase: "processing" });
-      await refetchRefs();
+      await refetchDocuments();
       setRefsExpanded((current) => ({ ...current, [categoryId]: true }));
       if (skippedHiddenCount > 0) {
         setRefsError(trf("docagent.skipped_hidden_documents_count", { count: skippedHiddenCount }));
@@ -1149,18 +1033,24 @@ export default function DocumentWriterView(props: SessionViewProps) {
     }
   };
 
-  const deleteReferenceFile = async (item: InboxItem) => {
-    const client = props.openworkServerClient;
-    const w = workspaceId();
-    if (!client || !w) return;
+  const deleteReferenceFile = async (item: DocumentItem) => {
+    const cfg = apiConfig();
+    if (!cfg) return;
     if (refsDeleteBusyId()) return;
-    const ok = window.confirm(trf("docwriter.confirm_delete_reference_file", { path: item.path }));
+    const ok = window.confirm(trf("docwriter.confirm_delete_reference_file", { path: item.name }));
     if (!ok) return;
-    setRefsDeleteBusyId(item.id);
+    setRefsDeleteBusyId(item.name);
     setRefsError(null);
     try {
-      await client.deleteInbox(w, item.id);
-      await refetchRefs();
+      const query = new URLSearchParams();
+      query.set("session", cfg.sessionId);
+      const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/delete", query);
+      await fetchJson(url, cfg.token, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: item.name }),
+      });
+      await refetchDocuments();
     } catch (error) {
       const message = error instanceof Error ? error.message : tr("docagent.failed_delete_file");
       setRefsError(message);
@@ -1169,45 +1059,48 @@ export default function DocumentWriterView(props: SessionViewProps) {
     }
   };
 
-  const downloadReferenceItem = async (item: InboxItem, suggestedFilename?: string) => {
-    const client = props.openworkServerClient;
-    const w = workspaceId();
-    if (!client || !w) return;
+  const downloadReferenceItem = async (item: DocumentItem, suggestedFilename?: string) => {
+    const cfg = apiConfig();
+    if (!cfg) return;
     try {
-      const result = await client.downloadInbox(w, item.id);
-      const blob = new Blob([result.data], { type: result.contentType ?? "application/octet-stream" });
-      const url = URL.createObjectURL(blob);
+      const query = new URLSearchParams();
+      query.set("session", cfg.sessionId);
+      query.set("docId", item.name);
+      const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/file", query);
+      const response = await fetch(url, { headers: { Authorization: `Bearer ${cfg.token}` } });
+      if (!response.ok) throw new Error(trf("docwriter.request_failed_with_status", { status: response.status }));
+      const blob = await response.blob();
+      const dlUrl = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url;
-      a.download = suggestedFilename ?? result.filename ?? item.path.split("/").pop() ?? "download";
+      a.href = dlUrl;
+      a.download = suggestedFilename ?? item.name.split("/").pop() ?? "download";
       document.body.appendChild(a);
       a.click();
       a.remove();
-      URL.revokeObjectURL(url);
+      URL.revokeObjectURL(dlUrl);
     } catch (error) {
       const message = error instanceof Error ? error.message : tr("docagent.failed_download_file");
       setRefsError(message);
     }
   };
 
-  const downloadReferenceFile = async (item: InboxItem) => {
+  const downloadReferenceFile = async (item: DocumentItem) => {
     await downloadReferenceItem(item);
   };
 
-  const downloadReferenceFolder = async (categoryId: string, folderPath: string, items: InboxItem[]) => {
+  const downloadReferenceFolder = async (categoryId: string, folderPath: string, items: DocumentItem[]) => {
     if (!items.length) return;
     for (const item of items) {
-      const relative = refsItemRelativePath(categoryId, item.path);
+      const relative = refsItemRelativePath(categoryId, item.name);
       const suffix = folderPath && relative.startsWith(`${folderPath}/`) ? relative.slice(folderPath.length + 1) : relative;
-      const filename = normalizeRelativePath(suffix, item.path.split("/").pop() ?? "download").replace(/\//g, "__");
+      const filename = normalizeRelativePath(suffix, item.name.split("/").pop() ?? "download").replace(/\//g, "__");
       await downloadReferenceItem(item, filename);
     }
   };
 
-  const deleteReferenceFolder = async (folderPath: string, items: InboxItem[]) => {
-    const client = props.openworkServerClient;
-    const w = workspaceId();
-    if (!client || !w) return;
+  const deleteReferenceFolder = async (folderPath: string, items: DocumentItem[]) => {
+    const cfg = apiConfig();
+    if (!cfg) return;
     if (refsBusy()) return;
     if (!items.length) return;
     const label = folderPath || tr("docwriter.ref_folder_root");
@@ -1218,9 +1111,16 @@ export default function DocumentWriterView(props: SessionViewProps) {
     setRefsError(null);
     try {
       for (const item of items) {
-        await client.deleteInbox(w, item.id);
+        const query = new URLSearchParams();
+        query.set("session", cfg.sessionId);
+        const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/delete", query);
+        await fetchJson(url, cfg.token, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: item.name }),
+        });
       }
-      await refetchRefs();
+      await refetchDocuments();
     } catch (error) {
       const message = error instanceof Error ? error.message : tr("docagent.failed_delete_folder");
       setRefsError(message);
@@ -1236,23 +1136,19 @@ export default function DocumentWriterView(props: SessionViewProps) {
     props.setPrompt(next);
   };
 
-  const openReferenceInEditor = async (item: InboxItem) => {
+  const openReferenceInEditor = async (item: DocumentItem) => {
     if (refsOpenBusyId()) return;
-    setRefsOpenBusyId(item.id);
+    setRefsOpenBusyId(item.name);
     setRefsError(null);
     try {
-      const remainder = refsSessionRemainder(item.path) || normalizeInboxPath(item.path);
+      const remainder = refsItemRemainder(item.name);
       const segments = remainder.split("/").filter(Boolean);
       const categoryId = (segments[0] ?? "other").trim() || "other";
-      const doc = await importReferenceToWorkspace(item, "overwrite");
-      // Refresh document list so the imported file is known before we select it.
-      // Without this the document-sync effect would reset activeDoc on the next
-      // reactivity pass because the file wouldn't exist in documentsList().
-      await refetchDocuments();
-      if (categoryId === "templates" || isTemplateDocName(doc)) {
-        setTargetDoc(doc);
+      // Files are already in documents/sessions — just open directly.
+      if (categoryId === "templates" || isTemplateDocName(item.name)) {
+        setTargetDoc(item.name);
       }
-      setActiveDoc(doc);
+      setActiveDoc(item.name);
       setConfigSeq((v) => v + 1);
     } catch (error) {
       const message = error instanceof Error ? error.message : tr("docwriter.failed_open_in_editor");
@@ -1322,7 +1218,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
         if (!ok) return;
       }
       const payload = {
-        partnerInboxId: source.id,
+        partnerDocPath: source.name,
         matchMode: assembleMatchMode(),
         force: assembleForce(),
         seedTarget: assembleSeedTarget(),
@@ -1331,13 +1227,13 @@ export default function DocumentWriterView(props: SessionViewProps) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
-      })) as { steps?: unknown[]; report?: { inboxId?: string; inboxPath?: string } };
-      const reportPath = typeof result?.report?.inboxPath === "string" ? result.report.inboxPath : "";
+      })) as { steps?: unknown[]; report?: { docPath?: string } };
+      const reportPath = typeof result?.report?.docPath === "string" ? result.report.docPath : "";
       setToastMessage(reportPath ? tr("docwriter.assemble_complete_saved") : tr("docwriter.assemble_complete"));
       closeModule();
       setConfigSeq((v) => v + 1);
       await refetchDocuments();
-      await refetchReports();
+      await refetchDocuments();
       setReportsExpanded(true);
     } catch (error) {
       const message = error instanceof Error ? error.message : tr("docwriter.failed_assemble");
@@ -1364,8 +1260,8 @@ export default function DocumentWriterView(props: SessionViewProps) {
       query.set("doc", doc);
       const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/bid/fill", query);
       const payload = {
-        techXlsxInboxId: fillTechXlsx().trim() || undefined,
-        equipXlsxInboxId: fillEquipXlsx().trim() || undefined,
+        techXlsxDocPath: fillTechXlsx().trim() || undefined,
+        equipXlsxDocPath: fillEquipXlsx().trim() || undefined,
         brand: fillBrand(),
         manufacturer: fillManufacturer(),
         origin: fillOrigin(),
@@ -1377,13 +1273,13 @@ export default function DocumentWriterView(props: SessionViewProps) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
-      })) as { report?: { inboxId?: string; inboxPath?: string } };
-      const reportPath = typeof result?.report?.inboxPath === "string" ? result.report.inboxPath : "";
+      })) as { report?: { docPath?: string } };
+      const reportPath = typeof result?.report?.docPath === "string" ? result.report.docPath : "";
       setToastMessage(reportPath ? tr("docwriter.fill_complete_saved") : tr("docwriter.fill_complete"));
       closeModule();
       setConfigSeq((v) => v + 1);
       await refetchDocuments();
-      await refetchReports();
+      await refetchDocuments();
       setReportsExpanded(true);
     } catch (error) {
       const message = error instanceof Error ? error.message : tr("docwriter.failed_fill");
@@ -1411,7 +1307,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
       query.set("doc", doc);
       const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/bid/facts", query);
       const payload = {
-        tenderInboxId: tender.id,
+        tenderDocPath: tender.name,
         applyToTarget: factsApplyToTarget(),
         force: factsForce(),
         ensureProjectInfoBlock: factsInsertBlock(),
@@ -1420,13 +1316,13 @@ export default function DocumentWriterView(props: SessionViewProps) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
-      })) as { report?: { inboxId?: string; inboxPath?: string } };
-      const reportPath = typeof result?.report?.inboxPath === "string" ? result.report.inboxPath : "";
+      })) as { report?: { docPath?: string } };
+      const reportPath = typeof result?.report?.docPath === "string" ? result.report.docPath : "";
       setToastMessage(reportPath ? tr("docwriter.facts_complete_saved") : tr("docwriter.facts_complete"));
       closeModule();
       setConfigSeq((v) => v + 1);
       await refetchDocuments();
-      await refetchReports();
+      await refetchDocuments();
       setReportsExpanded(true);
     } catch (error) {
       const message = error instanceof Error ? error.message : tr("docwriter.failed_facts");
@@ -1464,15 +1360,12 @@ export default function DocumentWriterView(props: SessionViewProps) {
       const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/bid/dedupe", query);
 
       const docPaths: string[] = [];
-      const inboxIds: string[] = [];
       for (const key of selected) {
         if (key.startsWith("doc:")) docPaths.push(key.slice("doc:".length));
-        else if (key.startsWith("inbox:")) inboxIds.push(key.slice("inbox:".length));
       }
 
       const payload = {
         docPaths,
-        inboxIds,
         excludeTables: dedupeExcludeTables(),
         simThreshold: dedupeSimThreshold(),
         exportMedia: dedupeExportMedia(),
@@ -1484,10 +1377,10 @@ export default function DocumentWriterView(props: SessionViewProps) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
-      })) as { report?: { inboxPath?: string }; mediaZip?: { inboxPath?: string }; mediaDoc?: { docPath?: string } };
+      })) as { report?: { docPath?: string }; mediaZip?: { docPath?: string }; mediaDoc?: { docPath?: string } };
 
-      const reportPath = typeof result?.report?.inboxPath === "string" ? result.report.inboxPath : "";
-      const mediaPath = typeof result?.mediaZip?.inboxPath === "string" ? result.mediaZip.inboxPath : "";
+      const reportPath = typeof result?.report?.docPath === "string" ? result.report.docPath : "";
+      const mediaPath = typeof result?.mediaZip?.docPath === "string" ? result.mediaZip.docPath : "";
       const mediaDocPath = typeof result?.mediaDoc?.docPath === "string" ? result.mediaDoc.docPath : "";
       const mediaDocWorkspacePath = mediaDocPath ? `documents/sessions/${cfg.sessionId}/${mediaDocPath}` : "";
       const hint = [
@@ -1502,7 +1395,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
       if (mediaDocPath) {
         await refetchDocuments();
       }
-      await refetchReports();
+      await refetchDocuments();
       setReportsExpanded(true);
     } catch (error) {
       const message = error instanceof Error ? error.message : tr("docwriter.failed_dedupe");
@@ -1526,7 +1419,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
       query.set("doc", doc);
       query.set("mode", qcMode());
       const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/bid/qc", query);
-      const result = (await fetchJson(url, cfg.token, { method: "POST" })) as { passed?: boolean; report?: { inboxPath?: string } };
+      const result = (await fetchJson(url, cfg.token, { method: "POST" })) as { passed?: boolean; report?: { docPath?: string } };
       const passed = Boolean(result?.passed);
       const label = qcMode() === "submit" ? tr("docwriter.qc_mode_submit") : tr("docwriter.qc_mode_draft");
       setToastMessage(
@@ -1535,7 +1428,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
           : trf("docwriter.qc_fail_saved", { mode: label }),
       );
       closeModule();
-      await refetchReports();
+      await refetchDocuments();
       setReportsExpanded(true);
     } catch (error) {
       const message = error instanceof Error ? error.message : tr("docwriter.failed_qc");
@@ -1562,11 +1455,11 @@ export default function DocumentWriterView(props: SessionViewProps) {
       query.set("doc", doc);
       const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/bid/preview-pdf", query);
       const result = (await fetchJson(url, cfg.token, { method: "POST" })) as {
-        pdf?: { inboxPath?: string };
+        pdf?: { docPath?: string };
         pdfDoc?: { docPath?: string };
-        report?: { inboxPath?: string };
+        report?: { docPath?: string };
       };
-      const pdfPath = typeof result?.pdf?.inboxPath === "string" ? result.pdf.inboxPath : "";
+      const pdfPath = typeof result?.pdf?.docPath === "string" ? result.pdf.docPath : "";
       const pdfDocPath = typeof result?.pdfDoc?.docPath === "string" ? result.pdfDoc.docPath : "";
       const pdfDocWorkspacePath = pdfDocPath ? `documents/sessions/${cfg.sessionId}/${pdfDocPath}` : "";
       setToastMessage(
@@ -1581,7 +1474,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
       if (pdfDocPath) {
         setActiveDoc(pdfDocPath);
       }
-      await refetchReports();
+      await refetchDocuments();
       setReportsExpanded(true);
     } catch (error) {
       const message = error instanceof Error ? error.message : tr("docwriter.failed_preview_pdf");
@@ -1795,7 +1688,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
     if (!serverReady()) return;
     setConfigSeq((v) => v + 1);
     void refetchDocuments();
-    void refetchRefs();
+    void refetchDocuments();
   });
 
   createEffect(() => {
@@ -2152,12 +2045,12 @@ export default function DocumentWriterView(props: SessionViewProps) {
                   <button
                     type="button"
                     class="p-1.5 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
-                    onClick={() => void refetchReports()}
-                    disabled={!serverReady() || reports.loading}
+                    onClick={() => void refetchDocuments()}
+                    disabled={!serverReady() || documents.loading}
                     title="Refresh reports"
                     aria-label="Refresh reports"
                   >
-                    <RefreshCw size={14} class={reports.loading ? "animate-spin" : ""} />
+                    <RefreshCw size={14} class={documents.loading ? "animate-spin" : ""} />
                   </button>
                 </div>
 
@@ -2255,14 +2148,17 @@ export default function DocumentWriterView(props: SessionViewProps) {
                             class={`shrink-0 transition-transform ${reportsExpanded() ? "rotate-180" : ""}`}
                           />
                           <span class="truncate text-[12px]">Reports</span>
-                          <span class="ml-auto text-[10px] text-dls-secondary">{(reports() ?? []).length}</span>
+                          <span class="ml-auto text-[10px] text-dls-secondary">{reportsList().length}</span>
                         </button>
                       </div>
                       <div class="px-2 pb-2 space-y-1">
                         <For each={visibleReports()}>
                           {(item) => {
-                            const workspacePath = () => inboxWorkspacePath(item.path);
-                            const name = () => item.path.split("/").slice(-2).join("/");
+                            const workspacePath = () => {
+                              const root = sessionDocumentsRoot();
+                              return root ? `${root}/${item.name}` : item.name;
+                            };
+                            const name = () => item.name.split("/").slice(-2).join("/");
                             return (
                               <div class="flex items-center gap-2 rounded-md px-2 py-1 hover:bg-dls-hover">
                                 <FileText size={14} class="text-dls-secondary shrink-0" />
@@ -2287,7 +2183,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
                                 <button
                                   type="button"
                                   class="p-1.5 rounded hover:bg-dls-active text-dls-secondary hover:text-dls-text"
-                                  onClick={() => void downloadInboxFile(item, (msg) => setToastMessage(msg))}
+                                  onClick={() => void downloadDocumentFile(item, (msg) => setToastMessage(msg))}
                                   title="Download"
                                   aria-label="Download"
                                 >
@@ -2308,12 +2204,12 @@ export default function DocumentWriterView(props: SessionViewProps) {
                 <button
                   type="button"
                   class="p-1.5 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
-                  onClick={() => void refetchRefs()}
-                  disabled={!serverReady() || refs.loading}
+                  onClick={() => void refetchDocuments()}
+                  disabled={!serverReady() || documents.loading}
                   title={tr("docwriter.refresh_reference_files")}
                   aria-label={tr("docwriter.refresh_reference_files")}
                 >
-                  <RefreshCw size={14} class={refs.loading ? "animate-spin" : ""} />
+                  <RefreshCw size={14} class={documents.loading ? "animate-spin" : ""} />
                 </button>
               </div>
 
@@ -2351,11 +2247,14 @@ export default function DocumentWriterView(props: SessionViewProps) {
                     const items = () => refsByCategory()[category.id] ?? [];
                     const tree = createMemo(() => buildRefsFolderTree(category.id, items()));
 
-                    const fileRow = (item: InboxItem, depth: number) => {
-                      const workspacePath = () => inboxWorkspacePath(item.path);
-                      const relativePath = () => refsItemRelativePath(category.id, item.path);
-                      const name = () => relativePath().split("/").pop() ?? item.path.split("/").pop() ?? item.path;
-                      const menuKey = refsFileMenuKey(category.id, item.id);
+                    const fileRow = (item: DocumentItem, depth: number) => {
+                      const workspacePath = () => {
+                        const root = sessionDocumentsRoot();
+                        return root ? `${root}/${item.name}` : item.name;
+                      };
+                      const relativePath = () => refsItemRelativePath(category.id, item.name);
+                      const name = () => relativePath().split("/").pop() ?? item.name.split("/").pop() ?? item.name;
+                      const menuKey = refsFileMenuKey(category.id, item.name);
                       const menuOpen = () => refsActionMenuKey() === menuKey;
                       return (
                         <div class="flex items-center gap-2 rounded-md px-2 py-1 hover:bg-dls-hover" style={{ "padding-left": `${8 + depth * 14}px` }}>
@@ -2369,7 +2268,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
                             onClick={() => void useReferenceInPrompt(item)}
                             title={tr("docagent.use_in_prompt")}
                             aria-label={tr("docagent.use_in_prompt")}
-                            disabled={refsOpenBusyId() === item.id}
+                            disabled={refsOpenBusyId() === item.name}
                           >
                             <AtSign size={14} />
                           </button>
@@ -2395,7 +2294,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
                                     setRefsActionMenuKey(null);
                                     void openReferenceInEditor(item);
                                   }}
-                                  disabled={!serverReady() || refsOpenBusyId() === item.id}
+                                  disabled={!serverReady() || refsOpenBusyId() === item.name}
                                   title={tr("docwriter.preview")}
                                 >
                                   {tr("docwriter.preview")}
@@ -2417,7 +2316,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
                                     setRefsActionMenuKey(null);
                                     void deleteReferenceFile(item);
                                   }}
-                                  disabled={refsDeleteBusyId() === item.id}
+                                  disabled={refsDeleteBusyId() === item.name}
                                 >
                                   {tr("docagent.delete_file")}
                                 </button>
@@ -2428,7 +2327,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
                       );
                     };
 
-                    const collectFolderItems = (folder: RefFolderNode): InboxItem[] => [
+                    const collectFolderItems = (folder: RefFolderNode): DocumentItem[] => [
                       ...folder.files,
                       ...folder.folders.flatMap((child) => collectFolderItems(child)),
                     ];
@@ -2956,18 +2855,18 @@ export default function DocumentWriterView(props: SessionViewProps) {
                   />
                 </div>
                 <div class="mt-2 rounded-lg border border-dls-border overflow-hidden max-h-[360px] overflow-y-auto">
-                  <Show when={!refs.loading} fallback={<div class="p-3 text-xs text-dls-secondary">{tr("docwriter.loading")}</div>}>
+                  <Show when={!documents.loading} fallback={<div class="p-3 text-xs text-dls-secondary">{tr("docwriter.loading")}</div>}>
                     <Show when={filteredModuleSources().length > 0} fallback={<div class="p-3 text-xs text-dls-secondary">{tr("docwriter.no_docx_sources")}</div>}>
                       <For each={filteredModuleSources()}>
                         {(item) => {
-                          const selected = createMemo(() => assembleSource()?.id === item.id);
-                          const name = () => item.path.split("/").pop() ?? item.path;
+                          const selected = createMemo(() => assembleSource()?.name === item.name);
+                          const name = () => item.name.split("/").pop() ?? item.name;
                           return (
                             <button
                               type="button"
                               class={`w-full text-left px-3 py-2 border-b border-dls-border/50 last:border-b-0 hover:bg-dls-hover ${selected() ? "bg-dls-active" : ""}`}
                               onClick={() => setAssembleSource(item)}
-                              title={item.path}
+                              title={item.name}
                             >
                               <div class="flex items-start gap-2">
                                 <FileText size={14} class="shrink-0 text-dls-secondary mt-0.5" />
@@ -3092,22 +2991,22 @@ export default function DocumentWriterView(props: SessionViewProps) {
               <div class="min-w-0">
                 <div class="text-xs font-medium text-dls-text">{tr("docwriter.facts_tender_source_label")}</div>
                 <div class="mt-2 rounded-lg border border-dls-border overflow-hidden max-h-[360px] overflow-y-auto">
-                  <Show when={!refs.loading} fallback={<div class="p-3 text-xs text-dls-secondary">{tr("docwriter.loading")}</div>}>
+                  <Show when={!documents.loading} fallback={<div class="p-3 text-xs text-dls-secondary">{tr("docwriter.loading")}</div>}>
                     <Show
                       when={tenderSources().length > 0}
                       fallback={<div class="p-3 text-xs text-dls-secondary">{tr("docwriter.facts_upload_tender_hint")}</div>}
                     >
                       <For each={tenderSources()}>
                         {(item) => {
-                          const selected = createMemo(() => factsTenderSource()?.id === item.id);
-                          const name = () => item.path.split("/").pop() ?? item.path;
+                          const selected = createMemo(() => factsTenderSource()?.name === item.name);
+                          const name = () => item.name.split("/").pop() ?? item.name;
                           return (
                             <button
                               type="button"
                               class={`w-full text-left px-3 py-2 border-b border-dls-border/50 last:border-b-0 hover:bg-dls-hover ${selected() ? "bg-dls-active" : ""
                                 }`}
                               onClick={() => setFactsTenderSource(item)}
-                              title={item.path}
+                              title={item.name}
                             >
                               <div class="flex items-start gap-2">
                                 <FileText size={14} class="shrink-0 text-dls-secondary mt-0.5" />
@@ -3235,8 +3134,8 @@ export default function DocumentWriterView(props: SessionViewProps) {
                     <option value="">—</option>
                     <For each={xlsxRefs()}>
                       {(item) => (
-                        <option value={item.id}>
-                          {item.path.split("/").pop() ?? item.path}
+                        <option value={item.name}>
+                          {item.name.split("/").pop() ?? item.name}
                         </option>
                       )}
                     </For>
@@ -3252,8 +3151,8 @@ export default function DocumentWriterView(props: SessionViewProps) {
                     <option value="">—</option>
                     <For each={xlsxRefs()}>
                       {(item) => (
-                        <option value={item.id}>
-                          {item.path.split("/").pop() ?? item.path}
+                        <option value={item.name}>
+                          {item.name.split("/").pop() ?? item.name}
                         </option>
                       )}
                     </For>
@@ -3396,7 +3295,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
                   />
                 </div>
                 <div class="mt-2 rounded-lg border border-dls-border overflow-hidden max-h-[420px] overflow-y-auto">
-                  <Show when={!refs.loading && !documents.loading} fallback={<div class="p-3 text-xs text-dls-secondary">{tr("docwriter.loading")}</div>}>
+                  <Show when={!documents.loading && !documents.loading} fallback={<div class="p-3 text-xs text-dls-secondary">{tr("docwriter.loading")}</div>}>
                     <Show
                       when={filteredDedupeCandidates().length > 0}
                       fallback={<div class="p-3 text-xs text-dls-secondary">{tr("docwriter.no_docx_sources")}</div>}
@@ -3406,7 +3305,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
                           const displayName = () =>
                             item.kind === "doc"
                               ? item.name.split("/").pop() ?? item.name
-                              : item.path.split("/").pop() ?? item.path;
+                              : item.name.split("/").pop() ?? item.name;
                           const selected = createMemo(() => dedupeSelected().has(item.key));
                           return (
                             <label

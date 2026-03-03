@@ -1241,8 +1241,9 @@ export default function DocumentAgentView(props: SessionViewProps) {
     const items = documentsList();
     const loading = documents.loading;
     const latestItems = documents.latest?.items ?? [];
-    // Keep current selection during transient refresh gaps to avoid preview flicker/reset while typing.
-    if (!items.length && loading && latestItems.length > 0) {
+    const hasFetchError = Boolean(documents.error);
+    // Keep current selection during transient refresh gaps/fetch errors to avoid preview flicker/reset while typing.
+    if (!items.length && latestItems.length > 0 && (loading || hasFetchError)) {
       return;
     }
     if (!items.length) {
@@ -1253,10 +1254,13 @@ export default function DocumentAgentView(props: SessionViewProps) {
 
     const previousTarget = targetDoc();
     const currentActive = activeDoc();
-    const activeExists = currentActive ? items.some((doc) => doc.name === currentActive) : false;
+    const activeExists =
+      currentActive
+        ? items.some((doc) => doc.name === currentActive) || latestItems.some((doc) => doc.name === currentActive)
+        : false;
     const targetExists =
       previousTarget && isTargetDocumentCandidate(previousTarget)
-        ? items.some((doc) => doc.name === previousTarget)
+        ? items.some((doc) => doc.name === previousTarget) || latestItems.some((doc) => doc.name === previousTarget)
         : false;
 
     let nextTarget: string | null = targetExists ? previousTarget : null;
@@ -1264,7 +1268,10 @@ export default function DocumentAgentView(props: SessionViewProps) {
       nextTarget = currentActive;
     }
     if (!nextTarget) {
-      nextTarget = items.find((doc) => isTargetDocumentCandidate(doc.name))?.name ?? null;
+      nextTarget =
+        items.find((doc) => isTargetDocumentCandidate(doc.name))?.name ??
+        latestItems.find((doc) => isTargetDocumentCandidate(doc.name))?.name ??
+        null;
     }
     if (previousTarget !== nextTarget) {
       setTargetDoc(nextTarget);

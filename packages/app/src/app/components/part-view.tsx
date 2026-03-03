@@ -718,7 +718,7 @@ export default function PartView(props: Props) {
   const diffText = createMemo(() => (p().type === "tool" ? extractDiff() : null));
   const normalizeToolText = (value: unknown) => {
     if (typeof value !== "string") return "";
-    return value.replace(/(?:\r?\n\s*)+$/, "");
+    return value.trimEnd();
   };
   const diffTextNormalized = createMemo(() => normalizeToolText(diffText()));
   const diffLines = createMemo(() => (diffTextNormalized() ? diffTextNormalized().split("\n") : []));

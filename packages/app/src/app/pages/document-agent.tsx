@@ -346,14 +346,6 @@ export default function DocumentAgentView(props: SessionViewProps) {
   const workspaceId = createMemo(() => props.openworkServerWorkspaceId?.trim() ?? "");
   const isAgentRunning = createMemo(() => (props.sessionStatus ?? "idle") === "running");
 
-  // Lock agent to common-work for document-agent page
-  createEffect(() => {
-    const sid = sessionId();
-    if (sid && props.selectedSessionAgent !== "common-work") {
-      props.setSessionAgent(sid, "common-work");
-    }
-  });
-
   const serverReady = createMemo(
     () =>
       props.openworkServerStatus === "connected" &&

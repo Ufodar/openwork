@@ -17,87 +17,26 @@ color: "#0EA5E9"
 
 ## 工作环境
 
-> **⚠ 仓库根目录 = `/root/ai_staff/openwork`**
-> 所有路径操作必须基于此根目录。绝对路径必须以 `/root/ai_staff/openwork/` 开头。
-> **错误示例**：`/root/ai_staff/documents/...`（缺少 `openwork/`）→ 此路径不存在，会导致 ENOENT。
+- 工具的工作目录（cwd）为工作区根目录。
+- 每个会话有独立目录：`documents/sessions/<sessionId>/`，这是本次任务的**唯一工作区**。
+- 该目录下的**所有文件**用户都能在左侧边栏看到。
+- 用户通过 `@` 引用文件时，系统传入绝对路径。**直接使用该路径，不要自行拼接或缩写。**
 
-- 当前会话的**唯一工作区**为 `/root/ai_staff/openwork/documents/sessions/<sessionId>/`。
-- 用户通过 `@` 引用文件时，系统会传入 `file://` 开头的**绝对路径**。你操作该文件时必须**原样使用这个绝对路径**，不要自行拼接或缩写。
-- 当你需要自己构造路径时，**必须使用完整绝对路径**：`/root/ai_staff/openwork/documents/sessions/<sessionId>/...`。
+### 路径边界（强制）
 
-### 工作区目录结构
+1. 仅允许读写当前会话目录 `documents/sessions/<sessionId>/` 内的文件。
+2. 禁止访问其他会话、系统路径或工作区外的目录。
+3. 用户请求越界操作时，说明限制并要求上传到当前会话。
 
-```
-/root/ai_staff/openwork/documents/sessions/<sessionId>/
-  refs/                 # 用户上传的参考材料（按分类组织，建议只读参考）
-    tender/             # 招标文件
-    templates/          # 模板/格式（推荐作为目标文档的模板来源）
-    business/           # 商务资料
-    technical/          # 技术资料
-    history/            # 历史标书
-    partners/           # 合作方材料
-    images/             # 图片/图纸
-    other/              # 其他
-  reports/              # 系统生成的报告
-  target/               # 目标文档
-  artifacts/            # 中间产物与结果产物（pdf、json、zip 等）
-```
+### 建议的目录组织（非强制）
 
-每个 session 有独立的存储空间，必须按 session 隔离读写。
+用户可自由组织文件。推荐结构：
+- `refs/` — 参考材料（按分类组织，建议只读，编辑前先复制）
+- `target/` — 正在编辑的目标文档
+- `artifacts/` — 生成的产物（pdf、zip、导出文件等）
+- `.worktree/` — 工作树协议状态（见下方）
 
----
-
-## 执行路径边界（强制 — 违反即失败）
-
-你必须把"可操作范围"限制为**当前会话目录**，而不是整个 `openwork` 工作区。
-
-### ⚠ 路径铁律（违反 = 任务失败）
-
-1. **绝对路径必须以 `/root/ai_staff/openwork/` 开头** — 没有例外。
-2. **永远不要出现 `/root/ai_staff/documents/`** — 这个路径缺少 `openwork/` 层级，文件系统中不存在。
-3. **用户 `@` 引用的路径直接使用** — 系统已转为绝对路径，不要修改、截断或重新拼接。
-4. **自己构造路径时用完整绝对路径** — `/root/ai_staff/openwork/documents/sessions/<sessionId>/...`。
-
-### 路径规则速查
-
-| 操作 | 允许路径 |
-|------|---------|
-| **读取**参考材料 | `/root/ai_staff/openwork/documents/sessions/<sessionId>/refs/...` |
-| **写入**文件 | `/root/ai_staff/openwork/documents/sessions/<sessionId>/...`（target/、artifacts/ 等） |
-| **创建**脚本/临时文件 | `/root/ai_staff/openwork/documents/sessions/<sessionId>/artifacts/...` 或 `/tmp/` |
-| **执行** bash 脚本 | 脚本放在 `/root/ai_staff/openwork/documents/sessions/<sessionId>/` 或 `/tmp/` |
-
-### ✅ 正确 vs ❌ 错误
-
-```
-✅ read: /root/ai_staff/openwork/documents/sessions/<sid>/refs/tender/招标文件.docx
-❌ read: /root/ai_staff/documents/sessions/<sid>/refs/tender/招标文件.docx
-   → 错！缺少 openwork/ 层级
-
-✅ bash: cp /root/ai_staff/openwork/documents/sessions/<sid>/refs/templates/模板.docx /root/ai_staff/openwork/documents/sessions/<sid>/target/模板.docx
-❌ bash: cp /root/ai_staff/documents/sessions/<sid>/refs/templates/模板.docx ...
-   → 错！缺少 openwork/ 层级
-
-✅ write: /root/ai_staff/openwork/documents/sessions/<sid>/target/投标文件.docx
-❌ write: documents/sessions/<sid>/target/投标文件.docx
-   → 不推荐！应使用绝对路径，避免 cwd 不确定导致的错误
-
-✅ bash: cd /root/ai_staff/openwork/documents/sessions/<sid>/artifacts && python /tmp/script.py
-```
-
-### 详细规则
-
-1. **仓库根目录**：`/root/ai_staff/openwork`。所有文件操作的绝对路径**必须**以此为前缀。如果你发现自己写出的路径里 `openwork` 后面直接接了 `documents`，检查前缀是否正确。
-2. **允许写入范围**：仅允许写入 `/root/ai_staff/openwork/documents/sessions/<sessionId>/...`（当前会话目录）中的文件。
-3. **允许读取范围**：当前会话目录 `/root/ai_staff/openwork/documents/sessions/<sessionId>/...`（包括 refs/ 下的参考材料）。
-4. **参考材料约定**：`refs/` 下的文件是用户上传的参考材料，建议只读参考。需要编辑时，先复制到 `target/` 或 `artifacts/` 再修改副本。
-5. **错误路径自检**：操作前检查路径是否包含 `/root/ai_staff/openwork/`。若发现 `/root/ai_staff/documents/...`（缺少 `openwork/`），**立即修正**为 `/root/ai_staff/openwork/documents/...`，不要执行错误路径。
-6. **禁止越界**：禁止读写仓库外路径、`/etc`、`~`、其他项目目录，以及任何非当前 session 的路径。
-7. **越界处理**：当用户请求操作越界文件时，只输出一句限制说明，并要求用户先把文件放入当前 session 左侧目录后再继续。
-8. **产物可见性分层**：
-   - 过程文件（临时文件、缓存、调试日志、内部中间态）可以隐藏，不要求用户可见。
-   - 面向用户交付的成品文件（新建/导出的 docx、pdf、xlsx、pptx、zip 等）必须落在 `/root/ai_staff/openwork/documents/sessions/<sessionId>/...`（推荐 `artifacts/`）并在左侧可见可改。
-9. **临时文件**：脚本和临时中间文件应放在 `/tmp/` 或会话目录下的隐藏目录中。
+产出文件（docx、pdf 等）必须放在会话目录内（用户可在侧边栏看到的任意位置）。
 
 ---
 
@@ -266,7 +205,7 @@ color: "#0EA5E9"
 ### 目录结构
 
 ```
-/root/ai_staff/openwork/documents/sessions/<sessionId>/
+documents/sessions/<sessionId>/
   .worktree/
     index.json            ← 树根：项目总览 + 当前焦点指针
     conventions.md        ← 写作约定（视角、术语、详略程度）

@@ -2851,7 +2851,7 @@ export default function App() {
     const id = sessionId.trim();
     if (!id) return "session";
     const view = openworkSessionPrefsById()[id]?.view;
-    return view === "document-writer" ? "document-writer" : view === "document-agent" ? "document-agent" : "session";
+    return view === "document-writer" ? "document-agent" : view === "document-agent" ? "document-agent" : "session";
   };
 
   const getSessionPreferredAgent = (sessionId: string): string | null => {
@@ -3084,13 +3084,6 @@ export default function App() {
   });
 
   createEffect(() => {
-    if (currentView() !== "document-writer") return;
-    const sessionId = activeSessionId();
-    if (!sessionId) return;
-    persistSessionPreferredView(sessionId, "document-writer").catch(() => undefined);
-  });
-
-  createEffect(() => {
     if (currentView() !== "document-agent") return;
     const sessionId = activeSessionId();
     if (!sessionId) return;
@@ -3100,9 +3093,9 @@ export default function App() {
   const inferSessionPreferredView = (title?: string | null): View | null => {
     const normalized = (title ?? "").trim().toLowerCase();
     if (!normalized) return null;
-    if (normalized.includes("document writer")) return "document-writer";
-    if (normalized.includes("bid writer")) return "document-writer";
-    if (normalized.includes("bid dedupe")) return "document-writer";
+    if (normalized.includes("document writer")) return "document-agent";
+    if (normalized.includes("bid writer")) return "document-agent";
+    if (normalized.includes("bid dedupe")) return "document-agent";
     if (normalized.includes("document agent")) return "document-agent";
     return null;
   };
@@ -4801,17 +4794,12 @@ export default function App() {
         persistSessionPreferredAgent(session.id, requestedAgent).catch(() => undefined);
       }
 
-      if (nextView === "document-writer") {
-        persistSessionPreferredView(session.id, "document-writer").catch(() => undefined);
-      }
-      if (nextView === "document-agent") {
+      if (nextView === "document-writer" || nextView === "document-agent") {
         persistSessionPreferredView(session.id, "document-agent").catch(() => undefined);
       }
 
       // setSessionViewLockUntil(Date.now() + 1200);
-      if (nextView === "document-writer") {
-        goToDocumentWriter(session.id);
-      } else if (nextView === "document-agent") {
+      if (nextView === "document-writer" || nextView === "document-agent") {
         goToDocumentAgent(session.id);
       } else {
         goToSession(session.id);
@@ -6139,19 +6127,12 @@ export default function App() {
         const title = sessions().find((session) => session.id === id)?.title ?? null;
         const inferred = inferSessionPreferredView(title);
         const resolved = stored !== "session" ? stored : inferred ?? stored;
-        if (resolved === "document-writer") {
+        if (resolved === "document-writer" || resolved === "document-agent") {
           window.setTimeout(() => {
             if (location.pathname.trim().toLowerCase() !== `/session/${id.toLowerCase()}`) return;
             if (new URLSearchParams(location.search).get("view") === "session") return;
-            if (getSessionPreferredView(id) !== "document-writer") return;
-            goToDocumentWriter(id, { replace: true });
-          }, 0);
-        }
-        if (resolved === "document-agent") {
-          window.setTimeout(() => {
-            if (location.pathname.trim().toLowerCase() !== `/session/${id.toLowerCase()}`) return;
-            if (new URLSearchParams(location.search).get("view") === "session") return;
-            if (getSessionPreferredView(id) !== "document-agent") return;
+            const pv = getSessionPreferredView(id);
+            if (pv !== "document-writer" && pv !== "document-agent") return;
             goToDocumentAgent(id, { replace: true });
           }, 0);
         }
@@ -6165,12 +6146,9 @@ export default function App() {
           if (location.pathname.trim().toLowerCase() !== `/session/${id.toLowerCase()}`) return;
           if (new URLSearchParams(location.search).get("view") === "session") return;
           const preferred = getSessionPreferredView(id);
-          if (preferred === "document-writer") {
-            goToDocumentWriter(id, { replace: true });
-            return;
-          }
-          if (preferred === "document-agent") {
+          if (preferred === "document-writer" || preferred === "document-agent") {
             goToDocumentAgent(id, { replace: true });
+            return;
           }
         })();
       }
@@ -6184,7 +6162,7 @@ export default function App() {
       if (!id) {
         const fallback = activeSessionId();
         if (fallback) {
-          goToDocumentWriter(fallback, { replace: true });
+          goToDocumentAgent(fallback, { replace: true });
         } else {
           navigate("/session", { replace: true });
         }
@@ -6199,7 +6177,8 @@ export default function App() {
         return;
       }
 
-      ensureRouteSessionHydrated(id);
+      // Redirect old /document-writer/<sid> URLs to /document-agent/<sid>
+      goToDocumentAgent(id, { replace: true });
       return;
     }
 

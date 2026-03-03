@@ -133,7 +133,7 @@ export default function AgentsView(props: AgentsViewProps) {
 
     if (featured.id === "document-writer") {
       const agent = resolveFeaturedAgentName(featured) ?? "document-writer";
-      props.createSessionAndOpen({ title: tr(featured.nameKey), agent, view: "document-writer" });
+      props.createSessionAndOpen({ title: tr(featured.nameKey), agent, view: "document-agent" });
       return;
     }
 

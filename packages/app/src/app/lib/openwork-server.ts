@@ -1071,21 +1071,99 @@ export function createOpenworkServerClient(options: { baseUrl: string; token?: s
         return promise;
       };
     })(),
-    patchConfig: (workspaceId: string, payload: { opencode?: Record<string, unknown>; openwork?: Record<string, unknown> }) => {
-      // Invalidate getConfig cache so next read gets fresh data.
-      configCache?.delete(workspaceId);
-      return requestJson<{ updatedAt?: number | null }>(
-        baseUrl,
-        `/workspace/${encodeURIComponent(workspaceId)}/config`,
+    patchConfig: (() => {
+      // Coalesce: multiple patchConfig calls within a short window are merged
+      // into a single PATCH request.  This prevents N concurrent effects from
+      // each occupying a browser connection (HTTP/1.1 allows only 6 per origin).
+      const COALESCE_MS = 50;
+      const pending = new Map<
+        string,
         {
-          token,
-          hostToken,
-          method: "PATCH",
-          body: payload,
-          timeoutMs: timeouts.config,
-        },
-      );
-    },
+          merged: { opencode?: Record<string, unknown>; openwork?: Record<string, unknown> };
+          timer: ReturnType<typeof setTimeout>;
+          resolve: (v: { updatedAt?: number | null }) => void;
+          reject: (e: unknown) => void;
+          promise: Promise<{ updatedAt?: number | null }>;
+        }
+      >();
+
+      const flush = (key: string) => {
+        const entry = pending.get(key);
+        if (!entry) return;
+        pending.delete(key);
+        configCache?.delete(key);
+        requestJson<{ updatedAt?: number | null }>(
+          baseUrl,
+          `/workspace/${encodeURIComponent(key)}/config`,
+          {
+            token,
+            hostToken,
+            method: "PATCH",
+            body: entry.merged,
+            timeoutMs: timeouts.config,
+          },
+        ).then(entry.resolve, entry.reject);
+      };
+
+      const deepMerge = (
+        target: Record<string, unknown>,
+        source: Record<string, unknown>,
+      ): Record<string, unknown> => {
+        const result = { ...target };
+        for (const k of Object.keys(source)) {
+          const sv = source[k];
+          const tv = result[k];
+          if (
+            sv && typeof sv === "object" && !Array.isArray(sv) &&
+            tv && typeof tv === "object" && !Array.isArray(tv)
+          ) {
+            result[k] = deepMerge(tv as Record<string, unknown>, sv as Record<string, unknown>);
+          } else {
+            result[k] = sv;
+          }
+        }
+        return result;
+      };
+
+      return (workspaceId: string, payload: { opencode?: Record<string, unknown>; openwork?: Record<string, unknown> }) => {
+        const existing = pending.get(workspaceId);
+        if (existing) {
+          // Merge into existing pending payload and reset the timer.
+          if (payload.opencode) {
+            existing.merged.opencode = deepMerge(
+              (existing.merged.opencode ?? {}) as Record<string, unknown>,
+              payload.opencode,
+            );
+          }
+          if (payload.openwork) {
+            existing.merged.openwork = deepMerge(
+              (existing.merged.openwork ?? {}) as Record<string, unknown>,
+              payload.openwork,
+            );
+          }
+          clearTimeout(existing.timer);
+          existing.timer = setTimeout(() => flush(workspaceId), COALESCE_MS);
+          return existing.promise;
+        }
+
+        // Create a new pending entry.
+        let resolve!: (v: { updatedAt?: number | null }) => void;
+        let reject!: (e: unknown) => void;
+        const promise = new Promise<{ updatedAt?: number | null }>((res, rej) => {
+          resolve = res;
+          reject = rej;
+        });
+        const timer = setTimeout(() => flush(workspaceId), COALESCE_MS);
+        pending.set(workspaceId, {
+          merged: { ...payload },
+          timer,
+          resolve,
+          reject,
+          promise,
+        });
+        return promise;
+      };
+    })(),
     setOpenCodeRouterTelegramToken: (
       workspaceId: string,
       tokenValue: string,

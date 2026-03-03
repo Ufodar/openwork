@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """
-Deterministic QC checks for bid documents.
+Deterministic **pre-screen** checks for bid documents.
 
 Runs hard-rule validations that produce the same output for the same input,
 independent of LLM judgment. Designed to be called from the bid-qc skill
-as Step 2a (deterministic layer).
+as Step 2a (deterministic pre-screen layer).
+
+IMPORTANT: Each check's ``pass`` status only means the check passed within
+its declared ``scope``. The ``uncovered`` list in each result specifies what
+the check does NOT verify — those aspects require LLM follow-up in Step 2c.
 
 Operates on an unpacked OOXML directory (word/document.xml etc.).
 
@@ -66,20 +70,33 @@ def _get_full_text(body: Any) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Check modules — each returns { name, status, findings[] }
+# Check modules — each returns { name, status, scope, uncovered, findings[] }
+# status: pass | fail | skip | not_applicable
 # ---------------------------------------------------------------------------
 
 
-def check_entity_consistency(
+def check_entity_presence(
     body: Any, full_text: str, facts: dict[str, Any] | None
 ) -> dict[str, Any]:
-    """Check company name whitelist/blacklist and project name consistency."""
+    """Check company/project name presence in full text and blacklist residuals."""
     findings: list[str] = []
+
+    _SCOPE = (
+        "检查 facts.json 中的 companyName/projectName/projectCode 是否出现在全文中"
+        "（去空格匹配）；检查黑名单公司名是否残留"
+    )
+    _UNCOVERED = [
+        "不检查全称vs简称混用",
+        "不检查合作方/供应商名称与资质文件匹配",
+        "不检查表格/页眉中的实体名与正文是否一致",
+    ]
 
     if not facts:
         return {
-            "name": "entity_consistency",
+            "name": "entity_presence",
             "status": "skip",
+            "scope": _SCOPE,
+            "uncovered": _UNCOVERED,
             "findings": ["No facts.json provided — skipping entity checks"],
         }
 
@@ -112,8 +129,10 @@ def check_entity_consistency(
             findings.append(f"Project code '{project_code}' not found in document")
 
     return {
-        "name": "entity_consistency",
+        "name": "entity_presence",
         "status": "fail" if findings else "pass",
+        "scope": _SCOPE,
+        "uncovered": _UNCOVERED,
         "findings": findings,
     }
 
@@ -124,10 +143,23 @@ def check_amount_consistency(
     """Parse pricing tables — verify item totals sum to grand total, check budget cap."""
     findings: list[str] = []
 
+    _UNCOVERED = [
+        "不验证单价×数量=行合计",
+        "不检查正文中提及的金额与报价表一致性",
+        "仅检查首个匹配表格",
+    ]
+
     if body is None:
-        return {"name": "amount_consistency", "status": "skip", "findings": ["No document body"]}
+        return {
+            "name": "amount_consistency",
+            "status": "skip",
+            "scope": "N/A — 无文档主体",
+            "uncovered": _UNCOVERED,
+            "findings": ["No document body"],
+        }
 
     tables = body.findall(w("tbl"))
+    table_matched = False
 
     def _extract_number(text: str) -> float | None:
         text = (text or "").strip().replace(",", "").replace("，", "")
@@ -152,6 +184,8 @@ def check_amount_consistency(
         # Detect itemized table by header pattern
         if not (len(header_cells) >= 7 and "总价" in "".join(header_cells)):
             continue
+
+        table_matched = True
 
         # Find the column index for 总价 (total price per item)
         total_col = None
@@ -203,23 +237,51 @@ def check_amount_consistency(
                             f"Bid total ({bid_total:.2f}) exceeds budget ({budget:.2f})"
                         )
 
+    if not table_matched:
+        scope = "未找到匹配格式的报价表（需 ≥7 列且含「总价」表头），仅做了预算上限检查（如有 facts.json）"
+    else:
+        scope = "匹配到分项报价表，验证了分项合计=总价、预算上限"
+
+    if not table_matched and not findings:
+        return {
+            "name": "amount_consistency",
+            "status": "not_applicable",
+            "scope": scope,
+            "uncovered": _UNCOVERED + ["未找到匹配格式的报价表，LLM 必须手动检查金额一致性"],
+            "findings": ["未找到匹配格式的分项报价表（表头需 ≥7 列且含「总价」），跳过分项合计校验"],
+        }
+
     return {
         "name": "amount_consistency",
         "status": "fail" if findings else "pass",
+        "scope": scope,
+        "uncovered": _UNCOVERED,
         "findings": findings,
     }
 
 
-def check_date_consistency(
+def check_date_presence(
     body: Any, full_text: str, facts: dict[str, Any] | None
 ) -> dict[str, Any]:
-    """Extract all dates via regex, cross-check consistency with facts."""
+    """Check whether dates from facts.json appear in document text."""
     findings: list[str] = []
+
+    _SCOPE = (
+        "检查 facts.json 中的截止日期/交货期/保修期是否出现在全文中；"
+        "检查截止日期是否已过期"
+    )
+    _UNCOVERED = [
+        "不做文档内部日期交叉比对（如保修期在多处的一致性）",
+        "不对照招标文件校验日期",
+        "仅检查 facts.json 中有的日期",
+    ]
 
     if not facts:
         return {
-            "name": "date_consistency",
+            "name": "date_presence",
             "status": "skip",
+            "scope": _SCOPE,
+            "uncovered": _UNCOVERED,
             "findings": ["No facts.json provided — skipping date checks"],
         }
 
@@ -273,8 +335,10 @@ def check_date_consistency(
             findings.append(f"Warranty/validity period '{warranty}' not found in document")
 
     return {
-        "name": "date_consistency",
+        "name": "date_presence",
         "status": "fail" if findings else "pass",
+        "scope": _SCOPE,
+        "uncovered": _UNCOVERED,
         "findings": findings,
     }
 
@@ -288,10 +352,22 @@ def check_star_coverage(
     """
     findings: list[str] = []
 
+    _SCOPE = (
+        "读取 requirements.csv 中 priority=star 的条目，"
+        "检查 deviation 字段无负偏离、status 字段非 pending/blocked"
+    )
+    _UNCOVERED = [
+        "不验证 docx 中是否有对应的实质性响应内容",
+        "仅读 CSV 元数据，若 agent 标了 done 但 docx 内容为空则本检查仍 pass",
+        "不检查响应位置是否非空",
+    ]
+
     if requirements_path is None or not requirements_path.exists():
         return {
             "name": "star_coverage",
             "status": "skip",
+            "scope": _SCOPE,
+            "uncovered": _UNCOVERED,
             "findings": ["No requirements.csv provided — skipping star coverage check"],
         }
 
@@ -309,6 +385,8 @@ def check_star_coverage(
         return {
             "name": "star_coverage",
             "status": "skip",
+            "scope": _SCOPE,
+            "uncovered": _UNCOVERED,
             "findings": [f"Failed to parse requirements.csv: {e}"],
         }
 
@@ -316,6 +394,8 @@ def check_star_coverage(
         return {
             "name": "star_coverage",
             "status": "pass",
+            "scope": _SCOPE,
+            "uncovered": _UNCOVERED,
             "findings": ["No star (★) items found in requirements.csv"],
         }
 
@@ -340,6 +420,8 @@ def check_star_coverage(
     return {
         "name": "star_coverage",
         "status": "fail" if findings else "pass",
+        "scope": _SCOPE,
+        "uncovered": _UNCOVERED,
         "findings": findings,
     }
 
@@ -347,6 +429,9 @@ def check_star_coverage(
 def check_placeholder_residue(body: Any, full_text: str) -> dict[str, Any]:
     """Search for <<TBD: ...>> residual placeholders and highlight markers."""
     findings: list[str] = []
+
+    _SCOPE = "搜索 <<TBD:...>> 占位符、中文占位词（待定/待确认/未填写/未填）、红色高亮文本"
+    _UNCOVERED = ["不检测语义占位（如'详见附件'但附件不存在）"]
 
     # TBD placeholders
     tbd_matches = re.findall(r"<<\s*TBD\s*:\s*([^>]*)>>", full_text, flags=re.IGNORECASE)
@@ -380,6 +465,8 @@ def check_placeholder_residue(body: Any, full_text: str) -> dict[str, Any]:
     return {
         "name": "placeholder_residue",
         "status": "fail" if findings else "pass",
+        "scope": _SCOPE,
+        "uncovered": _UNCOVERED,
         "findings": findings,
     }
 
@@ -390,10 +477,15 @@ def check_headers_footers(
     """Parse XML header/footer files, verify company name and project name."""
     findings: list[str] = []
 
+    _SCOPE = "解析 header*.xml 和 footer*.xml，检查含内容的页眉页脚中是否有公司名和项目名"
+    _UNCOVERED = ["不检查密级标识", "不检查页码和文档版本"]
+
     if not facts:
         return {
             "name": "headers_footers",
             "status": "skip",
+            "scope": _SCOPE,
+            "uncovered": _UNCOVERED,
             "findings": ["No facts.json provided — skipping header/footer checks"],
         }
 
@@ -403,13 +495,21 @@ def check_headers_footers(
     # Find all header/footer XML files
     word_dir = unpacked_dir / "word"
     if not word_dir.exists():
-        return {"name": "headers_footers", "status": "skip", "findings": ["No word/ directory"]}
+        return {
+            "name": "headers_footers",
+            "status": "skip",
+            "scope": _SCOPE,
+            "uncovered": _UNCOVERED,
+            "findings": ["No word/ directory"],
+        }
 
     hf_files = list(word_dir.glob("header*.xml")) + list(word_dir.glob("footer*.xml"))
     if not hf_files:
         return {
             "name": "headers_footers",
             "status": "pass",
+            "scope": _SCOPE,
+            "uncovered": _UNCOVERED,
             "findings": ["No header/footer files found"],
         }
 
@@ -439,6 +539,8 @@ def check_headers_footers(
     return {
         "name": "headers_footers",
         "status": "fail" if findings else "pass",
+        "scope": _SCOPE,
+        "uncovered": _UNCOVERED,
         "findings": findings,
     }
 
@@ -486,9 +588,9 @@ def run_all_checks(
 
     results: list[dict[str, Any]] = []
 
-    results.append(check_entity_consistency(body, full_text, facts))
+    results.append(check_entity_presence(body, full_text, facts))
     results.append(check_amount_consistency(body, full_text, facts))
-    results.append(check_date_consistency(body, full_text, facts))
+    results.append(check_date_presence(body, full_text, facts))
     results.append(check_star_coverage(body, full_text, requirements_path))
     results.append(check_placeholder_residue(body, full_text))
     results.append(check_headers_footers(unpacked_dir, facts))
@@ -498,7 +600,7 @@ def run_all_checks(
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Deterministic QC checks for bid documents (Step 2a)"
+        description="Deterministic pre-screen checks for bid documents (Step 2a)"
     )
     parser.add_argument(
         "--unpacked",
@@ -523,7 +625,21 @@ def main() -> int:
 
     results = run_all_checks(unpacked_dir, facts_path, requirements_path)
 
-    report = {"checks": results}
+    report = {
+        "meta": {
+            "description": (
+                "确定性预检结果。每个 check 包含 scope（实际检查了什么）和 "
+                "uncovered（需要 LLM 补充的部分）。pass 仅代表 scope 范围内通过。"
+            ),
+            "statuses": {
+                "pass": "scope 范围内通过，uncovered 部分仍需 LLM 检查",
+                "fail": "scope 范围内发现问题",
+                "skip": "缺少输入（如无 facts.json），未执行",
+                "not_applicable": "脚本无法匹配文档结构，LLM 必须手动检查该维度",
+            },
+        },
+        "checks": results,
+    }
 
     if args.output:
         output_path = Path(args.output)

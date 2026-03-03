@@ -1239,6 +1239,12 @@ export default function DocumentAgentView(props: SessionViewProps) {
 
   createEffect(() => {
     const items = documentsList();
+    const loading = documents.loading;
+    const latestItems = documents.latest?.items ?? [];
+    // Keep current selection during transient refresh gaps to avoid preview flicker/reset while typing.
+    if (!items.length && loading && latestItems.length > 0) {
+      return;
+    }
     if (!items.length) {
       setTargetDoc(null);
       setActiveDoc(null);

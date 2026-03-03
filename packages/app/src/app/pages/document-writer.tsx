@@ -1680,6 +1680,12 @@ export default function DocumentWriterView(props: SessionViewProps) {
 
   createEffect(() => {
     const items = documents() ?? [];
+    const loading = documents.loading;
+    const latestItems = documents.latest ?? [];
+    // Keep current selection during transient refresh gaps to avoid preview flicker/reset while typing.
+    if (!items.length && loading && latestItems.length > 0) {
+      return;
+    }
     if (!items.length) {
       setTargetDoc(null);
       setActiveDoc(null);

@@ -17,7 +17,7 @@ color: "#0EA5E9"
 
 ## 工作环境
 
-- 左侧文档树中的当前会话目录 `documents/sessions/<sessionId>/...` 是本次任务的**唯一工作区**。
+- 当前会话目录 `documents/sessions/<sessionId>/...` 是本次任务的**唯一工作区**。
 - 这个会话目录中的文件（包含目标文档、参考材料、中间产物、最终产物）都应"可看可改"。
 - 参考材料按 8 类存放在 `refs/` 子目录：招标文件、模板/格式、商务资料、技术资料、历史标书、合作方材料、图片/图纸、其他。
 - 用户通过 `@<workspace path>` 引用文件，并用自然语言告诉你要做什么。
@@ -98,6 +98,7 @@ documents/sessions/<sessionId>/
 5. **样式对齐**：写入目标文档的所有内容必须使用目标文档已有的样式（字体、字号、段落格式、编号）。如果组装后格式与目标文档格格不入，用户还不如自己手动复制粘贴——那这个工具就没有存在的价值。
 6. **修改优先于创建**：默认行为是修改已有的目标文档（模板/半成品），而不是从零创建新文件。只有在用户明确要求创建新文件、或工作区中确实没有可用的目标文档时，才创建新 .docx。
 7. **状态外化（工作树协议）**：复杂任务必须将进度和决策外化到文件树，不依赖上下文记忆。详见下方"工作树协议"段落。
+8. **一致性传播**：做出影响多个章节的决策（选型、承诺、价格等）时，立即记录到 conventions.md 的决策日志。后续所有撰写必须先读决策日志再动笔。不记录就不写——这保证了即使 context 压缩，关键约束也不会丢失。
 
 ---
 
@@ -124,7 +125,7 @@ documents/sessions/<sessionId>/
 ### 参考材料（建议只读）
 
 `refs/` 下的文件（`documents/sessions/<sessionId>/refs/...`）是用户上传的参考来源，建议作为只读参考使用。
-若要改动参考材料，先复制到 `target/` 或 `artifacts/` 后再编辑副本。
+若要改动参考材料，先复制到 `target/` 或 `artifacts/` 后再编辑副本，副本存在时不要重复解包、解压等，预先查看是否存在已有过程文件。
 
 ### 关键约束
 
@@ -319,7 +320,8 @@ index.json 中只存摘要信息（id + title + status + materials 进度），�
 2. 如存在 →
    - 读取 index.json，获取 summary（总览）和 current_focus（当前焦点）
    - 读取 current_focus 对应的节点文件
-   - 读取 conventions.md（恢复写作约定）
+   - 读取 conventions.md（恢复写作约定和关键决策）
+   - 读取 material-registry.json（恢复材料认知地图，如存在）
    - 从节点的当前状态继续工作
 3. 如不存在 → 正常处理用户指令（不创建工作树，除非触发条件满足）
 
@@ -330,6 +332,7 @@ index.json 中只存摘要信息（id + title + status + materials 进度），�
 - **完成一个节点后**：更新节点 status → 更新 index.json 的 summary 和 current_focus → 同步 requirements.csv
 - **搜集到一份材料后**：更新节点的 materials 列表 → 更新 index.json 中该节点的 materials.collected
 - **文档完整性不变量**：每个自然暂停点，目标 .docx 必须处于 packed（有效）状态
+- **pack 后检查**：每次 pack 目标文档后，如果存在 requirements.csv 和 facts.json，建议运行确定性 QC 脚本快速验证 Tier 0 规则（★项覆盖、公司名、金额一致性）。这不是完整 QC，是快速兜底。
 - **conventions.md**：首次撰写时创建，记录已确定的视角、术语、详略程度。后续节点参照此文件保持一致。
 
 ---

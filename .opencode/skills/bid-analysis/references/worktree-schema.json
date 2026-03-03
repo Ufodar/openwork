@@ -53,13 +53,18 @@
         "name": "H3C S6860 数据手册",
         "source": null,
         "status": "pending",
-        "search_scope": ["refs/technical/", "refs/partners/"]
+        "search_scope": ["refs/technical/", "refs/partners/"],
+        "searched_paths": []
       },
       {
         "name": "性能测试报告",
         "source": null,
-        "status": "pending",
-        "search_scope": ["refs/technical/"]
+        "status": "not_found",
+        "search_scope": ["refs/technical/"],
+        "searched_paths": [
+          { "path": "refs/technical/", "verdict": "无相关文件", "time": "Round 3" },
+          { "path": "refs/partners/h3c/", "verdict": "仅产品手册，无测试报告", "time": "Round 3" }
+        ]
       }
     ],
     "response": {
@@ -98,9 +103,10 @@
       "materials[]": {
         "name": "Descriptive name of the material",
         "source": "Relative path to materials/<id>-<name>.md, null if not yet collected",
-        "status": "pending | collected",
+        "status": "pending | collected | not_found",
         "key_facts": "Optional: key facts extracted from the material",
-        "search_scope": "Optional: directories to search for this material"
+        "search_scope": "Optional: directories to search for this material",
+        "searched_paths": "Array of { path, verdict, time } recording search attempts. path=directory searched, verdict=what was found/not found, time=which round. Survives context compression."
       },
       "response": {
         "status": "pending | in_progress | done | blocked",
@@ -108,6 +114,15 @@
         "draft": "Draft response text, null if not yet written",
         "deviation": "正偏离 | 无偏离 | 负偏离, null if not yet determined"
       }
+    }
+  },
+
+  "conventions.md": {
+    "_doc": "Three-section structure. All nodes MUST read this file before writing.",
+    "sections": {
+      "一、格式约定": "Writing style rules: perspective, terminology, detail level, numbering conventions",
+      "二、关键决策日志": "Decisions that ALL subsequent nodes must follow. Table format: 决策ID | 决策内容 | 影响节点 | 决策依据 | 记录时间",
+      "三、一致性检查点": "Quick checklist before writing each node: 引用产品参数→查选型决策；提及响应时间→查承诺数值；提及金额→查报价表"
     }
   }
 }

@@ -22,9 +22,22 @@ description: 分析招标文件，提取评标方法、评分标准、资质要�
 - 如提取出 ≥ 10 条要求 → 同时构建 `.worktree/`（结构参见 `references/worktree-schema.json`）：
   1. 创建 `.worktree/index.json`（总览 + children 列表）
   2. 为每条要求创建 `nodes/<id>.json`（含招标原文、定位、优先级、评分机制）
-  3. 创建 `conventions.md`（空模板，待撰写阶段填充）
+  3. 创建 `conventions.md`，包含三个区域：
+     - **一、格式约定**：暂为空，待撰写阶段首次写入时填充
+     - **二、关键决策日志**：空表格框架（决策ID | 决策内容 | 影响节点 | 决策依据 | 记录时间）
+     - **三、一致性检查点**：空检查清单框架，待首个关键决策产生后填充
   4. 两者的 status 字段保持同步
 - 如 < 10 条 → 只写 requirements.csv，不创建工作树。
+
+### Step 4.5: 构建材料索引（当 refs/ 目录含 >= 5 个文件时）
+
+浏览 refs/ 下所有子目录的文件列表，对每个文件快速了解其内容概要（读取前几页/首 sheet/首 slide），构建 `.worktree/material-registry.json`（schema 参见 `references/material-registry-template.json`）：
+
+- 每个文件一个条目：type、format、covers、useful_for_reqs、quality、caveats
+- useful_for_reqs 可在此阶段粗略填写（基于文件内容和 requirements.csv 的匹配），后续阶段逐步精确化
+- 该索引是全项目共享的，不是某个节点私有的
+
+此步骤为后续 bid-drafting 阶段提供"先查索引、再开文件"的快速路径。
 
 ### Step 5: 向用户汇报分析摘要
 简要汇报：评标方法、分值分布、★ 项数量、关键时间节点。指出需要用户确认的不确定项。
@@ -106,3 +119,4 @@ description: 分析招标文件，提取评标方法、评分标准、资质要�
 
 - `references/facts-template.json` — 关键事实的示例 schema（可选参考，非强制格式）
 - `references/requirements-matrix-template.csv` — 需求矩阵列定义和示例行（可选参考）
+- `references/material-registry-template.json` — 材料索引 schema（Step 4.5 构建时参照）

@@ -286,6 +286,14 @@ export default function DocumentWriterView(props: SessionViewProps) {
   const workspaceId = createMemo(() => props.openworkServerWorkspaceId?.trim() ?? "");
   const isAgentRunning = createMemo(() => (props.sessionStatus ?? "idle") === "running");
 
+  // Lock agent to document-writer for document-writer page
+  createEffect(() => {
+    const sid = sessionId();
+    if (sid && props.selectedSessionAgent !== "document-writer") {
+      props.setSessionAgent(sid, "document-writer");
+    }
+  });
+
   const serverReady = createMemo(
     () =>
       props.openworkServerStatus === "connected" &&

@@ -6,6 +6,10 @@ description: 撰写/组装商务标或技术标内容，包括点对点应答表
 ## Workflow
 
 ### Step 1: 确认前置条件 + 恢复进度
+
+**前置检查（强制）：**
+0. 确认目标文档已确定。检查会话目录的 `target/` 下是否存在目标 .docx（或用户通过 @ 指定的目标文件）。如果不存在且用户也未指定目标文件 → **停止**，提示用户先确定目标文档（"往哪个文件里写？"）。
+
 1. 检查 `.worktree/index.json` 是否存在：
    - 如有 → 读取 index.json 获取总览和 current_focus，读取 conventions.md 恢复写作约定，以此为任务清单
    - 如无 → 检查 requirements.csv，如有则以其为任务清单

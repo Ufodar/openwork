@@ -84,6 +84,7 @@
       "summary": "Aggregate counts by status, must stay in sync with children",
       "current_focus": "ID of the node currently being worked on, null if none",
       "conventions_ref": "Relative path to conventions.md",
+      "template_findings": "Optional. Reported by bid-analysis when template-related content is discovered. { found: bool, type: 'embedded_chapter'|'standalone_file'|'scattered_description', location: string, structure_summary: string }",
       "children[]": {
         "id": "Unique identifier, format: req-<section>.<number>",
         "title": "Short title summarizing the requirement",

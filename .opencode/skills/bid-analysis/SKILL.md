@@ -87,9 +87,26 @@ description: 分析招标文件，提取评标方法、评分标准、资质要�
 
 分析时标注每个评分因素属于哪种机制，供后续撰写阶段参考。
 
-### 模板决策
+### 模板发现与报告
 
-模板/格式的确定由 agent 层（document-writer）管控，本 skill 专注于分析阶段。
+模板/格式的最终决策由 agent 层（document-writer）管控，本 skill 专注于分析。
+
+但在 Step 1（读取招标文件）过程中，如果发现以下内容，**必须在 index.json 中报告**（`template_findings` 字段）：
+
+- 包含 "投标文件格式"/"响应文件格式"/"投标文件编制格式" 等标题的章节 → 记录章节标题、页码/位置
+- 单独的格式模板附件（如压缩包内的 .docx 模板文件）→ 记录文件名和路径
+- 格式要求的散落描述（如"投标文件应按以下顺序编排：..."）→ 记录原文和位置
+
+```json
+"template_findings": {
+  "found": true,
+  "type": "embedded_chapter | standalone_file | scattered_description",
+  "location": "招标文件.pdf p.78-85 '第七章 投标文件格式'",
+  "structure_summary": "包含 9 个章节模板：投标函、法人授权书、资格声明..."
+}
+```
+
+这些报告供 document-writer 的目标文档决策门使用。如果 agent 层已在分析前完成了模板探测，此报告作为交叉验证。
 
 ### 点对点应答表结构
 

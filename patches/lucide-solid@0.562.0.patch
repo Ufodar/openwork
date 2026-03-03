@@ -1,0 +1,26 @@
+diff --git a/package.json b/package.json
+index 1234567..abcdefg 100644
+--- a/package.json
++++ b/package.json
+@@ -33,21 +33,18 @@
+   "exports": {
+     ".": {
+       "types": "./dist/types/lucide-solid.d.ts",
+-      "solid": "./dist/source/lucide-solid.jsx",
+       "import": "./dist/esm/lucide-solid.js",
+       "browser": "./dist/esm/lucide-solid.js",
+       "require": "./dist/cjs/lucide-solid.js"
+     },
+     "./icons": {
+       "types": "./dist/types/lucide-solid.d.ts",
+-      "solid": "./dist/source/lucide-solid.jsx",
+       "import": "./dist/esm/lucide-solid.js",
+       "browser": "./dist/esm/lucide-solid.js",
+       "require": "./dist/cjs/lucide-solid.js"
+     },
+     "./icons/*": {
+       "types": "./dist/types/icons/*.d.ts",
+-      "solid": "./dist/source/icons/*.jsx",
+       "import": "./dist/esm/icons/*.js",
+       "browser": "./dist/esm/icons/*.js",
+       "require": "./dist/cjs/icons/*.js"

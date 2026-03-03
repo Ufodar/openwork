@@ -41,7 +41,8 @@
       "protobufjs"
     ],
     "patchedDependencies": {
-      "@solidjs/router@0.15.4": "patches/@solidjs__router@0.15.4.patch"
+      "@solidjs/router@0.15.4": "patches/@solidjs__router@0.15.4.patch",
+      "lucide-solid@0.562.0": "patches/lucide-solid@0.562.0.patch"
     }
   },
   "packageManager": "pnpm@10.27.0",

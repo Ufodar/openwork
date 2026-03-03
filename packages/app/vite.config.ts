@@ -39,6 +39,13 @@ export default defineConfig({
     tailwindcss(),
     solid(),
   ],
+  optimizeDeps: {
+    // lucide-solid has ~3300 individual ESM icon modules. Pre-bundling
+    // collapses them into one request, critical for SSH-tunneled dev.
+    // The pnpm patch (patches/lucide-solid@0.562.0.patch) removes the
+    // "solid" export condition so vite-plugin-solid won't exclude it.
+    include: ["lucide-solid"],
+  },
   server: {
     port: devPort,
     strictPort: true,

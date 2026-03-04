@@ -604,7 +604,7 @@ export default function MessageList(props: MessageListProps) {
   /** Compact steps list */
   const StepsList = (listProps: { parts: Part[]; isUser: boolean }) => {
     const shouldShowPartView = (part: Part) =>
-      (part.type === "tool" || part.type === "reasoning" || (props.developerMode && part.type !== "step-finish")) && part.type !== "step-finish";
+      part.type === "tool" || part.type === "reasoning" || (props.developerMode && part.type !== "step-finish");
 
     /** Single step item — reasoning is always expanded, tool is collapsed by default */
     const StepItem = (itemProps: { part: Part }) => {

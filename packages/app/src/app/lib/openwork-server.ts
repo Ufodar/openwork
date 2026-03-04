@@ -1122,52 +1122,39 @@ export function createOpenworkServerClient(options: { baseUrl: string; token?: s
       };
     })(),
     patchConfig: (() => {
-      // Coalesce: multiple patchConfig calls within a short window are merged
-      // into a single PATCH request.  This prevents N concurrent effects from
-      // each occupying a browser connection (HTTP/1.1 allows only 6 per origin).
-      const COALESCE_MS = 50;
-      const pending = new Map<
-        string,
-        {
-          merged: { opencode?: Record<string, unknown>; openwork?: Record<string, unknown> };
-          timer: ReturnType<typeof setTimeout>;
-          resolve: (v: { updatedAt?: number | null }) => void;
-          reject: (e: unknown) => void;
-          promise: Promise<{ updatedAt?: number | null }>;
-        }
-      >();
+      // Coalesce + serialize PATCH requests per workspace so write traffic
+      // cannot saturate the browser's per-origin connection pool (HTTP/1.1 is
+      // typically capped at 6 connections).
+      //
+      // Do NOT debounce with a long timer here: delaying the first PATCH makes
+      // it more likely to overlap with other startup API calls and recreate
+      // the "pending" symptom. Instead we coalesce within the current tick
+      // (microtask) and then flush immediately, while keeping only one request
+      // in-flight per workspace.
 
-      const flush = (key: string) => {
-        const entry = pending.get(key);
-        if (!entry) return;
-        pending.delete(key);
-        configCache?.delete(key);
-        requestJson<{ updatedAt?: number | null }>(
-          baseUrl,
-          `/workspace/${encodeURIComponent(key)}/config`,
-          {
-            token,
-            hostToken,
-            method: "PATCH",
-            body: entry.merged,
-            timeoutMs: timeouts.config,
-          },
-        ).then(entry.resolve, entry.reject);
+      type PatchPayload = { opencode?: Record<string, unknown>; openwork?: Record<string, unknown> };
+      type Waiter = {
+        resolve: (v: { updatedAt?: number | null }) => void;
+        reject: (e: unknown) => void;
+      };
+      type QueueState = {
+        queued: PatchPayload | null;
+        waiters: Waiter[];
+        flushing: boolean;
+        scheduled: boolean;
       };
 
-      const deepMerge = (
-        target: Record<string, unknown>,
-        source: Record<string, unknown>,
-      ): Record<string, unknown> => {
-        const result = { ...target };
-        for (const k of Object.keys(source)) {
-          const sv = source[k];
+      const queues = new Map<string, QueueState>();
+
+      const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+        Boolean(value) && typeof value === "object" && !Array.isArray(value);
+
+      const deepMerge = (target: Record<string, unknown>, source: Record<string, unknown>): Record<string, unknown> => {
+        const result: Record<string, unknown> = { ...target };
+        for (const [k, sv] of Object.entries(source)) {
           const tv = result[k];
-          if (
-            sv && typeof sv === "object" && !Array.isArray(sv) &&
-            tv && typeof tv === "object" && !Array.isArray(tv)
-          ) {
-            result[k] = deepMerge(tv as Record<string, unknown>, sv as Record<string, unknown>);
+          if (isPlainObject(tv) && isPlainObject(sv)) {
+            result[k] = deepMerge(tv, sv);
           } else {
             result[k] = sv;
           }
@@ -1175,42 +1162,95 @@ export function createOpenworkServerClient(options: { baseUrl: string; token?: s
         return result;
       };
 
-      return (workspaceId: string, payload: { opencode?: Record<string, unknown>; openwork?: Record<string, unknown> }) => {
-        const existing = pending.get(workspaceId);
-        if (existing) {
-          // Merge into existing pending payload and reset the timer.
-          if (payload.opencode) {
-            existing.merged.opencode = deepMerge(
-              (existing.merged.opencode ?? {}) as Record<string, unknown>,
-              payload.opencode,
-            );
+      const mergePayload = (target: PatchPayload | null, source: PatchPayload): PatchPayload => {
+        const next: PatchPayload = { ...(target ?? {}) };
+        if (source.opencode) {
+          const base = isPlainObject(next.opencode) ? next.opencode : {};
+          next.opencode = deepMerge(base, source.opencode);
+        }
+        if (source.openwork) {
+          const base = isPlainObject(next.openwork) ? next.openwork : {};
+          next.openwork = deepMerge(base, source.openwork);
+        }
+        return next;
+      };
+
+      const enqueueMicrotask = (fn: () => void) => {
+        if (typeof queueMicrotask === "function") {
+          queueMicrotask(fn);
+          return;
+        }
+        void Promise.resolve().then(fn);
+      };
+
+      const cleanupIfIdle = (workspaceId: string, state: QueueState) => {
+        if (!state.flushing && !state.scheduled && !state.queued && state.waiters.length === 0) {
+          queues.delete(workspaceId);
+        }
+      };
+
+      const flush = async (workspaceId: string) => {
+        const state = queues.get(workspaceId);
+        if (!state || state.flushing || !state.queued) return;
+
+        state.flushing = true;
+        const body = state.queued;
+        const waiters = state.waiters;
+        state.queued = null;
+        state.waiters = [];
+
+        // Invalidate before sending so follow-up reads don't return stale cached content.
+        configCache?.delete(workspaceId);
+
+        try {
+          const result = await requestJson<{ updatedAt?: number | null }>(
+            baseUrl,
+            `/workspace/${encodeURIComponent(workspaceId)}/config`,
+            {
+              token,
+              hostToken,
+              method: "PATCH",
+              body,
+              timeoutMs: timeouts.config,
+            },
+          );
+          for (const waiter of waiters) waiter.resolve(result);
+        } catch (error) {
+          for (const waiter of waiters) waiter.reject(error);
+        } finally {
+          state.flushing = false;
+          if (state.queued) {
+            scheduleFlush(workspaceId, state);
+          } else {
+            cleanupIfIdle(workspaceId, state);
           }
-          if (payload.openwork) {
-            existing.merged.openwork = deepMerge(
-              (existing.merged.openwork ?? {}) as Record<string, unknown>,
-              payload.openwork,
-            );
-          }
-          clearTimeout(existing.timer);
-          existing.timer = setTimeout(() => flush(workspaceId), COALESCE_MS);
-          return existing.promise;
+        }
+      };
+
+      const scheduleFlush = (workspaceId: string, state: QueueState) => {
+        if (state.scheduled) return;
+        state.scheduled = true;
+        enqueueMicrotask(() => {
+          state.scheduled = false;
+          void flush(workspaceId);
+        });
+      };
+
+      return (workspaceId: string, payload: PatchPayload) => {
+        let state = queues.get(workspaceId);
+        if (!state) {
+          state = { queued: null, waiters: [], flushing: false, scheduled: false };
+          queues.set(workspaceId, state);
         }
 
-        // Create a new pending entry.
-        let resolve!: (v: { updatedAt?: number | null }) => void;
-        let reject!: (e: unknown) => void;
-        const promise = new Promise<{ updatedAt?: number | null }>((res, rej) => {
-          resolve = res;
-          reject = rej;
+        state.queued = mergePayload(state.queued, payload);
+        // Invalidate cache immediately to avoid serving stale data during the coalesce window.
+        configCache?.delete(workspaceId);
+
+        const promise = new Promise<{ updatedAt?: number | null }>((resolve, reject) => {
+          state!.waiters.push({ resolve, reject });
         });
-        const timer = setTimeout(() => flush(workspaceId), COALESCE_MS);
-        pending.set(workspaceId, {
-          merged: { ...payload },
-          timer,
-          resolve,
-          reject,
-          promise,
-        });
+        scheduleFlush(workspaceId, state);
         return promise;
       };
     })(),

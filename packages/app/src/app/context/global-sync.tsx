@@ -71,6 +71,54 @@ const createWorkspaceState = (): WorkspaceState => ({
   todo: {},
 });
 
+const PROVIDER_LIST_TIMEOUT_MS = 4_000;
+const OPENCODE_GLOBAL_HEALTH_TIMEOUT_MS = 4_000;
+const OPENCODE_CONFIG_TIMEOUT_MS = 4_000;
+const OPENCODE_PROVIDER_AUTH_TIMEOUT_MS = 4_000;
+const OPENCODE_PROVIDER_LIST_TIMEOUT_MS = 6_000;
+const OPENCODE_MCP_STATUS_TIMEOUT_MS = 6_000;
+const OPENCODE_LSP_STATUS_TIMEOUT_MS = 6_000;
+const OPENCODE_PROJECT_LIST_TIMEOUT_MS = 6_000;
+const OPENCODE_VCS_GET_TIMEOUT_MS = 4_000;
+const VCS_REFRESH_BATCH_SIZE = 3;
+
+const withAbortTimeout = async <T,>(
+  runner: (signal?: AbortSignal) => Promise<T>,
+  timeoutMs: number,
+  label: string,
+): Promise<T> => {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    return await runner(undefined);
+  }
+
+  const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+  if (!controller) {
+    return await runner(undefined);
+  }
+
+  let didTimeout = false;
+  const timeoutId = setTimeout(() => {
+    didTimeout = true;
+    try {
+      controller.abort();
+    } catch {
+      // ignore
+    }
+  }, timeoutMs);
+
+  try {
+    return await runner(controller.signal);
+  } catch (error) {
+    const name = (error && typeof error === "object" && "name" in error ? (error as any).name : "") as string;
+    if (didTimeout || name === "AbortError") {
+      throw new Error(`${label} timed out.`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+};
+
 export function GlobalSyncProvider(props: ParentProps) {
   const globalSDK = useGlobalSDK();
   const defaultProvider: ProviderListResponse = { all: [], connected: [], default: {} };
@@ -89,6 +137,7 @@ export function GlobalSyncProvider(props: ParentProps) {
   });
   const children = new Map<string, WorkspaceStore>();
   const subscriptions = new Map<string, () => void>();
+  let refreshInFlight: Promise<void> | null = null;
 
   const keyFor = (directory: string) => directory || "global";
 
@@ -110,27 +159,59 @@ export function GlobalSyncProvider(props: ParentProps) {
   };
 
   const refreshConfig = async () => {
-    const result = unwrap(await globalSDK.client().config.get());
+    const result = unwrap(
+      await withAbortTimeout(
+        (signal) => globalSDK.client().config.get(undefined, signal ? { signal } : undefined),
+        OPENCODE_CONFIG_TIMEOUT_MS,
+        "config.get",
+      ),
+    );
     setGlobalStore("config", result);
   };
 
   const refreshProviders = async () => {
+    let seededFromConfig = false;
     try {
-      const result = unwrap(await globalSDK.client().provider.list());
-      setGlobalStore("provider", result);
-    } catch {
-      const fallback = unwrap(await globalSDK.client().config.providers()) as ConfigProvidersResponse;
+      const fallback = unwrap(
+        await withAbortTimeout(
+          (signal) => globalSDK.client().config.providers(undefined, signal ? { signal } : undefined),
+          OPENCODE_CONFIG_TIMEOUT_MS,
+          "config.providers",
+        ),
+      ) as ConfigProvidersResponse;
       setGlobalStore("provider", {
         all: mapConfigProvidersToList(fallback.providers),
-        connected: [],
+        connected: globalStore.provider.connected ?? [],
         default: fallback.default,
       });
+      seededFromConfig = true;
+    } catch {
+      // Keep current provider state if the lightweight source fails.
+    }
+
+    try {
+      const result = unwrap(
+        await withAbortTimeout(
+          (signal) => globalSDK.client().provider.list(undefined, signal ? { signal } : undefined),
+          Math.max(PROVIDER_LIST_TIMEOUT_MS, OPENCODE_PROVIDER_LIST_TIMEOUT_MS),
+          "provider.list",
+        ),
+      ) as ProviderListResponse;
+      setGlobalStore("provider", result);
+    } catch {
+      if (!seededFromConfig && !globalStore.provider.all.length) {
+        setGlobalStore("provider", defaultProvider);
+      }
     }
   };
 
   const refreshProviderAuth = async () => {
     try {
-      const result = await globalSDK.client().provider.auth();
+      const result = await withAbortTimeout(
+        (signal) => globalSDK.client().provider.auth(undefined, signal ? { signal } : undefined),
+        OPENCODE_PROVIDER_AUTH_TIMEOUT_MS,
+        "provider.auth",
+      );
       setGlobalStore("providerAuth", result.data ?? {});
     } catch {
       setGlobalStore("providerAuth", {});
@@ -138,18 +219,36 @@ export function GlobalSyncProvider(props: ParentProps) {
   };
 
   const refreshMcp = async (directory?: string) => {
-    const result = unwrap(await globalSDK.client().mcp.status({ directory })) as McpStatusMap;
+    const result = unwrap(
+      await withAbortTimeout(
+        (signal) => globalSDK.client().mcp.status({ directory }, signal ? { signal } : undefined),
+        OPENCODE_MCP_STATUS_TIMEOUT_MS,
+        "mcp.status",
+      ),
+    ) as McpStatusMap;
     setGlobalStore("mcp", keyFor(directory ?? ""), result as McpStatusMap);
   };
 
   const refreshLsp = async (directory?: string) => {
-    const result = unwrap(await globalSDK.client().lsp.status({ directory })) as LspStatus[];
+    const result = unwrap(
+      await withAbortTimeout(
+        (signal) => globalSDK.client().lsp.status({ directory }, signal ? { signal } : undefined),
+        OPENCODE_LSP_STATUS_TIMEOUT_MS,
+        "lsp.status",
+      ),
+    ) as LspStatus[];
     setGlobalStore("lsp", keyFor(directory ?? ""), result as LspStatus[]);
   };
 
   const refreshVcs = async (directory: string) => {
     try {
-      const result = unwrap(await globalSDK.client().vcs.get({ directory })) as VcsInfo;
+      const result = unwrap(
+        await withAbortTimeout(
+          (signal) => globalSDK.client().vcs.get({ directory }, signal ? { signal } : undefined),
+          OPENCODE_VCS_GET_TIMEOUT_MS,
+          "vcs.get",
+        ),
+      ) as VcsInfo;
       setGlobalStore("vcs", keyFor(directory), result ?? null);
     } catch {
       setGlobalStore("vcs", keyFor(directory), null);
@@ -157,32 +256,47 @@ export function GlobalSyncProvider(props: ParentProps) {
   };
 
   const refreshProjects = async () => {
-    const projects = unwrap(await globalSDK.client().project.list()) as Project[];
+    const projects = unwrap(
+      await withAbortTimeout(
+        (signal) => globalSDK.client().project.list(undefined, signal ? { signal } : undefined),
+        OPENCODE_PROJECT_LIST_TIMEOUT_MS,
+        "project.list",
+      ),
+    ) as Project[];
     setGlobalStore("project", projects);
     setProjectMeta(projects);
-    await Promise.allSettled(
-      projects
-        .map((project) => project.worktree)
-        .filter((worktree): worktree is string => typeof worktree === "string" && worktree.length > 0)
-        .map((worktree) => refreshVcs(worktree)),
-    );
+
+    const worktrees = Array.from(
+      new Set(
+        projects
+          .map((project) => project.worktree?.trim() ?? "")
+          .filter((worktree): worktree is string => Boolean(worktree)),
+      ),
+    ).filter((worktree) => worktree !== "/");
+
+    for (let index = 0; index < worktrees.length; index += VCS_REFRESH_BATCH_SIZE) {
+      const chunk = worktrees.slice(index, index + VCS_REFRESH_BATCH_SIZE);
+      await Promise.allSettled(chunk.map((worktree) => refreshVcs(worktree)));
+    }
   };
 
   const refreshDirectory = async (directory: string) => {
     if (!directory) return;
-    await Promise.allSettled([
-      refreshMcp(directory),
-      refreshLsp(directory),
-      refreshVcs(directory),
-    ]);
+    await Promise.allSettled([refreshMcp(directory), refreshLsp(directory)]);
   };
 
-  const refresh = async () => {
+  const runRefresh = async () => {
     setGlobalStore("ready", false);
     setGlobalStore("error", undefined);
 
     try {
-      const health = unwrap(await globalSDK.client().global.health()) as GlobalHealthResponse;
+      const health = unwrap(
+        await withAbortTimeout(
+          (signal) => globalSDK.client().global.health(signal ? { signal } : undefined),
+          OPENCODE_GLOBAL_HEALTH_TIMEOUT_MS,
+          "global.health",
+        ),
+      ) as GlobalHealthResponse;
       if (!health?.healthy) {
         setGlobalStore("error", "Server reported unhealthy status.");
         return;
@@ -201,22 +315,43 @@ export function GlobalSyncProvider(props: ParentProps) {
       return;
     }
 
-    const results = await Promise.allSettled([
-      refreshConfig(),
-      refreshProviders(),
-      refreshProviderAuth(),
-      refreshMcp(),
-      refreshLsp(),
-      refreshProjects(),
-    ]);
-
-    for (const result of results) {
-      if (result.status === "rejected") {
-        setError(result.reason);
-      }
+    const criticalResults = await Promise.allSettled([refreshConfig(), refreshProviders(), refreshProviderAuth()]);
+    for (const result of criticalResults) {
+      if (result.status === "rejected") setError(result.reason);
     }
-
     setGlobalStore("ready", true);
+
+    const scheduleBackground = (fn: () => void) => {
+      if (typeof window === "undefined") {
+        fn();
+        return;
+      }
+
+      const ric = (window as unknown as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number })
+        .requestIdleCallback;
+      if (typeof ric === "function") {
+        ric(fn, { timeout: 1000 });
+        return;
+      }
+      setTimeout(fn, 250);
+    };
+
+    scheduleBackground(() => {
+      void Promise.allSettled([refreshMcp(), refreshLsp(), refreshProjects()]).then((results) => {
+        for (const result of results) {
+          if (result.status === "rejected") setError(result.reason);
+        }
+      });
+    });
+  };
+
+  const refresh = async () => {
+    if (refreshInFlight) return refreshInFlight;
+    const task = runRefresh().finally(() => {
+      if (refreshInFlight === task) refreshInFlight = null;
+    });
+    refreshInFlight = task;
+    return task;
   };
 
   const child = (directory: string): WorkspaceStore => {
@@ -281,3 +416,4 @@ export function useGlobalSync() {
   }
   return context;
 }
+

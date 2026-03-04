@@ -398,7 +398,31 @@ export default function DocumentAgentView(props: SessionViewProps) {
     if (token && !headers.has("Authorization")) {
       headers.set("Authorization", `Bearer ${token}`);
     }
-    const response = await fetch(url, { ...init, headers });
+    const controller = typeof AbortController !== "undefined" && !init?.signal ? new AbortController() : null;
+    const timeoutMs = 12_000;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    if (controller && Number.isFinite(timeoutMs) && timeoutMs > 0) {
+      timeoutId = setTimeout(() => {
+        try {
+          controller.abort();
+        } catch {
+          // ignore
+        }
+      }, timeoutMs);
+    }
+
+    let response: Response;
+    try {
+      response = await fetch(url, { ...init, headers, ...(controller ? { signal: controller.signal } : {}) });
+    } catch (error) {
+      const name = (error && typeof error === "object" && "name" in error ? (error as any).name : "") as string;
+      if (name === "AbortError") {
+        throw new Error("Request timed out.");
+      }
+      throw error;
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
     if (!response.ok) {
       const text = await response.text().catch(() => "");
       try {

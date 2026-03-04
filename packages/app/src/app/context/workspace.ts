@@ -1350,8 +1350,13 @@ export function createWorkspaceStore(options: {
         options.refreshSkills({ force: true }).catch(() => undefined);
         options.refreshPlugins().catch(() => undefined);
         if (navigate && !options.selectedSessionId()) {
-          options.setTab("scheduled");
-          options.setView("session");
+          const pathname = typeof window !== "undefined" ? window.location.pathname.toLowerCase() : "";
+          const hash = typeof window !== "undefined" ? window.location.hash.toLowerCase() : "";
+          const isDashboardRoute = pathname.startsWith("/dashboard") || hash.startsWith("#/dashboard");
+          if (!isDashboardRoute) {
+            options.setTab("scheduled");
+            options.setView("session");
+          }
         }
 
         // If the user successfully connected, treat onboarding as complete so we

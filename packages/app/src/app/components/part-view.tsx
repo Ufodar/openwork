@@ -910,7 +910,7 @@ export default function PartView(props: Props) {
             (p() as { text: string }).text.trim()
           }
         >
-          <details class={`rounded-lg ${panelBgClass()} p-2`.trim()}>
+          <details open class={`rounded-lg ${panelBgClass()} p-2`.trim()}>
             <summary class={`cursor-pointer text-xs ${subtleTextClass()}`.trim()}>Thinking</summary>
             <pre class={`mt-2 whitespace-pre-wrap break-words text-xs text-gray-12`.trim()}>
               {String((p() as { text: string }).text)}

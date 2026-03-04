@@ -606,25 +606,39 @@ export default function MessageList(props: MessageListProps) {
     const shouldShowPartView = (part: Part) =>
       (part.type === "tool" || part.type === "reasoning" || (props.developerMode && part.type !== "step-finish")) && part.type !== "step-finish";
 
+    /** Single step item — reasoning is always expanded, tool is collapsed by default */
+    const StepItem = (itemProps: { part: Part }) => {
+      const isReasoning = () => itemProps.part.type === "reasoning";
+      const [toolExpanded, setToolExpanded] = createSignal(false);
+      const showContent = () => isReasoning() || toolExpanded();
+
+      return (
+        <div>
+          <div
+            class={isReasoning() ? "" : "cursor-pointer"}
+            onClick={() => { if (!isReasoning()) setToolExpanded((v) => !v); }}
+          >
+            <StepRow part={itemProps.part} isUser={listProps.isUser} />
+          </div>
+          <Show when={shouldShowPartView(itemProps.part) && showContent()}>
+            <div class="pl-6 pb-2 text-xs text-gray-10">
+              <PartView
+                part={itemProps.part}
+                developerMode={props.developerMode}
+                showThinking={props.showThinking}
+                workspaceRoot={props.workspaceRoot}
+                tone={listProps.isUser ? "dark" : "light"}
+              />
+            </div>
+          </Show>
+        </div>
+      );
+    };
+
     return (
       <div class="divide-y divide-gray-6/40">
         <For each={listProps.parts}>
-          {(part) => (
-            <div>
-              <StepRow part={part} isUser={listProps.isUser} />
-              <Show when={shouldShowPartView(part)}>
-                <div class="pl-6 pb-2 text-xs text-gray-10">
-                  <PartView
-                    part={part}
-                    developerMode={props.developerMode}
-                    showThinking={props.showThinking}
-                    workspaceRoot={props.workspaceRoot}
-                    tone={listProps.isUser ? "dark" : "light"}
-                  />
-                </div>
-              </Show>
-            </div>
-          )}
+          {(part) => <StepItem part={part} />}
         </For>
       </div>
     );

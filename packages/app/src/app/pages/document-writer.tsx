@@ -1,6 +1,6 @@
 import { For, Show, createEffect, createMemo, createResource, createSignal, on, onCleanup } from "solid-js";
 import type { Agent } from "@opencode-ai/sdk/v2/client";
-import { ArrowRight, AtSign, CheckCircle2, ChevronDown, Download, FileText, Folder, FolderArchive, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Search, Trash2, X } from "lucide-solid";
+import { ArrowRight, AtSign, Check, CheckCircle2, ChevronDown, Download, FileText, Folder, FolderArchive, ListTodo, Minimize2, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Search, Trash2, X } from "lucide-solid";
 import { useNavigate } from "@solidjs/router";
 
 import type { ComposerDraft, SlashCommandOption } from "../types";
@@ -419,6 +419,15 @@ export default function DocumentWriterView(props: SessionViewProps) {
   const [refsOpenBusyId, setRefsOpenBusyId] = createSignal<string | null>(null);
 
   const [modulesExpanded, setModulesExpanded] = createSignal(true);
+  const [todoExpanded, setTodoExpanded] = createSignal(false);
+  const todoList = createMemo(() => (props.todos ?? []).filter((todo) => todo.content.trim()));
+  const todoCount = createMemo(() => todoList().length);
+  const todoCompletedCount = createMemo(() => todoList().filter((todo) => todo.status === "completed").length);
+  const todoLabel = createMemo(() => {
+    const total = todoCount();
+    if (!total) return "";
+    return `${todoCompletedCount()} / ${total} ${tr("docwriter.tasks_completed")}`;
+  });
   const [moduleModal, setModuleModal] = createSignal<null | "facts" | "fill" | "dedupe" | "qc" | "preview">(null);
   const [factsTenderSource, setFactsTenderSource] = createSignal<DocumentItem | null>(null);
   const [factsApplyToTarget, setFactsApplyToTarget] = createSignal(true);
@@ -2658,6 +2667,70 @@ export default function DocumentWriterView(props: SessionViewProps) {
             }}
           />
         </div>
+
+        <Show when={todoCount() > 0}>
+          <div class="px-4">
+            <div class="rounded-t-xl border border-b-0 border-gray-6/70 bg-gray-1/70 shadow-sm shadow-gray-12/5">
+              <button
+                type="button"
+                class="w-full flex items-center justify-between px-4 py-2.5 text-xs text-gray-9 hover:bg-gray-2/50 transition-colors rounded-t-xl"
+                onClick={() => setTodoExpanded((v) => !v)}
+              >
+                <div class="flex items-center gap-2">
+                  <ListTodo size={14} class="text-gray-8" />
+                  <span class="text-gray-11 font-medium">{todoLabel()}</span>
+                </div>
+                <Minimize2
+                  size={12}
+                  class={`text-gray-8 transition-transform ${todoExpanded() ? "" : "rotate-180"}`}
+                />
+              </button>
+              <Show when={todoExpanded()}>
+                <div class="px-4 pb-3 space-y-2.5 max-h-60 overflow-auto border-t border-gray-6/50">
+                  <For each={todoList()}>
+                    {(todo, index) => {
+                      const done = () => todo.status === "completed";
+                      const cancelled = () => todo.status === "cancelled";
+                      const active = () => todo.status === "in_progress";
+                      return (
+                        <div class="flex items-start gap-2.5 pt-2.5 first:pt-2.5">
+                          <div class="flex items-center gap-1.5 pt-0.5">
+                            <div
+                              class={`h-4.5 w-4.5 rounded-full border flex items-center justify-center ${
+                                done()
+                                  ? "border-green-6 bg-green-2 text-green-11"
+                                  : active()
+                                    ? "border-amber-6 bg-amber-2 text-amber-11"
+                                    : cancelled()
+                                      ? "border-gray-6 bg-gray-2 text-gray-8"
+                                      : "border-gray-6 bg-gray-1 text-gray-8"
+                              }`}
+                            >
+                              <Show when={done()}>
+                                <Check size={10} />
+                              </Show>
+                              <Show when={!done() && active()}>
+                                <span class="h-1.5 w-1.5 rounded-full bg-amber-9" />
+                              </Show>
+                            </div>
+                          </div>
+                          <div
+                            class={`flex-1 text-sm leading-relaxed ${
+                              cancelled() ? "text-gray-9 line-through" : "text-gray-12"
+                            }`}
+                          >
+                            <span class="text-gray-9 mr-1.5">{index() + 1}.</span>
+                            {todo.content}
+                          </div>
+                        </div>
+                      );
+                    }}
+                  </For>
+                </div>
+              </Show>
+            </div>
+          </div>
+        </Show>
 
         <Composer
           prompt={props.prompt}

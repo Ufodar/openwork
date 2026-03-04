@@ -273,6 +273,7 @@ export default {
   "docwriter.close": "关闭",
   "docwriter.cancel": "取消",
   "docwriter.working": "执行中...",
+  "docwriter.tasks_completed": "项任务已完成",
   "docwriter.loading": "加载中...",
   "docwriter.source_document": "源文档",
   "docwriter.search_docx_sources": "搜索 DOCX 源文档...",

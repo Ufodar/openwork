@@ -273,6 +273,7 @@ export default {
   "docwriter.close": "Close",
   "docwriter.cancel": "Cancel",
   "docwriter.working": "Working...",
+  "docwriter.tasks_completed": "tasks completed",
   "docwriter.loading": "Loading...",
   "docwriter.source_document": "Source document",
   "docwriter.search_docx_sources": "Search DOCX sources...",

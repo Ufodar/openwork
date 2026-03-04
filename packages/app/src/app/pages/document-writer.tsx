@@ -180,6 +180,7 @@ const RIGHT_PANEL_DEFAULT_WIDTH = 500;
 const RIGHT_PANEL_MIN_WIDTH = 360;
 const CENTER_PANEL_MIN_WIDTH = 520;
 const STREAM_SCROLL_MIN_INTERVAL_MS = 90;
+const BID_MODULES_ENABLED = false;
 
 const clampNumber = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
@@ -1145,6 +1146,10 @@ export default function DocumentWriterView(props: SessionViewProps) {
   };
 
   const openModule = (key: "facts" | "fill" | "dedupe" | "qc" | "preview") => {
+    if (!BID_MODULES_ENABLED) {
+      setToastMessage("Bid 独立模块接口已下线，请通过 Agent 对话流程执行。");
+      return;
+    }
     if (!serverReady()) return;
     if (!targetDoc()) {
       setToastMessage(tr("docwriter.select_target_first"));

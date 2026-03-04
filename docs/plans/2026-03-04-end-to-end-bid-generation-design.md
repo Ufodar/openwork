@@ -23,9 +23,32 @@ Additionally, a **cross-cutting path mismatch** was discovered: agent/skills ass
 ## Design Principles
 
 - **No new skills** — all changes within existing 4 bid skills + document-writer agent
-- **No new data formats** — extend existing worktree, material-registry, facts.json schemas
+- **No new data formats** — extend existing worktree, material-registry, `.bid/facts.json` schemas
 - **Agent adapts to user** — no mandatory directory conventions; agent works with whatever file layout exists
 - **Incremental implementation** — each gap fix is independent and can ship separately
+
+---
+
+## Final Contract Landing (Implemented)
+
+Authoritative contract is now centralized at:
+
+- `docs/contracts/bid-session-file-contract.md`
+
+Final, active conventions:
+
+1. Canonical session root in docs/examples uses `<SESSION_ROOT>` placeholder; runtime logical root remains `documents/sessions/<sessionId>/`.
+2. Canonical facts path is `<SESSION_ROOT>/.bid/facts.json` (new writes only).
+3. Persisted metadata paths are session-relative (`target_doc`, triage entries, registry keys, node refs).
+4. `file-triage.json` new writes use v2 entries (`rel_path`, `name`, `size`), while v1 remains read-compatible.
+5. Agent dialog + skills is the primary workflow path.
+6. `/bid/*` standalone module APIs are optional/experimental and disabled by default.
+
+Deprecated in active guidance:
+
+- root-level `facts.json` write path
+- hardcoded `documents/sessions/<sessionId>` runnable examples in skills (use `<SESSION_ROOT>`)
+- assumptions that users must pre-create `refs/` or `target/` folders
 
 ---
 

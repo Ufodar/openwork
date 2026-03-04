@@ -129,6 +129,21 @@ const SLIDE_EXTENSIONS = [
 const DOCX_ZIP_EXTENSIONS = new Set([".docx", ".docm", ".dotx", ".dotm"]);
 const SESSION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 
+function resolveBidModuleApiEnabled(): boolean {
+    const raw = (process.env.OPENWORK_BID_MODULE_API_ENABLED ?? "").trim().toLowerCase();
+    if (!raw) return false;
+    return ["1", "true", "yes", "on"].includes(raw);
+}
+
+function assertBidModuleApiEnabled(): void {
+    if (resolveBidModuleApiEnabled()) return;
+    throw new ApiError(
+        501,
+        "bid_module_api_disabled",
+        "Bid module APIs are disabled. Use agent dialog + skills workflow instead.",
+    );
+}
+
 // Helper to get document type from extension
 function getDocumentType(filename: string): "word" | "cell" | "slide" {
     const ext = extname(filename).toLowerCase();
@@ -772,6 +787,7 @@ export function createDocumentRoutes(routes: unknown[]) {
         keys: ["id"],
         auth: "client",
         handler: async (ctx: RequestContext) => {
+            assertBidModuleApiEnabled();
             const workspaceId = ctx.params.id;
             const sessionId = parseDocumentSessionId(ctx.url.searchParams.get("session"));
             if (!sessionId) throw new ApiError(400, "invalid_request", "session is required");
@@ -902,6 +918,7 @@ export function createDocumentRoutes(routes: unknown[]) {
         keys: ["id"],
         auth: "client",
         handler: async (ctx: RequestContext) => {
+            assertBidModuleApiEnabled();
             const workspaceId = ctx.params.id;
             const sessionId = parseDocumentSessionId(ctx.url.searchParams.get("session"));
             if (!sessionId) throw new ApiError(400, "invalid_request", "session is required");
@@ -1034,6 +1051,7 @@ export function createDocumentRoutes(routes: unknown[]) {
         keys: ["id"],
         auth: "client",
         handler: async (ctx: RequestContext) => {
+            assertBidModuleApiEnabled();
             const workspaceId = ctx.params.id;
             const sessionId = parseDocumentSessionId(ctx.url.searchParams.get("session"));
             if (!sessionId) throw new ApiError(400, "invalid_request", "session is required");
@@ -1064,44 +1082,80 @@ export function createDocumentRoutes(routes: unknown[]) {
             }
 
             const factsAbs = join(docsDir, ".bid", "facts.json");
-            // TODO: check_deterministic.py expects --unpacked (dir), --facts, --requirements, --output
-            // but this route passes --docx (file) and --mode. Needs interface alignment.
-            const args = [scriptPath, "--docx", targetAbs];
-            args.push("--mode", mode);
+            const requirementsAbs = join(docsDir, "requirements.csv");
             const hasFacts = await exists(factsAbs);
-            if (hasFacts) {
-                args.push("--facts", factsAbs);
+            const hasRequirements = await exists(requirementsAbs);
+            const tmpDir = join(docsDir, ".tmp");
+            await ensureDir(tmpDir);
+            const unpackedDir = join(tmpDir, `unpacked-qc-${shortId()}`);
+            const outputJsonAbs = join(tmpDir, `qc-deterministic-${shortId()}.json`);
+            await ensureDir(unpackedDir);
+
+            try {
+                const unzip = spawnSync("unzip", ["-oq", targetAbs, "-d", unpackedDir], {
+                    encoding: "utf8",
+                    cwd: workspace.path,
+                });
+                const unzipStdout = String(unzip.stdout || "").trim();
+                const unzipStderr = String(unzip.stderr || "").trim();
+                if (unzip.error) {
+                    const message = unzip.error instanceof Error ? unzip.error.message : String(unzip.error);
+                    throw new ApiError(400, "qc_prepare_failed", `Failed to unpack DOCX for QC: ${message}`);
+                }
+                if (unzip.status !== 0) {
+                    throw new ApiError(
+                        400,
+                        "qc_prepare_failed",
+                        unzipStderr || unzipStdout || "Failed to unpack DOCX for QC",
+                    );
+                }
+
+                const args = [scriptPath, "--unpacked", unpackedDir, "--output", outputJsonAbs];
+                if (hasFacts) {
+                    args.push("--facts", factsAbs);
+                }
+                if (hasRequirements) {
+                    args.push("--requirements", requirementsAbs);
+                }
+
+                const result = spawnSync("python3", args, { encoding: "utf8", cwd: workspace.path });
+                const stdout = String(result.stdout || "").trim();
+                const stderr = String(result.stderr || "").trim();
+                const passed = result.status === 0;
+
+                const deterministicOutput = (await exists(outputJsonAbs))
+                    ? (await readFile(outputJsonAbs, "utf8")).trim()
+                    : "";
+
+                const reportText = [
+                    `# QC report: ${basename(targetAbs)}`,
+                    "",
+                    `- session: \`${sessionId}\``,
+                    `- target: \`${targetDoc}\``,
+                    `- mode: \`${mode}\``,
+                    `- facts: \`${hasFacts ? ".bid/facts.json" : "—"}\``,
+                    `- requirements: \`${hasRequirements ? "requirements.csv" : "—"}\``,
+                    `- result: **${passed ? "PASS" : "FAIL"}**`,
+                    "",
+                    "## Deterministic output",
+                    "",
+                    deterministicOutput || stdout || "(no output)",
+                    stderr ? `\n\n[stderr]\n${stderr}` : "",
+                    "",
+                ].join("\n");
+
+                const report = await writeSessionReport({
+                    workspace,
+                    sessionId,
+                    moduleId: "qc",
+                    content: reportText,
+                });
+
+                return jsonResponse({ ok: true, passed, mode, report, stdout, stderr });
+            } finally {
+                await rm(unpackedDir, { recursive: true, force: true }).catch(() => undefined);
+                await rm(outputJsonAbs, { force: true }).catch(() => undefined);
             }
-
-            const result = spawnSync("python3", args, { encoding: "utf8", cwd: workspace.path });
-            const stdout = String(result.stdout || "").trim();
-            const stderr = String(result.stderr || "").trim();
-            const passed = result.status === 0;
-
-            const reportText = [
-                `# QC report: ${basename(targetAbs)}`,
-                "",
-                `- session: \`${sessionId}\``,
-                `- target: \`${targetDoc}\``,
-                `- mode: \`${mode}\``,
-                `- facts: \`${hasFacts ? ".bid/facts.json" : "—"}\``,
-                `- result: **${passed ? "PASS" : "FAIL"}**`,
-                "",
-                "## Output",
-                "",
-                stdout || "(no stdout)",
-                stderr ? `\n\n[stderr]\n${stderr}` : "",
-                "",
-            ].join("\n");
-
-            const report = await writeSessionReport({
-                workspace,
-                sessionId,
-                moduleId: "qc",
-                content: reportText,
-            });
-
-            return jsonResponse({ ok: true, passed, mode, report, stdout, stderr });
         },
     });
 
@@ -1111,6 +1165,7 @@ export function createDocumentRoutes(routes: unknown[]) {
         keys: ["id"],
         auth: "client",
         handler: async (ctx: RequestContext) => {
+            assertBidModuleApiEnabled();
             const workspaceId = ctx.params.id;
             const sessionId = parseDocumentSessionId(ctx.url.searchParams.get("session"));
             if (!sessionId) throw new ApiError(400, "invalid_request", "session is required");
@@ -1320,6 +1375,7 @@ export function createDocumentRoutes(routes: unknown[]) {
         keys: ["id"],
         auth: "client",
         handler: async (ctx: RequestContext) => {
+            assertBidModuleApiEnabled();
             const workspaceId = ctx.params.id;
             const sessionId = parseDocumentSessionId(ctx.url.searchParams.get("session"));
             if (!sessionId) throw new ApiError(400, "invalid_request", "session is required");

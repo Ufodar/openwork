@@ -16,10 +16,10 @@ description: 检查投标文件质量，合规审查，查找错误和遗漏。�
 
 ```bash
 python .opencode/skills/bid-qc/scripts/check_deterministic.py \
-  --unpacked documents/sessions/<sessionId>/.tmp/unpacked/<docname>/ \
-  --facts documents/sessions/<sessionId>/.bid/facts.json \
-  --requirements documents/sessions/<sessionId>/requirements.csv \
-  --output documents/sessions/<sessionId>/reports/qc-deterministic.json
+  --unpacked <SESSION_ROOT>/.tmp/unpacked/<docname>/ \
+  --facts <SESSION_ROOT>/.bid/facts.json \
+  --requirements <SESSION_ROOT>/requirements.csv \
+  --output <SESSION_ROOT>/reports/qc-deterministic.json
 ```
 
 此步骤是**预检**，不是完整检查。脚本输出中每个 check 包含 `scope`（实际验证了什么）和 `uncovered`（需要 Step 2c 补充什么）。
@@ -28,7 +28,7 @@ python .opencode/skills/bid-qc/scripts/check_deterministic.py \
 |-------|-------------|---------------------|
 | entity_presence | 公司名/项目名在全文中的存在性；黑名单公司名残留 | 全称vs简称混用；合作方名称匹配 |
 | amount_consistency | 特定格式报价表的分项合计=总价；预算上限 | 非标准表格；单价×数量=行合计；正文金额 |
-| date_presence | facts.json 日期在全文中的存在性；截止日期是否过期 | 文档内部日期交叉比对 |
+| date_presence | `.bid/facts.json` 日期在全文中的存在性；截止日期是否过期 | 文档内部日期交叉比对 |
 | star_coverage | CSV 元数据中★项的 status 和 deviation | docx 中实际响应内容是否充实 |
 | placeholder_residue | `<<TBD>>`、中文占位词、红色高亮 | 语义占位 |
 | headers_footers | 页眉页脚中的公司名/项目名 | 密级标识 |
@@ -42,13 +42,13 @@ python .opencode/skills/bid-qc/scripts/check_deterministic.py \
 处理流程：
 1. 解析 `<unpacked>/word/_rels/document.xml.rels`，建立 rId → 图片文件的映射
 2. 解析 document.xml，确定每张图片所在的章节位置
-3. 结合 facts.json 和 requirements.csv，确定哪些图片需要校验
+3. 结合 `.bid/facts.json` 和 requirements.csv，确定哪些图片需要校验
 4. 按 vision-agent-protocol.md 的"调用策略"优先级，逐张调用视觉子 agent
 5. 收集所有 extract/verify/assess 结果
 
 **典型校验矩阵**：
 
-| 图片类型 | 调用模式 | 校验内容 | 对应 facts.json 字段 |
+| 图片类型 | 调用模式 | 校验内容 | 对应 `.bid/facts.json` 字段 |
 |---------|---------|---------|-------------------|
 | 营业执照 | extract→verify | 公司名、信用代码、法人、有效期 | companyName, creditCode, legalRep |
 | 资质证书 | extract→verify | 持证单位、等级、有效期 | companyName + 招标要求的资质类型 |
@@ -117,9 +117,9 @@ LLM 必须补充的检查（对应脚本 uncovered + 脚本完全不涉及的维
 - 日期：投标截止、开标、交货期、保修起止是否正确且相互一致
 - 金额：报价明细加总是否等于总价，预算是否超标
 - 技术参数：引用的产品参数是否与厂商资料一致
-- 如有 facts.json，以其为校验基线；如无，直接对照招标文件验证
+- 如有 `.bid/facts.json`，以其为校验基线；如无，直接对照招标文件验证
 
-> 脚本覆盖范围：`date_presence` 仅检查 facts.json 日期在全文中的存在性和过期；`amount_consistency` 仅检查特定格式报价表的合计和预算上限。日期交叉比对、非标准表格、正文金额等需 LLM 补充。
+> 脚本覆盖范围：`date_presence` 仅检查 `.bid/facts.json` 日期在全文中的存在性和过期；`amount_consistency` 仅检查特定格式报价表的合计和预算上限。日期交叉比对、非标准表格、正文金额等需 LLM 补充。
 
 #### 3. 实体一致性
 - 投标公司名称全文一致（全称 vs 简称不混用，除非有明确规则）

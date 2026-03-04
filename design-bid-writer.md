@@ -49,10 +49,10 @@ Why:
 
 ### Skills (workflow phases)
 - `bid-intake`
-  - Outputs: `facts.json`, `requirements.csv`, `questions.md`, `intake-summary.md`
+  - Outputs: `.bid/facts.json`, `requirements.csv`, `questions.md`, `intake-summary.md`
   - Principle: every key fact has a citation; no guessing.
 - `bid-drafting`
-  - Uses: `facts.json` + `requirements.csv` to draft 商务/技术 into a real `.docx`.
+  - Uses: `.bid/facts.json` + `requirements.csv` to draft 商务/技术 into a real `.docx`.
   - Preserves template formatting and uses tracked changes when editing.
   - **New**: Cross-document content assembly via `copy_docx_section.py` (DOCX→DOCX only).
   - **New**: Multi-format assembly routing — PDF/Excel/PPT sources use extract-then-write path with target style alignment.
@@ -80,10 +80,10 @@ Why:
 ## Workflow (end-to-end)
 
 1. **Intake (gate 1)**
-   - Ingest tender + materials → generate `facts.json` + `requirements.csv`.
+   - Ingest tender + materials → generate `.bid/facts.json` + `requirements.csv`.
    - Ask questions for missing values; do not draft yet.
 2. **Assemble / Draft (gate 2)**
-   - Create/modify the target `.docx` under `documents/` (in Document Writer UI this is session-scoped under `documents/sessions/<sessionId>/...`).
+   - Create/modify the target `.docx` under `<SESSION_ROOT>/`.
    - Assembly routing by source format:
      - **DOCX sources** → `copy_docx_section.py` for format-preserving copy, then adapt values
      - **PDF sources** → extract text/tables via `pdf` skill → write into target using target's styles
@@ -96,7 +96,7 @@ Why:
    - Compare main + partner drafts → `dedupe-report.md`.
    - Rewrite risky blocks and replace/alter duplicated figures.
 4. **QC (gate 4)**
-   - Cross-check against tender + `facts.json` + attachments.
+   - Cross-check against tender + `.bid/facts.json` + attachments.
    - Check qualification docs, certificate dates, stray company names, point-to-point completeness.
    - Fix blockers and rerun QC.
 
@@ -121,23 +121,25 @@ The meeting notes emphasize that users don't want "chat that writes a lot"; they
 less manual copy/paste, and faster verification. The UX should therefore optimize for:
 
 1. **A single, stable target document** (the artifact the team will submit).
-2. **Deterministic modules** that produce auditable outputs (reports) and avoid side effects.
-3. **Fast review loops**: run a module → see what changed → decide next action.
+2. **Agent dialog as main path** with auditable process files (`.worktree/`, `.bid/`, reports).
+3. **Fast review loops**: run one stage in agent flow → inspect output → continue/adjust.
 
 ### Principles
 
 - **Target vs Reference separation**: the UI must make it obvious which file is being edited, and which files are just sources.
 - **No silent duplication**: tools should not spawn new “final-vX” documents unless the user explicitly asks.
-- **Reports are the interface**: every module writes a timestamped report to the session inbox, and the UI makes those reports one-click accessible (`@` + download).
-- **Gated automation**: start with module buttons; do not ship “one-click generate full bid” until each module has clear success criteria.
+- **Reports are the interface**: every stage writes timestamped reports to session paths, and users can reference them with `@`.
+- **Gated automation**: keep stage-by-stage checkpoints in agent flow; avoid opaque one-click generation.
 
-### Recommended module-first flow (human-in-the-loop)
+### Recommended agent-first flow (human-in-the-loop, default)
 
 1. **Pick target**: upload the blank template (主标空模版) and confirm it is the target.
 2. **Assemble forms**: copy baseline required forms into the target from a trusted historical/partner DOCX.
 3. **Fill tables**: fill point-to-point and equipment list tables from XLSX.
 4. **Dedupe**: compare target against 2-4 other bids (主标 + 伙伴标) for text/image risks.
 5. **QC gate**: run deterministic checks; only then allow the team to proceed to polishing.
+
+> Note: standalone `/bid/*` module APIs are optional experimental surfaces and are disabled by default. Primary UX is agent dialog + skills.
 
 ### Make the system feel “real” to users (pragmatic add-ons)
 
@@ -155,7 +157,7 @@ less manual copy/paste, and faster verification. The UX should therefore optimiz
 ## Notes on safety
 
 - Do not modify factual values to "look different".
-- Keep all high-stakes values in `facts.json` as the single source-of-truth.
+- Keep all high-stakes values in `.bid/facts.json` as the single source-of-truth.
 - Prefer deterministic scripts for extraction, hashing, and validation.
 
 ## Design decisions log
@@ -183,7 +185,7 @@ less manual copy/paste, and faster verification. The UX should therefore optimiz
 **Rationale**:
 - `--list-headings` runs in milliseconds (ZIP decompress + XML parse); caching it saves negligible time.
 - Within a session, the agent's context already holds previous analysis results — no cache needed.
-- Across sessions, the intake artifacts (`facts.json`, `requirements.csv`, `intake-summary.md`) already capture what was learned — a separate index is redundant.
+- Across sessions, the intake artifacts (`.bid/facts.json`, `requirements.csv`, `intake-summary.md`) already capture what was learned — a separate index is redundant.
 - The cache introduced a consistency problem: files could change but the cache would not, leading the agent to act on stale information.
 - The "analyze before acting" workflow pattern is preserved — it's now expressed as "run the tool to discover structure" rather than "check the cache".
 

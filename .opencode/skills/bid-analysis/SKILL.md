@@ -14,6 +14,7 @@ description: 分析招标文件，提取评标方法、评分标准、资质要�
 **流程：**
 
 1. **快速扫描** — 对会话目录下所有文件（递归），仅读取：
+   - 扫描前先排除目录：`.tmp/`、`.worktree/`、`.bid/`、`reports/`、`.archive/`、`artifacts/`
    - 文件名 + 扩展名 + 文件大小
    - 前 2 页或前 3000 字符（PDF 用 bash 提取，DOCX 用 pandoc 转文本）
    - **不读全文内容**
@@ -30,26 +31,44 @@ description: 分析招标文件，提取评标方法、评分标准、资质要�
    | `product_doc` | 产品参数表、数据手册、白皮书、说明书等厂商技术资料 |
    | `other` | 无法确信分类的文件 |
 
-3. **输出** — 在会话根目录写入 `file-triage.json`：
+3. **输出** — 在会话根目录写入 `file-triage.json`（v2）：
 
    ```json
    {
-     "version": 1,
+     "version": 2,
      "total": 156,
      "by_category": {
-       "tender_main": ["招标文件.pdf"],
-       "tender_attachment": ["投标文件格式.docx", "报价清单.xlsx"],
-       "qualification": ["营业执照.pdf", "ISO证书.pdf"],
-       "historical_bid": ["2024年XX项目投标文件.docx"],
-       "pricing_data": ["报价参考.xlsx"],
-       "product_doc": ["H3C-S6860-datasheet.pdf"],
-       "other": ["附件3.pdf"]
+       "tender_main": [
+         { "rel_path": "招标文件.pdf", "name": "招标文件.pdf", "size": 4567890 }
+       ],
+       "tender_attachment": [
+         { "rel_path": "附件/投标文件格式.docx", "name": "投标文件格式.docx", "size": 7340032 },
+         { "rel_path": "附件/报价清单.xlsx", "name": "报价清单.xlsx", "size": 512000 }
+       ],
+       "qualification": [
+         { "rel_path": "资质/营业执照.pdf", "name": "营业执照.pdf", "size": 2048000 },
+         { "rel_path": "资质/ISO证书.pdf", "name": "ISO证书.pdf", "size": 1536000 }
+       ],
+       "historical_bid": [
+         { "rel_path": "历史/2024年XX项目投标文件.docx", "name": "2024年XX项目投标文件.docx", "size": 10485760 }
+       ],
+       "pricing_data": [
+         { "rel_path": "报价/报价参考.xlsx", "name": "报价参考.xlsx", "size": 307200 }
+       ],
+       "product_doc": [
+         { "rel_path": "厂商/H3C-S6860-datasheet.pdf", "name": "H3C-S6860-datasheet.pdf", "size": 2684354 }
+       ],
+       "other": [
+         { "rel_path": "附件3.pdf", "name": "附件3.pdf", "size": 204800 }
+       ]
      },
      "ambiguous": [
-       { "file": "附件3.pdf", "candidates": ["tender_attachment", "qualification"], "reason": "文件名无明确标识，前两页含表格但无法确定类型" }
+       { "rel_path": "附件3.pdf", "name": "附件3.pdf", "size": 204800, "candidates": ["tender_attachment", "qualification"], "reason": "文件名无明确标识，前两页含表格但无法确定类型" }
      ]
    }
    ```
+
+   > 兼容说明：如读到 v1（类别值为字符串数组），可兼容读取；**新写入必须为 v2**。
 
 4. **确认** — 向用户展示分类摘要（按类别汇总数量，不逐文件列出），重点确认：
    - `tender_main` 识别是否正确
@@ -59,14 +78,14 @@ description: 分析招标文件，提取评标方法、评分标准、资质要�
 **分批策略**：文件数 > 50 时，分批扫描（每批 20 个）。批次顺序：文件名含"招标"的优先，然后按文件大小降序（大文件更可能是主体文件）。每批结果追加到 file-triage.json。
 
 **与后续步骤的衔接**：
-- Step 1 直接从 triage 的 `tender_main` 取招标文件
+- Step 1 直接从 triage 的 `tender_main[].rel_path` 取招标文件
 - Step 4.5 使用 triage 分类作为 material-registry 的 `type` 字段初始值
 - document-writer 模板探测从 `tender_attachment` 中搜索模板
 - bid-drafting 路径 E 从 `qualification` 取资质文件
 - bid-drafting 路径 F 从 `pricing_data` 取报价数据
 
 ### Step 1: 读取招标文件
-读取用户指定的招标文件（通常是 PDF 或 Word）。如果 Step 0 已执行，直接从 `file-triage.json` 的 `tender_main` 取文件路径。浏览全文了解整体结构。
+读取用户指定的招标文件（通常是 PDF 或 Word）。如果 Step 0 已执行，直接从 `file-triage.json` 的 `tender_main[].rel_path` 取文件路径。浏览全文了解整体结构。
 
 ### Step 2: 按核心提取清单逐项提取
 按下方"核心提取清单"逐项提取信息。特别注意：
@@ -88,11 +107,12 @@ description: 分析招标文件，提取评标方法、评分标准、资质要�
      - **三、一致性检查点**：空检查清单框架，待首个关键决策产生后填充
   4. 两者的 status 字段保持同步
   5. 如有需要，生成 `.bid/facts.json`（schema 参见 `references/facts-template.json`），记录项目关键事实（公司名、项目名、项目编号、截止日期、预算等）。此文件供后续 bid-qc 确定性脚本使用。`.bid/` 目录位于会话根目录下，如不存在则创建。
-- 如 < 10 条 → 只写 requirements.csv，不创建工作树。
+- 如 < 10 条 → 默认只写 requirements.csv；若后续需要执行 Step 4.5（参考文件 ≥ 5），创建**轻量工作树**（`.worktree/index.json` + `conventions.md`，不创建 `nodes/`）以承载 `material-registry.json` 和恢复状态。
 
 ### Step 4.5: 构建材料索引（当会话目录下的参考文件 >= 5 个时）
 
 浏览会话目录下的参考文件（用户可能上传到根目录、子目录或任意位置——不要假设 `refs/` 目录存在），构建 `.worktree/material-registry.json`（schema 参见 `references/material-registry-template.json`）。
+扫描时排除目录：`.tmp/`、`.worktree/`、`.bid/`、`reports/`、`.archive/`、`artifacts/`。
 
 #### 分批策略（当 file-triage.json 存在时使用）
 
@@ -109,6 +129,8 @@ description: 分析招标文件，提取评标方法、评分标准、资质要�
 
 **每批处理流程：**
 1. 从 file-triage.json 取出该批文件列表
+   - v2 读取 `by_category.<category>[].rel_path`
+   - v1 读取字符串数组时，按文件名回退匹配为 `rel_path`
 2. 每个子批次最多 20 个文件。对每个文件：
    - 读取前 3000 字符 / 前 2 页
    - 提取：description、covers[]、useful_for_reqs[]、quality、caveats
@@ -133,7 +155,7 @@ description: 分析招标文件，提取评标方法、评分标准、资质要�
 
 #### 无 file-triage.json 时的回退
 
-如果 Step 0 未执行（文件数 < 10），按原始逻辑处理：对每个文件快速了解内容概要（读取前几页/首 sheet/首 slide），一次性构建 registry。
+如果 Step 0 未执行（文件数 < 10），按原始逻辑处理：对每个文件快速了解内容概要（读取前几页/首 sheet/首 slide），一次性构建 registry。若 `.worktree/` 不存在且需要 registry，先创建轻量工作树（index + conventions）。
 
 **每个文件一个条目**：type、format、covers、useful_for_reqs、quality、caveats
 - useful_for_reqs 可在此阶段粗略填写（基于文件内容和 requirements.csv 的匹配），后续阶段逐步精确化

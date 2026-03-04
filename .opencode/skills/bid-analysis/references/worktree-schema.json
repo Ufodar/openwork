@@ -1,11 +1,12 @@
 {
-  "_doc": "Work-Tree schema reference. Two structures: index.json (tree root) and node files (nodes/<id>.json).",
+  "_doc": "Work-Tree schema reference. Two structures: index.json (tree root) and node files (nodes/<id>.json). All persisted paths must be relative to session root.",
 
   "index.json": {
     "version": 1,
     "project": "XX市智慧城市信息化项目",
     "tender_file": "招标文件.pdf",
-    "target_doc": null,
+    "target_doc": "应标文件.docx",
+    "facts_ref": ".bid/facts.json",
     "phase": "需求分析",
     "summary": {
       "total": 47,
@@ -54,17 +55,17 @@
         "name": "H3C S6860 数据手册",
         "source": null,
         "status": "pending",
-        "search_scope": ["technical/", "partners/"],
+        "search_scope": ["."],
         "searched_paths": []
       },
       {
         "name": "性能测试报告",
         "source": null,
         "status": "not_found",
-        "search_scope": ["technical/"],
+        "search_scope": ["."],
         "searched_paths": [
-          { "path": "technical/", "verdict": "无相关文件", "time": "Round 3" },
-          { "path": "partners/h3c/", "verdict": "仅产品手册，无测试报告", "time": "Round 3" }
+          { "path": "资料/厂商/", "verdict": "无相关文件", "time": "Round 3" },
+          { "path": "资料/历史项目/", "verdict": "仅产品手册，无测试报告", "time": "Round 3" }
         ]
       }
     ],
@@ -81,7 +82,8 @@
       "version": "Schema version, always 1",
       "project": "Project name from tender document",
       "tender_file": "Relative path to the tender file in session directory",
-      "target_doc": "Relative path to the target document being written. Set by document-writer Phase 2, consumed by all skills. null until resolved.",
+      "target_doc": "Relative path to the target document being written. Must never be absolute path. Set by document-writer Phase 2, consumed by all skills.",
+      "facts_ref": "Optional relative path to facts file. Recommended value: .bid/facts.json",
       "phase": "Current phase: 需求分析 | 材料搜集 | 技术标撰写 | 商务标撰写 | 质量检查",
       "summary": "Aggregate counts by status, must stay in sync with children",
       "current_focus": "ID of the node currently being worked on, null if none",

@@ -5,6 +5,12 @@ description: 跨标书查重，检测串标风险，比较多份投标文件的�
 
 ## Workflow
 
+### Session 边界（硬约束）
+
+- 仅比较当前 `<SESSION_ROOT>` 内的文件。
+- 禁止读取或比较其他 session 的文件（即使用户提供绝对路径）。
+- 所有比较对象在落盘记录中使用 session 相对路径。
+
 ### Step 1: 解包所有待比较标书
 通过 docx skill 解包所有待比较的标书文件。
 
@@ -22,6 +28,8 @@ description: 跨标书查重，检测串标风险，比较多份投标文件的�
 
 ### Step 5: 输出查重报告
 按风险等级排序输出发现项。标注哪些是"合理重复"（招标文件规定的固定格式）。
+
+建议输出路径：`reports/dedupe/<timestamp>-dedupe-report.md`（session 相对路径）。
 
 ---
 

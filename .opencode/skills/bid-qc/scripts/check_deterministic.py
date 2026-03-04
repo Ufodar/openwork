@@ -371,15 +371,34 @@ def check_star_coverage(
             "findings": ["No requirements.csv provided — skipping star coverage check"],
         }
 
-    full_text_norm = _norm_text(full_text)
+    def _row_get(row: dict[str, Any], *keys: str) -> str:
+        lower_keys = {
+            str(k).strip().lower(): str(v)
+            for k, v in row.items()
+            if k is not None and v is not None
+        }
+        for key in keys:
+            direct = row.get(key)
+            if isinstance(direct, str) and direct.strip():
+                return direct
+            lowered = lower_keys.get(key.strip().lower())
+            if lowered and lowered.strip():
+                return lowered
+        return ""
 
     star_items: list[dict[str, str]] = []
     try:
         with open(requirements_path, "r", encoding="utf-8-sig") as f:
             reader = csv.DictReader(f)
             for row in reader:
-                priority = (row.get("priority") or row.get("优先级") or "").strip().lower()
-                if priority in ("star", "★"):
+                priority_raw = _row_get(row, "priority", "优先级", "标记").strip()
+                priority_norm = priority_raw.lower()
+                is_star = (
+                    "★" in priority_raw
+                    or priority_norm in ("star", "*", "星标")
+                    or "star" in priority_norm
+                )
+                if is_star:
                     star_items.append(row)
     except Exception as e:
         return {
@@ -400,21 +419,23 @@ def check_star_coverage(
         }
 
     for item in star_items:
-        req_id = item.get("id") or item.get("序号") or "unknown"
-        title = item.get("title") or item.get("标题") or item.get("requirement") or ""
-        status = (item.get("status") or item.get("状态") or "").strip().lower()
-        deviation = (item.get("deviation") or item.get("偏离") or "").strip()
+        req_id = _row_get(item, "id", "序号", "需求ID").strip() or "unknown"
+        title = _row_get(item, "title", "标题", "requirement", "招标要求").strip()
+        status_raw = _row_get(item, "status", "状态", "响应状态").strip()
+        status = status_raw.lower()
+        deviation_raw = _row_get(item, "deviation", "偏离", "偏离情况").strip()
+        deviation = deviation_raw.lower()
 
         # Check if there's a negative deviation recorded
-        if "负偏离" in deviation:
+        if "负偏离" in deviation_raw or "negative" in deviation:
             findings.append(
                 f"★ item {req_id} ('{title}') has negative deviation — DISQUALIFICATION RISK"
             )
 
         # Check if still pending (not yet addressed)
-        if status in ("pending", "blocked", "待处理"):
+        if status in ("pending", "blocked", "todo", "tbd") or status_raw in ("待处理", "未处理", "未开始", "阻塞"):
             findings.append(
-                f"★ item {req_id} ('{title}') status is '{status}' — not yet addressed"
+                f"★ item {req_id} ('{title}') status is '{status_raw or status}' — not yet addressed"
             )
 
     return {

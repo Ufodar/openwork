@@ -78,7 +78,7 @@ description: 撰写/组装商务标或技术标内容，包括点对点应答表
    - 设置节点 status: blocked, blocked_by: "缺少XX证书"
    - 汇总所有缺失项，报告给用户
 
-**输出产物**：`qualification-mapping.json`
+**输出产物**：`reports/drafting/<timestamp>-qualification-mapping.json`（路径相对于 session 根目录）
 
 ```json
 {
@@ -91,7 +91,7 @@ description: 撰写/组装商务标或技术标内容，包括点对点应答表
 }
 ```
 
-**与 bid-qc 的衔接**：QC 的 vision sub-agent 可以 verify 已插入的资质文件——检查公司名、有效期、证书编号是否与 facts.json 一致。无需修改 bid-qc。
+**与 bid-qc 的衔接**：QC 的 vision sub-agent 可以 verify 已插入的资质文件——检查公司名、有效期、证书编号是否与 `.bid/facts.json` 一致。无需修改 bid-qc。
 
 ---
 
@@ -122,7 +122,7 @@ description: 撰写/组装商务标或技术标内容，包括点对点应答表
 5. **校验** — 填充完成后的一致性检查：
    - 逐行：小计 == 单价 × 数量
    - 汇总：总计 == Σ 所有小计
-   - 预算：总价 ≤ facts.json 的 budget（如有）
+   - 预算：总价 ≤ `.bid/facts.json` 的 budget（如有）
    - 校验失败 → 标记节点为 blocked，报告给用户
 
 **安全规则**：

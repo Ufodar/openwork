@@ -3075,6 +3075,8 @@ export default function App() {
     if (normalized.includes("bid writer")) return "document-agent";
     if (normalized.includes("bid dedupe")) return "document-agent";
     if (normalized.includes("document agent")) return "document-agent";
+    if (normalized.includes("文档智能体")) return "document-agent";
+    if (normalized.includes("标书写作助手")) return "document-agent";
     return null;
   };
 
@@ -3084,7 +3086,9 @@ export default function App() {
     if (normalized.includes("document writer")) return "document-writer";
     if (normalized.includes("bid writer")) return "bid-writer";
     if (normalized.includes("bid dedupe")) return "bid-dedupe";
-    if (normalized.includes("document agent")) return "document-writer";
+    if (normalized.includes("document agent")) return "common-work";
+    if (normalized.includes("文档智能体")) return "common-work";
+    if (normalized.includes("标书写作助手")) return "document-writer";
     return null;
   };
 

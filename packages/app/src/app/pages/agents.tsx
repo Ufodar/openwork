@@ -81,7 +81,7 @@ export default function AgentsView(props: AgentsViewProps) {
   const resolveFeaturedAgentName = (featured: AgentType): string | null => {
     if (featured.id === "general-assistant") return null;
     if (featured.id === "document-agent") {
-      const match = agentByKey().get(normalizeAgentKey("document-writer"));
+      const match = agentByKey().get(normalizeAgentKey("common-work"));
       return match?.name ?? null;
     }
     const match = agentByKey().get(normalizeAgentKey(featured.id));
@@ -126,7 +126,8 @@ export default function AgentsView(props: AgentsViewProps) {
     }
 
     if (featured.id === "document-agent" || featured.id === "document-writer") {
-      const agent = resolveFeaturedAgentName(featured) ?? "document-writer";
+      const fallback = featured.id === "document-agent" ? "common-work" : "document-writer";
+      const agent = resolveFeaturedAgentName(featured) ?? fallback;
       props.createSessionAndOpen({ title: tr(featured.nameKey), agent, view: "document-agent" });
       return;
     }

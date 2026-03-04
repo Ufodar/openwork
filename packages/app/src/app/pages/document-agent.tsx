@@ -48,7 +48,6 @@ type EditorSource = {
   readonly: boolean;
 };
 
-const RUNNING_REFRESH_INTERVAL_MS = 60_000;
 const LEFT_PANEL_COLLAPSED_WIDTH = 56;
 const LEFT_PANEL_DEFAULT_WIDTH = 256;
 const LEFT_PANEL_MIN_WIDTH = 220;
@@ -1320,21 +1319,6 @@ export default function DocumentAgentView(props: SessionViewProps) {
     if (!serverReady()) return;
     setConfigSeq((v) => v + 1);
     void refetchDocuments();
-  });
-
-  createEffect(() => {
-    const running = isAgentRunning();
-    const ready = serverReady();
-    const doc = targetDoc();
-    const id = sessionId();
-    if (!running || !ready || !doc || !id) return;
-    if (typeof window === "undefined") return;
-
-    const timer = window.setInterval(() => {
-      setConfigSeq((v) => v + 1);
-    }, RUNNING_REFRESH_INTERVAL_MS);
-
-    onCleanup(() => window.clearInterval(timer));
   });
 
   onCleanup(() => {

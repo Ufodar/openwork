@@ -33,13 +33,6 @@ import CreateRemoteWorkspaceModal from "./components/create-remote-workspace-mod
 import CreateWorkspaceModal from "./components/create-workspace-modal";
 import RenameWorkspaceModal from "./components/rename-workspace-modal";
 import McpAuthModal from "./components/mcp-auth-modal";
-import OnboardingView from "./pages/onboarding";
-import DashboardView from "./pages/dashboard";
-import SessionView from "./pages/session";
-import ProtoWorkspacesView from "./pages/proto-workspaces";
-import ProtoV1UxView from "./pages/proto-v1-ux";
-import DocumentWriterView from "./pages/document-writer";
-import DocumentAgentView from "./pages/document-agent";
 import { createClient, unwrap, waitForHealthy, type OpencodeAuth } from "./lib/opencode";
 import {
   abortSession as abortSessionTyped,
@@ -163,6 +156,14 @@ import {
   type OpenworkServerSettings,
   OpenworkServerError,
 } from "./lib/openwork-server";
+
+import OnboardingView from "./pages/onboarding";
+import DashboardView from "./pages/dashboard";
+import SessionView from "./pages/session";
+import ProtoWorkspacesView from "./pages/proto-workspaces";
+import ProtoV1UxView from "./pages/proto-v1-ux";
+import DocumentWriterView from "./pages/document-writer";
+import DocumentAgentView from "./pages/document-agent";
 
 type RemoteWorkspaceDefaults = {
   openworkHostUrl?: string | null;
@@ -2007,7 +2008,7 @@ export default function App() {
   >("session");
   const [modelPickerQuery, setModelPickerQuery] = createSignal("");
 
-  const [showThinking, setShowThinking] = createSignal(false);
+  const [showThinking, setShowThinking] = createSignal(true);
   const [hideTitlebar, setHideTitlebar] = createSignal(false);
   const [modelVariant, setModelVariant] = createSignal<string | null>(null);
 
@@ -3866,9 +3867,31 @@ export default function App() {
       if (client()) return;
       if (openworkServerStatus() !== "connected") return;
 
+      // Remember the current route so we can restore it after connect
+      // (which clears selectedSessionId and may navigate away).
+      const routePath = location.pathname.trim();
+      const routeSessionId = (() => {
+        const segments = routePath.split("/");
+        // Matches /session/:id, /document-agent/:id, /document-writer/:id
+        if (segments.length >= 3) {
+          const page = (segments[1] ?? "").toLowerCase();
+          if (page === "session" || page === "document-agent" || page === "document-writer") {
+            return (segments[2] ?? "").trim() || null;
+          }
+        }
+        return null;
+      })();
+
       autoConnectInFlight = true;
       try {
         await workspaceStore.onConnectClient();
+        // After connect, restore the deep-linked session if the URL had one.
+        // connectToServer clears selectedSessionId and navigates to /session,
+        // losing the original route. Navigate back and re-select.
+        if (routeSessionId && client() && !selectedSessionId()) {
+          navigate(routePath, { replace: true });
+          void selectSession(routeSessionId);
+        }
       } finally {
         autoConnectInFlight = false;
         if (active && !client()) {

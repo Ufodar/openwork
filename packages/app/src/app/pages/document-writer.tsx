@@ -173,7 +173,6 @@ const isOnlyOfficeImportable = (path: string) => {
 };
 
 const DOCX_SECTION_COPY_SOURCE_EXTENSIONS = new Set([".docx", ".docm", ".dotx", ".dotm", ".doc"]);
-const RUNNING_REFRESH_INTERVAL_MS = 60_000;
 const LEFT_PANEL_COLLAPSED_WIDTH = 56;
 const LEFT_PANEL_DEFAULT_WIDTH = 256;
 const LEFT_PANEL_MIN_WIDTH = 220;
@@ -420,14 +419,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
   const [refsOpenBusyId, setRefsOpenBusyId] = createSignal<string | null>(null);
 
   const [modulesExpanded, setModulesExpanded] = createSignal(true);
-  const [moduleModal, setModuleModal] = createSignal<null | "assemble" | "facts" | "fill" | "dedupe" | "qc" | "preview">(null);
-  const [assembleSource, setAssembleSource] = createSignal<DocumentItem | null>(null);
-  const [assembleMatchMode, setAssembleMatchMode] = createSignal<"contains" | "exact" | "startswith">("contains");
-  const [assembleForce, setAssembleForce] = createSignal(false);
-  const [assembleSeedTarget, setAssembleSeedTarget] = createSignal(false);
-  const [assembleBusy, setAssembleBusy] = createSignal(false);
-  const [assembleError, setAssembleError] = createSignal<string | null>(null);
-  const [assembleQuery, setAssembleQuery] = createSignal("");
+  const [moduleModal, setModuleModal] = createSignal<null | "facts" | "fill" | "dedupe" | "qc" | "preview">(null);
   const [factsTenderSource, setFactsTenderSource] = createSignal<DocumentItem | null>(null);
   const [factsApplyToTarget, setFactsApplyToTarget] = createSignal(true);
   const [factsForce, setFactsForce] = createSignal(false);
@@ -562,32 +554,9 @@ export default function DocumentWriterView(props: SessionViewProps) {
     return result;
   });
 
-  const moduleSources = createMemo(() => {
-    const byCategory = refsByCategory();
-    const pool: DocumentItem[] = [];
-    for (const key of ["partners", "history", "templates", "tender", "other"] as const) {
-      pool.push(...(byCategory[key] ?? []));
-    }
-    const seen = new Set<string>();
-    return pool
-      .filter((item) => {
-        if (seen.has(item.name)) return false;
-        seen.add(item.name);
-        return true;
-      })
-      .filter((item) => isDocxSectionCopySource(item.name));
-  });
-
   const tenderSources = createMemo(() => {
     const byCategory = refsByCategory();
     return (byCategory.tender ?? []).filter((item) => isDocxSectionCopySource(item.name));
-  });
-
-  const filteredModuleSources = createMemo(() => {
-    const query = assembleQuery().trim().toLowerCase();
-    const items = moduleSources();
-    if (!query) return items;
-    return items.filter((item) => (item.name.split("/").pop() ?? item.name).toLowerCase().includes(query));
   });
 
   const xlsxRefs = createMemo(() => {
@@ -1166,23 +1135,18 @@ export default function DocumentWriterView(props: SessionViewProps) {
     }
   };
 
-  const openModule = (key: "assemble" | "facts" | "fill" | "dedupe" | "qc" | "preview") => {
+  const openModule = (key: "facts" | "fill" | "dedupe" | "qc" | "preview") => {
     if (!serverReady()) return;
     if (!targetDoc()) {
       setToastMessage(tr("docwriter.select_target_first"));
       return;
     }
-    setAssembleError(null);
     setFactsError(null);
     setFillError(null);
     setDedupeError(null);
     setPreviewError(null);
     setQcError(null);
 
-    if (key === "assemble" && !assembleSource()) {
-      const first = moduleSources()[0] ?? null;
-      setAssembleSource(first);
-    }
     if (key === "facts" && !factsTenderSource()) {
       const first = tenderSources()[0] ?? null;
       setFactsTenderSource(first);
@@ -1196,59 +1160,11 @@ export default function DocumentWriterView(props: SessionViewProps) {
 
   const closeModule = () => {
     setModuleModal(null);
-    setAssembleError(null);
     setFactsError(null);
     setFillError(null);
     setDedupeError(null);
     setPreviewError(null);
     setQcError(null);
-  };
-
-  const runAssemble = async () => {
-    const cfg = apiConfig();
-    const doc = targetDoc();
-    const source = assembleSource();
-    if (!cfg || !doc || !source) return;
-    if (assembleBusy()) return;
-    setAssembleBusy(true);
-    setAssembleError(null);
-
-    try {
-      if (activeDoc() !== doc) {
-        setActiveDoc(doc);
-      }
-      const query = new URLSearchParams();
-      query.set("session", cfg.sessionId);
-      query.set("doc", doc);
-      const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/bid/assemble", query);
-      if (assembleSeedTarget()) {
-        const ok = window.confirm(tr("docwriter.assemble_seed_confirm"));
-        if (!ok) return;
-      }
-      const payload = {
-        partnerDocPath: source.name,
-        matchMode: assembleMatchMode(),
-        force: assembleForce(),
-        seedTarget: assembleSeedTarget(),
-      };
-      const result = (await fetchJson(url, cfg.token, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      })) as { steps?: unknown[]; report?: { docPath?: string } };
-      const reportPath = typeof result?.report?.docPath === "string" ? result.report.docPath : "";
-      setToastMessage(reportPath ? tr("docwriter.assemble_complete_saved") : tr("docwriter.assemble_complete"));
-      closeModule();
-      setConfigSeq((v) => v + 1);
-      await refetchDocuments();
-      await refetchDocuments();
-      setReportsExpanded(true);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : tr("docwriter.failed_assemble");
-      setAssembleError(message);
-    } finally {
-      setAssembleBusy(false);
-    }
   };
 
   const runFill = async () => {
@@ -1586,8 +1502,6 @@ export default function DocumentWriterView(props: SessionViewProps) {
     setTargetDoc(null);
     setActiveDoc(null);
     setModuleModal(null);
-    setAssembleSource(null);
-    setAssembleError(null);
     setFillError(null);
     setDedupeSelected(new Set<string>());
     setDedupeError(null);
@@ -1697,21 +1611,6 @@ export default function DocumentWriterView(props: SessionViewProps) {
     setConfigSeq((v) => v + 1);
     void refetchDocuments();
     void refetchDocuments();
-  });
-
-  createEffect(() => {
-    const running = isAgentRunning();
-    const ready = serverReady();
-    const doc = targetDoc();
-    const id = sessionId();
-    if (!running || !ready || !doc || !id) return;
-    if (typeof window === "undefined") return;
-
-    const timer = window.setInterval(() => {
-      setConfigSeq((v) => v + 1);
-    }, RUNNING_REFRESH_INTERVAL_MS);
-
-    onCleanup(() => window.clearInterval(timer));
   });
 
   onCleanup(() => {
@@ -2064,16 +1963,6 @@ export default function DocumentWriterView(props: SessionViewProps) {
 
                 <Show when={modulesExpanded()}>
                   <div class="mt-2 grid grid-cols-1 gap-2">
-                    <button
-                      type="button"
-                      class="w-full rounded-lg border border-dls-border bg-dls-surface px-2 py-2 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover disabled:opacity-50 flex items-center gap-2"
-                      onClick={() => openModule("assemble")}
-                      disabled={!serverReady() || !targetDoc() || isAgentRunning()}
-                      title="Copy baseline bid forms into the target document"
-                    >
-                      <Copy size={14} />
-                      <span class="truncate">Assemble forms (DOCX→DOCX)</span>
-                    </button>
                     <button
                       type="button"
                       class="w-full rounded-lg border border-dls-border bg-dls-surface px-2 py-2 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover disabled:opacity-50 flex items-center gap-2"
@@ -2819,151 +2708,6 @@ export default function DocumentWriterView(props: SessionViewProps) {
           onMouseMove={(event) => event.preventDefault()}
           onMouseUp={() => paneResizeCleanup?.()}
         />
-      </Show>
-
-      <Show when={moduleModal() === "assemble"}>
-        <div
-          class="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) closeModule();
-          }}
-        >
-          <div
-            class="w-full max-w-4xl rounded-2xl border border-dls-border bg-dls-surface shadow-2xl overflow-hidden"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <div class="flex items-center justify-between px-4 py-3 border-b border-dls-border">
-              <div class="min-w-0">
-                <div class="text-sm font-semibold text-dls-text truncate">{tr("docwriter.assemble_title")}</div>
-                <div class="mt-1 text-[11px] text-dls-secondary truncate">
-                  {tr("docagent.target_prefix")} {targetDoc() ?? "—"}
-                </div>
-              </div>
-              <button
-                type="button"
-                class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text"
-                onClick={closeModule}
-                aria-label={tr("docwriter.close")}
-                title={tr("docwriter.close")}
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            <div class="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div class="min-w-0">
-                <div class="text-xs font-medium text-dls-text">{tr("docwriter.source_document")}</div>
-                <div class="mt-2">
-                  <input
-                    type="text"
-                    value={assembleQuery()}
-                    onInput={(event) => setAssembleQuery(event.currentTarget.value)}
-                    placeholder={tr("docwriter.search_docx_sources")}
-                    class="w-full rounded-lg border border-dls-border bg-dls-surface px-3 py-2 text-xs text-dls-text placeholder:text-dls-secondary focus:outline-none focus:ring-2 focus:ring-dls-accent/40"
-                  />
-                </div>
-                <div class="mt-2 rounded-lg border border-dls-border overflow-hidden max-h-[360px] overflow-y-auto">
-                  <Show when={!documents.loading} fallback={<div class="p-3 text-xs text-dls-secondary">{tr("docwriter.loading")}</div>}>
-                    <Show when={filteredModuleSources().length > 0} fallback={<div class="p-3 text-xs text-dls-secondary">{tr("docwriter.no_docx_sources")}</div>}>
-                      <For each={filteredModuleSources()}>
-                        {(item) => {
-                          const selected = createMemo(() => assembleSource()?.name === item.name);
-                          const name = () => item.name.split("/").pop() ?? item.name;
-                          return (
-                            <button
-                              type="button"
-                              class={`w-full text-left px-3 py-2 border-b border-dls-border/50 last:border-b-0 hover:bg-dls-hover ${selected() ? "bg-dls-active" : ""}`}
-                              onClick={() => setAssembleSource(item)}
-                              title={item.name}
-                            >
-                              <div class="flex items-start gap-2">
-                                <FileText size={14} class="shrink-0 text-dls-secondary mt-0.5" />
-                                <div class="min-w-0 flex-1">
-                                  <div class="text-xs text-dls-text truncate">{name()}</div>
-                                  <div class="mt-1 text-[10px] text-dls-secondary">{formatBytes(item.size)}</div>
-                                </div>
-                              </div>
-                            </button>
-                          );
-                        }}
-                      </For>
-                    </Show>
-                  </Show>
-                </div>
-              </div>
-
-              <div class="min-w-0 space-y-4">
-                <div>
-                  <div class="text-xs font-medium text-dls-text">{tr("docwriter.match_mode")}</div>
-                  <div class="mt-2">
-                    <select
-                      class="w-full rounded-lg border border-dls-border bg-dls-surface px-3 py-2 text-xs text-dls-text focus:outline-none focus:ring-2 focus:ring-dls-accent/40"
-                      value={assembleMatchMode()}
-                      onChange={(event) => setAssembleMatchMode(event.currentTarget.value as any)}
-                    >
-                      <option value="contains">{tr("docwriter.match_mode_contains_recommended")}</option>
-                      <option value="exact">{tr("docwriter.match_mode_exact")}</option>
-                      <option value="startswith">{tr("docwriter.match_mode_startswith")}</option>
-                    </select>
-                  </div>
-                  <div class="mt-2 text-[11px] text-dls-secondary">
-                    {tr("docwriter.assemble_description")}
-                  </div>
-                </div>
-
-                <label class="flex items-center gap-2 text-xs text-dls-secondary">
-                  <input
-                    type="checkbox"
-                    checked={assembleForce()}
-                    onChange={(event) => setAssembleForce(event.currentTarget.checked)}
-                  />
-                  {tr("docwriter.assemble_force")}
-                </label>
-
-                <label class="flex items-start gap-2 text-xs text-dls-secondary">
-                  <input
-                    type="checkbox"
-                    checked={assembleSeedTarget()}
-                    onChange={(event) => setAssembleSeedTarget(event.currentTarget.checked)}
-                  />
-                  <span class="min-w-0">
-                    {tr("docwriter.assemble_seed_target")}
-                    <div class="mt-1 text-[11px] text-dls-secondary">
-                      {tr("docwriter.assemble_seed_target_help")}
-                    </div>
-                  </span>
-                </label>
-
-                <Show when={assembleError()}>
-                  <div class="rounded-lg border border-red-11/30 bg-red-3/20 px-3 py-2 text-xs text-red-11 whitespace-pre-wrap break-words">
-                    {assembleError()}
-                  </div>
-                </Show>
-              </div>
-            </div>
-
-            <div class="px-4 py-3 border-t border-dls-border flex items-center justify-end gap-2">
-              <button
-                type="button"
-                class="rounded-lg border border-dls-border bg-dls-surface px-3 py-1.5 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover"
-                onClick={closeModule}
-              >
-                {tr("docwriter.cancel")}
-              </button>
-              <button
-                type="button"
-                class="rounded-lg border border-dls-border bg-dls-surface px-3 py-1.5 text-xs text-dls-text hover:bg-dls-hover disabled:opacity-50"
-                onClick={() => void runAssemble()}
-                disabled={assembleBusy() || !assembleSource()}
-                title={!assembleSource() ? tr("docwriter.select_source_document") : tr("docwriter.assemble_action")}
-              >
-                <Show when={!assembleBusy()} fallback={tr("docwriter.working")}>
-                  {tr("docwriter.assemble_action")}
-                </Show>
-              </button>
-            </div>
-          </div>
-        </div>
       </Show>
 
       <Show when={moduleModal() === "facts"}>

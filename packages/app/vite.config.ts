@@ -17,6 +17,15 @@ const addHost = (value?: string | null) => {
   allowedHosts.add(trimmed);
 };
 
+const readBool = (value: string | undefined) => {
+  const normalized = (value ?? "").trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+};
+
+// Solid devtools has significant runtime overhead in large routes.
+// Keep it opt-in so headless-web / pod / docker flows stay responsive.
+const solidDevtoolsEnabled = readBool(process.env.VITE_SOLID_DEVTOOLS);
+
 envAllowedHosts.split(",").forEach(addHost);
 addHost(process.env.OPENWORK_PUBLIC_HOST ?? null);
 const hostname = os.hostname();
@@ -28,14 +37,16 @@ if (shortHostname && shortHostname !== hostname) {
 
 export default defineConfig({
   plugins: [
-    devtools({
-      autoname: true,
-      locator: {
-        targetIDE: "vscode",
-        componentLocation: true,
-        jsxLocation: true,
-      },
-    }),
+    ...(solidDevtoolsEnabled
+      ? [devtools({
+        autoname: true,
+        locator: {
+          targetIDE: "vscode",
+          componentLocation: true,
+          jsxLocation: true,
+        },
+      })]
+      : []),
     tailwindcss(),
     solid(),
   ],

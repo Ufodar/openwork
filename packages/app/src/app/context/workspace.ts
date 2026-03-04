@@ -1276,6 +1276,14 @@ export function createWorkspaceStore(options: {
         options.setConnectedVersion(health.version);
         options.setBaseUrl(nextBaseUrl);
         options.setClientDirectory(resolvedDirectory);
+        // Reset stale session-scoped UI state before the new workspace/session
+        // hydration begins; do this once to avoid clearing a just-restored route
+        // session at the end of connect.
+        options.setMessages([]);
+        options.setTodos([]);
+        options.setPendingPermissions([]);
+        options.setSessionStatusById({});
+        options.setSelectedSessionId(null);
 
         const providersPromise = (async () => {
           const providersAt = Date.now();
@@ -1338,12 +1346,6 @@ export function createWorkspaceStore(options: {
         options.setProviders(providerState.providers);
         options.setProviderDefaults(providerState.defaults);
         options.setProviderConnectedIds(providerState.connectedIds);
-
-        options.setSelectedSessionId(null);
-        options.setMessages([]);
-        options.setTodos([]);
-        options.setPendingPermissions([]);
-        options.setSessionStatusById({});
 
         options.refreshSkills({ force: true }).catch(() => undefined);
         options.refreshPlugins().catch(() => undefined);

@@ -419,6 +419,8 @@ export default {
   "session.no_workspaces_yet": "No workspaces in this session yet. Add one to get started.",
   "session.show_fewer": "Show fewer",
   "session.show_more": "Show more",
+  "session.show_less": "Show less",
+  "session.step_finished": "Step finished",
   "session.show_more_count": "Show {count} more",
   "session.send": "Send",
   "session.thinking": "Thinking",

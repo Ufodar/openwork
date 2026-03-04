@@ -419,6 +419,8 @@ export default {
   "session.no_workspaces_yet": "当前会话还没有工作区。先添加一个再开始。",
   "session.show_fewer": "显示更少",
   "session.show_more": "显示更多",
+  "session.show_less": "收起",
+  "session.step_finished": "步骤完成",
   "session.show_more_count": "再显示 {count} 个",
   "session.send": "发送",
   "session.thinking": "思考",

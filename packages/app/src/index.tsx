@@ -1,5 +1,4 @@
 /* @refresh reload */
-import 'solid-devtools'
 import { render } from "solid-js/web";
 import { HashRouter, Route, Router } from "@solidjs/router";
 
@@ -9,6 +8,14 @@ import AppEntry from "./app/entry";
 import { PlatformProvider, type Platform } from "./app/context/platform";
 import { isTauriRuntime } from "./app/utils";
 
+const readBool = (value: string | undefined) => {
+  const normalized = (value ?? "").trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+};
+
+if (import.meta.env.DEV && readBool(import.meta.env.VITE_SOLID_DEVTOOLS)) {
+  void import("solid-devtools").catch(() => undefined);
+}
 
 bootstrapTheme();
 

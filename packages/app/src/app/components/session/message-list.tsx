@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
+import { ErrorBoundary, For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import type { JSX } from "solid-js";
 import type { Part } from "@opencode-ai/sdk/v2/client";
 import { Check, ChevronDown, ChevronRight, Copy, Eye, File, FileEdit, FolderSearch, Pencil, Search, Sparkles, Terminal } from "lucide-solid";
@@ -310,8 +310,13 @@ export default function MessageList(props: MessageListProps) {
         return props.showThinking;
       }
 
-      if (part.type === "step-start" || part.type === "step-finish") {
+      if (part.type === "step-start") {
         return false;
+      }
+
+      // step-finish carries per-step token/cost data — always show
+      if (part.type === "step-finish") {
+        return true;
       }
 
       if (part.type === "text" || part.type === "tool" || part.type === "agent" || part.type === "file") {
@@ -484,6 +489,56 @@ export default function MessageList(props: MessageListProps) {
       );
     }
 
+    // step-finish: show per-step token/cost summary
+    if (rowProps.part.type === "step-finish") {
+      const finishPart = rowProps.part as any;
+      const tokens = finishPart.tokens ?? {};
+      const cost = typeof finishPart.cost === "number" ? finishPart.cost : 0;
+      const reason = typeof finishPart.reason === "string" ? finishPart.reason : "";
+      const totalTokens = (tokens.input ?? 0) + (tokens.output ?? 0) + (tokens.reasoning ?? 0);
+      const cacheRead = tokens.cache?.read ?? 0;
+      const cacheWrite = tokens.cache?.write ?? 0;
+      const costLabel = cost > 0
+        ? cost < 0.01
+          ? `${(cost * 100).toFixed(2)}¢`
+          : `$${cost.toFixed(4)}`
+        : "";
+
+      // Only render if there is any data to show
+      if (totalTokens === 0 && !costLabel && !reason) return null;
+
+      return (
+        <div class="flex items-center gap-2 py-1 text-[11px] text-gray-9 border-t border-gray-6/30">
+          <span class="text-gray-8">{tr("session.step_finished")}</span>
+          <Show when={reason}>
+            <span class="text-gray-9">· {reason}</span>
+          </Show>
+          <span class="ml-auto flex items-center gap-3 text-[10px] text-gray-8">
+            <Show when={totalTokens > 0}>
+              <span title={`In: ${(tokens.input ?? 0).toLocaleString()} | Out: ${(tokens.output ?? 0).toLocaleString()} | Reasoning: ${(tokens.reasoning ?? 0).toLocaleString()} | Cache R: ${cacheRead.toLocaleString()} W: ${cacheWrite.toLocaleString()}`}>
+                {totalTokens.toLocaleString()} tokens
+              </span>
+            </Show>
+            <Show when={costLabel}>
+              <span>{costLabel}</span>
+            </Show>
+          </span>
+        </div>
+      );
+    }
+
+    // Tool execution duration
+    const duration = createMemo(() => {
+      if (rowProps.part.type !== "tool") return null;
+      const state = (rowProps.part as any).state ?? {};
+      const start = state.time?.start;
+      const end = state.time?.end;
+      if (typeof start !== "number" || typeof end !== "number") return null;
+      const ms = end - start;
+      if (ms < 1000) return `${ms}ms`;
+      return `${(ms / 1000).toFixed(1)}s`;
+    });
+
     return (
       <div class="flex items-center gap-2.5 py-1.5 min-h-[28px] group/step">
         {/* Status dot */}
@@ -538,33 +593,98 @@ export default function MessageList(props: MessageListProps) {
             {tr("session.open_session")}
           </button>
         </Show>
+        {/* Tool execution duration */}
+        <Show when={duration()}>
+          <span class="text-[10px] text-gray-8 ml-auto shrink-0">{duration()}</span>
+        </Show>
       </div>
     );
   };
 
   /** Compact steps list */
-  const StepsList = (listProps: { parts: Part[]; isUser: boolean }) => (
-    <div class="divide-y divide-gray-6/40">
-      <For each={listProps.parts}>
-        {(part) => (
-          <div>
-            <StepRow part={part} isUser={listProps.isUser} />
-            <Show when={part.type === "tool" || (props.developerMode && part.type !== "reasoning")}>
-              <div class="pl-6 pb-2 text-xs text-gray-10">
-                <PartView
-                  part={part}
-                  developerMode={props.developerMode}
-                  showThinking={props.showThinking}
-                  workspaceRoot={props.workspaceRoot}
-                  tone={listProps.isUser ? "dark" : "light"}
-                />
-              </div>
-            </Show>
-          </div>
-        )}
-      </For>
-    </div>
-  );
+  const StepsList = (listProps: { parts: Part[]; isUser: boolean }) => {
+    const shouldShowPartView = (part: Part) =>
+      (part.type === "tool" || (props.developerMode && part.type !== "reasoning")) && part.type !== "step-finish";
+
+    return (
+      <div class="divide-y divide-gray-6/40">
+        <For each={listProps.parts}>
+          {(part) => (
+            <div>
+              <StepRow part={part} isUser={listProps.isUser} />
+              <Show when={shouldShowPartView(part)}>
+                <div class="pl-6 pb-2 text-xs text-gray-10">
+                  <PartView
+                    part={part}
+                    developerMode={props.developerMode}
+                    showThinking={props.showThinking}
+                    workspaceRoot={props.workspaceRoot}
+                    tone={listProps.isUser ? "dark" : "light"}
+                  />
+                </div>
+              </Show>
+            </div>
+          )}
+        </For>
+      </div>
+    );
+  };
+
+  /** Compact metadata line for assistant messages */
+  const MessageMeta = (metaProps: { message: MessageWithParts }) => {
+    const info = () => metaProps.message.info as any;
+    const isAssistant = () => info().role === "assistant";
+    const modelLabel = () => {
+      if (!isAssistant()) return "";
+      const modelID = info().modelID ?? info().model ?? "";
+      if (!modelID) return "";
+      const providerID = info().providerID ?? "";
+      return providerID ? `${providerID}/${modelID}` : modelID;
+    };
+    const totalTokens = () => {
+      if (!isAssistant()) return 0;
+      const t = info().tokens;
+      if (!t) return 0;
+      return (t.input ?? 0) + (t.output ?? 0) + (t.reasoning ?? 0);
+    };
+    const costLabel = () => {
+      if (!isAssistant()) return "";
+      const c = info().cost;
+      if (typeof c !== "number" || c <= 0) return "";
+      return c < 0.01 ? `${(c * 100).toFixed(2)}¢` : `$${c.toFixed(4)}`;
+    };
+    const durationLabel = () => {
+      if (!isAssistant()) return "";
+      const created = info().time?.created;
+      const completed = info().time?.completed;
+      if (typeof created !== "number" || typeof completed !== "number") return "";
+      const ms = completed - created;
+      if (ms < 1000) return `${ms}ms`;
+      if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+      return `${Math.round(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`;
+    };
+
+    return (
+      <Show when={isAssistant() && (modelLabel() || totalTokens() > 0)}>
+        <div class="flex items-center gap-3 mt-2 text-[10px] text-gray-8 select-none">
+          <Show when={modelLabel()}>
+            <span title="Model">{modelLabel()}</span>
+          </Show>
+          <Show when={totalTokens() > 0}>
+            <span title={`Input: ${(info().tokens?.input ?? 0).toLocaleString()} | Output: ${(info().tokens?.output ?? 0).toLocaleString()} | Reasoning: ${(info().tokens?.reasoning ?? 0).toLocaleString()}`}>
+              {totalTokens().toLocaleString()} tokens
+            </span>
+          </Show>
+          <Show when={costLabel()}>
+            <span>{costLabel()}</span>
+          </Show>
+          <Show when={durationLabel()}>
+            <span>{durationLabel()}</span>
+          </Show>
+        </div>
+      </Show>
+    );
+  };
 
   /** Expandable steps container */
   const StepsContainer = (containerProps: {
@@ -603,6 +723,27 @@ export default function MessageList(props: MessageListProps) {
         return tr("session.execution_summary_reasoning").replace("{reasoning}", reasoning.toLocaleString());
       }
       return tr("session.execution_summary_updates");
+    };
+
+    // Aggregate per-step token/cost from step-finish parts
+    const stepFinishSummary = () => {
+      let totalCost = 0;
+      let totalTokens = 0;
+      for (const parts of containerProps.partsGroups) {
+        for (const part of parts) {
+          if (part.type !== "step-finish") continue;
+          const fp = part as any;
+          if (typeof fp.cost === "number") totalCost += fp.cost;
+          const t = fp.tokens;
+          if (t) totalTokens += (t.input ?? 0) + (t.output ?? 0) + (t.reasoning ?? 0);
+        }
+      }
+      const costLabel = totalCost > 0
+        ? totalCost < 0.01
+          ? `${(totalCost * 100).toFixed(2)}¢`
+          : `$${totalCost.toFixed(4)}`
+        : "";
+      return { totalTokens, costLabel };
     };
 
     const compactPathToken = (value: string) => {
@@ -760,7 +901,7 @@ export default function MessageList(props: MessageListProps) {
             </span>
           </span>
           <Show when={!expanded()}>
-            <span class="text-[11px] text-gray-9 truncate max-w-[56ch]">{`${executionSummary()} - ${latestStepLabel()}`}</span>
+            <span class="text-[11px] text-gray-9 truncate max-w-[56ch]">{`${executionSummary()}${stepFinishSummary().totalTokens > 0 ? ` · ${stepFinishSummary().totalTokens.toLocaleString()} tokens` : ""}${stepFinishSummary().costLabel ? ` · ${stepFinishSummary().costLabel}` : ""} - ${latestStepLabel()}`}</span>
           </Show>
           <Show when={expanded()}>
             <span class="text-[11px] text-gray-9 truncate max-w-[56ch]">{executionSummary()}</span>
@@ -795,6 +936,15 @@ export default function MessageList(props: MessageListProps) {
   };
 
   return (
+    <ErrorBoundary fallback={(err) => {
+      console.error("[MessageList] Render error:", err);
+      return (
+        <div class="p-4 text-red-11 text-sm">
+          <p>Render error: {String(err?.message ?? err)}</p>
+          <pre class="mt-2 text-[10px] text-gray-9 whitespace-pre-wrap">{err?.stack}</pre>
+        </div>
+      );
+    }}>
     <div class="space-y-6 pb-32" style={{ contain: "layout paint style" }}>
       <For each={messageBlocks()}>
         {(block, blockIndex) => {
@@ -909,6 +1059,9 @@ export default function MessageList(props: MessageListProps) {
                     </div>
                   )}
                 </For>
+                <Show when={!block.isUser}>
+                  <MessageMeta message={block.message} />
+                </Show>
                 <div class="absolute bottom-2 right-2 flex justify-end opacity-100 pointer-events-auto md:opacity-0 md:pointer-events-none md:group-hover:opacity-100 md:group-hover:pointer-events-auto md:group-focus-within:opacity-100 md:group-focus-within:pointer-events-auto transition-opacity select-none">
                   <button
                     class="text-dls-secondary hover:text-dls-text p-1 rounded hover:bg-dls-hover transition-colors"
@@ -932,5 +1085,6 @@ export default function MessageList(props: MessageListProps) {
       </For>
       <Show when={props.footer}>{props.footer}</Show>
     </div>
+    </ErrorBoundary>
   );
 }

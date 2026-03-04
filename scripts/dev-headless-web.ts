@@ -456,6 +456,8 @@ const viteEnv = {
   VITE_OPENWORK_URL: process.env.VITE_OPENWORK_URL ?? "/openwork",
   VITE_OPENWORK_PORT: process.env.VITE_OPENWORK_PORT ?? String(openworkPort),
   VITE_OPENWORK_TOKEN: process.env.VITE_OPENWORK_TOKEN ?? openworkToken,
+  // Keep devtools opt-in for headless/pod flows to reduce first-load jank.
+  VITE_SOLID_DEVTOOLS: process.env.VITE_SOLID_DEVTOOLS ?? "0",
 };
 const headlessEnv = {
   ...process.env,
@@ -485,6 +487,9 @@ logLine(`[dev:headless-web] OpenWork server: ${openworkUrl}`);
 logLine(`[dev:headless-web] Web host: ${viteHost}`);
 logLine(`[dev:headless-web] Web port: ${webPort}`);
 logLine(`[dev:headless-web] Web URL: ${webUrl}`);
+logLine(
+  `[dev:headless-web] Solid devtools: ${viteEnv.VITE_SOLID_DEVTOOLS === "1" ? "on" : "off"} (set VITE_SOLID_DEVTOOLS=1 to enable)`,
+);
 logLine(
   `[dev:headless-web] OpenCodeRouter: ${opencodeRouterEnabled ? "on" : "off"} (set OPENWORK_DEV_OPENCODE_ROUTER=0 to disable)`,
 );

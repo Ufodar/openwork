@@ -770,14 +770,14 @@ export default function PartView(props: Props) {
     return "diagnostic";
   };
 
-  const isLargeOutput = createMemo(() => toolOutput().length > 800);
+  const isLargeOutput = createMemo(() => toolOutput().length > 4000);
 
   const [expandedOutput, setExpandedOutput] = createSignal(false);
   const outputPreview = createMemo(() => {
     const output = toolOutput();
     if (!output) return "";
     if (isLargeOutput() && !expandedOutput()) {
-      return `${output.slice(0, 800)}\n\n… (truncated)`;
+      return `${output.slice(0, 4000)}\n\n… (truncated)`;
     }
     return output;
   });
@@ -905,7 +905,6 @@ export default function PartView(props: Props) {
         <Show
           when={
             showThinking() &&
-            developerMode() &&
             "text" in p() &&
             typeof (p() as { text: string }).text === "string" &&
             (p() as { text: string }).text.trim()
@@ -914,7 +913,7 @@ export default function PartView(props: Props) {
           <details class={`rounded-lg ${panelBgClass()} p-2`.trim()}>
             <summary class={`cursor-pointer text-xs ${subtleTextClass()}`.trim()}>Thinking</summary>
             <pre class={`mt-2 whitespace-pre-wrap break-words text-xs text-gray-12`.trim()}>
-              {clampText(String((p() as { text: string }).text), 2000)}
+              {String((p() as { text: string }).text)}
             </pre>
           </details>
         </Show>

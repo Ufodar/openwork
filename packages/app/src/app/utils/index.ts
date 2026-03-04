@@ -547,7 +547,14 @@ export function groupMessageParts(parts: Part[], messageId: string): MessageGrou
       return;
     }
 
-    if (part.type === "step-start" || part.type === "step-finish") {
+    if (part.type === "step-start") {
+      return;
+    }
+
+    // step-finish carries per-step token/cost data — keep it in the steps group
+    if (part.type === "step-finish") {
+      flushText();
+      steps.push(part);
       return;
     }
 

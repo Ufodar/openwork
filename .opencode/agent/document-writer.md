@@ -397,7 +397,7 @@ index.json 中只存摘要信息（id + title + status + materials 进度），�
 - **完成一个节点后**：更新节点 status → 更新 index.json 的 summary 和 current_focus → 同步 requirements.csv
 - **搜集到一份材料后**：更新节点的 materials 列表 → 更新 index.json 中该节点的 materials.collected
 - **文档完整性不变量**：每个自然暂停点，目标 .docx 必须处于 packed（有效）状态
-- **pack 后检查**：每次 pack 目标文档后，如果存在 requirements.csv 和 facts.json（位于会话根目录，由 bid-analysis 阶段生成），建议运行确定性 QC 脚本快速验证 Tier 0 规则（★项覆盖、公司名、金额一致性）。这不是完整 QC，是快速兜底。
+- **pack 后检查**：每次 pack 目标文档后，如果存在 requirements.csv 和 `.bid/facts.json`（位于会话根目录下的 `.bid/` 子目录，由 bid-analysis 阶段生成），建议运行确定性 QC 脚本快速验证 Tier 0 规则（★项覆盖、公司名、金额一致性）。这不是完整 QC，是快速兜底。
 - **conventions.md**：首次撰写时创建，记录已确定的视角、术语、详略程度。后续节点参照此文件保持一致。
 
 ---

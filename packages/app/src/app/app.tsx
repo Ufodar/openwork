@@ -162,7 +162,6 @@ import DashboardView from "./pages/dashboard";
 import SessionView from "./pages/session";
 import ProtoWorkspacesView from "./pages/proto-workspaces";
 import ProtoV1UxView from "./pages/proto-v1-ux";
-import DocumentWriterView from "./pages/document-writer";
 import DocumentAgentView from "./pages/document-agent";
 
 type RemoteWorkspaceDefaults = {
@@ -286,7 +285,7 @@ export default function App() {
     if (path.startsWith("/onboarding")) return "onboarding";
     if (path.startsWith("/session")) return "session";
     if (path.startsWith("/proto")) return "proto";
-    if (path.startsWith("/document-writer")) return "document-writer";
+    if (path.startsWith("/document-writer")) return "document-agent";
     if (path.startsWith("/document-agent")) return "document-agent";
     return "dashboard";
   });
@@ -338,20 +337,7 @@ export default function App() {
       navigate("/session");
       return;
     }
-    if (next === "document-writer") {
-      if (sessionId) {
-        goToDocumentWriter(sessionId);
-        return;
-      }
-      const fallback = activeSessionId();
-      if (fallback) {
-        goToDocumentWriter(fallback);
-        return;
-      }
-      navigate("/session");
-      return;
-    }
-    if (next === "document-agent") {
+    if (next === "document-writer" || next === "document-agent") {
       if (sessionId) {
         goToDocumentAgent(sessionId);
         return;
@@ -374,15 +360,6 @@ export default function App() {
       return;
     }
     navigate(`/session/${trimmed}`, options);
-  };
-
-  const goToDocumentWriter = (sessionId: string, options?: { replace?: boolean }) => {
-    const trimmed = sessionId.trim();
-    if (!trimmed) {
-      navigate("/session", options);
-      return;
-    }
-    navigate(`/document-writer/${trimmed}`, options);
   };
 
   const goToDocumentAgent = (sessionId: string, options?: { replace?: boolean }) => {
@@ -2669,7 +2646,7 @@ export default function App() {
       case "dashboard":
       case "session":
       case "proto":
-      case "document-writer":
+      case "document-writer":  // legacy — mapped to document-agent at view resolution
       case "document-agent":
         return value;
       default:
@@ -3132,10 +3109,7 @@ export default function App() {
     }
 
     setView(resolved, id);
-    if (resolved === "document-writer") {
-      persistSessionPreferredView(id, "document-writer").catch(() => undefined);
-    }
-    if (resolved === "document-agent") {
+    if (resolved === "document-writer" || resolved === "document-agent") {
       persistSessionPreferredView(id, "document-agent").catch(() => undefined);
     }
   };
@@ -3872,7 +3846,7 @@ export default function App() {
       const routePath = location.pathname.trim();
       const routeSessionId = (() => {
         const segments = routePath.split("/");
-        // Matches /session/:id, /document-agent/:id, /document-writer/:id
+        // Matches /session/:id, /document-agent/:id, /document-writer/:id (legacy)
         if (segments.length >= 3) {
           const page = (segments[1] ?? "").toLowerCase();
           if (page === "session" || page === "document-agent" || page === "document-writer") {
@@ -6287,9 +6261,6 @@ export default function App() {
         </Match>
         <Match when={currentView() === "session"}>
           <SessionView {...sessionProps()} />
-        </Match>
-        <Match when={currentView() === "document-writer"}>
-          <DocumentWriterView {...sessionProps()} />
         </Match>
         <Match when={currentView() === "document-agent"}>
           <DocumentAgentView {...sessionProps()} />

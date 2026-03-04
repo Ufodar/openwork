@@ -125,13 +125,7 @@ export default function AgentsView(props: AgentsViewProps) {
       return;
     }
 
-    if (featured.id === "document-agent") {
-      const agent = resolveFeaturedAgentName(featured) ?? "document-writer";
-      props.createSessionAndOpen({ title: tr(featured.nameKey), agent, view: "document-agent" });
-      return;
-    }
-
-    if (featured.id === "document-writer") {
+    if (featured.id === "document-agent" || featured.id === "document-writer") {
       const agent = resolveFeaturedAgentName(featured) ?? "document-writer";
       props.createSessionAndOpen({ title: tr(featured.nameKey), agent, view: "document-agent" });
       return;
@@ -281,7 +275,7 @@ export default function AgentsView(props: AgentsViewProps) {
                     props.createSessionAndOpen({
                       title: agent.name,
                       agent: agent.name,
-                      view: docWriterAgents.has(normalizeAgentKey(agent.name)) ? "document-writer" : "session",
+                      view: docWriterAgents.has(normalizeAgentKey(agent.name)) ? "document-agent" : "session",
                     })
                   }
                 >

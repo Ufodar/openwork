@@ -8,8 +8,17 @@ import type { SessionViewProps } from "./session";
 import OnlyOfficeEditor from "../components/onlyoffice-editor";
 import MessageList from "../components/session/message-list";
 import Composer from "../components/session/composer";
+import ToolMonitorPanel from "../components/tool-monitor/tool-monitor-panel";
 import { DOCUMENT_UPLOAD_ACCEPT } from "../lib/documents";
 import { currentLocale, t as i18n } from "../../i18n";
+import {
+  buildToolMonitorTurnReport,
+  selectLatestAssistantTurn,
+  selectNearestUserMessage,
+  shouldAnalyzeForAgent,
+} from "../lib/tool-monitor/analyze";
+import type { ToolMonitorTurnReport } from "../lib/tool-monitor/types";
+import { uploadSessionMarkdownReport } from "../lib/tool-monitor/persist";
 
 type DocumentItem = {
   name: string;
@@ -514,6 +523,9 @@ export default function DocumentAgentView(props: SessionViewProps) {
   const [activeDoc, setActiveDoc] = createSignal<string | null>(null);
   const [documentsCollapsed, setDocumentsCollapsed] = createSignal(false);
   const [todoExpanded, setTodoExpanded] = createSignal(false);
+  const [toolMonitorExpanded, setToolMonitorExpanded] = createSignal(false);
+  const [toolMonitorReports, setToolMonitorReports] = createSignal<ToolMonitorTurnReport[]>([]);
+  let lastToolMonitorAssistantMessageId: string | null = null;
   const todoList = createMemo(() => (props.todos ?? []).filter((todo) => todo.content.trim()));
   const todoCount = createMemo(() => todoList().length);
   const todoCompletedCount = createMemo(() => todoList().filter((todo) => todo.status === "completed").length);
@@ -1354,6 +1366,103 @@ export default function DocumentAgentView(props: SessionViewProps) {
     void refetchDocuments();
   });
 
+  const toolMonitorActive = createMemo(
+    () => Boolean(props.toolMonitorEnabled) && shouldAnalyzeForAgent(props.selectedSessionAgent),
+  );
+
+  const sanitizeReportToken = (value: string) =>
+    value
+      .trim()
+      .replace(/[^a-zA-Z0-9_-]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 90);
+
+  const toolMonitorReportPath = (assistantMessageId: string, createdAt: number) => {
+    const iso = new Date(createdAt).toISOString().replace(/[:.]/g, "-");
+    const safeId = sanitizeReportToken(assistantMessageId) || "assistant";
+    return `reports/tool-monitor/${iso}_${safeId}.md`;
+  };
+
+  const updateReportPersisted = (assistantMessageId: string, persisted: ToolMonitorTurnReport["persisted"]) => {
+    if (!persisted) return;
+    setToolMonitorReports((current) =>
+      current.map((report) =>
+        report.assistantMessageId === assistantMessageId ? { ...report, persisted } : report,
+      ),
+    );
+  };
+
+  const analyzeAndPersistToolMonitorTurn = async () => {
+    if (!toolMonitorActive()) return;
+
+    const sid = sessionId();
+    if (!sid) return;
+
+    const assistantTurn = selectLatestAssistantTurn(props.messages ?? []);
+    if (!assistantTurn) return;
+
+    const assistantMessageId = (assistantTurn.message.info as any)?.id;
+    if (typeof assistantMessageId !== "string" || !assistantMessageId.trim()) return;
+    if (assistantMessageId === lastToolMonitorAssistantMessageId) return;
+    lastToolMonitorAssistantMessageId = assistantMessageId;
+
+    const completedAtRaw = (assistantTurn.message.info as any)?.time?.completed;
+    const createdAt = typeof completedAtRaw === "number" && Number.isFinite(completedAtRaw) ? completedAtRaw : Date.now();
+
+    const userTurn = selectNearestUserMessage(props.messages ?? [], assistantTurn.index);
+    const userMessageId = (userTurn?.message.info as any)?.id;
+
+    const report = buildToolMonitorTurnReport({
+      sessionId: sid,
+      agent: props.selectedSessionAgent ?? "unknown",
+      messages: props.messages ?? [],
+      assistantMessageId,
+      userMessageId: typeof userMessageId === "string" ? userMessageId : undefined,
+      assistantParts: assistantTurn.message.parts ?? [],
+      userParts: userTurn?.message.parts ?? [],
+      createdAt,
+      developerMode: props.developerMode,
+    });
+
+    const path = toolMonitorReportPath(assistantMessageId, createdAt);
+    const pendingPersisted = { path, status: "pending" as const };
+    setToolMonitorReports((current) => [{ ...report, persisted: pendingPersisted }, ...current].slice(0, 24));
+
+    const cfg = apiConfig();
+    if (!cfg) {
+      updateReportPersisted(assistantMessageId, { path, status: "error", error: "Server not ready." });
+      return;
+    }
+
+    const persisted = await uploadSessionMarkdownReport({
+      baseUrl: cfg.baseUrl,
+      token: cfg.token,
+      workspaceId: cfg.workspaceId,
+      sessionId: cfg.sessionId,
+      path,
+      content: report.markdown,
+    });
+
+    updateReportPersisted(
+      assistantMessageId,
+      persisted.ok
+        ? { path: persisted.path, status: "ok" }
+        : { path: persisted.path, status: "error", error: persisted.error ?? "Upload failed." },
+    );
+  };
+
+  createEffect(
+    on(
+      () => props.sessionStatus ?? "idle",
+      (next, prev) => {
+        if (!toolMonitorActive()) return;
+        if (prev !== "running" || next === "running") return;
+        queueMicrotask(() => void analyzeAndPersistToolMonitorTurn());
+      },
+      { defer: true },
+    ),
+  );
+
   onCleanup(() => {
     clearPdfPreviewUrl();
     if (scrollFrame !== undefined) {
@@ -1946,6 +2055,15 @@ export default function DocumentAgentView(props: SessionViewProps) {
             }}
           />
         </div>
+
+        <ToolMonitorPanel
+          enabled={toolMonitorActive()}
+          developerMode={props.developerMode}
+          reports={toolMonitorReports()}
+          expanded={toolMonitorExpanded()}
+          setExpanded={setToolMonitorExpanded}
+          openDocument={(path) => setActiveDoc(path)}
+        />
 
         <Show when={todoCount() > 0}>
           <div class="px-4">

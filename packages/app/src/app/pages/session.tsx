@@ -157,6 +157,7 @@ export type SessionViewProps = {
   busyLabel: string | null;
   developerMode: boolean;
   showThinking: boolean;
+  toolMonitorEnabled: boolean;
   groupMessageParts: (parts: Part[], messageId: string) => MessageGroup[];
   summarizeStep: (part: Part) => { title: string; detail?: string };
   expandedStepIds: Set<string>;

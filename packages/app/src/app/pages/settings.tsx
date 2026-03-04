@@ -69,6 +69,8 @@ export type SettingsViewProps = {
   openDefaultModelPicker: () => void;
   showThinking: boolean;
   toggleShowThinking: () => void;
+  toolMonitorEnabled: boolean;
+  toggleToolMonitorEnabled: () => void;
   hideTitlebar: boolean;
   toggleHideTitlebar: () => void;
   modelVariantLabel: string;
@@ -868,6 +870,29 @@ export default function SettingsView(props: SettingsViewProps) {
                 </button>
                 <div class="text-xs text-gray-10">
                   {props.developerMode ? "Developer panel enabled." : "Enable this to access the Developer panel."}
+                </div>
+              </div>
+            </div>
+
+            <div class="bg-gray-2/30 border border-gray-7/60 rounded-2xl p-5 space-y-3">
+              <div class="text-sm font-medium text-gray-12">Tool Monitor</div>
+              <div class="text-xs text-gray-9">
+                Analyzes tool calls after each completed turn and saves a report in the session folder.
+              </div>
+              <div class="pt-1 flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  class={`${compactOutlineActionClass} ${
+                    props.toolMonitorEnabled
+                      ? "border-green-7/35 bg-green-3/20 text-green-11 hover:bg-green-3/35 hover:text-green-11"
+                      : ""
+                  }`}
+                  onClick={props.toggleToolMonitorEnabled}
+                >
+                  {props.toolMonitorEnabled ? "Enabled" : "Disabled"}
+                </button>
+                <div class="text-xs text-gray-10">
+                  {props.toolMonitorEnabled ? "Reports are generated after each run." : "No monitoring and no report writes."}
                 </div>
               </div>
             </div>

@@ -13,6 +13,83 @@ RUNTIME_ENV_DIR_DEFAULT="$HOME/.config/openwork"
 # ---- Bun path ----
 export PATH="$HOME/.bun/bin:$PATH"
 
+kill_pids_gracefully() {
+    local reason="$1"
+    shift
+    local pids=("$@")
+    if [ "${#pids[@]}" -eq 0 ]; then
+        return 0
+    fi
+
+    echo "[restart-pod] Stopping ${reason}: ${pids[*]}"
+    for pid in "${pids[@]}"; do
+        kill -TERM "$pid" 2>/dev/null || true
+    done
+
+    local deadline=$((SECONDS + 3))
+    local alive=()
+    while [ "$SECONDS" -lt "$deadline" ]; do
+        alive=()
+        for pid in "${pids[@]}"; do
+            if kill -0 "$pid" 2>/dev/null; then
+                alive+=("$pid")
+            fi
+        done
+        if [ "${#alive[@]}" -eq 0 ]; then
+            return 0
+        fi
+        sleep 0.1
+    done
+
+    echo "[restart-pod] Force killing ${reason}: ${alive[*]}"
+    for pid in "${alive[@]}"; do
+        kill -KILL "$pid" 2>/dev/null || true
+    done
+}
+
+kill_by_pattern() {
+    local reason="$1"
+    local pattern="$2"
+    local pids=()
+    while IFS= read -r pid; do
+        [ -n "$pid" ] && pids+=("$pid")
+    done < <(pgrep -f "$pattern" 2>/dev/null || true)
+
+    if [ "${#pids[@]}" -eq 0 ]; then
+        return 0
+    fi
+
+    kill_pids_gracefully "$reason" "${pids[@]}"
+}
+
+kill_by_port() {
+    local port="$1"
+    local pids=()
+    while IFS= read -r pid; do
+        [ -n "$pid" ] && pids+=("$pid")
+    done < <(lsof -ti :"$port" 2>/dev/null || true)
+
+    if [ "${#pids[@]}" -eq 0 ]; then
+        return 0
+    fi
+
+    kill_pids_gracefully "listeners on port ${port}" "${pids[@]}"
+}
+
+ensure_port_free() {
+    local port="$1"
+    local deadline=$((SECONDS + 3))
+    while lsof -ti :"$port" >/dev/null 2>&1; do
+        if [ "$SECONDS" -ge "$deadline" ]; then
+            echo "[restart-pod] ERROR: port $port is still occupied after cleanup"
+            lsof -nP -iTCP:"$port" -sTCP:LISTEN || true
+            return 1
+        fi
+        sleep 0.1
+    done
+    return 0
+}
+
 load_runtime_env() {
     local env_dir="${OPENWORK_RUNTIME_ENV_DIR:-$RUNTIME_ENV_DIR_DEFAULT}"
     local env_files=(
@@ -91,17 +168,21 @@ fi
 # ============================================
 echo "[restart-pod] Killing old processes..."
 
-# Kill by port
-for p in $OPENWORK_PORT $PORT; do
-    pids=$(lsof -ti :"$p" 2>/dev/null || true)
-    if [ -n "$pids" ]; then
-        echo "[restart-pod] Killing processes on port $p: $pids"
-        echo "$pids" | xargs kill -9 2>/dev/null || true
-    fi
+# Kill known process signatures first (more reliable than port-only cleanup).
+kill_by_pattern "dev-headless-web wrapper" "bun scripts/dev-headless-web.ts"
+kill_by_pattern "openwork orchestrator for this workspace" "openwork-orchestrator.*start.*--workspace[ =]$PROJECT_DIR"
+kill_by_pattern "openwork server cli for this workspace" "$PROJECT_DIR/packages/server/src/cli.ts"
+kill_by_pattern "vite dev server for openwork-ui" "openwork-ui.*vite|vite/bin/vite.js.*--port 5173"
+kill_by_pattern "orchestrator opencode sidecar" "/openwork-orchestrator/sidecars/opencode/.*/opencode serve"
+
+# Port-level fallback cleanup.
+for p in "$OPENWORK_PORT" "$PORT" 8789 5173; do
+    kill_by_port "$p"
 done
 
-# Kill leftover dev-headless-web processes
-pkill -f "dev-headless-web" 2>/dev/null || true
+for p in "$OPENWORK_PORT" "$PORT" 8789 5173; do
+    ensure_port_free "$p"
+done
 
 sleep 1
 

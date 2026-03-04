@@ -277,6 +277,18 @@ export default function App() {
   const location = useLocation();
   const navigate = useNavigate();
   let routeHydratedSessionKey = "";
+  let queuedDocumentAgentRedirect:
+    | {
+      sessionId: string;
+      timer: number;
+    }
+    | null = null;
+
+  const clearQueuedDocumentAgentRedirect = () => {
+    if (!queuedDocumentAgentRedirect) return;
+    window.clearTimeout(queuedDocumentAgentRedirect.timer);
+    queuedDocumentAgentRedirect = null;
+  };
 
   const [creatingSession, setCreatingSession] = createSignal(false);
   const [sessionViewLockUntil, setSessionViewLockUntil] = createSignal(0);
@@ -370,6 +382,32 @@ export default function App() {
     }
     navigate(`/document-agent/${trimmed}`, options);
   };
+
+  const queueDocumentAgentRedirect = (sessionId: string) => {
+    const trimmed = sessionId.trim();
+    if (!trimmed || typeof window === "undefined") return;
+    if (queuedDocumentAgentRedirect?.sessionId === trimmed) return;
+
+    clearQueuedDocumentAgentRedirect();
+
+    const timer = window.setTimeout(() => {
+      const queued = queuedDocumentAgentRedirect;
+      queuedDocumentAgentRedirect = null;
+      if (!queued || queued.sessionId !== trimmed) return;
+      const expectedSessionPath = `/session/${trimmed.toLowerCase()}`;
+      if (location.pathname.trim().toLowerCase() !== expectedSessionPath) return;
+      if (new URLSearchParams(location.search).get("view") === "session") return;
+      const preferred = getSessionPreferredView(trimmed);
+      if (preferred !== "document-writer" && preferred !== "document-agent") return;
+      goToDocumentAgent(trimmed, { replace: true });
+    }, 0);
+
+    queuedDocumentAgentRedirect = { sessionId: trimmed, timer };
+  };
+
+  onCleanup(() => {
+    clearQueuedDocumentAgentRedirect();
+  });
 
   const [startupPreference, setStartupPreference] = createSignal<StartupPreference | null>(null);
   const [onboardingStep, setOnboardingStep] =
@@ -4704,32 +4742,14 @@ export default function App() {
     setError(null);
     setCreatingSession(true);
 
-    const withTimeout = async <T,>(
-      promise: Promise<T>,
-      ms: number,
-      label: string
-    ) => {
-      let timeoutId: ReturnType<typeof setTimeout> | null = null;
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        timeoutId = setTimeout(
-          () => reject(new Error(`Timed out waiting for ${label}`)),
-          ms
-        );
-      });
-      try {
-        return await Promise.race([promise, timeoutPromise]);
-      } finally {
-        if (timeoutId) {
-          clearTimeout(timeoutId);
-        }
-      }
-    };
-
     try {
       // Quick health check to detect stale connection
       mark("health:start");
       try {
-        await withTimeout(c.global.health(), 3_000, "health");
+        const health = unwrap(await c.global.health({ signal: AbortSignal.timeout(3_000) }));
+        if (!health?.healthy) {
+          throw new Error("Server reported unhealthy status.");
+        }
         mark("health:ok");
       } catch (healthErr) {
         mark("health:error", {
@@ -6066,6 +6086,9 @@ export default function App() {
   createEffect(() => {
     const rawPath = location.pathname.trim();
     const path = rawPath.toLowerCase();
+    if (!path.startsWith("/session")) {
+      clearQueuedDocumentAgentRedirect();
+    }
     const isKnownMissingSession = (sessionId: string) => {
       if (!sessionsLoaded()) return false;
       if (sessions().some((session) => session.id === sessionId)) return false;
@@ -6139,13 +6162,7 @@ export default function App() {
         const inferred = inferSessionPreferredView(title);
         const resolved = stored !== "session" ? stored : inferred ?? stored;
         if (resolved === "document-writer" || resolved === "document-agent") {
-          window.setTimeout(() => {
-            if (location.pathname.trim().toLowerCase() !== `/session/${id.toLowerCase()}`) return;
-            if (new URLSearchParams(location.search).get("view") === "session") return;
-            const pv = getSessionPreferredView(id);
-            if (pv !== "document-writer" && pv !== "document-agent") return;
-            goToDocumentAgent(id, { replace: true });
-          }, 0);
+          queueDocumentAgentRedirect(id);
         }
 
         void (async () => {
@@ -6158,7 +6175,7 @@ export default function App() {
           if (new URLSearchParams(location.search).get("view") === "session") return;
           const preferred = getSessionPreferredView(id);
           if (preferred === "document-writer" || preferred === "document-agent") {
-            goToDocumentAgent(id, { replace: true });
+            queueDocumentAgentRedirect(id);
             return;
           }
         })();

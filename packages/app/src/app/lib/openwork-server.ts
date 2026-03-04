@@ -807,32 +807,82 @@ async function fetchWithTimeout(
     return fetchImpl(url, init);
   }
 
-  const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
-  const signal = controller?.signal;
-  const initWithSignal = signal && !init.signal ? { ...init, signal } : init;
+  const timeoutController = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const upstreamSignal = init.signal;
+  const canComposeSignals = typeof AbortSignal !== "undefined" && typeof AbortSignal.any === "function";
+  const signal =
+    upstreamSignal && timeoutController && canComposeSignals
+      ? AbortSignal.any([upstreamSignal, timeoutController.signal])
+      : timeoutController?.signal ?? upstreamSignal;
+  const initWithSignal = signal ? { ...init, signal } : init;
 
-  let timeoutId: ReturnType<typeof setTimeout> | null = null;
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timeoutId = setTimeout(() => {
-      try {
-        controller?.abort();
-      } catch {
-        // ignore
-      }
-      reject(new Error("Request timed out."));
-    }, timeoutMs);
-  });
+  // Fallback for runtimes without AbortController support.
+  if (!timeoutController) {
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error("Request timed out.")), timeoutMs);
+    });
+    try {
+      return await Promise.race([fetchImpl(url, initWithSignal), timeoutPromise]);
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
+  }
 
   try {
-    return await Promise.race([fetchImpl(url, initWithSignal), timeoutPromise]);
+    // Fallback linking when AbortSignal.any is unavailable.
+    if (upstreamSignal && !canComposeSignals) {
+      const relayAbort = () => {
+        try {
+          timeoutController.abort((upstreamSignal as { reason?: unknown }).reason);
+        } catch {
+          try {
+            timeoutController.abort();
+          } catch {
+            // ignore
+          }
+        }
+      };
+      if (upstreamSignal.aborted) {
+        relayAbort();
+      } else {
+        // Use once:true and do not remove in finally so long-lived streaming
+        // requests still observe upstream cancellation after headers.
+        try {
+          upstreamSignal.addEventListener("abort", relayAbort, { once: true });
+        } catch {
+          // ignore
+        }
+      }
+    }
+
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    timeoutId = setTimeout(() => {
+      try {
+        timeoutController.abort(new Error("Request timed out."));
+      } catch {
+        try {
+          timeoutController.abort();
+        } catch {
+          // ignore
+        }
+      }
+    }, timeoutMs);
+
+    try {
+      return await fetchImpl(url, initWithSignal);
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
   } catch (error) {
     const name = (error && typeof error === "object" && "name" in error ? (error as any).name : "") as string;
     if (name === "AbortError") {
+      if (upstreamSignal?.aborted) {
+        throw error;
+      }
       throw new Error("Request timed out.");
     }
     throw error;
-  } finally {
-    if (timeoutId) clearTimeout(timeoutId);
   }
 }
 

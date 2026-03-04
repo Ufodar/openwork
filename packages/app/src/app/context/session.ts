@@ -466,20 +466,6 @@ export function createSessionStore(options: {
     return lines.join("\n");
   };
 
-  const withTimeout = async <T,>(promise: Promise<T>, ms: number, label: string) => {
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      timeoutId = setTimeout(() => reject(new Error(`Timed out waiting for ${label}`)), ms);
-    });
-    try {
-      return await Promise.race([promise, timeoutPromise]);
-    } finally {
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-      }
-    }
-  };
-
   let selectRunCounter = 0;
   let selectVersion = 0;
   const selectInFlightBySession = new Map<string, Promise<void>>();
@@ -559,10 +545,12 @@ export function createSessionStore(options: {
     setStore("sessions", (current) => upsertSession(current, next));
   }
 
-  async function refreshPendingPermissions() {
+  async function refreshPendingPermissions(requestOptions?: { signal?: AbortSignal }) {
     const c = options.client();
     if (!c) return;
-    const list = unwrap(await c.permission.list());
+    const list = requestOptions?.signal
+      ? unwrap(await c.permission.list(undefined, { signal: requestOptions.signal }))
+      : unwrap(await c.permission.list());
     const now = Date.now();
     const byId = new Map(store.pendingPermissions.map((perm) => [perm.id, perm] as const));
     const next = list.map((perm) => ({ ...perm, receivedAt: byId.get(perm.id)?.receivedAt ?? now }));
@@ -634,7 +622,10 @@ export function createSessionStore(options: {
 
       mark("checking health");
       try {
-        await withTimeout(c.global.health(), 3000, "health");
+        const health = unwrap(await c.global.health({ signal: AbortSignal.timeout(3_000) }));
+        if (!health?.healthy) {
+          throw new Error("Server reported unhealthy status.");
+        }
         mark("health ok");
       } catch (error) {
         mark("health FAILED", {
@@ -645,7 +636,10 @@ export function createSessionStore(options: {
       if (abortIfStale("selection changed after health")) return;
 
       mark("calling session.messages");
-      const msgs = unwrap(await withTimeout(c.session.messages({ sessionID }), 12000, "session.messages"));
+      const msgs = unwrap(await c.session.messages(
+        { sessionID },
+        { signal: AbortSignal.timeout(12_000) },
+      ));
       mark("session.messages done");
       if (abortIfStale("selection changed before messages applied")) return;
       setMessagesForSession(sessionID, msgs);
@@ -668,7 +662,10 @@ export function createSessionStore(options: {
 
       try {
         mark("calling session.todo");
-        const list = unwrap(await withTimeout(c.session.todo({ sessionID }), 8000, "session.todo"));
+        const list = unwrap(await c.session.todo(
+          { sessionID },
+          { signal: AbortSignal.timeout(8_000) },
+        ));
         mark("session.todo done");
         if (abortIfStale("selection changed before todos applied")) return;
         setStore("todos", sessionID, list);
@@ -682,7 +679,7 @@ export function createSessionStore(options: {
 
       try {
         mark("calling permission.list");
-        await withTimeout(refreshPendingPermissions(), 6000, "permission.list");
+        await refreshPendingPermissions({ signal: AbortSignal.timeout(6_000) });
         mark("permission.list done");
         if (abortIfStale("selection changed before permissions applied")) return;
       } catch (error) {

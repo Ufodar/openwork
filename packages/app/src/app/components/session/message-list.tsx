@@ -604,7 +604,7 @@ export default function MessageList(props: MessageListProps) {
   /** Compact steps list */
   const StepsList = (listProps: { parts: Part[]; isUser: boolean }) => {
     const shouldShowPartView = (part: Part) =>
-      (part.type === "tool" || (props.developerMode && part.type !== "reasoning")) && part.type !== "step-finish";
+      (part.type === "tool" || part.type === "reasoning" || (props.developerMode && part.type !== "step-finish")) && part.type !== "step-finish";
 
     return (
       <div class="divide-y divide-gray-6/40">

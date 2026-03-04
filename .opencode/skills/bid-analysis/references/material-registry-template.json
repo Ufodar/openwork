@@ -27,7 +27,7 @@
     }
   },
   "field_definitions": {
-    "type": "Material type: 产品数据手册 | 历史标书 | 资质文件 | 方案文档 | 报价参考 | 其他",
+    "type": "Material type: 招标文件 | 招标附件 | 产品数据手册 | 历史标书 | 资质文件 | 方案文档 | 报价参考 | 其他",
     "format": "File format: pdf | docx | xlsx | pptx | doc | image",
     "covers": "List of content topics this material covers",
     "useful_for_reqs": "List of requirement IDs this material can serve. Supports wildcards (e.g. req-5.1.*)",

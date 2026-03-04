@@ -65,7 +65,7 @@ description: 撰写/组装商务标或技术标内容，包括点对点应答表
 3. **格式转换** — 对每个匹配到的文件：
    - PDF 扫描件 → 使用 bash + ghostscript/imagemagick 转为图片（每页一张）
    - 原生图片（jpg/png）→ 直接使用
-   - DOCX → 走路径 A（格式保真复制）
+   - DOCX → 走路径 A（格式保真复制：加载 docx skill → XML 层面复制章节 → 对齐样式 → tracked changes）
 
 4. **插入** — 按顺序写入目标文档的资格证明章节：
    - 每类文件前插入标题（如"一、营业执照"）

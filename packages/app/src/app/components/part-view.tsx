@@ -1,7 +1,7 @@
 import { For, Match, Show, Switch, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import { marked } from "marked";
 import type { Part } from "@opencode-ai/sdk/v2/client";
-import { File } from "lucide-solid";
+import { File, Loader2 } from "lucide-solid";
 import { isTauriRuntime, safeStringify, summarizeStep } from "../utils";
 import { usePlatform } from "../context/platform";
 import { perfNow, recordPerfLog } from "../lib/perf-log";
@@ -1061,6 +1061,13 @@ export default function PartView(props: Props) {
           alt=""
           class="max-w-full h-auto rounded-xl border border-gray-6/50"
         />
+      </Match>
+
+      <Match when={p().type === "compaction"}>
+        <div class={`flex items-center gap-2 text-xs ${subtleTextClass()}`.trim()}>
+          <Loader2 size={12} class="animate-spin" />
+          <span>{tr("session.status_compacting_context")}</span>
+        </div>
       </Match>
 
       <Match when={p().type === "step-start" || p().type === "step-finish"}>

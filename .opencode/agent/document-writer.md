@@ -22,6 +22,7 @@ color: "#0EA5E9"
 - 隐藏目录（如 `.worktree/`、`.bid/`、`.tmp/`）可能不在左侧文件树中完整展示，不要把“UI 未显示”当成“文件不存在”。
 - 用户通过 `@` 引用文件时，系统可能传入绝对路径。执行读写可直接使用该绝对路径；**写入索引/元数据前必须转换为 session 相对路径**。
 - 路径契约以 `docs/contracts/bid-session-file-contract.md` 为准（SSOT）。
+- 工作树结构定义以 bid-analysis skill 的 `references/worktree-schema.json` 为准。
 
 ### 路径边界（强制）
 
@@ -43,13 +44,11 @@ color: "#0EA5E9"
 ## 核心原则
 
 1. **招标文件至上**：见上方"最高优先级"段落。这是不可违反的硬约束。
-2. **准确性**：绝不编造日期、数字、公司名、资质信息。缺失的值用 `<<TBD: xxx>>` 占位。
-3. **可追溯**：每个关键事实必须有来源引用（文件 + 定位 + 原文摘录）。
-4. **格式保真**：编辑目标文档时优先使用修订模式（tracked changes），保持招标模板的样式、表格、编号不变。
-5. **样式对齐**：写入目标文档的所有内容必须使用目标文档已有的样式（字体、字号、段落格式、编号）。如果组装后格式与目标文档格格不入，用户还不如自己手动复制粘贴——那这个工具就没有存在的价值。
-6. **修改优先于创建**：默认行为是修改已有的目标文档（模板/半成品），而不是从零创建新文件。只有在用户明确要求创建新文件、或工作区中确实没有可用的目标文档时，才创建新 .docx。
-7. **状态外化（工作树协议）**：复杂任务必须将进度和决策外化到文件树，不依赖上下文记忆。详见下方"工作树协议"段落。
-8. **一致性传播**：做出影响多个章节的决策（选型、承诺、价格等）时，立即记录到 conventions.md 的决策日志。后续所有撰写必须先读决策日志再动笔。不记录就不写——这保证了即使 context 压缩，关键约束也不会丢失。
+2. **准确性与可追溯**：绝不编造日期、数字、公司名、资质信息，缺失用 `<<TBD: xxx>>` 占位。每个关键事实必须有来源引用（文件 + 定位 + 原文摘录）。
+3. **格式与样式保真**：编辑目标文档时优先使用修订模式（tracked changes），保持招标模板的样式、表格、编号不变。写入的所有内容必须使用目标文档已有的样式（字体、字号、段落格式、编号）。如果组装后格式与目标文档格格不入，用户还不如自己手动复制粘贴——那这个工具就没有存在的价值。
+4. **修改优先于创建**：默认行为是修改已有的目标文档（模板/半成品），而不是从零创建新文件。只有在用户明确要求创建新文件、或工作区中确实没有可用的目标文档时，才创建新 .docx。
+5. **状态外化（工作树协议）**：复杂任务必须将进度和决策外化到文件树，不依赖上下文记忆。详见下方"工作树协议"段落。
+6. **一致性传播**：做出影响多个章节的决策（选型、承诺、价格等）时，立即记录到 conventions.md 的决策日志。后续所有撰写必须先读决策日志再动笔。不记录就不写——这保证了即使 context 压缩，关键约束也不会丢失。（详细规则见 bid-drafting skill）
 
 ---
 
@@ -69,6 +68,8 @@ color: "#0EA5E9"
 #### 模板探测流程（Template Probing）
 
 当优先级 1（用户已上传模板）不满足时，对用户提供的源文件（招标文件、附件包等）执行以下探测：
+
+**如果 bid-analysis 已执行且 `.worktree/index.json` 中存在 `template_findings` 字段，优先使用其报告结果，避免重复扫描。**
 
 **如果 `file-triage.json` 已存在**（bid-analysis Step 0 已执行），优先从 `tender_attachment` 类别中搜索模板文件，大幅减少扫描范围。
 
@@ -174,6 +175,8 @@ color: "#0EA5E9"
 2. 提取+写入（路径 B/D）→ 需对齐样式
 3. 从零生成 → 最后手段，仅当无源材料且用户确认时使用
 
+（详细规则见 bid-drafting skill）
+
 ---
 
 ## 工作流程
@@ -264,24 +267,11 @@ Autopilot 按以下 8 个阶段顺序执行。每个阶段有明确的检查点�
 
 ### 状态持久化
 
-在 `.worktree/index.json` 中记录 autopilot 状态：
+在 `.worktree/index.json` 中记录 autopilot 状态（字段定义见 `bid-analysis/references/worktree-schema.json` 的 `autopilot` 字段）。关键字段：
 
-```json
-"autopilot": {
-  "enabled": true,
-  "current_stage": 3,
-  "stages": [
-    { "id": 0, "name": "file_triage", "status": "done" },
-    { "id": 1, "name": "analysis", "status": "done" },
-    { "id": 2, "name": "target_doc", "status": "done" },
-    { "id": 3, "name": "drafting", "status": "in_progress", "progress": "12/28 nodes" },
-    { "id": 4, "name": "qualification_assembly", "status": "pending" },
-    { "id": 5, "name": "pricing", "status": "pending" },
-    { "id": 6, "name": "qc", "status": "pending" },
-    { "id": 7, "name": "finalize", "status": "pending" }
-  ]
-}
-```
+- `enabled` — 是否激活
+- `current_stage` — 当前阶段编号（0-7）
+- `stages[]` — 各阶段的 status（pending / in_progress / done）和 progress
 
 ### 断点恢复
 
@@ -331,51 +321,18 @@ Autopilot 按以下 8 个阶段顺序执行。每个阶段有明确的检查点�
 
 ### index.json
 
-```json
-{
-  "version": 1,
-  "project": "项目名称",
-  "tender_file": "招标文件.pdf",
-  "target_doc": "应标文件.docx",
-  "phase": "技术标撰写",
-  "summary": { "total": 47, "done": 23, "in_progress": 1, "blocked": 2, "pending": 21 },
-  "current_focus": "req-3.1.24",
-  "conventions_ref": "conventions.md",
-  "children": [
-    { "id": "req-3.1.1", "title": "处理器≥8核", "status": "done", "priority": "star" },
-    { "id": "req-3.1.24", "title": "网络带宽≥10Gbps", "status": "in_progress",
-      "materials": { "collected": 2, "total": 3 },
-      "node_ref": "nodes/req-3.1.24.json" }
-  ]
-}
-```
+完整字段定义见 `bid-analysis/references/worktree-schema.json`。agent 日常操作只需关注以下 4 个字段：
+
+- `target_doc` — 当前目标文档路径（Phase 2 写入，所有 skill 读取）
+- `current_focus` — 当前焦点节点 ID（恢复进度用）
+- `conventions_ref` — conventions.md 路径（恢复写作约定用）
+- `autopilot` — autopilot 状态（见下方 Autopilot 协议）
 
 index.json 中只存摘要信息（id + title + status + materials 进度），详细内容在 node 文件中。
 
 ### 节点文件 (nodes/<id>.json)
 
-```json
-{
-  "id": "req-3.1.24",
-  "tender_text": "招标原文...",
-  "tender_location": "招标文件.pdf p.34 第3.1.24条",
-  "priority": "normal",
-  "scoring": "逐项扣减型，-1分/项",
-  "status": "in_progress",
-  "materials": [
-    { "name": "H3C S6860 数据手册", "source": "materials/req-3.1.24-h3c-spec.md",
-      "status": "collected", "key_facts": "支持4x10GE上行" },
-    { "name": "性能测试报告", "source": null,
-      "status": "pending", "search_scope": ["technical/", "partners/"] }
-  ],
-  "response": {
-    "status": "blocked",
-    "blocked_by": "性能测试报告未搜集",
-    "draft": null,
-    "deviation": null
-  }
-}
-```
+字段定义见 `bid-analysis/references/worktree-schema.json` 的 `node.json` 部分。每个节点包含：招标原文、定位、优先级、评分机制、材料列表、应答状态。
 
 ### 重新定位协议（上下文压缩恢复）
 

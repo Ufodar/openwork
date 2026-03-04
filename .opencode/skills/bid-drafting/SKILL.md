@@ -11,7 +11,7 @@ description: 撰写/组装商务标或技术标内容，包括点对点应答表
 0. 确认目标文档已确定。读取 `.worktree/index.json` 中的 `target_doc` 字段，或检查用户是否通过 @ 指定了目标文件。如果两者均无 → **停止**，提示用户先确定目标文档（"往哪个文件里写？"）。不要硬编码搜索 `target/` 目录。
 
 1. 检查 `.worktree/index.json` 是否存在：
-   - 如有 → 读取 index.json 获取总览和 current_focus，读取 conventions.md 恢复写作约定，以此为任务清单
+   - 如有 → 读取 index.json 获取总览和 current_focus，读取 conventions.md 恢复写作约定，以此为任务清单。如 conventions.md 不存在，按 `bid-analysis/references/worktree-schema.json` 的 conventions.md 定义创建（三个区域：格式约定、关键决策日志、一致性检查点）。首次撰写前必须完成此创建。
    - 如无 → 检查 requirements.csv，如有则以其为任务清单
    - 都无 → 向用户确认先做分析还是直接撰写
 2. 恢复工作树后，从 current_focus 指向的节点继续，不要从头开始
@@ -45,53 +45,9 @@ description: 撰写/组装商务标或技术标内容，包括点对点应答表
 
 **触发条件**：当前处理的 worktree 节点属于"资格证明文件"类章节，且 `file-triage.json` 中有 `qualification` 类别的文件。
 
-**流程：**
+详细流程（匹配表、格式转换、插入逻辑、输出 schema）见 `references/route-e-qualification.md`。
 
-1. **匹配** — 将招标要求中的每条资质要求（来自 requirements.csv 中 `分类 == "资格要求"` 的行）与 triage 中的 qualification 文件匹配：
-
-   | 资质类型 | 文件匹配信号 |
-   |---------|------------|
-   | 营业执照 | 文件名含 "营业执照" / "business_license" |
-   | 资质证书 | 文件名含 "资质" / "证书" / "认证" / "ISO" / "CMMI" |
-   | 业绩合同 | 文件名含 "合同" / "业绩" / "案例" / "project" |
-   | 财务报表 | 文件名含 "审计" / "财务" / "资产负债" / "audit" |
-   | 授权书 | 文件名含 "授权" / "authorization" |
-   | 人员证书 | 文件名含 "人员" / "工程师" / "PMP" 或证书类关键词 + 人名 |
-   | 其他 | 基于前 2 页内容做语义匹配 |
-
-2. **排序** — 按招标文件要求的顺序排列（如有明确顺序要求），否则使用通用顺序：
-   营业执照 → 资质证书 → 业绩合同 → 财务报表 → 人员证书 → 授权书 → 其他
-
-3. **格式转换** — 对每个匹配到的文件：
-   - PDF 扫描件 → 使用 bash + ghostscript/imagemagick 转为图片（每页一张）
-   - 原生图片（jpg/png）→ 直接使用
-   - DOCX → 走路径 A（格式保真复制：加载 docx skill → XML 层面复制章节 → 对齐样式 → tracked changes）
-
-4. **插入** — 按顺序写入目标文档的资格证明章节：
-   - 每类文件前插入标题（如"一、营业执照"）
-   - 使用 docx skill 的图片插入 XML 知识
-   - 每份文件之间插入分页符
-   - 保持修订标记
-
-5. **缺失报告** — 对未匹配到文件的招标要求：
-   - 在目标文档对应位置插入占位符 `<<待补充：XX证书>>`
-   - 设置节点 status: blocked, blocked_by: "缺少XX证书"
-   - 汇总所有缺失项，报告给用户
-
-**输出产物**：`reports/drafting/<timestamp>-qualification-mapping.json`（路径相对于 session 根目录）
-
-```json
-{
-  "mappings": [
-    { "requirement": "营业执照", "file": "营业执照.pdf", "status": "inserted", "pages": [45, 46] },
-    { "requirement": "ISO27001", "file": "ISO27001证书.pdf", "status": "inserted", "pages": [47] },
-    { "requirement": "近三年审计报告", "file": null, "status": "missing" }
-  ],
-  "summary": { "total": 12, "inserted": 10, "missing": 2 }
-}
-```
-
-**与 bid-qc 的衔接**：QC 的 vision sub-agent 可以 verify 已插入的资质文件——检查公司名、有效期、证书编号是否与 `.bid/facts.json` 一致。无需修改 bid-qc。
+**核心步骤**：匹配资质要求与 triage 文件 → 按招标顺序排列 → 格式转换 → 插入目标文档 → 缺失项报告给用户。
 
 ---
 
@@ -99,36 +55,10 @@ description: 撰写/组装商务标或技术标内容，包括点对点应答表
 
 **触发条件**：当前处理的 worktree 节点属于"报价/商务"类章节，且 `file-triage.json` 中有 `pricing_data` 类别的文件。
 
-**流程：**
+详细流程（列映射、填充逻辑、校验规则、安全规则）见 `references/route-f-pricing.md`。
 
-1. **读取源数据** — 用 xlsx skill 读取 pricing_data 文件：
-   - 提取列头和行数据
-   - 识别数据结构：设备清单 / 报价明细 / 费率表 / 工程量清单
-
-2. **读取目标表结构** — 从目标文档中提取报价表的表头和结构：
-   - 如果模板中有空白报价表 → 按其列结构填充
-   - 如果没有 → 从招标文件的报价格式要求推导
-
-3. **列映射** — 将源数据列映射到目标表列：
-   - 自动匹配：同名列
-   - 语义匹配：近义列（如 "单价" ↔ "含税单价"）
-   - 无法匹配的列 → 报告给用户确认
-
-4. **填充** — 将数据写入目标文档的表格：
-   - 使用 docx skill 的表格 XML 操作
-   - 保留原始数字精度（不四舍五入）
-   - 计算派生列：小计 = 单价 × 数量，总计 = Σ 小计
-
-5. **校验** — 填充完成后的一致性检查：
-   - 逐行：小计 == 单价 × 数量
-   - 汇总：总计 == Σ 所有小计
-   - 预算：总价 ≤ `.bid/facts.json` 的 budget（如有）
-   - 校验失败 → 标记节点为 blocked，报告给用户
-
-**安全规则**：
-- 价格数据**只能**来自用户提供的源文件，绝不可编造价格
-- 填充完成后**必须**向用户展示汇总：总价、金额最大的前 5 项
-- 用户确认后才标记节点为 done
+**核心步骤**：读取源数据 → 读取目标表结构 → 列映射 → 填充 → 校验一致性。
+**安全规则**：价格数据只能来自用户源文件，填充后必须向用户展示汇总，确认后才标记 done。
 
 ---
 

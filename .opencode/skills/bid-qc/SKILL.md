@@ -1,6 +1,6 @@
 ---
 name: bid-qc
-description: 检查投标文件质量，合规审查，查找错误和遗漏。触发词：检查、审查、有没有问题、查一下、合规检查、质量检查
+description: 检查投标文件质量，合规审查，查找错误和遗漏。触发词：检查投标文件、审查标书、投标合规检查、标书质量检查、投标文件有没有问题
 ---
 
 ## Workflow
@@ -21,6 +21,8 @@ python .opencode/skills/bid-qc/scripts/check_deterministic.py \
   --requirements <SESSION_ROOT>/requirements.csv \
   --output <SESSION_ROOT>/reports/qc-deterministic.json
 ```
+
+`--facts` 和 `--requirements` 为可选参数——脚本在未传入时优雅降级（对应检查标记为 skip），不会报错。
 
 此步骤是**预检**，不是完整检查。脚本输出中每个 check 包含 `scope`（实际验证了什么）和 `uncovered`（需要 Step 2c 补充什么）。
 

@@ -42,32 +42,21 @@ description: 分析招标文件，提取评标方法、评分标准、资质要�
          { "rel_path": "招标文件.pdf", "name": "招标文件.pdf", "size": 4567890 }
        ],
        "tender_attachment": [
-         { "rel_path": "附件/投标文件格式.docx", "name": "投标文件格式.docx", "size": 7340032 },
-         { "rel_path": "附件/报价清单.xlsx", "name": "报价清单.xlsx", "size": 512000 }
+         { "rel_path": "附件/投标文件格式.docx", "name": "投标文件格式.docx", "size": 7340032 }
        ],
-       "qualification": [
-         { "rel_path": "资质/营业执照.pdf", "name": "营业执照.pdf", "size": 2048000 },
-         { "rel_path": "资质/ISO证书.pdf", "name": "ISO证书.pdf", "size": 1536000 }
-       ],
-       "historical_bid": [
-         { "rel_path": "历史/2024年XX项目投标文件.docx", "name": "2024年XX项目投标文件.docx", "size": 10485760 }
-       ],
-       "pricing_data": [
-         { "rel_path": "报价/报价参考.xlsx", "name": "报价参考.xlsx", "size": 307200 }
-       ],
-       "product_doc": [
-         { "rel_path": "厂商/H3C-S6860-datasheet.pdf", "name": "H3C-S6860-datasheet.pdf", "size": 2684354 }
-       ],
-       "other": [
-         { "rel_path": "附件3.pdf", "name": "附件3.pdf", "size": 204800 }
-       ]
+       "qualification": [ "..." ],
+       "historical_bid": [ "..." ],
+       "pricing_data": [ "..." ],
+       "product_doc": [ "..." ],
+       "other": [ "..." ]
      },
      "ambiguous": [
-       { "rel_path": "附件3.pdf", "name": "附件3.pdf", "size": 204800, "candidates": ["tender_attachment", "qualification"], "reason": "文件名无明确标识，前两页含表格但无法确定类型" }
+       { "rel_path": "附件3.pdf", "name": "附件3.pdf", "size": 204800, "candidates": ["tender_attachment", "qualification"], "reason": "..." }
      ]
    }
    ```
 
+   > 每个 entry 的字段：`rel_path`（session 相对路径）、`name`、`size`。完整字段约束见 `docs/contracts/bid-session-file-contract.md` Section 7。
    > 兼容说明：如读到 v1（类别值为字符串数组），可兼容读取；**新写入必须为 v2**。
 
 4. **确认** — 向用户展示分类摘要（按类别汇总数量，不逐文件列出），重点确认：
@@ -99,6 +88,7 @@ description: 分析招标文件，提取评标方法、评分标准、资质要�
 ### Step 4: 外化分析结果
 - 始终生成 `requirements.csv`（列定义参见 `references/requirements-matrix-template.csv`），方便用户在 Excel 中查看。
 - 如提取出 ≥ 10 条要求 → 同时构建 `.worktree/`（结构参见 `references/worktree-schema.json`）：
+  字段完整定义见 `references/worktree-schema.json`，此处仅列创建步骤。
   1. 创建 `.worktree/index.json`（总览 + children 列表）
   2. 为每条要求创建 `nodes/<id>.json`（含招标原文、定位、优先级、评分机制）
   3. 创建 `conventions.md`，包含三个区域：
@@ -116,42 +106,13 @@ description: 分析招标文件，提取评标方法、评分标准、资质要�
 
 #### 分批策略（当 file-triage.json 存在时使用）
 
-如果 Step 0 已生成 file-triage.json，按以下优先级分批处理：
+详细的分批优先级表、每批处理流程、token 预算、渐进式索引规则见 `references/material-registry-guide.md`。
 
-| 批次 | 类别 | 处理深度 | 说明 |
-|------|------|---------|------|
-| 1 | `tender_main` + `tender_attachment` | 读前 3000 字符 | 最关键，通常 < 5 个文件 |
-| 2 | `historical_bid` | 读前 3000 字符 | 结构可复用，通常 < 20 个 |
-| 3 | `product_doc` | 读前 3000 字符 | 技术参数来源 |
-| 4 | `pricing_data` | 读前 3000 字符 | 报价参考 |
-| 5 | `qualification` | **仅文件名 + 类型** | 不读内容（由路径 E 在组装时处理），token 消耗 ≈ 0 |
-| 6 | `other` | 读前 3000 字符 | 兜底 |
-
-**每批处理流程：**
-1. 从 file-triage.json 取出该批文件列表
-   - v2 读取 `by_category.<category>[].rel_path`
-   - v1 读取字符串数组时，按文件名回退匹配为 `rel_path`
-2. 每个子批次最多 20 个文件。对每个文件：
-   - 读取前 3000 字符 / 前 2 页
-   - 提取：description、covers[]、useful_for_reqs[]、quality、caveats
-   - 追加到 material-registry.json
-3. **每个子批次完成后立即持久化** material-registry.json 到磁盘
-4. 更新 index.json 的 `registry_progress` 字段：
-   ```json
-   "registry_progress": {
-     "total": 156,
-     "indexed": 45,
-     "current_batch": "historical_bid",
-     "batch_order": ["tender_main", "tender_attachment", "historical_bid", "product_doc", "pricing_data", "qualification", "other"]
-   }
-   ```
-
-**qualification 特殊处理**：资质类文件只记录 `文件名 + 检测到的子类型`（营业执照/资质证书/审计报告/业绩合同/授权书/人员证书/其他），不读取文件内容。内容在 bid-drafting 路径 E 组装时才读取。
-
-**渐进式索引**：
-- 批次 1-2 完成后即可开始 drafting 阶段（不必等全部索引完）
-- 剩余批次可按需索引：当 drafting 遇到某节点需要的材料不在 registry 中时，按 search_scope 即时扫描并补充 registry
-- Token 预算：每子批次最多 20 × 3000 字符 ≈ 60K token。超出则自动拆分
+**关键要点**：
+- 按类别优先级分 6 批处理（tender_main 最先，other 兜底）
+- qualification 类只记文件名 + 子类型，不读内容
+- 每子批次完成后立即持久化 registry
+- 批次 1-2 完成后即可开始 drafting（不必等全部索引完）
 
 #### 无 file-triage.json 时的回退
 

@@ -4,7 +4,8 @@
   "index.json": {
     "version": 1,
     "project": "XX市智慧城市信息化项目",
-    "tender_file": "refs/tender/招标文件.pdf",
+    "tender_file": "招标文件.pdf",
+    "target_doc": null,
     "phase": "需求分析",
     "summary": {
       "total": 47,
@@ -53,17 +54,17 @@
         "name": "H3C S6860 数据手册",
         "source": null,
         "status": "pending",
-        "search_scope": ["refs/technical/", "refs/partners/"],
+        "search_scope": ["technical/", "partners/"],
         "searched_paths": []
       },
       {
         "name": "性能测试报告",
         "source": null,
         "status": "not_found",
-        "search_scope": ["refs/technical/"],
+        "search_scope": ["technical/"],
         "searched_paths": [
-          { "path": "refs/technical/", "verdict": "无相关文件", "time": "Round 3" },
-          { "path": "refs/partners/h3c/", "verdict": "仅产品手册，无测试报告", "time": "Round 3" }
+          { "path": "technical/", "verdict": "无相关文件", "time": "Round 3" },
+          { "path": "partners/h3c/", "verdict": "仅产品手册，无测试报告", "time": "Round 3" }
         ]
       }
     ],
@@ -79,12 +80,15 @@
     "index.json": {
       "version": "Schema version, always 1",
       "project": "Project name from tender document",
-      "tender_file": "Relative path to the tender file in refs/",
+      "tender_file": "Relative path to the tender file in session directory",
+      "target_doc": "Relative path to the target document being written. Set by document-writer Phase 2, consumed by all skills. null until resolved.",
       "phase": "Current phase: 需求分析 | 材料搜集 | 技术标撰写 | 商务标撰写 | 质量检查",
       "summary": "Aggregate counts by status, must stay in sync with children",
       "current_focus": "ID of the node currently being worked on, null if none",
       "conventions_ref": "Relative path to conventions.md",
       "template_findings": "Optional. Reported by bid-analysis when template-related content is discovered. { found: bool, type: 'embedded_chapter'|'standalone_file'|'scattered_description', location: string, structure_summary: string }",
+      "autopilot": "Optional. Present when autopilot mode is active. { enabled: bool, current_stage: number, stages: [{ id: number, name: string, status: 'pending'|'in_progress'|'done', progress?: string }] }",
+      "registry_progress": "Optional. Tracks batch material-registry construction progress. { total: number, indexed: number, current_batch: string, batch_order: string[] }",
       "children[]": {
         "id": "Unique identifier, format: req-<section>.<number>",
         "title": "Short title summarizing the requirement",
@@ -106,7 +110,7 @@
         "source": "Relative path to materials/<id>-<name>.md, null if not yet collected",
         "status": "pending | collected | not_found",
         "key_facts": "Optional: key facts extracted from the material",
-        "search_scope": "Optional: directories to search for this material",
+        "search_scope": "Optional: directories within session root to search for this material",
         "searched_paths": "Array of { path, verdict, time } recording search attempts. path=directory searched, verdict=what was found/not found, time=which round. Survives context compression."
       },
       "response": {

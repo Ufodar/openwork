@@ -32,7 +32,7 @@ description: 分析招标文件，提取评标方法、评分标准、资质要�
 
 ### Step 4.5: 构建材料索引（当会话目录下的参考文件 >= 5 个时）
 
-浏览会话目录下的参考文件（通常在 refs/ 下，但用户可能直接上传到根目录或其他子目录），对每个文件快速了解其内容概要（读取前几页/首 sheet/首 slide），构建 `.worktree/material-registry.json`（schema 参见 `references/material-registry-template.json`）：
+浏览会话目录下的参考文件（用户可能上传到根目录、子目录或任意位置——不要假设 `refs/` 目录存在），对每个文件快速了解其内容概要（读取前几页/首 sheet/首 slide），构建 `.worktree/material-registry.json`（schema 参见 `references/material-registry-template.json`）：
 
 - 每个文件一个条目：type、format、covers、useful_for_reqs、quality、caveats
 - useful_for_reqs 可在此阶段粗略填写（基于文件内容和 requirements.csv 的匹配），后续阶段逐步精确化

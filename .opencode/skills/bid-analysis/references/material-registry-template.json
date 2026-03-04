@@ -1,7 +1,7 @@
 {
-  "_doc": "Project-level material registry. Built during material collection phase, reused by all subsequent nodes. Stored at .worktree/material-registry.json.",
+  "_doc": "Project-level material registry. Built during material collection phase, reused by all subsequent nodes. Stored at .worktree/material-registry.json. Keys are paths relative to session root.",
   "example": {
-    "refs/partners/h3c/S6860-datasheet.pdf": {
+    "partners/h3c/S6860-datasheet.pdf": {
       "type": "产品数据手册",
       "format": "pdf",
       "covers": ["交换机全系列参数", "端口规格", "环境指标"],
@@ -9,7 +9,7 @@
       "quality": "官方文档，参数可信",
       "caveats": null
     },
-    "refs/history/2024-bid/技术方案.docx": {
+    "history/2024-bid/技术方案.docx": {
       "type": "历史标书",
       "format": "docx",
       "covers": ["售后服务方案(ch.8)", "项目管理方案(ch.5)"],
@@ -17,7 +17,7 @@
       "quality": "结构可复用，参数需更新",
       "caveats": "公司名为旧名称'XX科技'，需替换为当前公司名"
     },
-    "refs/business/营业执照.pdf": {
+    "营业执照.pdf": {
       "type": "资质文件",
       "format": "pdf",
       "covers": ["统一社会信用代码", "公司全称", "法人代表", "注册资本"],

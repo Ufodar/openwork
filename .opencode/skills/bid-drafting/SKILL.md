@@ -1,6 +1,14 @@
 ---
 name: bid-drafting
 description: 撰写/组装商务标或技术标内容——填写应答表、编写技术方案、商务承诺等。触发词：写技术方案、写商务标、填应答表、填写点对点应答、撰写投标文件、组装标书内容。注意：本 skill 只负责"撰写和填写"，前置的"分析和提取"由 bid-analysis 处理。
+requires:
+  - target_doc: "目标文档路径, 来自 .worktree/index.json 的 target_doc 字段或用户 @ 引用"
+  - requirements_source: "requirements.csv 或 .worktree/index.json (至少一个)"
+  - conventions.md: "写作约定, 来自 .worktree/conventions.md (如不存在则本 skill 创建)"
+provides:
+  - filled_target_doc: "已填充内容的目标文档"
+  - updated_worktree: "更新后的 .worktree/ 状态 (current_focus, node status)"
+  - reports/drafting-quality.json: "确定性自检报告 (可选)"
 ---
 
 ## Workflow
@@ -11,7 +19,7 @@ description: 撰写/组装商务标或技术标内容——填写应答表、编
 0. 确认目标文档已确定。读取 `.worktree/index.json` 中的 `target_doc` 字段，或检查用户是否通过 @ 指定了目标文件。如果两者均无 → **停止**，提示用户先确定目标文档（"往哪个文件里写？"）。不要硬编码搜索 `target/` 目录。
 
 1. 检查 `.worktree/index.json` 是否存在：
-   - 如有 → 读取 index.json 获取总览和 current_focus，读取 conventions.md 恢复写作约定，以此为任务清单。如 conventions.md 不存在，按 `bid-analysis/references/worktree-schema.json` 的 conventions.md 定义创建（三个区域：格式约定、关键决策日志、一致性检查点）。首次撰写前必须完成此创建。
+   - 如有 → 读取 index.json 获取总览和 current_focus，读取 conventions.md 恢复写作约定，以此为任务清单。如 conventions.md 不存在，按 `bid-analysis/references/worktree-schema.json` 的 conventions.md 定义创建（五个区域：格式约定、关键决策日志、一致性检查点、格式快照、质量基线）。首次撰写前必须完成此创建。
    - 如无 → 检查 requirements.csv，如有则以其为任务清单
    - 都无 → 向用户确认先做分析还是直接撰写
 2. 恢复工作树后，从 current_focus 指向的节点继续，不要从头开始
@@ -22,6 +30,8 @@ description: 撰写/组装商务标或技术标内容——填写应答表、编
 ### Step 3: 逐项撰写
 按工作树节点（或 csv 行）逐项处理。每个节点的处理流程：
 1. 读取 conventions.md（刷新约束和决策记忆）
+   - 首次撰写时如"四、格式快照"为空，先读取目标文档样式基线（字体、标题层级、段落间距），写入格式快照区
+   - 前 3 个节点完成后如"五、质量基线"为空，计算前 3 个节点的平均应答字数和实质内容比，写入质量基线区
 2. **如有 .worktree/material-registry.json → 先查索引定位候选材料，避免盲目搜索**
 3. 读取节点的 node.json（获取招标原文和已搜集材料）
 4. 从候选材料中提取/组装内容（组装优先于生成）
@@ -33,6 +43,24 @@ description: 撰写/组装商务标或技术标内容——填写应答表、编
 
 ### Step 4: 完整性检查
 撰写完成后，用下方"完整性检查清单"核对是否遗漏。
+
+### Step 4.5: 确定性自检（Deterministic Self-Check）
+
+运行确定性自检脚本验证已撰写的应答质量：
+
+```bash
+python .opencode/skills/bid-drafting/scripts/check_drafting_quality.py \
+  --requirements <SESSION_ROOT>/requirements.csv \
+  --conventions <SESSION_ROOT>/.worktree/conventions.md \
+  --output <SESSION_ROOT>/reports/drafting-quality.json
+```
+
+处理结果：
+- `response_length` fail → 标记对应节点为 needs_review
+- `bare_satisfy` fail → 立即重写该条应答（最常见的质量问题）
+- `star_substance` fail → Blocker，必须补充实质内容
+- `tbd_unresolved` fail → 检查是否有可用材料，有则填写，无则保持 TBD 但标记 blocked
+- `quality_trend` fail → 向用户报告衰减指标，建议暂停
 
 ### Step 5: 交付暂停点
 确保目标文档处于 packed（有效）状态。汇报已完成项和剩余项。
@@ -150,13 +178,25 @@ description: 撰写/组装商务标或技术标内容——填写应答表、编
 
 每完成 5 个节点的撰写后，暂停执行以下刷新：
 
-1. **重读 conventions.md** — 刷新决策日志和格式约定的记忆
-2. **回顾最近 5 个应答的质量** — 检查是否出现以下衰减信号：
-   - 应答长度明显缩短（相比前 5 个）
-   - 出现笼统用语（"符合"、"满足"、"响应"）
-   - 偏离标注变得模糊或缺失
-3. **如发现衰减** → 提示用户并建议在此处暂停，下次继续
+1. **重读 conventions.md 全文** — 刷新决策日志、格式约定、格式快照、质量基线的记忆。**此步不可跳过。**
+2. **质量衰减检测**（需质量基线已建立）：
+   - 计算最近 5 个节点的平均应答字数，与质量基线比较
+   - 如平均字数下降 > 30% → 警告信号
+   - 检查最近 5 个应答是否出现笼统用语（"符合"、"满足"、"响应"）
+   - 检查偏离标注是否变得模糊或缺失
+   - 可选：运行 `python .opencode/skills/bid-drafting/scripts/check_drafting_quality.py --requirements <SESSION_ROOT>/requirements.csv --trend-only --output <SESSION_ROOT>/reports/quality-trend.json`
+3. **如发现衰减** → 向用户报告衰减指标（"前3节点平均287字，最近5节点平均98字"），建议暂停
 4. **更新 index.json 进度** → 标记安全暂停点
+5. **更新 conventions.md 五、质量基线** → 追加本轮检查点的质量快照（时间戳、节点范围、指标值）
+
+### 检查点文件（每个刷新检查点写入）
+
+每次执行刷新检查点或完成暂停点（Step 5）时，写入 `.worktree/last-checkpoint.md`：
+- 当前阶段和 autopilot stage（如适用）
+- 最后完成的节点 ID 和状态
+- 从 conventions.md 决策日志中提取的关键进行中决策（最近 5 条）
+- 质量指标快照（已完成数、最近均值、趋势）
+- 下一步动作（明确到具体节点 ID）
 
 ### 状态外化（长任务保障）
 

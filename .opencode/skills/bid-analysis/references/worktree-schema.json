@@ -89,7 +89,7 @@
       "current_focus": "ID of the node currently being worked on, null if none",
       "conventions_ref": "Relative path to conventions.md",
       "template_findings": "Optional. Reported by bid-analysis when template-related content is discovered. { found: bool, type: 'embedded_chapter'|'standalone_file'|'scattered_description', location: string, structure_summary: string }",
-      "autopilot": "Optional. Present when autopilot mode is active. { enabled: bool, current_stage: number, stages: [{ id: number, name: string, status: 'pending'|'in_progress'|'done', progress?: string }] }",
+      "autopilot": "Optional. Present when autopilot mode is active. { enabled: bool, current_stage: number, stages: [{ id: number, name: string, status: 'pending'|'in_progress'|'done'|'skipped', progress?: string }] }",
       "registry_progress": "Optional. Tracks batch material-registry construction progress. { total: number, indexed: number, current_batch: string, batch_order: string[] }",
       "children[]": {
         "id": "Unique identifier, format: req-<section>.<number>",
@@ -125,11 +125,13 @@
   },
 
   "conventions.md": {
-    "_doc": "Three-section structure. All nodes MUST read this file before writing.",
+    "_doc": "Five-section structure. All nodes MUST read this file before writing.",
     "sections": {
       "一、格式约定": "Writing style rules: perspective, terminology, detail level, numbering conventions",
       "二、关键决策日志": "Decisions that ALL subsequent nodes must follow. Table format: 决策ID | 决策内容 | 影响节点 | 决策依据 | 记录时间",
-      "三、一致性检查点": "Quick checklist before writing each node: 引用产品参数→查选型决策；提及响应时间→查承诺数值；提及金额→查报价表"
+      "三、一致性检查点": "Quick checklist before writing each node",
+      "四、格式快照": "Target document style baseline captured at Phase 2: font family, heading styles, numbering format, table border style, paragraph spacing. Captured once, never modified.",
+      "五、质量基线": "Quality metrics from first 3 completed nodes: avg response length, substantive content ratio, deviation annotation completeness. Used for drift detection at refresh checkpoints."
     }
   }
 }

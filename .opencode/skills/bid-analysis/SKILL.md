@@ -1,6 +1,15 @@
 ---
 name: bid-analysis
 description: 分析招标文件，提取评标方法、评分标准、资质要求、截止时间等关键信息，确定投标文件结构。触发词：分析招标文件、提取招标要求、评分标准是什么、招标需求分析、提取应答表结构。注意：本 skill 只负责"分析和提取"，不负责"撰写和填写"——后者由 bid-drafting 处理。
+requires:
+  - tender_main_file: "招标文件 (PDF/DOCX)"
+provides:
+  - requirements.csv: "需求矩阵"
+  - .worktree/index.json: "工作树根节点 (条件: >=10条)"
+  - .worktree/conventions.md: "写作约定框架"
+  - .worktree/material-registry.json: "材料索引 (条件: 参考文件>=5)"
+  - .bid/facts.json: "项目关键事实 (可选)"
+  - file-triage.json: "文件分类 (条件: 文件数>=10)"
 ---
 
 ## Workflow
@@ -91,10 +100,12 @@ description: 分析招标文件，提取评标方法、评分标准、资质要�
   字段完整定义见 `references/worktree-schema.json`，此处仅列创建步骤。
   1. 创建 `.worktree/index.json`（总览 + children 列表）
   2. 为每条要求创建 `nodes/<id>.json`（含招标原文、定位、优先级、评分机制）
-  3. 创建 `conventions.md`，包含三个区域：
+  3. 创建 `conventions.md`，包含五个区域：
      - **一、格式约定**：暂为空，待撰写阶段首次写入时填充
      - **二、关键决策日志**：空表格框架（决策ID | 决策内容 | 影响节点 | 决策依据 | 记录时间）
      - **三、一致性检查点**：空检查清单框架，待首个关键决策产生后填充
+     - **四、格式快照**：空框架，由 document-writer Phase 2 确定目标文档后填充（字体、标题层级、编号格式、表格边框、段落间距）
+     - **五、质量基线**：空框架，由 bid-drafting 完成前 3 个节点后自动填充（平均应答字数、实质内容比、偏离标注完整率）
   4. 两者的 status 字段保持同步
   5. 如有需要，生成 `.bid/facts.json`（schema 参见 `references/facts-template.json`），记录项目关键事实（公司名、项目名、项目编号、截止日期、预算等）。此文件供后续 bid-qc 确定性脚本使用。`.bid/` 目录位于会话根目录下，如不存在则创建。
 - 如 < 10 条 → 默认只写 requirements.csv；若后续需要执行 Step 4.5（参考文件 ≥ 5），创建**轻量工作树**（`.worktree/index.json` + `conventions.md`，不创建 `nodes/`）以承载 `material-registry.json` 和恢复状态。
@@ -123,6 +134,19 @@ description: 分析招标文件，提取评标方法、评分标准、资质要�
 - 该索引是全项目共享的，不是某个节点私有的
 
 此步骤为后续 bid-drafting 阶段提供"先查索引、再开文件"的快速路径。
+
+### Step 4.6: 材料缺口分析（Material Gap Detection）
+
+registry 构建完成后（或批次 1-2 完成后），执行缺口分析：
+
+1. 遍历 requirements.csv 中所有 pending 节点
+2. 对每个节点，在 material-registry.json 中搜索 useful_for_reqs 匹配
+3. 分类结果：
+   - **有直接匹配**（high relevance）→ 标注为 "material_ready"
+   - **有间接匹配**（medium/low）→ 标注为 "material_partial"
+   - **无匹配** → 标注为 "material_gap"
+4. 输出缺口报告到 `.worktree/material-gaps.json`
+5. 向用户报告缺口节点，建议补充材料或标记为需要从零撰写
 
 ### Step 5: 向用户汇报分析摘要
 简要汇报：评标方法、分值分布、★ 项数量、关键时间节点。指出需要用户确认的不确定项。

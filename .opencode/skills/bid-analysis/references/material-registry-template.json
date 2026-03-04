@@ -5,7 +5,11 @@
       "type": "产品数据手册",
       "format": "pdf",
       "covers": ["交换机全系列参数", "端口规格", "环境指标"],
-      "useful_for_reqs": ["req-3.1.24", "req-3.1.25", "req-3.2.1"],
+      "useful_for_reqs": [
+        { "id": "req-3.1.24", "relevance": "high", "match_method": "keyword_exact" },
+        { "id": "req-3.1.25", "relevance": "medium", "match_method": "semantic" },
+        { "id": "req-3.2.1", "relevance": "high", "match_method": "keyword_exact" }
+      ],
       "quality": "官方文档，参数可信",
       "caveats": null
     },
@@ -39,7 +43,7 @@
     "type": "Material type: 招标文件 | 招标附件 | 产品数据手册 | 历史标书 | 资质文件 | 方案文档 | 报价参考 | 其他",
     "format": "File format: pdf | docx | xlsx | pptx | doc | image",
     "covers": "List of content topics this material covers",
-    "useful_for_reqs": "List of requirement IDs this material can serve. Supports wildcards (e.g. req-5.1.*)",
+    "useful_for_reqs": "List of requirement IDs this material can serve. Supports wildcards (e.g. req-5.1.*). Two formats accepted: v1 string array [\"req-3.1.24\"] (still valid) or v2 object array [{ \"id\": \"req-3.1.24\", \"relevance\": \"high\", \"match_method\": \"keyword_exact\" }]. v2 fields: id (required), relevance: high|medium|low (required), match_method: keyword_exact|semantic|manual (optional).",
     "quality": "Quality assessment: official doc / internal doc / credibility note",
     "caveats": "Usage notes (e.g. company name needs replacement, params outdated). null if none"
   }

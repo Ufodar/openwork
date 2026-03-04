@@ -1,6 +1,14 @@
 ---
 name: bid-qc
 description: 检查投标文件质量，合规审查，查找错误和遗漏。触发词：检查投标文件、审查标书、投标合规检查、标书质量检查、投标文件有没有问题
+requires:
+  - target_doc: "投标文件 .docx (必须)"
+  - tender_file: "招标文件 (必须, 校验基线)"
+  - .bid/facts.json: "事实校验基线 (可选, 降级运行)"
+  - requirements.csv: "检查清单骨架 (可选, 降级运行)"
+provides:
+  - reports/qc-deterministic.json: "确定性检查报告"
+  - reports/qc-full.md: "完整 QC 报告 (含 LLM 判断层)"
 ---
 
 ## Workflow

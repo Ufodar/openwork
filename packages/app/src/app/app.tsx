@@ -52,6 +52,7 @@ import {
   SESSION_MODEL_PREF_KEY,
   SUGGESTED_PLUGINS,
   THINKING_PREF_KEY,
+  TOOL_MONITOR_PREF_KEY,
   VARIANT_PREF_KEY,
 } from "./constants";
 import { parseMcpServersFromContent, removeMcpFromConfig, validateMcpServerName } from "./mcp";
@@ -994,7 +995,20 @@ export default function App() {
 
   const buildPromptParts = (draft: ComposerDraft): PartInput[] => {
     const parts: PartInput[] = [];
-    const text = draft.resolvedText ?? draft.text;
+    let text = draft.resolvedText ?? draft.text;
+
+    // Auto-inject session directory context for document agents.
+    // The agents' files live in documents/sessions/<id>/ which is gitignored,
+    // so glob/grep cannot find them. Appending the path lets the agent discover its workspace.
+    const agent = selectedSessionAgent();
+    const sessionId = selectedSessionId();
+    if (sessionId && agent && (agent === "document-writer" || agent === "common-work")) {
+      const sessionDir = `documents/sessions/${sessionId}/`;
+      if (!text.includes(sessionDir)) {
+        text = text + `\n\n[会话目录: ${sessionDir}]`;
+      }
+    }
+
     parts.push({ type: "text", text } as TextPartInput);
 
     const root = workspaceProjectDir().trim();
@@ -2029,6 +2043,7 @@ export default function App() {
   const [modelPickerQuery, setModelPickerQuery] = createSignal("");
 
   const [showThinking, setShowThinking] = createSignal(true);
+  const [toolMonitorEnabled, setToolMonitorEnabled] = createSignal(true);
   const [hideTitlebar, setHideTitlebar] = createSignal(false);
   const [modelVariant, setModelVariant] = createSignal<string | null>(null);
 
@@ -4975,6 +4990,18 @@ export default function App() {
           }
         }
 
+        const storedToolMonitor = window.localStorage.getItem(TOOL_MONITOR_PREF_KEY);
+        if (storedToolMonitor != null) {
+          try {
+            const parsed = JSON.parse(storedToolMonitor);
+            if (typeof parsed === "boolean") {
+              setToolMonitorEnabled(parsed);
+            }
+          } catch {
+            // ignore
+          }
+        }
+
         const storedHideTitlebar = window.localStorage.getItem(HIDE_TITLEBAR_PREF_KEY);
         if (storedHideTitlebar != null) {
           try {
@@ -5396,6 +5423,18 @@ export default function App() {
       window.localStorage.setItem(
         THINKING_PREF_KEY,
         JSON.stringify(showThinking())
+      );
+    } catch {
+      // ignore
+    }
+  });
+
+  createEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(
+        TOOL_MONITOR_PREF_KEY,
+        JSON.stringify(toolMonitorEnabled())
       );
     } catch {
       // ignore
@@ -5832,6 +5871,8 @@ export default function App() {
       openDefaultModelPicker,
       showThinking: showThinking(),
       toggleShowThinking: () => setShowThinking((v) => !v),
+      toolMonitorEnabled: toolMonitorEnabled(),
+      toggleToolMonitorEnabled: () => setToolMonitorEnabled((v) => !v),
       hideTitlebar: hideTitlebar(),
       toggleHideTitlebar: () => setHideTitlebar((v) => !v),
       modelVariantLabel: formatModelVariantLabel(modelVariant()),
@@ -6003,6 +6044,7 @@ export default function App() {
     busyLabel: busyLabel(),
     developerMode: developerMode(),
     showThinking: showThinking(),
+    toolMonitorEnabled: toolMonitorEnabled(),
     groupMessageParts,
     summarizeStep,
     expandedStepIds: expandedStepIds(),

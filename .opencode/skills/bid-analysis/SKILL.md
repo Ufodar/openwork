@@ -23,6 +23,7 @@ provides:
 **流程：**
 
 1. **快速扫描** — 对会话目录下所有文件（递归），仅读取：
+   - **重要**：`documents/` 目录在 `.gitignore` 中，glob/grep 无法搜索。使用 `bash: find <SESSION_ROOT>/ -type f` 列出文件。
    - 扫描前先排除目录：`.tmp/`、`.worktree/`、`.bid/`、`reports/`、`.archive/`、`artifacts/`
    - 文件名 + 扩展名 + 文件大小
    - 前 2 页或前 3000 字符（PDF 用 bash 提取，DOCX 用 pandoc 转文本）

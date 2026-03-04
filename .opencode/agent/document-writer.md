@@ -167,7 +167,7 @@ find documents/sessions/<sessionId>/ -type f -not -path '*/.tmp/*' -not -path '*
    - 涉及特定文件格式操作 → 加载对应格式 skill (`docx`/`pdf`/`xlsx`/`pptx`)
    - 简单文本替换 / 局部修改 → 直接用 `docx` skill，不需要 bid-* skill
 3. **skill 不覆盖时** — 回退到本文件（document-writer.md）的通用原则
-4. **前置条件检查** — 加载 skill 前，检查其 `requires` 列表是否满足。缺失前置条件时先满足（如缺 requirements.csv → 先运行 bid-analysis）。
+4. **前置条件检查** — 加载 skill 前，检查其 YAML frontmatter 中的 `requires` 列表是否满足。逐项检查对应文件或产物是否存在于当前 session 目录。缺失前置条件时先满足依赖（如 bid-drafting 需要 requirements.csv → 先运行 bid-analysis；bid-qc 需要 target_doc → 先确认目标文档）。
 
 **优先级**：本文件的核心原则（招标文件至上、准确性等）始终生效，skill 提供补充领域知识，两者冲突时以本文件为准。
 

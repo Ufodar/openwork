@@ -1511,7 +1511,12 @@ export default function App() {
     // (Otherwise the route effect can try to re-select a session that no longer exists.)
     try {
       const path = location.pathname.toLowerCase();
-      if (path === `/session/${trimmed.toLowerCase()}`) {
+      const sessionPath = trimmed.toLowerCase();
+      if (
+        path === `/session/${sessionPath}` ||
+        path === `/document-agent/${sessionPath}` ||
+        path === `/document-writer/${sessionPath}`
+      ) {
         navigate("/session", { replace: true });
       }
     } catch {

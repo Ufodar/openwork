@@ -1857,8 +1857,6 @@ export default function SessionView(props: SessionViewProps) {
       await props.deleteSession(sessionId);
       setDeleteSessionOpen(false);
       setToastMessage("Session deleted");
-      // Route away from the deleted session id.
-      props.setView("session");
     } catch (error) {
       const message = error instanceof Error ? error.message : props.safeStringify(error);
       setToastMessage(message || "Failed to delete session");
@@ -2286,9 +2284,6 @@ export default function SessionView(props: SessionViewProps) {
     setDeletingSessionId(sid);
     try {
       await props.deleteSession(sid);
-      if (props.selectedSessionId === sid) {
-        props.setView("session");
-      }
       setToastMessage("Session deleted");
     } catch (error) {
       const message = error instanceof Error ? error.message : props.safeStringify(error);

@@ -9,48 +9,51 @@
       "models": {
         "Kimi-K2.5": {
           "name": "Kimi-K2.5",
-          "modalities": {
-            "input": [
-              "text",
-              "image",
-              "audio",
-              "video",
-              "pdf"
-            ],
-            "output": [
-              "text",
-              "image"
-            ]
-          },
-          "attachment": true,
-          "interleaved": true,
-          "tool_call": true
+          "capabilities": {
+            "input": {
+              "text": true,
+              "image": true,
+              "audio": true,
+              "video": true,
+              "pdf": true
+            },
+            "output": {
+              "text": true,
+              "image": true,
+              "audio": false,
+              "video": false,
+              "pdf": false
+            },
+            "attachment": true,
+            "interleaved": true,
+            "toolcall": true
+          }
         },
         "GLM-5": {
           "name": "GLM-5",
-          "modalities": {
-            "input": [
-              "text"
-            ],
-            "output": [
-              "text"
-            ]
-          },
-          "attachment": false,
-          "tool_call": false
+          "capabilities": {
+            "input": {
+              "text": true
+            },
+            "output": {
+              "text": true
+            },
+            "attachment": false,
+            "toolcall": true
+          }
         },
         "MiniMax-2.1": {
           "name": "MiniMax-2.1",
-          "modalities": {
-            "input": [
-              "text"
-            ],
-            "output": [
-              "text"
-            ]
-          },
-          "attachment": false,
-          "tool_call": false
+          "capabilities": {
+            "input": {
+              "text": true
+            },
+            "output": {
+              "text": true
+            },
+            "attachment": false,
+            "toolcall": true
+          }
         }
       }
     }

@@ -37,7 +37,7 @@ export function LocalProvider(props: ParentProps) {
   const [prefs, setPrefs, , prefsReady] = persisted(
     Persist.global("local.preferences", ["openwork.preferences"]),
     createStore<LocalPreferences>({
-      showThinking: false,
+      showThinking: true,
       modelVariant: null,
       defaultModel: null,
     }),

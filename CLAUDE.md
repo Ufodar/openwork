@@ -81,15 +81,15 @@ User: "Add a column 'Acceptance Criteria' to the table in Chapter 3"
   |
 OpenCode Agent (has read SKILL.md, understands OOXML)
   |
-bash: python scripts/office/unpack.py document.docx /tmp/work/
+bash: python scripts/office/unpack.py document.docx <SESSION_ROOT>/.tmp/work/
   |
 grep: <w:pStyle w:val="Heading1" → locate chapters
   |
-read: /tmp/work/word/document.xml (lines 450-600) → read Chapter 3
+read: <SESSION_ROOT>/.tmp/work/word/document.xml (lines 450-600) → read Chapter 3
   |
 edit: insert <w:tc> with w:ins markup
   |
-bash: python scripts/office/pack.py /tmp/work/ document.docx
+bash: python scripts/office/pack.py <SESSION_ROOT>/.tmp/work/ document.docx
   |
 OnlyOffice reloads → user sees tracked changes → accept/reject
 ```

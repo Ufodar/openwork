@@ -44,6 +44,39 @@ find documents/sessions/<sessionId>/ -type f -not -path '*/.tmp/*' -not -path '*
 - 路径契约以 `docs/contracts/bid-session-file-contract.md` 为准（SSOT）。
 - 工作树结构定义以 bid-analysis skill 的 `references/worktree-schema.json` 为准。
 
+### 临时目录约定（必须遵守）
+
+**所有临时文件必须放在 `<SESSION_ROOT>/.tmp/` 下，禁止使用系统 `/tmp/`。**
+
+原因：工作区可能运行在沙箱容器中，`/tmp/` 可能无写入权限或不在允许路径内，而 `<SESSION_ROOT>/.tmp/` 始终可写且 MCP filesystem 可访问。
+
+```
+<SESSION_ROOT>/
+├── .tmp/                          ← 所有临时文件的唯一合法位置
+│   ├── tender_work/               ← 招标文件 unpack 目录
+│   ├── template_work/             ← 模板组装工作目录
+│   ├── unpacked/<docname>/        ← 目标文档 unpack 目录
+│   ├── tender_text.txt            ← 招标文件全文缓存
+│   └── ...                        ← 其他临时产物
+├── .worktree/                     ← 工作树状态（持久化）
+├── .bid/                          ← 投标分析结果（持久化）
+└── documents/                     ← 用户可见文件
+```
+
+**禁止的路径**：
+- ❌ `/tmp/...` — 系统临时目录，沙箱中可能无权限
+- ❌ `/var/tmp/...` — 同上
+- ❌ 任何 `<SESSION_ROOT>` 之外的路径
+
+**示例**：
+```bash
+# ✅ 正确
+python scripts/office/unpack.py 招标文件.docx <SESSION_ROOT>/.tmp/tender_work/
+
+# ❌ 错误
+python scripts/office/unpack.py 招标文件.docx /tmp/tender_work/
+```
+
 ### 会话目录发现（补充说明）
 
 上方"第一步"已说明核心方法。补充确定规则：
@@ -114,6 +147,11 @@ find documents/sessions/<sessionId>/ -type f -not -path '*/.tmp/*' -not -path '*
 │ Q4: 如果是 .csv / .json：                            │
 │     → 它属于允许列表中的文件类型？✅ 允许。           │
 │     → 否则 ❌ 停止，说明理由。                        │
+│                                                      │
+│ Q5: 文件路径是否在 <SESSION_ROOT> 内？                │
+│     → 是（含 .tmp/、.worktree/、.bid/）：✅ 允许。   │
+│     → 否（如 /tmp/、/var/tmp/、其他目录）：❌ 停止。  │
+│       所有临时文件必须放在 <SESSION_ROOT>/.tmp/ 下。  │
 └──────────────────────────────────────────────────────┘
 ```
 
@@ -147,10 +185,10 @@ find documents/sessions/<sessionId>/ -type f -not -path '*/.tmp/*' -not -path '*
 当需要从招标文件中提取投标文件格式模板时，**唯一正确的方法**是：
 
 ```
-步骤 1: python scripts/office/unpack.py 招标文件.docx /tmp/tender_work/
-步骤 2: 在 /tmp/tender_work/word/document.xml 中定位投标文件格式章节的 XML 范围
+步骤 1: python scripts/office/unpack.py 招标文件.docx <SESSION_ROOT>/.tmp/tender_work/
+步骤 2: 在 <SESSION_ROOT>/.tmp/tender_work/word/document.xml 中定位投标文件格式章节的 XML 范围
 步骤 3: 提取该 XML 片段，组装为新的合法 document.xml
-步骤 4: python scripts/office/pack.py /tmp/template_work/ 投标模板.docx
+步骤 4: python scripts/office/pack.py <SESSION_ROOT>/.tmp/template_work/ 投标模板.docx
 ```
 
 **以下方法全部禁止**（它们会丢失格式/表格结构/样式）：

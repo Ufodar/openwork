@@ -4162,28 +4162,7 @@ export default function App() {
   const selectedSessionModelLabel = createMemo(() =>
     formatModelLabel(selectedSessionModel(), providers())
   );
-
-  // Workspace customization: keep the chat model picker focused on a single
-  // company model instead of listing every built-in provider.
-  const PINNED_PROVIDER_ID = "my-company";
-  const PINNED_MODEL_ID = "Kimi-K2.5";
-  const PINNED_MODEL_REF: ModelRef = {
-    providerID: PINNED_PROVIDER_ID,
-    modelID: PINNED_MODEL_ID,
-  };
-  const isPinnedModelOption = (providerID: string, modelID: string) =>
-    providerID === PINNED_PROVIDER_ID && modelID === PINNED_MODEL_ID;
-
-  createEffect(() => {
-    const allProviders = providers();
-    const hasPinnedModel = allProviders.some(
-      (provider) => provider.id === PINNED_PROVIDER_ID && Boolean(provider.models?.[PINNED_MODEL_ID]),
-    );
-    if (!hasPinnedModel) return;
-    if (modelEquals(defaultModel(), PINNED_MODEL_REF)) return;
-    setDefaultModelExplicit(true);
-    setDefaultModel(PINNED_MODEL_REF);
-  });
+  const MODEL_PICKER_PROVIDER_ID = "my-company";
 
   const modelPickerCurrent = createMemo(() =>
     modelPickerTarget() === "default" ? defaultModel() : selectedSessionModel()
@@ -4218,7 +4197,7 @@ export default function App() {
     const next: ModelOption[] = [];
 
     for (const provider of sortedProviders) {
-      if (provider.id !== PINNED_PROVIDER_ID) continue;
+      if (provider.id !== MODEL_PICKER_PROVIDER_ID) continue;
       const defaultModelID = defaults[provider.id];
       const isConnected = providerConnectedIds().includes(provider.id);
       const models = Object.values(provider.models ?? {}).filter(
@@ -4233,7 +4212,6 @@ export default function App() {
       });
 
       for (const model of models) {
-        if (!isPinnedModelOption(provider.id, model.id)) continue;
         const isFree = model.cost?.input === 0 && model.cost?.output === 0;
         const isDefault =
           provider.id === currentDefault.providerID && model.id === currentDefault.modelID;

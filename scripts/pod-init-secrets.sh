@@ -92,6 +92,7 @@ lines = [
     "export PORT='5173'",
     "export OPENWORK_ONLYOFFICE_URL=''",
     "export OPENWORK_ONLYOFFICE_INTERNAL_URL='http://onlyoffice:80'",
+    "export OPENWORK_ONLYOFFICE_PUBLIC_BASE_URL=''",
     "",
 ]
 

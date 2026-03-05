@@ -27,19 +27,38 @@ provides:
 ### Step 2: 确定写作范围
 与用户确认本轮要写的部分（整个商务标？整个技术标？某几个章节？某张应答表？）。
 
-### Step 3: 逐项撰写
+### Step 3: 逐项撰写（写入 CSV，不直接改 docx 表格）
+
+**⚠ 核心规则：应答内容只写入 requirements.csv，不要用 python-docx 代码直接操作 docx 表格。**
+
+LLM 生成的 python-docx 代码存在系统性的表格行索引错位问题（off-by-N），导致内容写入错误的单元格。因此：
+- ✅ 将应答内容写入 requirements.csv 的"响应内容"列
+- ✅ 将偏离标注写入 requirements.csv 的"偏离情况"列
+- ✅ 将证明材料页码写入 requirements.csv 的"证明材料页码"列
+- ❌ 不要生成 python-docx 代码来写表格单元格
+- ❌ 不要用 `table.rows[i].cells[j]` 之类的代码操作目标文档
+
+CSV 写入完成后，由 Step 4.7 的确定性脚本负责将 CSV 内容组装到 docx 表格中。
+
 按工作树节点（或 csv 行）逐项处理。每个节点的处理流程：
 1. 读取 conventions.md（刷新约束和决策记忆）
    - 首次撰写时如"四、格式快照"为空，先读取目标文档样式基线（字体、标题层级、段落间距），写入格式快照区
    - 前 3 个节点完成后如"五、质量基线"为空，计算前 3 个节点的平均应答字数和实质内容比，写入质量基线区
-2. **如有 .worktree/material-registry.json → 先查索引定位候选材料，避免盲目搜索**
+2. **材料查找流程**（按优先级）：
+   a. 如有 `.worktree/material-registry.json` → 先查索引的 `useful_for_reqs` 字段定位候选材料
+   b. 如无 registry 或 registry 中无匹配 → 按 `file-triage.json` 的分类筛选（product_doc + historical_bid 优先）
+   c. 如连 triage 也无 → 用 `bash: find` 搜索会话目录，排除 `.tmp/`、`.worktree/`、`.bid/` 等
+   d. **★/# 项的材料搜索不可跳过** — 即使 registry 标记为 material_gap，也要尝试从产品文档中提取相关能力描述
 3. 读取节点的 node.json（获取招标原文和已搜集材料）
 4. 从候选材料中提取/组装内容（组装优先于生成）
+   - **技术指标类**：从产品彩页/数据手册提取具体参数
+   - **能力/方案类**（如"本地化部署"、"二次开发"）：从产品白皮书/技术方案中提取架构说明和功能描述，结合招标要求组织应答
+   - **资质/证明类**：引用文件名和页码即可，内容在路径 E 组装
 5. 每条应答使用下方"点对点应答 Output Template"的格式
 6. 如搜集到新材料 → 更新 material-registry.json 和节点的 materials 列表
 7. 如搜索某路径未果 → 记录到节点的 materials[].searched_paths
-8. 完成一项立即更新状态（工作树：更新节点 + index.json + csv；无工作树：更新 csv）
-9. 如有工作树，更新 index.json 的 current_focus 指向下一个待处理节点
+8. **完成一项立即更新 requirements.csv**（写入响应内容、偏离情况、证明材料页码列，更新 status 为 done）
+9. 如有工作树，同步更新节点 status + index.json summary/current_focus
 
 ### Step 4: 完整性检查
 撰写完成后，用下方"完整性检查清单"核对是否遗漏。
@@ -61,6 +80,47 @@ python .opencode/skills/bid-drafting/scripts/check_drafting_quality.py \
 - `star_substance` fail → Blocker，必须补充实质内容
 - `tbd_unresolved` fail → 检查是否有可用材料，有则填写，无则保持 TBD 但标记 blocked
 - `quality_trend` fail → 向用户报告衰减指标，建议暂停
+
+### Step 4.7: 表格组装（CSV → docx，确定性脚本）
+
+**在应答内容全部写入 CSV 后**，运行确定性组装脚本将 CSV 中的应答数据填入目标文档的表格：
+
+```bash
+python .opencode/skills/bid-drafting/scripts/assemble_response_table.py \
+  --requirements <SESSION_ROOT>/requirements.csv \
+  --target <SESSION_ROOT>/<target_doc> \
+  --output <SESSION_ROOT>/<target_doc> \
+  --report <SESSION_ROOT>/reports/assembly-report.json
+```
+
+**注意**：`--target` 和 `--output` 可以是同一路径（原地更新）。脚本按**内容匹配**（而非行索引）将 CSV 的响应内容写入 docx 表格的正确行，从根本上避免 off-by-N 错位问题。
+
+处理组装报告：
+- 检查 `summary.unmapped_csv` — 如有未匹配的 CSV 行，说明表格中缺少对应的招标要求行，需人工处理
+- 检查 `summary.unmapped_table` — 如有未匹配的表格行，可能是表格中有但 CSV 中没有的要求，需补充分析
+- 检查 `warnings` — 如有"cell already has content"警告，说明某些单元格已有非占位符内容，脚本跳过了覆写
+
+**分批执行**：如果只完成了部分 CSV 行（如一个大章节），可以随时运行组装脚本。脚本只处理 status=done 的行，不影响 pending 行。
+
+### Step 4.8: 表格验证（docx vs CSV 交叉校验）
+
+组装完成后，运行验证脚本确认内容已正确填入 docx：
+
+```bash
+python .opencode/skills/bid-drafting/scripts/verify_docx_table.py \
+  --requirements <SESSION_ROOT>/requirements.csv \
+  --target <SESSION_ROOT>/<target_doc> \
+  --output <SESSION_ROOT>/reports/verify-report.json
+```
+
+处理验证结果：
+- `exact_match` → 正常，无需处理
+- `partial_match` → 检查是否是格式差异（如换行符、空格），通常可接受
+- `mismatch` → **严重问题**，CSV 和 docx 内容不一致。检查原因，必要时重新运行组装
+- `empty` → docx 单元格为空但 CSV 有内容，组装可能失败
+- `placeholder` → docx 单元格仍有占位符，组装可能被跳过（因已有非占位符内容）
+
+**只有验证通过后，才能进入 Step 5 交付。**
 
 ### Step 5: 交付暂停点
 确保目标文档处于 packed（有效）状态。汇报已完成项和剩余项。
@@ -174,9 +234,9 @@ python .opencode/skills/bid-drafting/scripts/check_drafting_quality.py \
 - 公司信息（全称/简称规则、法人代表、联系方式）
 - 价格框架（总价/分项价确定后影响报价表和商务条款）
 
-### 刷新检查点（每处理 5 个节点后强制执行）
+### 刷新检查点（每处理 5 个节点后强制执行，★/# 项每 3 个后执行）
 
-每完成 5 个节点的撰写后，暂停执行以下刷新：
+每完成 5 个节点的撰写后（如果连续处理 ★ 或 # 项，则每 3 个后），暂停执行以下刷新：
 
 1. **重读 conventions.md 全文** — 刷新决策日志、格式约定、格式快照、质量基线的记忆。**此步不可跳过。**
 2. **质量衰减检测**（需质量基线已建立）：
@@ -211,9 +271,12 @@ python .opencode/skills/bid-drafting/scripts/check_drafting_quality.py \
 
 1. 读取 .worktree/index.json（或 requirements.csv），筛选技术类待处理项（status=pending）共 23 条
 2. 确认范围：用户要求填技术应答表，聚焦技术指标类条目
-3. 逐条处理：读取厂商数据手册提取参数 → 按 output template 格式写入应答表 → 更新 csv 状态
+3. 逐条处理：读取厂商数据手册提取参数 → 按 output template 格式**写入 requirements.csv** → 更新 csv 状态为 done
 4. 完成 18 条，5 条因缺少厂商数据标记为 `<<TBD: 需厂商确认>>`
-5. 汇报："已完成 18/23 条技术应答，5 条待厂商确认参数。文档已 pack。"
+5. 运行质量自检脚本 → 全部通过
+6. 运行组装脚本：`assemble_response_table.py` 将 18 条应答从 CSV 填入 docx 表格
+7. 运行验证脚本：`verify_docx_table.py` 确认 18 条全部 exact_match
+8. 汇报："已完成 18/23 条技术应答，5 条待厂商确认参数。文档已组装验证通过。"
 
 ### 参考文件
 

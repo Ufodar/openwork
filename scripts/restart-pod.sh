@@ -137,15 +137,7 @@ sync_opencode_config_files() {
 load_runtime_env
 
 # ---- Pod IP (prefer OPENWORK_POD_IP in ~/.config/openwork/pod.env) ----
-detect_default_pod_ip() {
-    local detected=""
-    detected="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
-    if [ -z "$detected" ]; then
-        detected="127.0.0.1"
-    fi
-    printf '%s\n' "$detected"
-}
-export OPENWORK_POD_IP="${OPENWORK_POD_IP:-$(detect_default_pod_ip)}"
+export OPENWORK_POD_IP="${OPENWORK_POD_IP:-192.168.5.10}"
 
 # ---- Network ----
 export OPENWORK_NETWORK_MODE="${OPENWORK_NETWORK_MODE:-pod}"
@@ -155,8 +147,9 @@ export VITE_HOST="${VITE_HOST:-0.0.0.0}"
 # ---- Ports ----
 export OPENWORK_PORT="${OPENWORK_PORT:-8789}"
 export PORT="${PORT:-5173}"
-export OPENWORK_ONLYOFFICE_URL="${OPENWORK_ONLYOFFICE_URL:-http://${OPENWORK_POD_IP}:30080}"
+export OPENWORK_ONLYOFFICE_URL="${OPENWORK_ONLYOFFICE_URL:-http://${OPENWORK_POD_IP}:32764}"
 export OPENWORK_ONLYOFFICE_INTERNAL_URL="${OPENWORK_ONLYOFFICE_INTERNAL_URL:-http://onlyoffice:80}"
+export OPENWORK_ONLYOFFICE_PUBLIC_BASE_URL="${OPENWORK_ONLYOFFICE_PUBLIC_BASE_URL:-http://${OPENWORK_POD_IP}:32765/openwork}"
 
 if [ "${OPENWORK_PULL_BEFORE_RESTART:-0}" = "1" ]; then
     echo "[restart-pod] OPENWORK_PULL_BEFORE_RESTART=1, delegating to pod-pull-restart.sh"

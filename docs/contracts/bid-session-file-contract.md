@@ -94,6 +94,8 @@ Minimal entry shape:
 {
   "version": 2,
   "total": 156,
+  "classified_by_name": 116,
+  "classified_by_content": 13,
   "by_category": {
     "tender_main": [
       { "rel_path": "招标文件.pdf", "name": "招标文件.pdf", "size": 1024000 }
@@ -102,10 +104,14 @@ Minimal entry shape:
 }
 ```
 
+Valid categories: `tender_main`, `tender_attachment`, `historical_bid`, `qualification`, `pricing_data`, `product_doc`, `image_asset`, `archive`, `other`.
+
 Rules:
 
 - each file entry MUST include `rel_path`, `name`, `size`
+- `image_asset` entries SHOULD include `source_pdf` field linking to the parent PDF
 - `rel_path` MUST be unique within a session
+- `classified_by_name` and `classified_by_content` are optional counters for triage efficiency tracking
 - v1 (string-array) may be read for compatibility but MUST NOT be newly written
 
 ## 8) Worktree contract

@@ -6,7 +6,7 @@ set -euo pipefail
 # ============================================
 
 # ---- Pod IP (change this when deploying to a new pod) ----
-export OPENWORK_POD_IP="${OPENWORK_POD_IP:-192.168.5.250}"
+export OPENWORK_POD_IP="${OPENWORK_POD_IP:-192.168.5.10}"
 
 # ---- Network ----
 export OPENWORK_NETWORK_MODE="${OPENWORK_NETWORK_MODE:-pod}"
@@ -16,8 +16,9 @@ export VITE_HOST="${VITE_HOST:-0.0.0.0}"
 # ---- Ports (usually no need to change) ----
 export OPENWORK_PORT="${OPENWORK_PORT:-8789}"
 export PORT="${PORT:-5173}"
-export OPENWORK_ONLYOFFICE_URL="${OPENWORK_ONLYOFFICE_URL:-http://${OPENWORK_POD_IP}:30080}"
+export OPENWORK_ONLYOFFICE_URL="${OPENWORK_ONLYOFFICE_URL:-http://${OPENWORK_POD_IP}:32764}"
 export OPENWORK_ONLYOFFICE_INTERNAL_URL="${OPENWORK_ONLYOFFICE_INTERNAL_URL:-http://onlyoffice:80}"
+export OPENWORK_ONLYOFFICE_PUBLIC_BASE_URL="${OPENWORK_ONLYOFFICE_PUBLIC_BASE_URL:-http://${OPENWORK_POD_IP}:32765/openwork}"
 
 # ---- Bun path ----
 export PATH=$HOME/.bun/bin:$PATH

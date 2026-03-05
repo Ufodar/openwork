@@ -167,7 +167,7 @@ find documents/sessions/<sessionId>/ -type f -not -path '*/.tmp/*' -not -path '*
    - 涉及特定文件格式操作 → 加载对应格式 skill (`docx`/`pdf`/`xlsx`/`pptx`)
    - 简单文本替换 / 局部修改 → 直接用 `docx` skill，不需要 bid-* skill
 3. **skill 不覆盖时** — 回退到本文件（document-writer.md）的通用原则
-4. **前置条件检查** — 加载 skill 前，检查其 `requires` 列表是否满足。缺失前置条件时先满足（如缺 requirements.csv → 先运行 bid-analysis）。
+4. **前置条件检查** — 加载 skill 前，检查其 YAML frontmatter 中的 `requires` 列表是否满足。逐项检查对应文件或产物是否存在于当前 session 目录。缺失前置条件时先满足依赖（如 bid-drafting 需要 requirements.csv → 先运行 bid-analysis；bid-qc 需要 target_doc → 先确认目标文档）。
 
 **优先级**：本文件的核心原则（招标文件至上、准确性等）始终生效，skill 提供补充领域知识，两者冲突时以本文件为准。
 
@@ -260,6 +260,7 @@ Autopilot 按以下 8 个阶段顺序执行。每个阶段有明确的检查点�
 | 1.6 | 投标策略（可选） | 半自动 | **必须确认** — 展示策略建议（得分优化优先级、风险评估、内容策略） |
 | 2 | 目标文档确定 | 自动（模板探测） | **必须确认** — 向用户展示文档结构 |
 | 3 | 内容撰写 | 逐节点（bid-drafting） | **每个大章节** 完成时暂停审阅 |
+| 3.5 | 表格组装 | 自动（assemble 脚本） | 展示组装报告，验证通过后自动继续 |
 | 4 | 资质文件组装 | 自动（路径 E） | 展示匹配清单 + 缺失项 |
 | 5 | 报价表填充 | 自动（路径 F） | **必须确认** — 展示金额汇总 |
 | 6 | 质量检查 | 自动（bid-qc） | 展示 Blocker/High 级问题 |
@@ -268,7 +269,14 @@ Autopilot 按以下 8 个阶段顺序执行。每个阶段有明确的检查点�
 **Stage 3 详细说明**：
 - 按 worktree 优先级排序执行：star > hash > dot > triangle > normal
 - 每完成一个"大章节"（如整个"技术方案"、整个"商务应答表"）暂停，向用户展示进度和章节摘要
+- **应答内容只写入 CSV，不直接操作 docx 表格**（详见 bid-drafting skill Step 3 规则）
 - 用户可选择："继续" / 给出修改意见 / "跳过"（标记为 blocked）
+
+**Stage 3.5 详细说明**：
+- 每完成一批 CSV 行后，运行 `assemble_response_table.py` 将内容从 CSV 填入 docx 表格
+- 运行 `verify_docx_table.py` 交叉校验 docx 与 CSV 一致性
+- 验证通过 → 自动继续下一阶段
+- 验证失败 → 暂停，展示不一致项，可能需要调整 CSV 内容或表格结构
 
 **Stage 1.5/1.6 触发与跳过**：
 - **Stage 1.5（答疑整合）**：自动检测会话目录中是否存在答疑文件（答疑纪要、补遗等）。如存在，解析答疑内容并展示对原始要求的变更影响；如不存在，自动跳过进入下一阶段。

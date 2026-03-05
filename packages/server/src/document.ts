@@ -503,6 +503,36 @@ function normalizeOriginUrl(raw: string | null | undefined): string | null {
     }
 }
 
+function normalizeHostname(raw: string | null | undefined): string {
+    const value = (raw ?? "").trim().toLowerCase();
+    if (!value) return "";
+    if (value.startsWith("[")) {
+        const end = value.indexOf("]");
+        if (end > 1) return value.slice(1, end);
+    }
+    const firstColon = value.indexOf(":");
+    const lastColon = value.lastIndexOf(":");
+    if (firstColon > -1 && firstColon === lastColon) {
+        return value.slice(0, firstColon);
+    }
+    return value.replace(/^\[|\]$/g, "");
+}
+
+function isLoopbackHostname(raw: string | null | undefined): boolean {
+    const hostname = normalizeHostname(raw);
+    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+}
+
+function isLoopbackOrigin(raw: string | null | undefined): boolean {
+    const normalized = normalizeOriginUrl(raw);
+    if (!normalized) return false;
+    try {
+        return isLoopbackHostname(new URL(normalized).hostname);
+    } catch {
+        return false;
+    }
+}
+
 function normalizeBaseUrl(raw: string | null | undefined): string | null {
     const trimmed = (raw ?? "").trim();
     if (!trimmed) return null;
@@ -554,7 +584,8 @@ function resolvePodNodeIp(): string {
 function resolveOnlyOfficeDocumentServerUrl(): string {
     if (resolveOnlyOfficeNetworkMode() !== "pod") return LOCAL_ONLYOFFICE_DOCUMENT_SERVER_URL;
     const explicit = normalizeOriginUrl(process.env.OPENWORK_ONLYOFFICE_URL);
-    if (explicit) return explicit;
+    if (explicit && !isLoopbackOrigin(explicit)) return explicit;
+    // In pod mode we never expose loopback-only document server URLs.
     const host = resolvePodNodeIp();
     return `http://${host}:${DEFAULT_POD_ONLYOFFICE_PUBLIC_PORT}`;
 }

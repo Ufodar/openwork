@@ -2036,7 +2036,7 @@ export default function DocumentAgentView(props: SessionViewProps) {
             </div>
           </div>
           <div class="text-[11px] text-dls-secondary truncate" title={sessionId()}>
-            {sessionId() ? `#${sessionId()}` : tr("docagent.no_session")}
+            {sessionId() ? `#${sessionId().slice(0, 8)}` : tr("docagent.no_session")}
           </div>
         </div>
 
@@ -2047,6 +2047,7 @@ export default function DocumentAgentView(props: SessionViewProps) {
             showThinking={props.showThinking}
             expandedStepIds={props.expandedStepIds}
             setExpandedStepIds={props.setExpandedStepIds}
+            compact
           />
           <div
             ref={(el) => {

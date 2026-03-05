@@ -22,6 +22,7 @@ export type MessageListProps = {
   searchHighlightQuery?: string;
   workspaceRoot?: string;
   footer?: JSX.Element;
+  compact?: boolean;
 };
 
 type StepClusterBlock = {
@@ -508,12 +509,12 @@ export default function MessageList(props: MessageListProps) {
       if (totalTokens === 0 && !costLabel && !reason) return null;
 
       return (
-        <div class="flex items-center gap-2 py-1 text-[11px] text-gray-9 border-t border-gray-6/30">
+        <div class={`flex items-center ${props.compact ? "gap-1.5" : "gap-2"} py-1 text-[11px] text-gray-9 border-t border-gray-6/30`}>
           <span class="text-gray-8">{tr("session.step_finished")}</span>
           <Show when={reason}>
             <span class="text-gray-9">· {reason}</span>
           </Show>
-          <span class="ml-auto flex items-center gap-3 text-[10px] text-gray-8">
+          <span class={`ml-auto flex items-center ${props.compact ? "gap-1.5" : "gap-3"} text-[10px] text-gray-8`}>
             <Show when={totalTokens > 0}>
               <span title={`In: ${(tokens.input ?? 0).toLocaleString()} | Out: ${(tokens.output ?? 0).toLocaleString()} | Reasoning: ${(tokens.reasoning ?? 0).toLocaleString()} | Cache R: ${cacheRead.toLocaleString()} W: ${cacheWrite.toLocaleString()}`}>
                 {totalTokens.toLocaleString()} tokens
@@ -540,7 +541,7 @@ export default function MessageList(props: MessageListProps) {
     });
 
     return (
-      <div class="flex items-center gap-2.5 py-1.5 min-h-[28px] group/step">
+      <div class={`flex items-center ${props.compact ? "gap-1.5 py-1 min-h-[24px]" : "gap-2.5 py-1.5 min-h-[28px]"} group/step`}>
         {/* Status dot */}
         <div class={`w-1.5 h-1.5 rounded-full shrink-0 ${statusDotClass(status())}`} />
         {/* Tool icon */}
@@ -551,7 +552,7 @@ export default function MessageList(props: MessageListProps) {
           <ToolIcon category={category()} size={13} />
         </div>
         {/* Title */}
-        <span class="text-[13px] text-gray-12 font-medium truncate min-w-0 max-w-[260px]">
+        <span class={`text-gray-12 font-medium truncate min-w-0 ${props.compact ? "text-[12px] max-w-[45%]" : "text-[13px] max-w-[260px]"}`}>
           {localizedTitle()}
         </span>
         {/* Skill badge */}
@@ -680,7 +681,7 @@ export default function MessageList(props: MessageListProps) {
 
     return (
       <Show when={isAssistant() && (modelLabel() || totalTokens() > 0)}>
-        <div class="flex items-center gap-3 mt-2 text-[10px] text-gray-8 select-none">
+        <div class={`flex items-center ${props.compact ? "gap-1.5 mt-1" : "gap-3 mt-2"} text-[10px] text-gray-8 select-none`}>
           <Show when={modelLabel()}>
             <span title="Model">{modelLabel()}</span>
           </Show>
@@ -896,7 +897,7 @@ export default function MessageList(props: MessageListProps) {
       <div class={containerProps.isInline ? (containerProps.isUser ? "mt-2" : "mt-3 pt-3") : ""}>
         {/* Toggle button - clean, compact */}
         <button
-          class={`flex items-center gap-2 py-1.5 text-[13px] transition-colors ${containerProps.isUser
+          class={`flex items-center ${props.compact ? "gap-1.5 py-1 text-[12px]" : "gap-2 py-1.5 text-[13px]"} transition-colors ${containerProps.isUser
               ? "text-gray-10 hover:text-gray-11"
               : "text-gray-10 hover:text-gray-12"
             }`}
@@ -906,26 +907,26 @@ export default function MessageList(props: MessageListProps) {
             size={14}
             class={`transition-transform duration-200 ${expanded() ? "rotate-90" : ""}`}
           />
-          <span class="font-medium inline-flex items-center gap-1.5 text-xs sm:text-[13px] text-gray-11">
+          <span class={`font-medium inline-flex items-center gap-1.5 text-xs ${props.compact ? "" : "sm:text-[13px]"} text-gray-11`}>
             <Show when={hasRunning()}>
               <span class="inline-flex h-1 w-1 rounded-full bg-blue-10/70 animate-pulse" />
             </Show>
-            <span class="truncate max-w-[58ch]">
+            <span class={`truncate ${props.compact ? "max-w-[90%]" : "max-w-[58ch]"}`}>
               {expanded() ? tr("session.hide_timeline") : tr("session.execution_timeline")}
             </span>
           </span>
           <Show when={!expanded()}>
-            <span class="text-[11px] text-gray-9 truncate max-w-[56ch]">{`${executionSummary()}${stepFinishSummary().totalTokens > 0 ? ` · ${stepFinishSummary().totalTokens.toLocaleString()} tokens` : ""}${stepFinishSummary().costLabel ? ` · ${stepFinishSummary().costLabel}` : ""} - ${latestStepLabel()}`}</span>
+            <span class={`text-[11px] text-gray-9 truncate ${props.compact ? "max-w-[85%]" : "max-w-[56ch]"}`}>{`${executionSummary()}${stepFinishSummary().totalTokens > 0 ? ` · ${stepFinishSummary().totalTokens.toLocaleString()} tokens` : ""}${stepFinishSummary().costLabel ? ` · ${stepFinishSummary().costLabel}` : ""} - ${latestStepLabel()}`}</span>
           </Show>
           <Show when={expanded()}>
-            <span class="text-[11px] text-gray-9 truncate max-w-[56ch]">{executionSummary()}</span>
+            <span class={`text-[11px] text-gray-9 truncate ${props.compact ? "max-w-[85%]" : "max-w-[56ch]"}`}>{executionSummary()}</span>
           </Show>
         </button>
 
         {/* Expanded content */}
         <Show when={expanded()}>
           <div
-            class={`mt-1 ml-1 pl-3 border-l-2 ${containerProps.isUser
+            class={`mt-1 ${props.compact ? "ml-0 pl-2" : "ml-1 pl-3"} border-l-2 ${containerProps.isUser
                 ? "border-gray-6"
                 : "border-gray-6/60"
               }`}
@@ -959,7 +960,7 @@ export default function MessageList(props: MessageListProps) {
         </div>
       );
     }}>
-    <div class="space-y-6 pb-32" style={{ contain: "layout paint style" }}>
+    <div class={props.compact ? "space-y-3 pb-16 px-3" : "space-y-6 pb-32"} style={{ contain: "layout paint style" }}>
       <For each={messageBlocks()}>
         {(block, blockIndex) => {
           const blockMessageIds = block.kind === "steps-cluster" ? block.messageIds : [block.messageId];
@@ -981,8 +982,12 @@ export default function MessageList(props: MessageListProps) {
               >
                 <div
                   class={`w-full relative ${block.isUser
-                      ? "max-w-2xl px-6 py-4 rounded-[24px] bg-gray-3 text-gray-12 text-[15px] leading-relaxed"
-                      : "max-w-[68ch] text-[15px] leading-7 text-gray-12 group pl-2"
+                      ? (props.compact
+                        ? "max-w-full px-3.5 py-2.5 rounded-2xl bg-gray-3 text-gray-12 text-[14px] leading-normal"
+                        : "max-w-2xl px-6 py-4 rounded-[24px] bg-gray-3 text-gray-12 text-[15px] leading-relaxed")
+                      : (props.compact
+                        ? "w-full text-[14px] leading-6 text-gray-12 group"
+                        : "max-w-[68ch] text-[15px] leading-7 text-gray-12 group pl-2")
                     } ${searchOutlineClass}`}
                 >
                   <StepsContainer
@@ -1006,8 +1011,12 @@ export default function MessageList(props: MessageListProps) {
             >
               <div
                 class={`w-full relative ${block.isUser
-                    ? "max-w-2xl px-6 py-4 rounded-[24px] bg-gray-3 text-gray-12 text-[15px] leading-relaxed"
-                    : "max-w-[68ch] text-[15px] leading-7 text-gray-12 group pl-2"
+                    ? (props.compact
+                      ? "max-w-full px-3.5 py-2.5 rounded-2xl bg-gray-3 text-gray-12 text-[14px] leading-normal"
+                      : "max-w-2xl px-6 py-4 rounded-[24px] bg-gray-3 text-gray-12 text-[15px] leading-relaxed")
+                    : (props.compact
+                      ? "w-full text-[14px] leading-6 text-gray-12 group"
+                      : "max-w-[68ch] text-[15px] leading-7 text-gray-12 group pl-2")
                   } ${searchOutlineClass}`}
               >
                 <Show when={attachmentsForMessage(block.message).length > 0}>

@@ -483,15 +483,40 @@ function jsonResponse(data: unknown, status = 200) {
     });
 }
 
-const LOCAL_ONLYOFFICE_URL = "http://localhost:8080";
-const POD_IP = process.env.OPENWORK_POD_IP ?? "192.168.5.250";
-const POD_ONLYOFFICE_URL = process.env.OPENWORK_ONLYOFFICE_URL?.trim() || `http://${POD_IP}:30080`;
-const POD_ONLYOFFICE_INTERNAL_URL = process.env.OPENWORK_ONLYOFFICE_INTERNAL_URL?.trim() || "http://onlyoffice:80";
-const LOCAL_ONLYOFFICE_PUBLIC_BASE_URL = "http://host.docker.internal:8789";
-const POD_ONLYOFFICE_PUBLIC_BASE_URL =
-    process.env.OPENWORK_ONLYOFFICE_PUBLIC_BASE_URL?.trim() ||
-    process.env.OPENWORK_BASE_URL?.trim() ||
-    `http://${POD_IP}:30789`;
+const LOCAL_ONLYOFFICE_DOCUMENT_SERVER_URL = "http://localhost:8080";
+const LOCAL_ONLYOFFICE_OPENWORK_PUBLIC_BASE_URL = "http://host.docker.internal:8789";
+
+const DEFAULT_POD_NODE_IP = "192.168.5.10";
+const DEFAULT_POD_ONLYOFFICE_PUBLIC_PORT = 32764;
+const DEFAULT_POD_OPENWORK_PUBLIC_PORT = 32765;
+const DEFAULT_POD_ONLYOFFICE_INTERNAL_URL = "http://onlyoffice:80";
+const DEFAULT_POD_OPENWORK_PUBLIC_PATH = "/openwork";
+
+function normalizeOriginUrl(raw: string | null | undefined): string | null {
+    const trimmed = (raw ?? "").trim();
+    if (!trimmed) return null;
+    const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
+    try {
+        return new URL(withProtocol).origin;
+    } catch {
+        return trimmed.replace(/\/+$/, "");
+    }
+}
+
+function normalizeBaseUrl(raw: string | null | undefined): string | null {
+    const trimmed = (raw ?? "").trim();
+    if (!trimmed) return null;
+    const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
+    try {
+        const url = new URL(withProtocol);
+        url.search = "";
+        url.hash = "";
+        url.pathname = url.pathname.replace(/\/+$/, "");
+        return url.toString().replace(/\/+$/, "");
+    } catch {
+        return withProtocol.replace(/\/+$/, "");
+    }
+}
 
 function resolveOnlyOfficeNetworkMode(): "local" | "pod" {
     const raw = (
@@ -505,20 +530,53 @@ function resolveOnlyOfficeNetworkMode(): "local" | "pod" {
     return raw === "pod" ? "pod" : "local";
 }
 
-function getOnlyOfficeUrl(_request?: Request): string {
-    return resolveOnlyOfficeNetworkMode() === "pod" ? POD_ONLYOFFICE_URL : LOCAL_ONLYOFFICE_URL;
+function resolvePodNodeIp(): string {
+    const explicit = (process.env.OPENWORK_POD_IP ?? "").trim();
+    if (explicit) return explicit;
+
+    const candidates = [
+        normalizeOriginUrl(process.env.OPENWORK_ONLYOFFICE_URL),
+        normalizeBaseUrl(process.env.OPENWORK_ONLYOFFICE_PUBLIC_BASE_URL),
+        normalizeBaseUrl(process.env.OPENWORK_BASE_URL),
+    ].filter(Boolean) as string[];
+
+    for (const candidate of candidates) {
+        try {
+            return new URL(candidate).hostname;
+        } catch {
+            // ignore
+        }
+    }
+
+    return DEFAULT_POD_NODE_IP;
 }
 
-function getOnlyOfficeInternalUrl(): string {
-    return resolveOnlyOfficeNetworkMode() === "pod" ? POD_ONLYOFFICE_INTERNAL_URL : LOCAL_ONLYOFFICE_URL;
+function resolveOnlyOfficeDocumentServerUrl(): string {
+    if (resolveOnlyOfficeNetworkMode() !== "pod") return LOCAL_ONLYOFFICE_DOCUMENT_SERVER_URL;
+    const explicit = normalizeOriginUrl(process.env.OPENWORK_ONLYOFFICE_URL);
+    if (explicit) return explicit;
+    const host = resolvePodNodeIp();
+    return `http://${host}:${DEFAULT_POD_ONLYOFFICE_PUBLIC_PORT}`;
+}
+
+function resolveOnlyOfficeDocumentServerInternalUrl(): string {
+    if (resolveOnlyOfficeNetworkMode() !== "pod") return LOCAL_ONLYOFFICE_DOCUMENT_SERVER_URL;
+    return normalizeOriginUrl(process.env.OPENWORK_ONLYOFFICE_INTERNAL_URL) ?? DEFAULT_POD_ONLYOFFICE_INTERNAL_URL;
 }
 
 function getOnlyOfficeJwtSecret(): string {
     return (process.env.ONLYOFFICE_JWT_SECRET ?? "").trim();
 }
 
-function resolveOnlyOfficePublicBaseUrl(_host: string, _port: number): string {
-    return resolveOnlyOfficeNetworkMode() === "pod" ? POD_ONLYOFFICE_PUBLIC_BASE_URL : LOCAL_ONLYOFFICE_PUBLIC_BASE_URL;
+function resolveOnlyOfficeOpenworkPublicBaseUrl(_host: string, _port: number): string {
+    if (resolveOnlyOfficeNetworkMode() !== "pod") return LOCAL_ONLYOFFICE_OPENWORK_PUBLIC_BASE_URL;
+
+    const explicit =
+        normalizeBaseUrl(process.env.OPENWORK_ONLYOFFICE_PUBLIC_BASE_URL) ?? normalizeBaseUrl(process.env.OPENWORK_BASE_URL);
+    if (explicit) return explicit;
+
+    const host = resolvePodNodeIp();
+    return `http://${host}:${DEFAULT_POD_OPENWORK_PUBLIC_PORT}${DEFAULT_POD_OPENWORK_PUBLIC_PATH}`;
 }
 
 function buildDocumentQuery(docId: string, sessionId?: string | null): string {
@@ -536,12 +594,12 @@ function resolveOnlyOfficeLang(request: Request): string {
 }
 
 function getCallbackUrl(host: string, port: number, workspaceId: string, docId: string, sessionId?: string | null): string {
-    const baseUrl = resolveOnlyOfficePublicBaseUrl(host, port);
+    const baseUrl = resolveOnlyOfficeOpenworkPublicBaseUrl(host, port);
     return `${baseUrl}/w/${workspaceId}/document/callback?${buildDocumentQuery(docId, sessionId)}`;
 }
 
 function getDownloadUrl(host: string, port: number, workspaceId: string, docId: string, sessionId?: string | null): string {
-    const baseUrl = resolveOnlyOfficePublicBaseUrl(host, port);
+    const baseUrl = resolveOnlyOfficeOpenworkPublicBaseUrl(host, port);
     return `${baseUrl}/w/${workspaceId}/document/file?${buildDocumentQuery(docId, sessionId)}`;
 }
 
@@ -577,8 +635,8 @@ function buildOnlyOfficeDownloadCandidates(rawUrl: string): string[] {
 
     const host = parsed.hostname.toLowerCase();
     const isLoopbackHost = host === "localhost" || host === "127.0.0.1" || host === "::1";
-    const internalBaseUrl = getOnlyOfficeInternalUrl();
-    const publicBaseUrl = getOnlyOfficeUrl();
+    const internalBaseUrl = resolveOnlyOfficeDocumentServerInternalUrl();
+    const publicBaseUrl = resolveOnlyOfficeDocumentServerUrl();
 
     if (isLoopbackHost) {
         replaceOrigin(internalBaseUrl);
@@ -1544,7 +1602,7 @@ export function createDocumentRoutes(routes: unknown[]) {
                 config.token = token;
             }
 
-            return jsonResponse({ documentServerUrl: getOnlyOfficeUrl(ctx.request), config });
+            return jsonResponse({ documentServerUrl: resolveOnlyOfficeDocumentServerUrl(), config });
         },
     });
 
@@ -1615,7 +1673,7 @@ export function createDocumentRoutes(routes: unknown[]) {
 
             // value 2 = ready for saving, 6 = force save
             if (body.status === 2 || body.status === 6) {
-                console.log("你要保存啦！！！！！Callback received for document:", docName, "Status:", body.status);
+                console.log("[onlyoffice] Callback received", { document: docName, status: body.status });
                 if (body.url) {
                     const docsDir = resolveDocumentsDir(workspace.path, sessionId);
                     await ensureDir(docsDir);

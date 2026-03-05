@@ -89,6 +89,36 @@ find documents/sessions/<sessionId>/ -type f -not -path '*/.tmp/*' -not -path '*
    - ❌ 创建独立的 `.docx` 文件作为中间产物（应在目标文档上原地编辑）
    - ✅ 允许的文件：`requirements.csv`、`.worktree/` 下的状态文件、`.bid/facts.json`、`reports/` 下的验证报告
 
+### 文件创建前置检查（Pre-create Gate — 模型无关强制流程）
+
+**在执行任何会创建新文件的 bash 命令之前**（包括 `>` 重定向、`cp`、`python` 脚本输出、`touch` 等），必须逐条回答以下检查清单。任何一项为"否"则**禁止执行该命令**。
+
+```
+┌─ Pre-create Gate ──────────────────────────────────┐
+│ Q1: 要创建的文件扩展名是什么？                        │
+│     → 如果是 .py / .js / .sh / .ts：❌ 停止。        │
+│       你不应该生成代码脚本。                          │
+│       只能调用 .opencode/skills/ 中已有的脚本。       │
+│                                                      │
+│ Q2: 如果是 .md：                                     │
+│     → 它是写入 .worktree/ 或 reports/ 的状态文件？    │
+│       ✅ 允许。                                       │
+│     → 它是投标章节内容（如"技术方案.md"）？            │
+│       ❌ 停止。内容只能写入 requirements.csv。         │
+│                                                      │
+│ Q3: 如果是 .docx：                                   │
+│     → 它是从已有文档 cp 出的工作副本？✅ 允许。       │
+│     → 它是用代码/脚本新生成的文档？❌ 停止。          │
+│       应使用 unpack → 编辑 XML → repack 流程。       │
+│                                                      │
+│ Q4: 如果是 .csv / .json：                            │
+│     → 它属于允许列表中的文件类型？✅ 允许。           │
+│     → 否则 ❌ 停止，说明理由。                        │
+└──────────────────────────────────────────────────────┘
+```
+
+**此检查不可省略、不可"批量通过"**。即使你认为"显然应该创建这个文件"，也必须逐条过检查清单。这是对所有模型都适用的程序化约束。
+
 ---
 
 ## 目标文档 vs 参考材料
@@ -111,6 +141,25 @@ find documents/sessions/<sessionId>/ -type f -not -path '*/.tmp/*' -not -path '*
 **如果 bid-analysis 已执行且 `.worktree/index.json` 中存在 `template_findings` 字段，优先使用其报告结果，避免重复扫描。**
 
 完整探测流程见 `references/template-probing-protocol.md`。
+
+#### 模板提取的正确方法（不可替代）
+
+当需要从招标文件中提取投标文件格式模板时，**唯一正确的方法**是：
+
+```
+步骤 1: python scripts/office/unpack.py 招标文件.docx /tmp/tender_work/
+步骤 2: 在 /tmp/tender_work/word/document.xml 中定位投标文件格式章节的 XML 范围
+步骤 3: 提取该 XML 片段，组装为新的合法 document.xml
+步骤 4: python scripts/office/pack.py /tmp/template_work/ 投标模板.docx
+```
+
+**以下方法全部禁止**（它们会丢失格式/表格结构/样式）：
+- ❌ 用 pandoc 转 markdown 再重新生成 docx
+- ❌ 写 python-docx / docx.js 脚本从零创建文档
+- ❌ 用 LLM 生成 OOXML 代码拼装文档
+- ❌ 先导出为文本再用任何方式"还原"格式
+
+**判断标准**：如果你的方法会丢失原文档的表格线宽、单元格合并、字体字号、段落间距中的任何一项，那就是错误的方法。
 
 ### 目标文档（默认主写入对象）
 
@@ -405,6 +454,20 @@ index.json 中只存摘要信息（id + title + status + materials 进度），�
 ---
 
 ## 常见异常处理
+
+### 2-Strike 重试规则（强制）
+
+**如果一个 bash 命令失败了 2 次且错误信息相似**，你必须：
+
+1. **停止重试当前方法**。第 3 次尝试相同方法几乎必然再次失败，且浪费大量 token。
+2. **回顾失败原因**：读取两次的错误输出，判断是环境问题、依赖问题、还是方法本身不可行。
+3. **切换到根本不同的方法**：
+   - 如果脚本失败 → 改用手动 XML 编辑（unpack → read → edit → repack）
+   - 如果 unpack 失败 → 检查文件是否损坏，尝试用 `file` 命令确认格式
+   - 如果格式转换失败 → 不转换，直接在原格式上操作
+4. **不要只改脚本参数然后重试** — 那不是"不同的方法"。
+
+**计数方式**：同一个逻辑操作（如"从招标文件提取模板"）使用相同的技术路线（如"写 Python 脚本"）算同一方法。修改脚本细节（换库、调参数、加 try-catch）不算切换方法。
 
 | 异常 | 处理 |
 |------|------|

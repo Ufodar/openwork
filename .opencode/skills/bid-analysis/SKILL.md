@@ -14,6 +14,12 @@ provides:
 
 ## Workflow
 
+**⚠ 通用约束（适用于本 skill 所有步骤）：**
+- 本 skill 只分析和提取，**不撰写**任何投标应答内容（撰写由 bid-drafting 处理）
+- 所有输出均为结构化数据文件（`.json`、`.csv`、`.md` 状态文件），不生成独立的文档内容
+- **禁止生成 .py / .js / .sh 脚本**——只能调用 `.opencode/skills/` 中已有的脚本
+- 如果某个操作失败 2 次，切换方法（见 document-writer 的 2-Strike 规则）
+
 ### Step 0: 文件分类（File Triage）
 
 **触发条件**：会话目录下文件数 ≥ 10。低于 10 个文件时跳过此步，直接进入 Step 1。

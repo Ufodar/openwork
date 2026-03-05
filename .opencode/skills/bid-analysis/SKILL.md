@@ -107,9 +107,12 @@ provides:
 读取用户指定的招标文件（通常是 PDF 或 Word）。如果 Step 0 已执行，直接从 `file-triage.json` 的 `tender_main[].rel_path` 取文件路径。
 
 **文本提取方法**（按优先级）：
-1. **DOCX** → `bash: python3 -c "import zipfile,re; z=zipfile.ZipFile('<path>'); xml=z.read('word/document.xml').decode(); print(re.sub(r'<[^>]+>','',xml))" > /tmp/tender_text.txt`
-2. **PDF** → `bash: python3 -c "..."` 使用 `pdfplumber` 或 `PyPDF2`；如未安装则使用 `read` 工具直接读 PDF（Claude 原生支持读 PDF）
-3. 回退 → 使用 `read` 工具直接读文件（Claude 可读 docx/pdf）
+1. **缓存优先** → 检查 `<SESSION_ROOT>/.tmp/tender_text.txt` 是否存在。如存在且非空，直接读取缓存，**跳过重新提取**。这避免了重复提取同一招标文件消耗大量 token。
+2. **DOCX** → `bash: python3 -c "import zipfile,re; z=zipfile.ZipFile('<path>'); xml=z.read('word/document.xml').decode(); print(re.sub(r'<[^>]+>','',xml))" > <SESSION_ROOT>/.tmp/tender_text.txt`
+3. **PDF** → `bash: python3 -c "..."` 使用 `pdfplumber` 或 `PyPDF2`，输出到 `<SESSION_ROOT>/.tmp/tender_text.txt`；如未安装则使用 `read` 工具直接读 PDF（Claude 原生支持读 PDF）
+4. 回退 → 使用 `read` 工具直接读文件（Claude 可读 docx/pdf）
+
+**重要**：提取结果必须缓存到 `<SESSION_ROOT>/.tmp/tender_text.txt`。后续所有需要引用招标文件全文的步骤（Step 2-5）应读取此缓存文件，而非重新提取原始文档。这可节省数百万 token 的重复消耗。
 
 **分段阅读策略**：招标文件通常 40-100 页。不要一次读全文（可能超 context），按以下顺序分段：
 1. 首先读**目录**（通常在前 2 页）→ 了解整体结构和页码范围
@@ -190,6 +193,30 @@ registry 构建完成后（或批次 1-2 完成后），执行缺口分析：
 
 ### Step 5: 向用户汇报分析摘要
 简要汇报：评标方法、分值分布、★ 项数量、关键时间节点。指出需要用户确认的不确定项。
+
+### Step 5.5: Autopilot 阶段标记（自动执行）
+
+**当本 skill 作为 Autopilot Stage 1 被调用时**，在 Step 5 完成后必须执行：
+
+1. 更新 `.worktree/index.json` 的 autopilot 状态：
+   ```json
+   {
+     "autopilot": {
+       "stages": [
+         { "id": 1, "status": "done", "progress": "analysis complete" }
+       ],
+       "current_stage": 1.5
+     }
+   }
+   ```
+   - 将 `stages[1].status` 设为 `"done"`
+   - 将 `current_stage` 推进到下一个阶段（1.5 如有答疑文件，否则 2）
+
+2. **不要等待用户指令** — 阶段标记是自动的，Stage 1 的所有产出（requirements.csv、index.json、conventions.md、material-registry.json）就绪即标记 done
+
+3. 检查是否存在答疑/补遗文件（文件名含"答疑"/"补遗"/"澄清"）：
+   - 如存在 → `current_stage = 1.5`
+   - 如不存在 → `current_stage = 2`（跳过 1.5）
 
 ---
 

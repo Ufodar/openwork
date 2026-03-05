@@ -27,16 +27,25 @@ provides:
 ### Step 2: 确定写作范围
 与用户确认本轮要写的部分（整个商务标？整个技术标？某几个章节？某张应答表？）。
 
-### Step 3: 逐项撰写（写入 CSV，不直接改 docx 表格）
+### Step 3: 逐项撰写（CSV-only — 硬约束）
 
-**⚠ 核心规则：应答内容只写入 requirements.csv，不要用 python-docx 代码直接操作 docx 表格。**
+**⚠⚠⚠ 核心规则：所有应答内容只能写入 requirements.csv，严禁任何其他输出形式。**
 
-LLM 生成的 python-docx 代码存在系统性的表格行索引错位问题（off-by-N），导致内容写入错误的单元格。因此：
-- ✅ 将应答内容写入 requirements.csv 的"响应内容"列
-- ✅ 将偏离标注写入 requirements.csv 的"偏离情况"列
-- ✅ 将证明材料页码写入 requirements.csv 的"证明材料页码"列
-- ❌ 不要生成 python-docx 代码来写表格单元格
-- ❌ 不要用 `table.rows[i].cells[j]` 之类的代码操作目标文档
+这是不可违反的硬约束。LLM 生成的 python-docx 代码存在系统性的表格行索引错位问题（off-by-N），而独立 .md 文件无法被自动组装进目标文档。因此：
+
+**✅ 唯一允许的写入目标：`requirements.csv`**
+- 将应答内容写入 requirements.csv 的"响应内容"列
+- 将偏离标注写入 requirements.csv 的"偏离情况"列
+- 将证明材料页码写入 requirements.csv 的"证明材料页码"列
+
+**❌ 以下行为全部禁止：**
+- ❌ 生成 python-docx 代码来写表格单元格
+- ❌ 用 `table.rows[i].cells[j]` 之类的代码操作目标文档
+- ❌ 创建独立的 `.md` 文件作为投标章节（如 `技术方案.md`、`本地化部署.md`、`售后服务.md`）
+- ❌ 生成 `.py`、`.js`、`.sh` 转换/操作脚本
+- ❌ 创建独立的 `.docx` 中间文件
+
+**违反此规则的产出一律无效** — 独立 .md 文件不会被任何流水线处理，最终会被丢弃，等于白做。
 
 CSV 写入完成后，由 Step 4.7 的确定性脚本负责将 CSV 内容组装到 docx 表格中。
 

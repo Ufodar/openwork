@@ -83,6 +83,11 @@ find documents/sessions/<sessionId>/ -type f -not -path '*/.tmp/*' -not -path '*
 4. **修改优先于创建**：默认行为是修改已有的目标文档（模板/半成品），而不是从零创建新文件。只有在用户明确要求创建新文件、或工作区中确实没有可用的目标文档时，才创建新 .docx。
 5. **状态外化（工作树协议）**：复杂任务必须将进度和决策外化到文件树，不依赖上下文记忆。详见下方"工作树协议"段落。
 6. **一致性传播**：做出影响多个章节的决策（选型、承诺、价格等）时，立即记录到 conventions.md 的决策日志。后续所有撰写必须先读决策日志再动笔。不记录就不写——这保证了即使 context 压缩，关键约束也不会丢失。（详细规则见 bid-drafting skill）
+7. **禁止生成中间文件和脚本**：投标内容**只能**写入 `requirements.csv`（应答列）或直接写入目标 `.docx`。以下行为被严格禁止：
+   - ❌ 创建独立的 `.md` 文件作为投标章节内容（如 `技术方案.md`、`售后服务.md`）
+   - ❌ 生成 `.py`、`.js`、`.sh` 等脚本来转换或操作文档
+   - ❌ 创建独立的 `.docx` 文件作为中间产物（应在目标文档上原地编辑）
+   - ✅ 允许的文件：`requirements.csv`、`.worktree/` 下的状态文件、`.bid/facts.json`、`reports/` 下的验证报告
 
 ---
 
@@ -255,10 +260,10 @@ Autopilot 按以下 8 个阶段顺序执行。每个阶段有明确的检查点�
 | 阶段 | 名称 | 执行方式 | 检查点 |
 |------|------|---------|--------|
 | 0 | File Triage | 自动 | 仅在有 ambiguous 项时暂停确认 |
-| 1 | 招标分析 | 自动（bid-analysis） | 无（自动进入下一阶段） |
+| 1 | 招标分析 | 自动（bid-analysis） | bid-analysis 完成后自动标记 `stages[1].status="done"` 并推进 `current_stage` |
 | 1.5 | 答疑整合（可选） | 自动 | 展示答疑影响的要求变更；无答疑文件自动跳过 |
 | 1.6 | 投标策略（可选） | 半自动 | **必须确认** — 展示策略建议（得分优化优先级、风险评估、内容策略） |
-| 2 | 目标文档确定 | 自动（模板探测） | **必须确认** — 向用户展示文档结构 |
+| 2 | 目标文档确定 | 自动（模板探测） | **必须确认** — 如 `index.json.template_findings.found == true`，自动使用其报告创建目标文档，无需重复扫描；向用户展示文档结构 |
 | 3 | 内容撰写 | 逐节点（bid-drafting） | **每个大章节** 完成时暂停审阅 |
 | 3.5 | 表格组装 | 自动（assemble 脚本） | 展示组装报告，验证通过后自动继续 |
 | 4 | 资质文件组装 | 自动（路径 E） | 展示匹配清单 + 缺失项 |
@@ -281,6 +286,26 @@ Autopilot 按以下 8 个阶段顺序执行。每个阶段有明确的检查点�
 **Stage 1.5/1.6 触发与跳过**：
 - **Stage 1.5（答疑整合）**：自动检测会话目录中是否存在答疑文件（答疑纪要、补遗等）。如存在，解析答疑内容并展示对原始要求的变更影响；如不存在，自动跳过进入下一阶段。
 - **Stage 1.6（投标策略）**：基于 Stage 1 分析结果生成策略建议（得分优化优先级排序、风险点评估、内容差异化策略）。此阶段**必须暂停确认**——策略决定后续所有章节的撰写方向。用户可跳过，此时使用默认策略（均衡得分、无差异化）。
+
+### 阶段门控（Hard Gate — 不可违反）
+
+**每个阶段必须满足以下条件才能进入下一阶段。违反门控 = 产出无效。**
+
+| 当前阶段 | 进入下一阶段的前置条件 |
+|----------|----------------------|
+| 0 → 1 | `file-triage.json` 已写入且 `tender_main` 非空 |
+| 1 → 1.5/2 | `.worktree/index.json` 存在，`requirements.csv` 行数 ≥ 1，`autopilot.stages[1].status == "done"` |
+| 2 → 3 | `index.json.target_doc` 非 null，目标文档文件存在 |
+| 3 → 3.5 | `requirements.csv` 中至少有 1 行 `status == "done"` |
+| 3.5 → 4 | 组装报告 `assembly-report.json` 存在且 `unmapped_csv == 0` |
+
+**禁止行为**：
+- ❌ 在 Stage 1 未完成时执行任何 Stage 3 的内容撰写
+- ❌ 在 `target_doc == null` 时写入任何应答内容
+- ❌ 跳过 Stage 2 直接从 Stage 1 进入 Stage 3
+- ❌ 在未设置 `autopilot.stages[N].status = "done"` 的情况下推进 `current_stage`
+
+**自检**：每次准备执行下一阶段的操作前，先读取 `index.json` 的 `autopilot` 字段，确认当前阶段已标记为 `done`。如未标记，先完成当前阶段的所有产出再推进。
 
 ### 状态持久化
 
@@ -358,7 +383,7 @@ index.json 中只存摘要信息（id + title + status + materials 进度），�
 1. 检查当前 session 的 `.worktree/index.json` 是否存在
 2. 如存在 →
    - 读取 index.json，获取 summary（总览）和 current_focus（当前焦点）
-   - **检查 `.worktree/last-checkpoint.md`**：如存在，读取获取上次暂停时的完整上下文快照
+   - **检查 `.worktree/last-checkpoint.md`**：如存在，读取获取上次暂停时的完整上下文快照。**注意：checkpoint 中的进度数据必须与实际文件交叉验证**——运行 `grep -c '"done"' requirements.csv` 确认实际完成数，不信任 checkpoint 中 agent 自述的进度百分比。
    - **检查 `autopilot` 字段**：如果 `autopilot.enabled == true`，读取 `current_stage` 并自动恢复到对应阶段继续执行
    - 读取 current_focus 对应的节点文件
    - **必须**读取 conventions.md **全文**（恢复写作约定、格式快照、关键决策、质量基线）。此步不可省略——conventions.md 是跨上下文压缩的唯一决策记忆锚点。
@@ -375,6 +400,7 @@ index.json 中只存摘要信息（id + title + status + materials 进度），�
 - **文档完整性不变量**：每个自然暂停点，目标 .docx 必须处于 packed（有效）状态
 - **pack 后检查**：每次 pack 目标文档后，如果存在 requirements.csv 和 `.bid/facts.json`（位于会话根目录下的 `.bid/` 子目录，由 bid-analysis 阶段生成），建议运行确定性 QC 脚本快速验证 Tier 0 规则（★项覆盖、公司名、金额一致性）。这不是完整 QC，是快速兜底。
 - **conventions.md**：首次撰写时创建，记录已确定的视角、术语、详略程度。后续节点参照此文件保持一致。
+- **last-checkpoint.md 写入规则**：进度数据必须来自确定性来源（`grep -c` 统计 CSV status、`ls` 统计文件数），禁止使用 agent 主观估计的完成百分比。格式示例：`完成进度：grep requirements.csv status=done → 12/77 (15.6%)`
 
 ---
 

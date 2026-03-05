@@ -54,6 +54,28 @@
             "attachment": false,
             "toolcall": true
           }
+        },
+        "Qwen3.5-397B-A17B": {
+          "name": "Qwen3.5-397B-A17B",
+          "capabilities": {
+            "input": {
+              "text": true,
+              "image": true,
+              "audio": true,
+              "video": true,
+              "pdf": true
+            },
+            "output": {
+              "text": true,
+              "image": true,
+              "audio": false,
+              "video": false,
+              "pdf": false
+            },
+            "attachment": true,
+            "interleaved": true,
+            "toolcall": true
+          }
         }
       }
     }

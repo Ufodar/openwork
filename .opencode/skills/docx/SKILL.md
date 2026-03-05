@@ -304,6 +304,18 @@ Edit files in `unpacked/word/`. See XML Reference below for patterns.
 
 **Use the Edit tool directly for string replacement. Do not write Python scripts.** Scripts introduce unnecessary complexity. The Edit tool shows exactly what is being replaced.
 
+**提取/拆分章节时，使用字符串操作，禁止使用 XML DOM 解析器：**
+```python
+# ✅ 正确：字符串切片保留所有命名空间和格式
+xml = open("unpacked/word/document.xml").read()
+start = xml.find('<w:p>...目标章节标记...')  # 定位起始段落
+end = xml.find('</w:body>')                  # 或下一个章节的起始位置
+fragment = xml[start:end]                     # 完整保留原始 XML
+
+# ❌ 错误：ElementTree / lxml 会丢弃 wp14, w14, w15, mc 等命名空间
+import xml.etree.ElementTree as ET  # 禁止用于提取章节
+```
+
 **CRITICAL: Use smart quotes for new content.** When adding text with apostrophes or quotes, use XML entities to produce smart quotes:
 ```xml
 <!-- Use these entities for professional typography -->
@@ -341,6 +353,8 @@ Validates with auto-repair, condenses XML, and creates DOCX. Use `--validate fal
 
 - **Replace entire `<w:r>` elements**: When adding tracked changes, replace the whole `<w:r>...</w:r>` block with `<w:del>...<w:ins>...` as siblings. Don't inject tracked change tags inside a run.
 - **Preserve `<w:rPr>` formatting**: Copy the original run's `<w:rPr>` block into your tracked change runs to maintain bold, font size, etc.
+- **Never use DOM 解析器（ElementTree / lxml）提取章节**: DOM 解析器在序列化时会丢弃未显式声明的命名空间前缀（如 `wp14`、`w14`、`w15`、`mc`），导致 pack 后文档损坏（报 "namespace not declared" 错误）。**必须使用字符串操作**（`str.find()` + 切片）提取 XML 片段，这样能 100% 保留原始命名空间声明和格式。
+- **定位章节时跳过 TOC 区域**: document.xml 中的目录（Table of Contents）包裹在 `<w:sdt>` 标签内，其中的文字也包含章节标题（如"第五部分"）。搜索章节标题时，必须跳过 `<w:sdt>...</w:sdt>` 区域内的匹配，否则会定位到目录条目而非实际正文。实用方法：搜索所有匹配位置，取 `<w:sdt>` 块之外的**最后一个**匹配。
 
 ---
 

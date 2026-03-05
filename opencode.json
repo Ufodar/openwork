@@ -3,31 +3,41 @@
   "provider": {
     "my-company": {
       "options": {
-        "baseURL": "http://192.168.5.10:3000/v1",
-        "apiKey": "{env:MY_COMPANY_API_KEY}"
+        "baseURL": "http://192.168.5.10:3002/v1",
+        "apiKey": "sk-ICERFam8VpvQ3tsE3413B6B6Fc674966B1330cFaFbEd2836"
       },
       "models": {
         "Kimi-K2.5": {
           "name": "Kimi-K2.5",
-          "capabilities": {
-            "input": {
-              "text": true,
-              "image": true,
-              "audio": true,
-              "video": true,
-              "pdf": true
-            },
-            "output": {
-              "text": true,
-              "image": true,
-              "audio": false,
-              "video": false,
-              "pdf": false
-            },
-            "attachment": true,
-            "interleaved": true,
-            "toolcall": true
-          }
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "audio",
+              "video",
+              "pdf"
+            ],
+            "output": [
+              "text",
+              "image"
+            ]
+          },
+          "attachment": true,
+          "interleaved": true,
+          "tool_call": true
+        },
+        "GLM-5": {
+          "name": "GLM-5",
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "attachment": false,
+          "tool_call": false
         }
       }
     }

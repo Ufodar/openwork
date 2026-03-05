@@ -38,6 +38,19 @@
           },
           "attachment": false,
           "tool_call": false
+        },
+        "MiniMax-2.1": {
+          "name": "MiniMax-2.1",
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "attachment": false,
+          "tool_call": false
         }
       }
     }

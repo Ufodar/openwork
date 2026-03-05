@@ -235,6 +235,8 @@ export type DashboardViewProps = {
   openDefaultModelPicker: () => void;
   showThinking: boolean;
   toggleShowThinking: () => void;
+  toolMonitorEnabled: boolean;
+  toggleToolMonitorEnabled: () => void;
   hideTitlebar: boolean;
   toggleHideTitlebar: () => void;
   modelVariantLabel: string;
@@ -1526,6 +1528,8 @@ export default function DashboardView(props: DashboardViewProps) {
                   openDefaultModelPicker={props.openDefaultModelPicker}
                   showThinking={props.showThinking}
                   toggleShowThinking={props.toggleShowThinking}
+                  toolMonitorEnabled={props.toolMonitorEnabled}
+                  toggleToolMonitorEnabled={props.toggleToolMonitorEnabled}
                   hideTitlebar={props.hideTitlebar}
                   toggleHideTitlebar={props.toggleHideTitlebar}
                   modelVariantLabel={props.modelVariantLabel}

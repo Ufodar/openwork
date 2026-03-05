@@ -26,10 +26,24 @@ provides:
    - **重要**：`documents/` 目录在 `.gitignore` 中，glob/grep 无法搜索。使用 `bash: find <SESSION_ROOT>/ -type f` 列出文件。
    - 扫描前先排除目录：`.tmp/`、`.worktree/`、`.bid/`、`reports/`、`.archive/`、`artifacts/`
    - 文件名 + 扩展名 + 文件大小
+
+2. **预过滤（filename-only 分类）** — 在读取任何文件内容之前，先按文件名模式快速分类：
+
+   | 模式 | 分类 | 说明 |
+   |------|------|------|
+   | `*_page-NNNN.jpg` | `image_asset` | PDF 导出的页面图片，关联到同名 PDF |
+   | `ilovepdf_pages-to-jpg*.zip` | `archive` | 包含 JPG 导出的压缩包，跳过 |
+   | 文件名含"招标"且为 `.docx/.pdf` | `tender_main` 候选 | 仍需读取内容确认 |
+   | `.xlsx/.xls/.csv` 且名含"清单"/"报价"/"价格" | `pricing_data` 候选 | 仍需读取确认 |
+   | 文件名含"授权"/"资质"/"营业执照"/"审计" | `qualification` | 仅记文件名，不读内容 |
+   | 文件名含"彩页"/"产品"/"数据手册"且为 `.pdf` | `product_doc` | 仍需读取前 2 页确认参数 |
+
+   **关键规则**：`image_asset` 和 `archive` 类文件**不计入分批数量**，不读取内容。它们在 file-triage.json 中单独列出，附带关联的源 PDF 路径。
+
+3. **内容读取分类** — 仅对预过滤后**未能确定分类**的文件读取内容：
    - 前 2 页或前 3000 字符（PDF 用 bash 提取，DOCX 用 pandoc 转文本）
    - **不读全文内容**
-
-2. **分类** — 将每个文件归入以下类别之一：
+   - 将每个文件归入以下类别之一：
 
    | 类别 | 判断依据 |
    |------|---------|
@@ -39,14 +53,18 @@ provides:
    | `qualification` | PDF/图片形式的营业执照、资质证书、业绩合同、审计报告、授权书等 |
    | `pricing_data` | xlsx/csv 格式，含价格/数量/型号等列的报价或清单数据 |
    | `product_doc` | 产品参数表、数据手册、白皮书、说明书等厂商技术资料 |
+   | `image_asset` | PDF 导出的页面图片（`_page-NNNN.jpg`）——关联到源 PDF，不单独处理 |
+   | `archive` | ZIP/RAR 等压缩包——如内含已提取的文件则跳过，否则标记待提取 |
    | `other` | 无法确信分类的文件 |
 
-3. **输出** — 在会话根目录写入 `file-triage.json`（v2）：
+4. **输出** — 在会话根目录写入 `file-triage.json`（v2）：
 
    ```json
    {
      "version": 2,
      "total": 156,
+     "classified_by_name": 116,
+     "classified_by_content": 13,
      "by_category": {
        "tender_main": [
          { "rel_path": "招标文件.pdf", "name": "招标文件.pdf", "size": 4567890 }
@@ -58,6 +76,8 @@ provides:
        "historical_bid": [ "..." ],
        "pricing_data": [ "..." ],
        "product_doc": [ "..." ],
+       "image_asset": [ "..." ],
+       "archive": [ "..." ],
        "other": [ "..." ]
      },
      "ambiguous": [
@@ -66,15 +86,15 @@ provides:
    }
    ```
 
-   > 每个 entry 的字段：`rel_path`（session 相对路径）、`name`、`size`。完整字段约束见 `docs/contracts/bid-session-file-contract.md` Section 7。
+   > 每个 entry 的字段：`rel_path`（session 相对路径）、`name`、`size`。`image_asset` 条目额外包含 `source_pdf` 字段指向关联的 PDF。完整字段约束见 `docs/contracts/bid-session-file-contract.md` Section 7。
    > 兼容说明：如读到 v1（类别值为字符串数组），可兼容读取；**新写入必须为 v2**。
 
-4. **确认** — 向用户展示分类摘要（按类别汇总数量，不逐文件列出），重点确认：
+5. **确认** — 向用户展示分类摘要（按类别汇总数量，不逐文件列出），重点确认：
    - `tender_main` 识别是否正确
    - `ambiguous` 项请用户澄清
    - 如果没有识别出 `tender_main` → 必须请用户指定哪个是招标文件
 
-**分批策略**：文件数 > 50 时，分批扫描（每批 20 个）。批次顺序：文件名含"招标"的优先，然后按文件大小降序（大文件更可能是主体文件）。每批结果追加到 file-triage.json。
+**分批策略**：仅对需要**内容读取**的文件分批（预过滤后的剩余文件）。文件数 > 50 时，分批扫描（每批 20 个）。批次顺序：文件名含"招标"的优先，然后按文件大小降序（大文件更可能是主体文件）。每批结果追加到 file-triage.json。`image_asset` 和 `archive` 不参与分批。
 
 **与后续步骤的衔接**：
 - Step 1 直接从 triage 的 `tender_main[].rel_path` 取招标文件
@@ -84,7 +104,26 @@ provides:
 - bid-drafting 路径 F 从 `pricing_data` 取报价数据
 
 ### Step 1: 读取招标文件
-读取用户指定的招标文件（通常是 PDF 或 Word）。如果 Step 0 已执行，直接从 `file-triage.json` 的 `tender_main[].rel_path` 取文件路径。浏览全文了解整体结构。
+读取用户指定的招标文件（通常是 PDF 或 Word）。如果 Step 0 已执行，直接从 `file-triage.json` 的 `tender_main[].rel_path` 取文件路径。
+
+**文本提取方法**（按优先级）：
+1. **DOCX** → `bash: python3 -c "import zipfile,re; z=zipfile.ZipFile('<path>'); xml=z.read('word/document.xml').decode(); print(re.sub(r'<[^>]+>','',xml))" > /tmp/tender_text.txt`
+2. **PDF** → `bash: python3 -c "..."` 使用 `pdfplumber` 或 `PyPDF2`；如未安装则使用 `read` 工具直接读 PDF（Claude 原生支持读 PDF）
+3. 回退 → 使用 `read` 工具直接读文件（Claude 可读 docx/pdf）
+
+**分段阅读策略**：招标文件通常 40-100 页。不要一次读全文（可能超 context），按以下顺序分段：
+1. 首先读**目录**（通常在前 2 页）→ 了解整体结构和页码范围
+2. 读**评分标准**章节（通常在"评标方法"或"评标标准"标题下）→ 确定分值分布
+3. 读**项目需求书/技术要求**（通常最长的章节）→ 提取所有要求条目
+4. 读**商务要求/资质要求**→ 提取商务和资质条目
+5. 读**投标文件格式**章节 → 识别模板结构（供 template_findings 报告）
+
+**常见招标文件结构**（中国政府采购）：
+- 第一部分：投标邀请函（项目概况、资格要求、时间节点）
+- 第二部分：招标项目要求（技术要求、商务要求、评标方法、**项目需求书**）
+- 第三部分：投标须知（投标文件编写规则）
+- 第四部分：合同条款
+- 第五部分：附件/投标文件格式
 
 ### Step 2: 按核心提取清单逐项提取
 按下方"核心提取清单"逐项提取信息。特别注意：

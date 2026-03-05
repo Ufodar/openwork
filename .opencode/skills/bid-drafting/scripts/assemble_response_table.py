@@ -28,6 +28,7 @@ import json
 import re
 import sys
 from pathlib import Path
+from difflib import SequenceMatcher
 from typing import Any
 
 try:
@@ -102,6 +103,8 @@ def _is_placeholder(text: str) -> bool:
         r"^—\s*$",
         r"^-\s*$",
         r"^N/?A\s*$",
+        r"^[【\[]重点[填写】\]]",
+        r"^[【\[]待[填写】\]]",
     ]
     for pattern in placeholder_patterns:
         if re.match(pattern, text.strip(), re.IGNORECASE):
@@ -258,6 +261,7 @@ def _match_text(csv_text: str, table_text: str) -> tuple[bool, str]:
     Returns (is_match, confidence) where confidence is:
       - "exact": normalized texts are identical
       - "prefix": first 20 normalized chars match
+      - "overlap": SequenceMatcher ratio >= 0.45 (for reworded but same requirement)
       - "fuzzy": not a match
     """
     csv_norm = _norm_text(csv_text)
@@ -280,7 +284,15 @@ def _match_text(csv_text: str, table_text: str) -> tuple[bool, str]:
     # truncated or extended text)
     if len(csv_norm) > 10 and len(table_norm) > 10:
         if csv_norm in table_norm or table_norm in csv_norm:
-            return True, "fuzzy"
+            return True, "overlap"
+
+    # Sequence similarity: handles cases where CSV summary text uses different
+    # phrasing/ordering than the docx full requirement text (e.g.
+    # "支持本地化部署-智能中枢平台：可根据..." vs "★智能中枢平台 - 本地化部署要求：支持本地化...")
+    if len(csv_norm) >= 10 and len(table_norm) >= 10:
+        ratio = SequenceMatcher(None, csv_norm, table_norm).ratio()
+        if ratio >= 0.45:
+            return True, "overlap"
 
     return False, "fuzzy"
 
@@ -327,7 +339,7 @@ def _build_mappings(
         if csv_idx in matched_csv_indices:
             continue
 
-        csv_req = _row_get(csv_row, "requirement", "招标要求", "title", "标题").strip()
+        csv_req = _row_get(csv_row, "requirement", "招标要求", "条款内容", "需求内容", "title", "标题").strip()
         csv_id = _row_get(csv_row, "id", "序号", "需求ID").strip() or f"row-{csv_idx}"
 
         for table_idx, table_req in table_row_map.items():
@@ -354,11 +366,11 @@ def _build_mappings(
         if csv_idx in matched_csv_indices:
             continue
 
-        csv_req = _row_get(csv_row, "requirement", "招标要求", "title", "标题").strip()
+        csv_req = _row_get(csv_row, "requirement", "招标要求", "条款内容", "需求内容", "title", "标题").strip()
         csv_id = _row_get(csv_row, "id", "序号", "需求ID").strip() or f"row-{csv_idx}"
 
         best_match: dict[str, Any] | None = None
-        best_confidence_rank = 0  # prefix=2, fuzzy(containment)=1
+        best_confidence_rank = 0  # prefix=2, overlap=1
 
         for table_idx, table_req in table_row_map.items():
             if table_idx in matched_table_indices:
@@ -395,7 +407,7 @@ def _build_mappings(
     # Warnings for unmapped items
     for csv_row in unmapped_csv:
         csv_id = _row_get(csv_row, "id", "序号", "需求ID").strip() or "unknown"
-        csv_req = _row_get(csv_row, "requirement", "招标要求", "title", "标题").strip()
+        csv_req = _row_get(csv_row, "requirement", "招标要求", "条款内容", "需求内容", "title", "标题").strip()
         warnings.append(
             f"CSV row {csv_id} ('{csv_req[:40]}') could not be matched to any table row"
         )
@@ -585,7 +597,7 @@ def _build_report(
     unmapped_csv_info = []
     for row in unmapped_csv:
         csv_id = _row_get(row, "id", "序号", "需求ID").strip() or "unknown"
-        csv_req = _row_get(row, "requirement", "招标要求", "title", "标题").strip()
+        csv_req = _row_get(row, "requirement", "招标要求", "条款内容", "需求内容", "title", "标题").strip()
         unmapped_csv_info.append({
             "csv_id": csv_id,
             "csv_requirement": csv_req[:80],

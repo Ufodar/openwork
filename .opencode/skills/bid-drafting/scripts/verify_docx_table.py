@@ -140,7 +140,7 @@ def _csv_id(row: dict[str, Any]) -> str:
 
 def _csv_requirement(row: dict[str, Any]) -> str:
     """Extract requirement text from CSV."""
-    return _row_get(row, "requirement", "招标要求", "title", "标题").strip()
+    return _row_get(row, "requirement", "招标要求", "条款内容", "需求内容", "title", "标题").strip()
 
 
 def _csv_response(row: dict[str, Any]) -> str:
@@ -314,7 +314,7 @@ def _extract_table_rows(
 # Matching and comparison
 # ---------------------------------------------------------------------------
 
-_FUZZY_THRESHOLD = 0.70  # Minimum similarity to consider a fuzzy match
+_FUZZY_THRESHOLD = 0.45  # Minimum similarity to consider a fuzzy match
 
 
 def _find_matching_table_row(

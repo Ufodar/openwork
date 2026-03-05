@@ -124,7 +124,7 @@ def check_response_length(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
     for row in done_rows:
         req_id = _row_get(row, "id", "序号", "需求ID").strip() or "unknown"
-        title = _row_get(row, "title", "标题", "requirement", "招标要求").strip()
+        title = _row_get(row, "title", "标题", "requirement", "招标要求", "条款内容", "需求内容").strip()
         response = _response_text(row)
 
         if len(response) < 20:
@@ -172,7 +172,7 @@ def check_bare_satisfy(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
     for row in done_rows:
         req_id = _row_get(row, "id", "序号", "需求ID").strip() or "unknown"
-        title = _row_get(row, "title", "标题", "requirement", "招标要求").strip()
+        title = _row_get(row, "title", "标题", "requirement", "招标要求", "条款内容", "需求内容").strip()
         response = _response_text(row)
 
         if response and bare_pattern.match(response):
@@ -229,7 +229,7 @@ def check_star_substance(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
     for row in star_done_rows:
         req_id = _row_get(row, "id", "序号", "需求ID").strip() or "unknown"
-        title = _row_get(row, "title", "标题", "requirement", "招标要求").strip()
+        title = _row_get(row, "title", "标题", "requirement", "招标要求", "条款内容", "需求内容").strip()
         response = _response_text(row)
         deviation_raw = _row_get(row, "deviation", "偏离", "偏离情况").strip()
 
@@ -278,7 +278,7 @@ def check_tbd_unresolved(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
     for row in done_rows:
         req_id = _row_get(row, "id", "序号", "需求ID").strip() or "unknown"
-        title = _row_get(row, "title", "标题", "requirement", "招标要求").strip()
+        title = _row_get(row, "title", "标题", "requirement", "招标要求", "条款内容", "需求内容").strip()
         response = _response_text(row)
 
         matches = tbd_pattern.findall(response)

@@ -1675,6 +1675,12 @@ export default function DocumentWriterView(props: SessionViewProps) {
   });
 
   const agentLabel = createMemo(() => props.selectedSessionAgent ?? tr("docwriter.default_agent"));
+  const agentLock = createMemo(() => props.selectedSessionAgentLock);
+  const agentLockTooltip = createMemo(() => {
+    const lock = agentLock();
+    if (!lock) return null;
+    return currentLocale() === "zh" ? `智能体已锁定：@${lock}` : `Agent locked: @${lock}`;
+  });
 
   const loadAgentOptions = async (force = false) => {
     if (agentPickerBusy()) return agentOptions();
@@ -1698,6 +1704,10 @@ export default function DocumentWriterView(props: SessionViewProps) {
   };
 
   const openAgentPicker = () => {
+    if (agentLock()) {
+      setToastMessage(agentLockTooltip() ?? "Agent locked");
+      return;
+    }
     setAgentPickerOpen((current) => !current);
     if (!agentPickerReady()) {
       void loadAgentOptions();
@@ -1705,6 +1715,11 @@ export default function DocumentWriterView(props: SessionViewProps) {
   };
 
   const applySessionAgent = (agent: string | null) => {
+    const lock = agentLock();
+    if (lock && agent !== lock) {
+      setToastMessage(agentLockTooltip() ?? "Agent locked");
+      return;
+    }
     const id = sessionId();
     if (!id) {
       setToastMessage(tr("docagent.no_session_selected"));
@@ -1712,6 +1727,11 @@ export default function DocumentWriterView(props: SessionViewProps) {
     }
     props.setSessionAgent(id, agent);
   };
+
+  createEffect(() => {
+    if (!agentLock()) return;
+    setAgentPickerOpen(false);
+  });
 
   createEffect(() => {
     if (!agentPickerOpen()) return;
@@ -2780,6 +2800,8 @@ export default function DocumentWriterView(props: SessionViewProps) {
           agentPickerOpen={agentPickerOpen()}
           agentPickerBusy={agentPickerBusy()}
           agentPickerError={agentPickerError()}
+          agentPickerDisabled={Boolean(agentLock())}
+          agentPickerDisabledReason={agentLockTooltip()}
           agentOptions={agentOptions()}
           onToggleAgentPicker={openAgentPicker}
           onSelectAgent={(agent) => {

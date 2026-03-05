@@ -1627,14 +1627,22 @@ export default function App() {
   }
 
   function setSessionAgent(sessionID: string, agent: string | null) {
-    const trimmed = agent?.trim() ?? "";
+    const id = sessionID.trim();
+    if (!id) return;
+    const lock = untrack(() => {
+      const stored = getSessionPreferredAgentLock(id);
+      if (stored) return stored;
+      const title = sessions().find((session) => session.id === id)?.title ?? null;
+      return inferSessionPreferredAgentLock(title);
+    });
+    const trimmed = (lock ?? agent ?? "").trim();
     setSessionAgentById((current) => {
       const next = { ...current };
       if (!trimmed) {
-        delete next[sessionID];
+        delete next[id];
         return next;
       }
-      next[sessionID] = trimmed;
+      next[id] = trimmed;
       return next;
     });
   }
@@ -2696,7 +2704,7 @@ export default function App() {
   const devtoolsCapabilities = createMemo(() => openworkServerCapabilities());
   const resolvedDevtoolsWorkspaceId = createMemo(() => devtoolsWorkspaceId() ?? openworkServerWorkspaceId());
 
-  type OpenworkSessionPrefs = { view?: View | null; agent?: string | null; [key: string]: unknown };
+  type OpenworkSessionPrefs = { view?: View | null; agent?: string | null; agentLock?: string | null; [key: string]: unknown };
 
   const normalizeStoredView = (value: unknown): View | null => {
     switch (value) {
@@ -2744,6 +2752,13 @@ export default function App() {
         prefs.agent = agent;
       } else {
         delete prefs.agent;
+      }
+
+      const agentLock = normalizeStoredAgent(prefs.agentLock);
+      if (agentLock) {
+        prefs.agentLock = agentLock;
+      } else {
+        delete prefs.agentLock;
       }
       next[trimmedId] = prefs;
     }
@@ -2894,6 +2909,12 @@ export default function App() {
     const id = sessionId.trim();
     if (!id) return null;
     return openworkSessionPrefsById()[id]?.agent ?? null;
+  };
+
+  const getSessionPreferredAgentLock = (sessionId: string): string | null => {
+    const id = sessionId.trim();
+    if (!id) return null;
+    return openworkSessionPrefsById()[id]?.agentLock ?? null;
   };
 
   const ensureOpenworkSessionPrefsLoaded = async (): Promise<void> => {
@@ -3112,6 +3133,107 @@ export default function App() {
     });
   };
 
+  const persistSessionPreferredAgentLock = async (sessionId: string, agentLock: string | null): Promise<void> => {
+    const id = sessionId.trim();
+    if (!id) return;
+
+    const normalized = agentLock?.trim() ?? "";
+    const nextLock = normalized ? normalized : null;
+
+    const localBase = openworkSessionPrefsById();
+    const localExisting = localBase[id] ?? null;
+    const localExistingLock = normalizeStoredAgent(localExisting?.agentLock) ?? null;
+    const localExistingAgent = normalizeStoredAgent(localExisting?.agent) ?? null;
+    const localNeedsUpdate = localExistingLock !== nextLock || (nextLock !== null && localExistingAgent !== nextLock);
+    if (localNeedsUpdate) {
+      const localNext: Record<string, OpenworkSessionPrefs> = {
+        ...(localBase ?? {}),
+        [id]: {
+          ...(localExisting ?? {}),
+        },
+      };
+
+      if (nextLock) {
+        localNext[id].agentLock = nextLock;
+        localNext[id].agent = nextLock;
+      } else {
+        delete localNext[id].agentLock;
+      }
+
+      // Clean up empty prefs objects
+      if (!Object.keys(localNext[id]).length) {
+        delete localNext[id];
+      }
+
+      setOpenworkSessionPrefsById(localNext);
+      writeLocalOpenworkSessionPrefs(localNext);
+    }
+
+    const openworkClient = openworkServerClient();
+    const caps = resolvedOpenworkCapabilities();
+    const canReadWrite =
+      openworkServerStatus() === "connected" &&
+      openworkClient &&
+      (caps?.config?.read ?? false) &&
+      (caps?.config?.write ?? false);
+    if (!canReadWrite) return;
+
+    let workspaceId = (openworkServerWorkspaceId() ?? "").trim();
+    if (!workspaceId) {
+      workspaceId = (await ensureOpenworkServerWorkspaceIdResolved())?.trim() ?? "";
+    }
+    if (!workspaceId) return;
+
+    let basePrefs: Record<string, OpenworkSessionPrefs> | null = null;
+    if (openworkSessionPrefsLoaded() && openworkSessionPrefsWorkspaceId() === workspaceId) {
+      basePrefs = openworkSessionPrefsById();
+    } else {
+      try {
+        const config = await openworkClient.getConfig(workspaceId);
+        const openwork =
+          config.openwork && typeof config.openwork === "object" ? (config.openwork as Record<string, unknown>) : {};
+        basePrefs = parseOpenworkSessionPrefs(openwork);
+      } catch {
+        return;
+      }
+    }
+
+    const existing = basePrefs[id] ?? null;
+    const existingLock = normalizeStoredAgent(existing?.agentLock) ?? null;
+    const existingAgent = normalizeStoredAgent(existing?.agent) ?? null;
+    if (existingLock === nextLock && (nextLock === null || existingAgent === nextLock)) return;
+
+    const nextPrefs: Record<string, OpenworkSessionPrefs> = {
+      ...(basePrefs ?? {}),
+      [id]: {
+        ...(existing ?? {}),
+      },
+    };
+
+    if (nextLock) {
+      nextPrefs[id].agentLock = nextLock;
+      nextPrefs[id].agent = nextLock;
+    } else {
+      delete nextPrefs[id].agentLock;
+    }
+
+    // Clean up empty prefs objects
+    if (!Object.keys(nextPrefs[id]).length) {
+      delete nextPrefs[id];
+    }
+
+    setOpenworkSessionPrefsById(nextPrefs);
+    setOpenworkSessionPrefsWorkspaceId(workspaceId);
+    setOpenworkSessionPrefsLoaded(true);
+    writeLocalOpenworkSessionPrefs(nextPrefs);
+
+    await openworkClient.patchConfig(workspaceId, {
+      openwork: {
+        sessions: nextPrefs as unknown as Record<string, unknown>,
+      },
+    });
+  };
+
   createEffect(() => {
     const sessionId = activeSessionId();
     if (!sessionId) return;
@@ -3150,6 +3272,18 @@ export default function App() {
     return null;
   };
 
+  const inferSessionPreferredAgentLock = (title?: string | null): string | null => {
+    const normalized = (title ?? "").trim().toLowerCase();
+    if (!normalized) return null;
+    if (normalized.includes("document agent")) return "common-work";
+    if (normalized.includes("文档智能体")) return "common-work";
+    // "Bid Writer" is a guided flow that must remain on document-writer (not bid-writer).
+    if (normalized.includes("bid writer")) return "document-writer";
+    if (normalized.includes("document writer")) return "document-writer";
+    if (normalized.includes("标书写作助手")) return "document-writer";
+    return null;
+  };
+
   const openSessionInPreferredView = async (sessionId: string, options?: { title?: string | null }): Promise<void> => {
     const id = sessionId.trim();
     if (!id) return;
@@ -3162,12 +3296,23 @@ export default function App() {
     const inferred = inferSessionPreferredView(options?.title);
     const resolved = stored !== "session" ? stored : inferred ?? stored;
 
-    const storedAgent = getSessionPreferredAgent(id);
-    const inferredAgent = inferSessionPreferredAgent(options?.title);
-    const resolvedAgent = storedAgent ?? inferredAgent ?? null;
-    if (resolvedAgent !== null) {
-      setSessionAgent(id, resolvedAgent);
-      persistSessionPreferredAgent(id, resolvedAgent).catch(() => undefined);
+    const storedLock = getSessionPreferredAgentLock(id);
+    const inferredLock = inferSessionPreferredAgentLock(options?.title);
+    const resolvedLock = storedLock ?? inferredLock ?? null;
+    if (resolvedLock) {
+      if (storedLock !== resolvedLock) {
+        persistSessionPreferredAgentLock(id, resolvedLock).catch(() => undefined);
+      }
+      setSessionAgent(id, resolvedLock);
+      persistSessionPreferredAgent(id, resolvedLock).catch(() => undefined);
+    } else {
+      const storedAgent = getSessionPreferredAgent(id);
+      const inferredAgent = inferSessionPreferredAgent(options?.title);
+      const resolvedAgent = storedAgent ?? inferredAgent ?? null;
+      if (resolvedAgent !== null) {
+        setSessionAgent(id, resolvedAgent);
+        persistSessionPreferredAgent(id, resolvedAgent).catch(() => undefined);
+      }
     }
 
     setView(resolved, id);
@@ -3181,6 +3326,24 @@ export default function App() {
     if (!sessionId) return;
     void ensureOpenworkSessionPrefsLoaded()
       .then(() => {
+        const title =
+          (selectedSessionId() === sessionId ? selectedSession()?.title : null) ??
+          sessions().find((session) => session.id === sessionId)?.title ??
+          null;
+
+        const storedLock = getSessionPreferredAgentLock(sessionId);
+        const inferredLock = inferSessionPreferredAgentLock(title);
+        const resolvedLock = storedLock ?? inferredLock ?? null;
+        if (resolvedLock) {
+          if (storedLock !== resolvedLock) {
+            persistSessionPreferredAgentLock(sessionId, resolvedLock).catch(() => undefined);
+          }
+          const current = sessionAgentById()[sessionId] ?? null;
+          if (current === resolvedLock) return;
+          setSessionAgent(sessionId, resolvedLock);
+          return;
+        }
+
         const storedAgent = getSessionPreferredAgent(sessionId);
         if (!storedAgent) return;
         const current = sessionAgentById()[sessionId] ?? null;
@@ -3975,6 +4138,25 @@ export default function App() {
     const id = selectedSessionId();
     if (!id) return null;
     return sessionAgentById()[id] ?? null;
+  });
+
+  const selectedSessionAgentLock = createMemo(() => {
+    const id = selectedSessionId();
+    if (!id) return null;
+    const stored = getSessionPreferredAgentLock(id);
+    if (stored) return stored;
+    const title = selectedSession()?.title ?? sessions().find((session) => session.id === id)?.title ?? null;
+    return inferSessionPreferredAgentLock(title);
+  });
+
+  createEffect(() => {
+    const id = selectedSessionId();
+    if (!id) return;
+    const lock = selectedSessionAgentLock();
+    if (!lock) return;
+    const current = sessionAgentById()[id] ?? null;
+    if (current === lock) return;
+    setSessionAgent(id, lock);
   });
 
   const selectedSessionModelLabel = createMemo(() =>
@@ -4778,6 +4960,10 @@ export default function App() {
         options?.agent === undefined
           ? undefined
           : (options.agent?.trim() ?? "") || null;
+      const requestedAgentLock =
+        options?.agentLock === undefined
+          ? undefined
+          : (options.agentLock?.trim() ?? "") || null;
       const nextView = options?.view ?? "session";
 
       let rawResult: Awaited<ReturnType<typeof c.session.create>>;
@@ -4835,7 +5021,12 @@ export default function App() {
         }));
       }
 
-      if (requestedAgent !== undefined) {
+      if (requestedAgentLock !== undefined) {
+        if (requestedAgentLock) {
+          setSessionAgent(session.id, requestedAgentLock);
+        }
+        persistSessionPreferredAgentLock(session.id, requestedAgentLock).catch(() => undefined);
+      } else if (requestedAgent !== undefined) {
         setSessionAgent(session.id, requestedAgent);
         persistSessionPreferredAgent(session.id, requestedAgent).catch(() => undefined);
       }
@@ -6080,6 +6271,7 @@ export default function App() {
     listAgents: listAgents,
     listCommands: listCommands,
     selectedSessionAgent: selectedSessionAgent(),
+    selectedSessionAgentLock: selectedSessionAgentLock(),
     setSessionAgent: setSessionAgent,
     saveSession: saveSessionExport,
     sessionStatusById: activeSessionStatusById(),

@@ -39,6 +39,8 @@ type ComposerProps = {
   agentPickerOpen: boolean;
   agentPickerBusy: boolean;
   agentPickerError: string | null;
+  agentPickerDisabled?: boolean;
+  agentPickerDisabledReason?: string | null;
   agentOptions: Agent[];
   onToggleAgentPicker: () => void;
   onSelectAgent: (agent: string | null) => void;
@@ -1792,9 +1794,13 @@ export default function Composer(props: ComposerProps) {
                             type="button"
                             class="flex items-center gap-1.5 px-2 py-1 hover:bg-dls-hover rounded-md text-xs font-medium text-dls-secondary hover:text-dls-text"
                             onClick={props.onToggleAgentPicker}
-                            disabled={props.busy}
+                            disabled={props.busy || Boolean(props.agentPickerDisabled)}
                             aria-expanded={props.agentPickerOpen}
-                            title={tr("session.agent")}
+                            title={
+                              props.agentPickerDisabled
+                                ? props.agentPickerDisabledReason ?? tr("session.agent")
+                                : tr("session.agent")
+                            }
                           >
                             <AtSign size={14} />
                             <span class="max-w-[140px] truncate">{props.agentLabel}</span>

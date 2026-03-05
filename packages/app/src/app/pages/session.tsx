@@ -212,6 +212,7 @@ export type SessionViewProps = {
   searchFiles: (query: string) => Promise<string[]>;
   listCommands: () => Promise<{ id: string; name: string; description?: string; source?: "command" | "mcp" | "skill" }[]>;
   selectedSessionAgent: string | null;
+  selectedSessionAgentLock: string | null;
   setSessionAgent: (sessionId: string, agent: string | null) => void;
   saveSession: (sessionId: string) => Promise<string>;
   sessionStatusById: Record<string, string>;
@@ -1875,7 +1876,18 @@ export default function SessionView(props: SessionViewProps) {
     return sessionId;
   };
 
+  const agentLock = createMemo(() => props.selectedSessionAgentLock);
+  const agentLockTooltip = createMemo(() => {
+    const lock = agentLock();
+    if (!lock) return null;
+    return currentLocale() === "zh" ? `智能体已锁定：@${lock}` : `Agent locked: @${lock}`;
+  });
+
   const openAgentPicker = () => {
+    if (agentLock()) {
+      setToastMessage(agentLockTooltip() ?? "Agent locked");
+      return;
+    }
     setAgentPickerOpen((current) => !current);
     if (!agentPickerReady()) {
       void loadAgentOptions();
@@ -1883,6 +1895,11 @@ export default function SessionView(props: SessionViewProps) {
   };
 
   const applySessionAgent = async (agent: string | null) => {
+    const lock = agentLock();
+    if (lock && agent !== lock) {
+      setToastMessage(agentLockTooltip() ?? "Agent locked");
+      return;
+    }
     let sessionId = props.selectedSessionId;
     if (!sessionId) {
       // Auto-create a session when none is selected (same pattern as sendPrompt)
@@ -1891,6 +1908,11 @@ export default function SessionView(props: SessionViewProps) {
     }
     props.setSessionAgent(sessionId, agent);
   };
+
+  createEffect(() => {
+    if (!agentLock()) return;
+    setAgentPickerOpen(false);
+  });
 
   createEffect(() => {
     if (!agentPickerOpen()) return;
@@ -3480,6 +3502,8 @@ export default function SessionView(props: SessionViewProps) {
         agentPickerOpen={agentPickerOpen()}
         agentPickerBusy={agentPickerBusy()}
         agentPickerError={agentPickerError()}
+        agentPickerDisabled={Boolean(agentLock())}
+        agentPickerDisabledReason={agentLockTooltip()}
         agentOptions={agentOptions()}
         onToggleAgentPicker={openAgentPicker}
         onSelectAgent={(agent) => {

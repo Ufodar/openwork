@@ -130,6 +130,7 @@ export type View = "onboarding" | "dashboard" | "session" | "proto" | "document-
 export type CreateSessionOptions = {
   title?: string;
   agent?: string | null;
+  agentLock?: string | null;
   view?: View;
 };
 

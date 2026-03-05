@@ -128,7 +128,7 @@ export default function AgentsView(props: AgentsViewProps) {
     if (featured.id === "document-agent" || featured.id === "document-writer") {
       const fallback = featured.id === "document-agent" ? "common-work" : "document-writer";
       const agent = resolveFeaturedAgentName(featured) ?? fallback;
-      props.createSessionAndOpen({ title: tr(featured.nameKey), agent, view: "document-agent" });
+      props.createSessionAndOpen({ title: tr(featured.nameKey), agent, agentLock: agent, view: "document-agent" });
       return;
     }
 

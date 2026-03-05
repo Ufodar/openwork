@@ -484,7 +484,7 @@ function jsonResponse(data: unknown, status = 200) {
 }
 
 const LOCAL_ONLYOFFICE_DOCUMENT_SERVER_URL = "http://localhost:8080";
-const LOCAL_ONLYOFFICE_OPENWORK_PUBLIC_BASE_URL = "http://host.docker.internal:8789";
+const LOCAL_ONLYOFFICE_DOCKER_HOSTNAME = "host.docker.internal";
 
 const DEFAULT_POD_NODE_IP = "192.168.5.10";
 const DEFAULT_POD_ONLYOFFICE_PUBLIC_PORT = 32764;
@@ -582,32 +582,65 @@ function resolvePodNodeIp(): string {
 }
 
 function resolveOnlyOfficeDocumentServerUrl(): string {
-    if (resolveOnlyOfficeNetworkMode() !== "pod") return LOCAL_ONLYOFFICE_DOCUMENT_SERVER_URL;
-    const explicit = normalizeOriginUrl(process.env.OPENWORK_ONLYOFFICE_URL);
-    if (explicit && !isLoopbackOrigin(explicit)) return explicit;
+    const networkMode = resolveOnlyOfficeNetworkMode();
+    const explicit = normalizeOriginUrl(process.env.OPENWORK_ONLYOFFICE_URL ?? process.env.ONLYOFFICE_URL);
+    if (explicit) {
+        if (networkMode !== "pod" || !isLoopbackOrigin(explicit)) {
+            return explicit;
+        }
+    }
+
+    if (networkMode !== "pod") return LOCAL_ONLYOFFICE_DOCUMENT_SERVER_URL;
+
     // In pod mode we never expose loopback-only document server URLs.
     const host = resolvePodNodeIp();
     return `http://${host}:${DEFAULT_POD_ONLYOFFICE_PUBLIC_PORT}`;
 }
 
 function resolveOnlyOfficeDocumentServerInternalUrl(): string {
+    const explicit = normalizeOriginUrl(process.env.OPENWORK_ONLYOFFICE_INTERNAL_URL ?? process.env.ONLYOFFICE_INTERNAL_URL);
+    if (explicit) return explicit;
     if (resolveOnlyOfficeNetworkMode() !== "pod") return LOCAL_ONLYOFFICE_DOCUMENT_SERVER_URL;
-    return normalizeOriginUrl(process.env.OPENWORK_ONLYOFFICE_INTERNAL_URL) ?? DEFAULT_POD_ONLYOFFICE_INTERNAL_URL;
+    return DEFAULT_POD_ONLYOFFICE_INTERNAL_URL;
 }
 
 function getOnlyOfficeJwtSecret(): string {
     return (process.env.ONLYOFFICE_JWT_SECRET ?? "").trim();
 }
 
-function resolveOnlyOfficeOpenworkPublicBaseUrl(_host: string, _port: number): string {
-    if (resolveOnlyOfficeNetworkMode() !== "pod") return LOCAL_ONLYOFFICE_OPENWORK_PUBLIC_BASE_URL;
-
+function resolveOnlyOfficeOpenworkPublicBaseUrl(request: Request): string {
     const explicit =
-        normalizeBaseUrl(process.env.OPENWORK_ONLYOFFICE_PUBLIC_BASE_URL) ?? normalizeBaseUrl(process.env.OPENWORK_BASE_URL);
+        normalizeBaseUrl(process.env.ONLYOFFICE_CALLBACK_URL) ??
+        normalizeBaseUrl(process.env.OPENWORK_ONLYOFFICE_CALLBACK_URL) ??
+        normalizeBaseUrl(process.env.OPENWORK_ONLYOFFICE_PUBLIC_BASE_URL) ??
+        normalizeBaseUrl(process.env.OPENWORK_BASE_URL);
     if (explicit) return explicit;
 
-    const host = resolvePodNodeIp();
-    return `http://${host}:${DEFAULT_POD_OPENWORK_PUBLIC_PORT}${DEFAULT_POD_OPENWORK_PUBLIC_PATH}`;
+    const networkMode = resolveOnlyOfficeNetworkMode();
+    if (networkMode === "pod") {
+        const host = resolvePodNodeIp();
+        return `http://${host}:${DEFAULT_POD_OPENWORK_PUBLIC_PORT}${DEFAULT_POD_OPENWORK_PUBLIC_PATH}`;
+    }
+
+    let origin: string | null = null;
+    try {
+        origin = new URL(request.url).origin;
+    } catch {
+        origin = null;
+    }
+
+    const normalizedOrigin = normalizeBaseUrl(origin) ?? origin;
+    if (!normalizedOrigin) return `http://${LOCAL_ONLYOFFICE_DOCKER_HOSTNAME}`;
+
+    try {
+        const url = new URL(normalizedOrigin);
+        if (url.hostname === "0.0.0.0" || isLoopbackHostname(url.hostname)) {
+            url.hostname = LOCAL_ONLYOFFICE_DOCKER_HOSTNAME;
+        }
+        return url.toString().replace(/\/+$/, "");
+    } catch {
+        return normalizedOrigin;
+    }
 }
 
 function buildDocumentQuery(docId: string, sessionId?: string | null): string {
@@ -624,13 +657,13 @@ function resolveOnlyOfficeLang(request: Request): string {
     return "en";
 }
 
-function getCallbackUrl(host: string, port: number, workspaceId: string, docId: string, sessionId?: string | null): string {
-    const baseUrl = resolveOnlyOfficeOpenworkPublicBaseUrl(host, port);
+function getCallbackUrl(request: Request, workspaceId: string, docId: string, sessionId?: string | null): string {
+    const baseUrl = resolveOnlyOfficeOpenworkPublicBaseUrl(request);
     return `${baseUrl}/w/${workspaceId}/document/callback?${buildDocumentQuery(docId, sessionId)}`;
 }
 
-function getDownloadUrl(host: string, port: number, workspaceId: string, docId: string, sessionId?: string | null): string {
-    const baseUrl = resolveOnlyOfficeOpenworkPublicBaseUrl(host, port);
+function getDownloadUrl(request: Request, workspaceId: string, docId: string, sessionId?: string | null): string {
+    const baseUrl = resolveOnlyOfficeOpenworkPublicBaseUrl(request);
     return `${baseUrl}/w/${workspaceId}/document/file?${buildDocumentQuery(docId, sessionId)}`;
 }
 
@@ -1603,7 +1636,7 @@ export function createDocumentRoutes(routes: unknown[]) {
                     fileType: extname(docName).slice(1).toLowerCase(),
                     key: key,
                     title: docName,
-                    url: getDownloadUrl(ctx.config.host, ctx.config.port, workspaceId, docName, sessionId),
+                    url: getDownloadUrl(ctx.request, workspaceId, docName, sessionId),
                     permissions: {
                         download: true,
                         edit: canEdit,
@@ -1613,7 +1646,7 @@ export function createDocumentRoutes(routes: unknown[]) {
                 },
                 documentType: getDocumentType(docName),
                 editorConfig: {
-                    callbackUrl: getCallbackUrl(ctx.config.host, ctx.config.port, workspaceId, docName, sessionId),
+                    callbackUrl: getCallbackUrl(ctx.request, workspaceId, docName, sessionId),
                     user: {
                         id: ctx.actor?.clientId || "anonymous",
                         name: "AI User", // TODO: Get actual user name

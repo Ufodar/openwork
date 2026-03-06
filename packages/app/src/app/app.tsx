@@ -148,6 +148,7 @@ import {
   readOpenworkServerSettings,
   writeOpenworkServerSettings,
   clearOpenworkServerSettings,
+  type OpenworkAdminSession,
   type OpenworkAuditEntry,
   type OpenworkSoulHeartbeatEntry,
   type OpenworkSoulStatus,
@@ -164,6 +165,7 @@ import SessionView from "./pages/session";
 import ProtoWorkspacesView from "./pages/proto-workspaces";
 import ProtoV1UxView from "./pages/proto-v1-ux";
 import DocumentAgentView from "./pages/document-agent";
+import LoginView from "./pages/login";
 
 type RemoteWorkspaceDefaults = {
   openworkHostUrl?: string | null;
@@ -293,8 +295,10 @@ export default function App() {
 
   const [creatingSession, setCreatingSession] = createSignal(false);
   const [sessionViewLockUntil, setSessionViewLockUntil] = createSignal(0);
-  const currentView = createMemo<View>(() => {
+  type AppRouteView = "onboarding" | "dashboard" | "session" | "proto" | "document-agent" | "login";
+  const currentView = createMemo<AppRouteView>(() => {
     const path = location.pathname.toLowerCase();
+    if (path.startsWith("/login")) return "login";
     if (path.startsWith("/onboarding")) return "onboarding";
     if (path.startsWith("/session")) return "session";
     if (path.startsWith("/proto")) return "proto";
@@ -302,6 +306,37 @@ export default function App() {
     if (path.startsWith("/document-agent")) return "document-agent";
     return "dashboard";
   });
+  const OPENWORK_WEB_AUTH_USER_KEY = "openwork.web.auth.user";
+  const readWebAuthUser = () => {
+    if (typeof window === "undefined") return null;
+    try {
+      const raw = window.localStorage.getItem(OPENWORK_WEB_AUTH_USER_KEY);
+      const value = raw?.trim() ?? "";
+      return value || null;
+    } catch {
+      return null;
+    }
+  };
+  const writeWebAuthUser = (username: string | null) => {
+    if (typeof window === "undefined") return;
+    try {
+      const value = username?.trim() ?? "";
+      if (value) {
+        window.localStorage.setItem(OPENWORK_WEB_AUTH_USER_KEY, value);
+      } else {
+        window.localStorage.removeItem(OPENWORK_WEB_AUTH_USER_KEY);
+      }
+    } catch {
+      // ignore
+    }
+  };
+  const [webAuthUser, setWebAuthUser] = createSignal<string | null>(readWebAuthUser());
+  const setWebAuthSessionUser = (username: string | null) => {
+    const value = username?.trim() ?? "";
+    const next = value || null;
+    setWebAuthUser(next);
+    writeWebAuthUser(next);
+  };
   const isProtoV1Ux = createMemo(() =>
     location.pathname.toLowerCase().startsWith("/proto-v1-ux")
   );
@@ -2701,6 +2736,21 @@ export default function App() {
       openworkServerWorkspaceReady() &&
       (resolvedOpenworkCapabilities()?.plugins?.write ?? false),
   );
+  const requiresWebServerAuth = createMemo(() => !isTauriRuntime());
+  const hasWebAuthSession = createMemo(() => Boolean((webAuthUser() ?? "").trim()));
+  const isAdminWebUser = createMemo(() => (webAuthUser()?.trim().toLowerCase() ?? "") === "admin");
+  const openworkAccessTokenPresent = createMemo(() => Boolean((openworkServerAuth().token ?? "").trim()));
+  const openworkSessionAuthenticated = createMemo(() => {
+    if (!requiresWebServerAuth()) return true;
+    if (!hasWebAuthSession()) return false;
+    return openworkAccessTokenPresent();
+  });
+  createEffect(() => {
+    if (!requiresWebServerAuth()) return;
+    if (!hasWebAuthSession()) return;
+    if (openworkAccessTokenPresent()) return;
+    setWebAuthSessionUser(null);
+  });
   const devtoolsCapabilities = createMemo(() => openworkServerCapabilities());
   const resolvedDevtoolsWorkspaceId = createMemo(() => devtoolsWorkspaceId() ?? openworkServerWorkspaceId());
 
@@ -3540,6 +3590,118 @@ export default function App() {
     } finally {
       setOpenworkReconnectBusy(false);
     }
+  };
+
+  const authenticateWebSession = async (
+    mode: "register" | "login",
+    input: { username: string; password: string },
+  ) => {
+    if (!requiresWebServerAuth()) return;
+    const username = input.username.trim();
+    const password = input.password;
+    if (!username || !password) {
+      throw new Error("Username and password are required.");
+    }
+
+    const baseFromSettings = normalizeOpenworkServerUrl(openworkServerBaseUrl().trim()) ?? "";
+    const baseFromWindow =
+      typeof window !== "undefined" ? normalizeOpenworkServerUrl(window.location.origin) ?? "" : "";
+    const baseUrl = baseFromSettings || baseFromWindow;
+    if (!baseUrl) {
+      throw new Error("OpenWork server URL is not configured.");
+    }
+
+    const client = createOpenworkServerClient({ baseUrl });
+    const result = mode === "register"
+      ? await client.authRegister({ username, password })
+      : await client.authLogin({ username, password });
+
+    updateOpenworkServerSettings({
+      ...openworkServerSettings(),
+      urlOverride: baseUrl,
+      token: result.token,
+    });
+    setWebAuthSessionUser(result.user.username);
+    setOpenworkServerStatus("connected");
+    setOpenworkServerCheckedAt(Date.now());
+    goToDashboard("agents", { replace: true });
+  };
+
+  const openAdminSession = async (session: OpenworkAdminSession) => {
+    const openworkClient = openworkServerClient();
+    if (!openworkClient) {
+      throw new Error("OpenWork 服务未连接。");
+    }
+
+    const sessionId = session.id.trim();
+    const targetWorkspaceId = session.workspaceId.trim();
+    if (!sessionId || !targetWorkspaceId) {
+      throw new Error("会话信息不完整。");
+    }
+
+    const hostUrl = normalizeOpenworkServerUrl(openworkServerUrl().trim()) ?? "";
+    const token =
+      openworkServerSettings().token?.trim() ||
+      openworkServerAuth().token?.trim() ||
+      "";
+    if (!hostUrl || !token) {
+      throw new Error("管理员会话未连接到 OpenWork 服务。");
+    }
+
+    const workspaces = workspaceStore.workspaces();
+    const existingWorkspace = workspaces.find((workspace) =>
+      workspace.workspaceType === "remote" &&
+      workspace.remoteType === "openwork" &&
+      (workspace.openworkWorkspaceId?.trim() ?? "") === targetWorkspaceId &&
+      (normalizeOpenworkServerUrl(workspace.openworkHostUrl ?? workspace.baseUrl ?? "") ?? "") === hostUrl
+    ) ?? null;
+
+    if (existingWorkspace) {
+      const ok = await Promise.resolve(workspaceStore.activateWorkspace(existingWorkspace.id));
+      if (ok === false) {
+        throw new Error("切换到目标工作区失败。");
+      }
+    } else {
+      const activeWorkspace = workspaceStore.activeWorkspaceDisplay();
+      const canReuseActiveRemote =
+        activeWorkspace.workspaceType === "remote" &&
+        activeWorkspace.remoteType === "openwork" &&
+        (normalizeOpenworkServerUrl(activeWorkspace.openworkHostUrl ?? activeWorkspace.baseUrl ?? "") ?? "") === hostUrl;
+
+      if (canReuseActiveRemote) {
+        const ok = await workspaceStore.updateRemoteWorkspaceFlow(activeWorkspace.id, {
+          openworkHostUrl: hostUrl,
+          openworkToken: token,
+          displayName:
+            activeWorkspace.displayName ??
+            activeWorkspace.openworkWorkspaceName ??
+            activeWorkspace.name ??
+            session.workspaceName,
+          openworkWorkspaceId: targetWorkspaceId,
+        });
+        if (!ok) {
+          throw new Error("切换到目标工作区失败。");
+        }
+      } else {
+        const ok = await workspaceStore.createRemoteWorkspaceFlow({
+          openworkHostUrl: hostUrl,
+          openworkToken: token,
+          displayName: session.workspaceName,
+          openworkWorkspaceId: targetWorkspaceId,
+        });
+        if (!ok) {
+          throw new Error("创建目标工作区连接失败。");
+        }
+      }
+    }
+
+    setOpenworkServerWorkspaceId(targetWorkspaceId);
+    const activeWorkspaceId = workspaceStore.activeWorkspaceId().trim();
+    if (activeWorkspaceId) {
+      await refreshSidebarWorkspaceSessions(activeWorkspaceId);
+    }
+
+    await openSessionInPreferredView(sessionId, { title: session.title });
   };
 
   const openWorkspaceConnectionSettings = (workspaceId: string) => {
@@ -5915,7 +6077,7 @@ export default function App() {
       startProviderAuth,
       completeProviderAuthOAuth,
       submitProviderApiKey,
-      view: currentView(),
+      view: (currentView() === "login" ? "dashboard" : currentView()) as View,
       setView,
       openSessionInPreferredView,
       startupPreference: startupPreference(),
@@ -5930,6 +6092,8 @@ export default function App() {
       openworkServerStatus: openworkStatus,
       openworkServerUrl: openworkServerUrl(),
       openworkServerClient: openworkServerClient(),
+      isAdminUser: isAdminWebUser(),
+      openAdminSession,
       openworkReconnectBusy: openworkReconnectBusy(),
       reconnectOpenworkServer,
       openworkServerSettings: openworkServerSettings(),
@@ -6272,6 +6436,7 @@ export default function App() {
 
   const dashboardTabs = new Set<DashboardTab>([
     "agents",
+    "users",
     "scheduled",
     "soul",
     "skills",
@@ -6292,6 +6457,9 @@ export default function App() {
 
   const initialRoute = () => {
     if (typeof window === "undefined") return "/session";
+    if (requiresWebServerAuth()) {
+      return openworkSessionAuthenticated() ? "/dashboard/agents" : "/login";
+    }
     return "/session";
   };
 
@@ -6300,6 +6468,27 @@ export default function App() {
     const path = rawPath.toLowerCase();
     if (!path.startsWith("/session")) {
       clearQueuedDocumentAgentRedirect();
+    }
+    const isLoginRoute = path === "/login" || path.startsWith("/login/");
+    if (isLoginRoute) {
+      if (!requiresWebServerAuth()) {
+        navigate("/session", { replace: true });
+        return;
+      }
+      if (openworkSessionAuthenticated()) {
+        goToDashboard("agents", { replace: true });
+      }
+      return;
+    }
+    const requiresAuthRoute =
+      path.startsWith("/dashboard") ||
+      path.startsWith("/session") ||
+      path.startsWith("/document-writer") ||
+      path.startsWith("/document-agent") ||
+      path.startsWith("/proto");
+    if (requiresAuthRoute && requiresWebServerAuth() && !openworkSessionAuthenticated()) {
+      navigate("/login", { replace: true });
+      return;
     }
     const isKnownMissingSession = (sessionId: string) => {
       if (!sessionsLoaded()) return false;
@@ -6330,12 +6519,13 @@ export default function App() {
     if (path.startsWith("/dashboard")) {
       const [, , tabSegment] = path.split("/");
       const resolvedTab = resolveDashboardTab(tabSegment);
+      const nextTab = resolvedTab === "users" && !isAdminWebUser() ? "agents" : resolvedTab;
 
-      if (resolvedTab !== tab()) {
-        setTabState(resolvedTab);
+      if (nextTab !== tab()) {
+        setTabState(nextTab);
       }
-      if (!tabSegment || tabSegment !== resolvedTab) {
-        goToDashboard(resolvedTab, { replace: true });
+      if (!tabSegment || tabSegment !== nextTab) {
+        goToDashboard(nextTab, { replace: true });
       }
       return;
     }
@@ -6469,16 +6659,22 @@ export default function App() {
     }
 
     if (path.startsWith("/onboarding")) {
-      navigate("/session", { replace: true });
+      navigate(initialRoute(), { replace: true });
       return;
     }
 
     const fallback = activeSessionId();
-    if (fallback) {
+    if (fallback && !requiresWebServerAuth()) {
       goToSession(fallback, { replace: true });
       return;
     }
-    navigate("/session", { replace: true });
+    navigate(initialRoute(), { replace: true });
+  });
+
+  const loginProps = () => ({
+    serverStatus: openworkServerStatus(),
+    serverUrl: openworkServerUrl(),
+    onAuthenticate: authenticateWebSession,
   });
 
   return (
@@ -6496,6 +6692,9 @@ export default function App() {
         </Match>
         <Match when={currentView() === "onboarding"}>
           <OnboardingView {...onboardingProps()} />
+        </Match>
+        <Match when={currentView() === "login"}>
+          <LoginView {...loginProps()} />
         </Match>
         <Match when={currentView() === "session"}>
           <SessionView {...sessionProps()} />

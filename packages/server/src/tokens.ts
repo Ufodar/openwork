@@ -126,6 +126,43 @@ export class TokenService {
     return { id, token, scope, createdAt, label: record.label };
   }
 
+  async registerToken(
+    token: string,
+    scope: TokenScope,
+    options?: { label?: string },
+  ): Promise<{ id: string; scope: TokenScope; createdAt: number; label?: string }> {
+    await this.ensureLoaded();
+    const raw = token.trim();
+    if (!raw) {
+      throw new Error("Token is required");
+    }
+    const hash = hashToken(raw);
+    const existing = this.byHash.get(hash);
+    if (existing) {
+      return {
+        id: existing.id,
+        scope: existing.scope,
+        createdAt: existing.createdAt,
+        label: existing.label,
+      };
+    }
+
+    const id = shortId();
+    const createdAt = Date.now();
+    const record: TokenRecord = {
+      id,
+      hash,
+      scope,
+      createdAt,
+      label: options?.label?.trim() || undefined,
+    };
+
+    this.tokens = [record, ...this.tokens];
+    this.byHash.set(record.hash, record);
+    await writeTokenStore(this.path, this.tokens);
+    return { id, scope, createdAt, label: record.label };
+  }
+
   async revoke(id: string): Promise<boolean> {
     await this.ensureLoaded();
     const index = this.tokens.findIndex((token) => token.id === id);
@@ -141,6 +178,7 @@ export class TokenService {
   async scopeForToken(token: string): Promise<TokenScope | null> {
     const trimmed = token.trim();
     if (!trimmed) return null;
+    if (trimmed === this.config.hostToken) return "owner";
     if (trimmed === this.config.token) return "collaborator";
     await this.ensureLoaded();
     const found = this.byHash.get(hashToken(trimmed));

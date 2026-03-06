@@ -30,6 +30,7 @@ import {
 } from "../lib/openwork-server";
 import type {
   OpenworkAuditEntry,
+  OpenworkAdminSession,
   OpenworkSoulHeartbeatEntry,
   OpenworkSoulStatus,
   OpenworkServerClient,
@@ -49,6 +50,7 @@ import SettingsView from "./settings";
 import SkillsView from "./skills";
 import IdentitiesView from "./identities";
 import AgentsView from "./agents";
+import AdminUsersView from "./admin-users";
 import StatusBar from "../components/status-bar";
 import ProviderAuthModal, { type ProviderOAuthStartResult } from "../components/provider-auth-modal";
 import ShareWorkspaceModal from "../components/share-workspace-modal";
@@ -102,6 +104,8 @@ export type DashboardViewProps = {
   openworkServerStatus: OpenworkServerStatus;
   openworkServerUrl: string;
   openworkServerClient: OpenworkServerClient | null;
+  isAdminUser: boolean;
+  openAdminSession: (session: OpenworkAdminSession) => Promise<void>;
   openworkReconnectBusy: boolean;
   reconnectOpenworkServer: () => Promise<boolean>;
   openworkServerSettings: OpenworkServerSettings;
@@ -313,6 +317,8 @@ export default function DashboardView(props: DashboardViewProps) {
         return "Extensions";
       case "mcp":
         return "Extensions";
+      case "users":
+        return "用户会话";
       case "identities":
         return "Messaging";
       case "config":
@@ -597,6 +603,12 @@ export default function DashboardView(props: DashboardViewProps) {
     if (props.developerMode) return;
     if (props.tab !== "config") return;
     props.setTab("identities");
+  });
+
+  createEffect(() => {
+    if (props.isAdminUser) return;
+    if (props.tab !== "users") return;
+    props.setTab("agents");
   });
 
   const shareWorkspace = createMemo(() => {
@@ -1485,6 +1497,15 @@ export default function DashboardView(props: DashboardViewProps) {
               />
             </Match>
 
+            <Match when={props.tab === "users"}>
+              <AdminUsersView
+                active={props.tab === "users"}
+                enabled={props.isAdminUser}
+                client={props.openworkServerClient}
+                onOpenSession={props.openAdminSession}
+              />
+            </Match>
+
             <Match when={props.tab === "settings"}>
                 <SettingsView
                   startupPreference={props.startupPreference}
@@ -1667,6 +1688,17 @@ export default function DashboardView(props: DashboardViewProps) {
               <Bot size={18} />
               {tr("dashboard.agents")}
             </button>
+            <Show when={props.isAdminUser}>
+              <button
+                class={`flex flex-col items-center gap-1 text-xs ${
+                  props.tab === "users" ? "text-gray-12" : "text-gray-10"
+                }`}
+                onClick={() => props.setTab("users")}
+              >
+                <span class="text-xs font-semibold leading-none">管</span>
+                用户会话
+              </button>
+            </Show>
             {/* <button
               class={`flex flex-col items-center gap-1 text-xs ${
                 props.tab === "scheduled" ? "text-gray-12" : "text-gray-10"
@@ -1730,6 +1762,9 @@ export default function DashboardView(props: DashboardViewProps) {
       <aside class="w-56 hidden md:flex flex-col bg-dls-sidebar border-l border-dls-border p-4">
         <div class="space-y-1 pt-2">
           {navItem("agents", tr("dashboard.agents"), <Bot size={18} />)}
+          <Show when={props.isAdminUser}>
+            {navItem("users", "用户会话", <span class="w-4 text-center text-xs font-semibold">管</span>)}
+          </Show>
           {/* {navItem("scheduled", "Automations", <History size={18} />)} */}
           {/* {navItem("soul", "Soul", <HeartPulse size={18} class={soulNavIconClass()} />)} */}
           {/* {navItem("skills", "Skills", <Zap size={18} />)} */}

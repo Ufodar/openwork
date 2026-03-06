@@ -1,7 +1,12 @@
 import type { MessageWithParts } from "../../types";
 import type { Part } from "@opencode-ai/sdk/v2/client";
 
-import type { ToolMonitorFinding, ToolMonitorToolCall, ToolMonitorTurnReport } from "./types";
+import type {
+  ToolMonitorFinding,
+  ToolMonitorRetrospective,
+  ToolMonitorToolCall,
+  ToolMonitorTurnReport,
+} from "./types";
 import { renderToolMonitorMarkdown } from "./markdown";
 
 type ToolPartRecord = Part & {
@@ -36,6 +41,21 @@ const safeJsonPreview = (value: unknown, max = 900) => {
   } catch {
     return "";
   }
+};
+
+const uniqueTrimmed = (items: string[], max = 8) => {
+  const next: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of items) {
+    const value = raw.trim();
+    if (!value) continue;
+    const key = value.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    next.push(value);
+    if (next.length >= max) break;
+  }
+  return next;
 };
 
 const toolErrorText = (part: ToolPartRecord) => {
@@ -148,6 +168,178 @@ const buildFindings = (calls: ToolMonitorToolCall[]) => {
   return findings;
 };
 
+const classifyErrorKind = (message: string) => {
+  const lowered = message.toLowerCase();
+  if (
+    lowered.includes("invalid tool") ||
+    lowered.includes("unknown tool") ||
+    lowered.includes("tool not found") ||
+    lowered.includes("unavailable tool")
+  ) {
+    return "invalid_tool";
+  }
+  if (
+    lowered.includes("permission") ||
+    lowered.includes("forbidden") ||
+    lowered.includes("denied") ||
+    lowered.includes("not allowed")
+  ) {
+    return "permission";
+  }
+  if (lowered.includes("timeout") || lowered.includes("timed out")) return "timeout";
+  if (lowered.includes("rate limit") || lowered.includes("429")) return "rate_limit";
+  if (lowered.includes("invalid json") || lowered.includes("schema") || lowered.includes("parse")) return "payload";
+  return "generic";
+};
+
+const avoidanceTipForError = (message: string) => {
+  const kind = classifyErrorKind(message);
+  if (kind === "invalid_tool") {
+    return "Validate available tools before the first call and keep a strict allow-list for tool names.";
+  }
+  if (kind === "permission") {
+    return "Pre-check required permissions and fail fast with a clear permission request before execution.";
+  }
+  if (kind === "timeout") {
+    return "Split the task into smaller calls and add a lightweight preflight call before heavy operations.";
+  }
+  if (kind === "rate_limit") {
+    return "Throttle repeated calls and add retry with backoff instead of immediate retries.";
+  }
+  if (kind === "payload") {
+    return "Validate input shape locally before dispatching the tool call.";
+  }
+  return "Use a short preflight call to validate assumptions before committing to a long tool sequence.";
+};
+
+const inferScenarioFromTool = (tool: string): string | null => {
+  const lowered = tool.toLowerCase();
+  if (
+    lowered.includes("read") ||
+    lowered.includes("find") ||
+    lowered.includes("search") ||
+    lowered.includes("list") ||
+    lowered.includes("glob")
+  ) {
+    return "Discovery-heavy tasks where quick context gathering is required.";
+  }
+  if (
+    lowered.includes("write") ||
+    lowered.includes("edit") ||
+    lowered.includes("patch") ||
+    lowered.includes("create") ||
+    lowered.includes("replace")
+  ) {
+    return "Document or code change tasks that need controlled edits.";
+  }
+  if (
+    lowered.includes("test") ||
+    lowered.includes("lint") ||
+    lowered.includes("build") ||
+    lowered.includes("typecheck")
+  ) {
+    return "Verification-focused tasks before merge or release.";
+  }
+  if (lowered.includes("fetch") || lowered.includes("http") || lowered.includes("request")) {
+    return "External integration checks and API verification flows.";
+  }
+  return null;
+};
+
+const buildShortestPath = (calls: ToolMonitorToolCall[]) => {
+  const completed = calls.filter((call) => call.status === "completed");
+  const fallback = calls.filter((call) => call.status !== "error");
+  const source = (completed.length ? completed : fallback).filter((call) => call.tool.trim());
+
+  const compact: ToolMonitorToolCall[] = [];
+  for (const call of source) {
+    if (compact[compact.length - 1]?.tool === call.tool) continue;
+    compact.push(call);
+    if (compact.length >= 4) break;
+  }
+
+  if (!compact.length) {
+    return [
+      "Define output + acceptance criteria before any tool call.",
+      "Run one targeted call that directly advances the output.",
+      "Validate immediately and stop when acceptance criteria are met.",
+    ];
+  }
+
+  return compact.map((call, index) => {
+    const note = call.title && call.title !== call.tool ? ` (${truncateText(call.title, 96)})` : "";
+    if (index === 0) return `Start with ${call.tool}${note} to establish the minimum required context.`;
+    if (index === compact.length - 1) return `Finish with ${call.tool}${note} to finalize and verify the outcome.`;
+    return `Then run ${call.tool}${note} for the core execution step.`;
+  });
+};
+
+const buildRetrospective = (
+  calls: ToolMonitorToolCall[],
+  findings: ToolMonitorFinding[],
+  trigger: ToolMonitorRetrospective["trigger"],
+): ToolMonitorRetrospective => {
+  const errorCalls = calls.filter((call) => call.status === "error");
+  const completedCalls = calls.filter((call) => call.status === "completed");
+
+  const errorsEncountered = errorCalls.slice(0, 8).map((call) => {
+    const message = truncateText(call.errorText || call.subtitle || call.title || "Tool call failed.", 240);
+    return {
+      tool: call.tool,
+      message,
+      avoidNextTime: avoidanceTipForError(message),
+    };
+  });
+
+  const preventionChecklist = uniqueTrimmed(
+    [
+      ...errorsEncountered.map((item) => item.avoidNextTime),
+      errorCalls.length > 0
+        ? "Insert a short preflight check before the first irreversible tool call."
+        : "Reuse this turn's successful tool order as the default path for similar tasks.",
+    ],
+    8,
+  );
+
+  const lessonCandidates: string[] = [];
+  if (errorCalls.length > 0 && completedCalls.length > 0) {
+    lessonCandidates.push("The run recovered after failures; fallback behavior is working and should be formalized.");
+  }
+  if (errorCalls.length > 0 && completedCalls.length === 0) {
+    lessonCandidates.push("Errors blocked completion; preflight validation should happen before execution.");
+  }
+  if (errorCalls.length === 0 && completedCalls.length > 0) {
+    lessonCandidates.push("This turn stayed stable end-to-end and is a good candidate for a reusable template.");
+  }
+  if (findings.some((item) => item.code === "invalid_tool_call")) {
+    lessonCandidates.push("Tool-name validation needs to happen earlier to avoid avoidable detours.");
+  }
+
+  const applicableScenarios = uniqueTrimmed(
+    [
+      ...calls.map((call) => inferScenarioFromTool(call.tool) ?? ""),
+      errorCalls.length > 0 ? "Troubleshooting tasks where recovery after a failed step matters." : "",
+    ],
+    8,
+  );
+
+  return {
+    trigger,
+    errorsEncountered,
+    preventionChecklist,
+    lessonsLearned: uniqueTrimmed(
+      lessonCandidates.length
+        ? lessonCandidates
+        : ["Keep goals narrow and use the minimum viable tool sequence to avoid drift."],
+      8,
+    ),
+    applicableScenarios: applicableScenarios.length
+      ? applicableScenarios
+      : ["General tool-assisted execution where concise, low-detour workflows are preferred."],
+    shortestPath: buildShortestPath(calls),
+  };
+};
+
 export function buildToolMonitorTurnReport(input: {
   sessionId: string;
   agent: string;
@@ -158,6 +350,7 @@ export function buildToolMonitorTurnReport(input: {
   userParts?: Part[];
   createdAt?: number;
   developerMode?: boolean;
+  trigger?: ToolMonitorRetrospective["trigger"];
 }): ToolMonitorTurnReport {
   const createdAt = typeof input.createdAt === "number" ? input.createdAt : Date.now();
   const tools = extractToolCalls(input.assistantParts);
@@ -174,6 +367,7 @@ export function buildToolMonitorTurnReport(input: {
     }).length;
 
   const findings = buildFindings(tools);
+  const trigger = input.trigger === "manual_excellent" ? "manual_excellent" : "auto";
   const report: ToolMonitorTurnReport = {
     schemaVersion: 1,
     createdAt,
@@ -190,6 +384,7 @@ export function buildToolMonitorTurnReport(input: {
     assistantTextPreview: pickTextPreviewFromParts(input.assistantParts) || undefined,
     tools,
     findings,
+    retrospective: buildRetrospective(tools, findings, trigger),
     markdown: "",
     ...(input.developerMode
       ? {
@@ -247,4 +442,3 @@ export function detectInvalidToolParts(parts: Part[]) {
 export function getToolMonitorDebugSnapshot(report: ToolMonitorTurnReport) {
   return safeJsonPreview(report, 5000);
 }
-

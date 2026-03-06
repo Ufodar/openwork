@@ -8,7 +8,10 @@ import TextInput from "../components/text-input";
 
 import { RefreshCcw } from "lucide-solid";
 
-import { buildOpenworkWorkspaceBaseUrl, parseOpenworkWorkspaceIdFromUrl } from "../lib/openwork-server";
+import {
+  buildOpenworkWorkspaceBaseUrl,
+  parseOpenworkWorkspaceIdFromUrl,
+} from "../lib/openwork-server";
 import type { OpenworkServerSettings, OpenworkServerStatus } from "../lib/openwork-server";
 import type { OpenworkServerInfo } from "../lib/tauri";
 

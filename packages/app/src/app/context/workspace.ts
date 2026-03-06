@@ -1699,6 +1699,7 @@ export function createWorkspaceStore(options: {
   async function createRemoteWorkspaceFlow(input: {
     openworkHostUrl?: string | null;
     openworkToken?: string | null;
+    openworkWorkspaceId?: string | null;
     directory?: string | null;
     displayName?: string | null;
     manageBusy?: boolean;
@@ -1756,6 +1757,7 @@ export function createWorkspaceStore(options: {
         resolved = await resolveOpenworkHost({
           hostUrl,
           token,
+          workspaceId: input.openworkWorkspaceId ?? null,
           directoryHint: directory || null,
         });
       } catch (error) {
@@ -1834,7 +1836,7 @@ export function createWorkspaceStore(options: {
           remoteType,
           openworkHostUrl: remoteType === "openwork" ? resolvedHostUrl : null,
           openworkToken: remoteType === "openwork" ? (token || null) : null,
-          openworkWorkspaceId: remoteType === "openwork" ? openworkWorkspace?.id ?? null : null,
+          openworkWorkspaceId: remoteType === "openwork" ? openworkWorkspace?.id ?? input.openworkWorkspaceId ?? null : null,
           openworkWorkspaceName: remoteType === "openwork" ? openworkWorkspace?.name ?? null : null,
           sandboxBackend: input.sandboxBackend ?? null,
           sandboxRunId: input.sandboxRunId ?? null,
@@ -1857,7 +1859,7 @@ export function createWorkspaceStore(options: {
           displayName,
           openworkHostUrl: remoteType === "openwork" ? resolvedHostUrl : null,
           openworkToken: remoteType === "openwork" ? (token || null) : null,
-          openworkWorkspaceId: remoteType === "openwork" ? openworkWorkspace?.id ?? null : null,
+          openworkWorkspaceId: remoteType === "openwork" ? openworkWorkspace?.id ?? input.openworkWorkspaceId ?? null : null,
           openworkWorkspaceName: remoteType === "openwork" ? openworkWorkspace?.name ?? null : null,
           sandboxBackend: input.sandboxBackend ?? null,
           sandboxRunId: input.sandboxRunId ?? null,
@@ -1916,6 +1918,7 @@ export function createWorkspaceStore(options: {
     input: {
       openworkHostUrl?: string | null;
       openworkToken?: string | null;
+      openworkWorkspaceId?: string | null;
       directory?: string | null;
       displayName?: string | null;
     },
@@ -1967,7 +1970,7 @@ export function createWorkspaceStore(options: {
       const resolved = await resolveOpenworkHost({
         hostUrl,
         token,
-        workspaceId: workspace.openworkWorkspaceId ?? null,
+        workspaceId: input.openworkWorkspaceId ?? workspace.openworkWorkspaceId ?? null,
         directoryHint: directory || null,
       });
       if (resolved.kind !== "openwork") {
@@ -2025,7 +2028,7 @@ export function createWorkspaceStore(options: {
           displayName,
           openworkHostUrl: resolvedHostUrl,
           openworkToken: token ? token : null,
-          openworkWorkspaceId: openworkWorkspace?.id ?? workspace.openworkWorkspaceId ?? null,
+          openworkWorkspaceId: openworkWorkspace?.id ?? input.openworkWorkspaceId ?? workspace.openworkWorkspaceId ?? null,
           openworkWorkspaceName: openworkWorkspace?.name ?? workspace.openworkWorkspaceName ?? null,
         });
         setWorkspaces(ws.workspaces);
@@ -2045,7 +2048,7 @@ export function createWorkspaceStore(options: {
                 displayName,
                 openworkHostUrl: resolvedHostUrl,
                 openworkToken: token ? token : null,
-                openworkWorkspaceId: openworkWorkspace?.id ?? item.openworkWorkspaceId ?? null,
+                openworkWorkspaceId: openworkWorkspace?.id ?? input.openworkWorkspaceId ?? item.openworkWorkspaceId ?? null,
                 openworkWorkspaceName: openworkWorkspace?.name ?? item.openworkWorkspaceName ?? null,
               }
             : item,

@@ -18,7 +18,9 @@ import {
   shouldAnalyzeForAgent,
 } from "../lib/tool-monitor/analyze";
 import type { ToolMonitorTurnReport } from "../lib/tool-monitor/types";
+import { renderToolMonitorMarkdown } from "../lib/tool-monitor/markdown";
 import { uploadSessionMarkdownReport } from "../lib/tool-monitor/persist";
+import { requestToolMonitorModelRetrospective } from "../lib/tool-monitor/reflect";
 
 type DocumentItem = {
   name: string;
@@ -529,6 +531,7 @@ export default function DocumentAgentView(props: SessionViewProps) {
   const [todoExpanded, setTodoExpanded] = createSignal(false);
   const [toolMonitorExpanded, setToolMonitorExpanded] = createSignal(false);
   const [toolMonitorReports, setToolMonitorReports] = createSignal<ToolMonitorTurnReport[]>([]);
+  const [toolMonitorManualTriggerBusy, setToolMonitorManualTriggerBusy] = createSignal(false);
   let lastToolMonitorAssistantMessageId: string | null = null;
   const todoList = createMemo(() => (props.todos ?? []).filter((todo) => todo.content.trim()));
   const todoCount = createMemo(() => todoList().length);
@@ -1381,10 +1384,25 @@ export default function DocumentAgentView(props: SessionViewProps) {
       .replace(/^_+|_+$/g, "")
       .slice(0, 90);
 
-  const toolMonitorReportPath = (assistantMessageId: string, createdAt: number) => {
+  const toolMonitorReportPath = (
+    assistantMessageId: string,
+    createdAt: number,
+    options?: { trigger?: "auto" | "manual_excellent" },
+  ) => {
     const iso = new Date(createdAt).toISOString().replace(/[:.]/g, "-");
     const safeId = sanitizeReportToken(assistantMessageId) || "assistant";
-    return `reports/tool-monitor/${iso}_${safeId}.md`;
+    const suffix = options?.trigger === "manual_excellent" ? "_excellent" : "";
+    return `reports/tool-monitor/${iso}_${safeId}${suffix}.md`;
+  };
+
+  const upsertToolMonitorReport = (report: ToolMonitorTurnReport, persisted?: ToolMonitorTurnReport["persisted"]) => {
+    setToolMonitorReports((current) => {
+      const existing = current.find((item) => item.assistantMessageId === report.assistantMessageId);
+      const nextPersisted = persisted ?? existing?.persisted ?? report.persisted;
+      const nextReport = nextPersisted ? { ...report, persisted: nextPersisted } : report;
+      const rest = current.filter((item) => item.assistantMessageId !== report.assistantMessageId);
+      return [nextReport, ...rest].slice(0, 24);
+    });
   };
 
   const updateReportPersisted = (assistantMessageId: string, persisted: ToolMonitorTurnReport["persisted"]) => {
@@ -1396,7 +1414,7 @@ export default function DocumentAgentView(props: SessionViewProps) {
     );
   };
 
-  const analyzeAndPersistToolMonitorTurn = async () => {
+  const analyzeAndPersistToolMonitorTurn = async (options?: { force?: boolean; trigger?: "auto" | "manual_excellent" }) => {
     if (!toolMonitorActive()) return;
 
     const sid = sessionId();
@@ -1407,11 +1425,13 @@ export default function DocumentAgentView(props: SessionViewProps) {
 
     const assistantMessageId = (assistantTurn.message.info as any)?.id;
     if (typeof assistantMessageId !== "string" || !assistantMessageId.trim()) return;
-    if (assistantMessageId === lastToolMonitorAssistantMessageId) return;
+    if (!options?.force && assistantMessageId === lastToolMonitorAssistantMessageId) return;
     lastToolMonitorAssistantMessageId = assistantMessageId;
 
     const completedAtRaw = (assistantTurn.message.info as any)?.time?.completed;
-    const createdAt = typeof completedAtRaw === "number" && Number.isFinite(completedAtRaw) ? completedAtRaw : Date.now();
+    const completedAt = typeof completedAtRaw === "number" && Number.isFinite(completedAtRaw) ? completedAtRaw : Date.now();
+    const trigger = options?.trigger === "manual_excellent" ? "manual_excellent" : "auto";
+    const createdAt = trigger === "manual_excellent" ? Date.now() : completedAt;
 
     const userTurn = selectNearestUserMessage(props.messages ?? [], assistantTurn.index);
     const userMessageId = (userTurn?.message.info as any)?.id;
@@ -1426,11 +1446,12 @@ export default function DocumentAgentView(props: SessionViewProps) {
       userParts: userTurn?.message.parts ?? [],
       createdAt,
       developerMode: props.developerMode,
+      trigger,
     });
 
-    const path = toolMonitorReportPath(assistantMessageId, createdAt);
+    const path = toolMonitorReportPath(assistantMessageId, createdAt, { trigger });
     const pendingPersisted = { path, status: "pending" as const };
-    setToolMonitorReports((current) => [{ ...report, persisted: pendingPersisted }, ...current].slice(0, 24));
+    upsertToolMonitorReport(report, pendingPersisted);
 
     const cfg = apiConfig();
     if (!cfg) {
@@ -1438,13 +1459,32 @@ export default function DocumentAgentView(props: SessionViewProps) {
       return;
     }
 
+    const reflected = await requestToolMonitorModelRetrospective({
+      baseUrl: cfg.baseUrl,
+      token: cfg.token,
+      workspaceId: cfg.workspaceId,
+      sessionId: sid,
+      assistantMessageId,
+      agent: props.selectedSessionAgent ?? "unknown",
+      messages: props.messages ?? [],
+      tools: report.tools,
+      fallback: report.retrospective,
+    });
+
+    const finalReport: ToolMonitorTurnReport = {
+      ...report,
+      retrospective: reflected.retrospective,
+    };
+    finalReport.markdown = renderToolMonitorMarkdown(finalReport, { includeDebug: Boolean(props.developerMode) });
+    upsertToolMonitorReport(finalReport, pendingPersisted);
+
     const persisted = await uploadSessionMarkdownReport({
       baseUrl: cfg.baseUrl,
       token: cfg.token,
       workspaceId: cfg.workspaceId,
       sessionId: cfg.sessionId,
       path,
-      content: report.markdown,
+      content: finalReport.markdown,
     });
 
     updateReportPersisted(
@@ -1466,6 +1506,17 @@ export default function DocumentAgentView(props: SessionViewProps) {
       { defer: true },
     ),
   );
+
+  const triggerExcellentToolMonitorRun = async () => {
+    if (!toolMonitorActive()) return;
+    if (toolMonitorManualTriggerBusy()) return;
+    setToolMonitorManualTriggerBusy(true);
+    try {
+      await analyzeAndPersistToolMonitorTurn({ force: true, trigger: "manual_excellent" });
+    } finally {
+      setToolMonitorManualTriggerBusy(false);
+    }
+  };
 
   onCleanup(() => {
     clearPdfPreviewUrl();
@@ -2087,6 +2138,8 @@ export default function DocumentAgentView(props: SessionViewProps) {
           expanded={toolMonitorExpanded()}
           setExpanded={setToolMonitorExpanded}
           openDocument={(path) => setActiveDoc(path)}
+          triggerBusy={toolMonitorManualTriggerBusy()}
+          onTriggerExcellentRun={triggerExcellentToolMonitorRun}
         />
 
         <Show when={todoCount() > 0}>

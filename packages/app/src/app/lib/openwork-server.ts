@@ -56,6 +56,57 @@ export type OpenworkServerSettings = {
   token?: string;
 };
 
+export type OpenworkAuthUser = {
+  id: string;
+  username: string;
+  createdAt: number;
+  lastLoginAt?: number | null;
+};
+
+export type OpenworkAuthResponse = {
+  ok: boolean;
+  token: string;
+  user: OpenworkAuthUser;
+};
+
+export type OpenworkAdminWarning = {
+  workspaceId: string;
+  workspaceName: string;
+  message: string;
+};
+
+export type OpenworkAdminUser = {
+  id: string;
+  username: string;
+  createdAt: number;
+  lastLoginAt: number | null;
+  isAdmin: boolean;
+  sessionCount: number;
+};
+
+export type OpenworkAdminUsersResponse = {
+  items: OpenworkAdminUser[];
+  warnings: OpenworkAdminWarning[];
+};
+
+export type OpenworkAdminSession = {
+  id: string;
+  title: string;
+  slug: string | null;
+  directory: string | null;
+  createdAt: number | null;
+  updatedAt: number | null;
+  workspaceId: string;
+  workspaceName: string;
+  workspaceType: "local" | "remote";
+};
+
+export type OpenworkAdminUserSessionsResponse = {
+  user: OpenworkAdminUser;
+  items: OpenworkAdminSession[];
+  warnings: OpenworkAdminWarning[];
+};
+
 export type OpenworkWorkspaceInfo = {
   id: string;
   name: string;
@@ -663,7 +714,7 @@ export function hydrateOpenworkServerSettingsFromEnv() {
     const currentUrlNormalized = normalizeOpenworkServerUrl(current.urlOverride ?? "") ?? "";
     const envUrlNormalized = normalizeOpenworkServerUrl(envUrl) ?? "";
     const isDevMode = Boolean(import.meta.env?.DEV);
-    const allowEnvTokenOverride = isDevMode;
+    const canHydrateEnvToken = isTauriRuntime();
 
     // In web dev mode (e.g. pod + vite), always trust env URL so stale browser
     // localStorage cannot keep the app pointed at an old worker endpoint.
@@ -681,22 +732,9 @@ export function hydrateOpenworkServerSettingsFromEnv() {
     }
 
     if (envToken) {
-      // In web dev mode, always refresh token from env to avoid "Limited access"
-      // after worker restarts or when browser cache has an old token.
-      if (isDevMode) {
-        if ((current.token?.trim() ?? "") !== envToken) {
-          next.token = envToken;
-          changed = true;
-        }
-      }
-
-      const sameTarget =
-        Boolean(envUrlNormalized) &&
-        (!currentUrlNormalized || currentUrlNormalized === envUrlNormalized);
-      if (
-        !isDevMode &&
-        (!current.token || (allowEnvTokenOverride && sameTarget && current.token?.trim() !== envToken))
-      ) {
+      // For web clients, require explicit login/token input in Config.
+      // Keep env token hydration only for desktop-hosted flows.
+      if (canHydrateEnvToken && (current.token?.trim() ?? "") !== envToken) {
         next.token = envToken;
         changed = true;
       }
@@ -1023,6 +1061,7 @@ export function createOpenworkServerClient(options: { baseUrl: string; token?: s
     deleteWorkspace: 10_000,
     deleteSession: 12_000,
     status: 6_000,
+    admin: 12_000,
     config: 10_000,
     opencodeRouter: 10_000,
     workspaceExport: 30_000,
@@ -1033,6 +1072,32 @@ export function createOpenworkServerClient(options: { baseUrl: string; token?: s
   return {
     baseUrl,
     token,
+    authRegister: (input: { username: string; password: string }) =>
+      requestJson<OpenworkAuthResponse>(baseUrl, "/auth/register", {
+        method: "POST",
+        body: input,
+      }),
+    authLogin: (input: { username: string; password: string }) =>
+      requestJson<OpenworkAuthResponse>(baseUrl, "/auth/login", {
+        method: "POST",
+        body: input,
+      }),
+    adminListUsers: () =>
+      requestJson<OpenworkAdminUsersResponse>(baseUrl, "/admin/users", {
+        token,
+        hostToken,
+        timeoutMs: timeouts.admin,
+      }),
+    adminListUserSessions: (userId: string) =>
+      requestJson<OpenworkAdminUserSessionsResponse>(
+        baseUrl,
+        `/admin/users/${encodeURIComponent(userId)}/sessions`,
+        {
+          token,
+          hostToken,
+          timeoutMs: timeouts.admin,
+        },
+      ),
     health: () =>
       requestJson<{ ok: boolean; version: string; uptimeMs: number }>(baseUrl, "/health", { token, hostToken, timeoutMs: timeouts.health }),
     status: () => requestJson<OpenworkServerDiagnostics>(baseUrl, "/status", { token, hostToken, timeoutMs: timeouts.status }),

@@ -22,6 +22,21 @@ export type ToolMonitorFinding = {
   relatedPartIds?: string[];
 };
 
+export type ToolMonitorRetrospectiveError = {
+  tool: string;
+  message: string;
+  avoidNextTime: string;
+};
+
+export type ToolMonitorRetrospective = {
+  trigger: "auto" | "manual_excellent";
+  errorsEncountered: ToolMonitorRetrospectiveError[];
+  preventionChecklist: string[];
+  lessonsLearned: string[];
+  applicableScenarios: string[];
+  shortestPath: string[];
+};
+
 export type ToolMonitorTurnReport = {
   schemaVersion: 1;
   createdAt: number;
@@ -38,6 +53,7 @@ export type ToolMonitorTurnReport = {
   assistantTextPreview?: string;
   tools: ToolMonitorToolCall[];
   findings: ToolMonitorFinding[];
+  retrospective: ToolMonitorRetrospective;
   markdown: string;
   persisted?: {
     path: string;

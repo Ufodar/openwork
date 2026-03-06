@@ -69,6 +69,11 @@ describe("TokenService", () => {
     expect(scope).toBe("collaborator");
   });
 
+  test("resolves scope for built-in host token", async () => {
+    const scope = await service.scopeForToken("test-host-token");
+    expect(scope).toBe("owner");
+  });
+
   test("returns null for unknown token", async () => {
     const scope = await service.scopeForToken("unknown-token");
     expect(scope).toBeNull();

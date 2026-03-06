@@ -12,6 +12,8 @@ export type ToolMonitorPanelProps = {
   expanded: boolean;
   setExpanded: (next: boolean) => void;
   openDocument?: (path: string) => void;
+  triggerBusy?: boolean;
+  onTriggerExcellentRun?: () => void | Promise<void>;
 };
 
 const compactReportLabel = (report: ToolMonitorTurnReport) => {
@@ -93,6 +95,19 @@ export default function ToolMonitorPanel(props: ToolMonitorPanelProps) {
 
           <Show when={props.expanded}>
             <div class="px-4 pb-3 space-y-3 max-h-80 overflow-auto border-t border-gray-6/50">
+              <Show when={props.onTriggerExcellentRun}>
+                <div class="pt-3">
+                  <button
+                    type="button"
+                    class="text-[11px] px-2.5 py-1.5 rounded-lg border border-green-7/40 bg-green-3/25 text-green-11 hover:bg-green-3/35 disabled:opacity-60 disabled:cursor-not-allowed"
+                    disabled={Boolean(props.triggerBusy)}
+                    onClick={() => void props.onTriggerExcellentRun?.()}
+                  >
+                    {props.triggerBusy ? "Generating..." : "Great run: trigger reflection + shortest path"}
+                  </button>
+                </div>
+              </Show>
+
               <Show
                 when={props.reports.length > 0}
                 fallback={<div class="pt-3 text-xs text-gray-8">Waiting for the next completed turn…</div>}

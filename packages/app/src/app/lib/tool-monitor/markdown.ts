@@ -31,6 +31,7 @@ export function renderToolMonitorMarkdown(
     `toolCalls: ${report.summary.toolCalls}`,
     `toolErrors: ${report.summary.toolErrors}`,
     `invalidToolCalls: ${report.summary.invalidToolCalls}`,
+    `trigger: ${report.retrospective.trigger}`,
     "---",
   ]
     .filter(Boolean)
@@ -40,6 +41,7 @@ export function renderToolMonitorMarkdown(
     `- Tool calls: **${report.summary.toolCalls}**`,
     `- Tool errors: **${report.summary.toolErrors}**`,
     `- Invalid tool calls: **${report.summary.invalidToolCalls}**`,
+    `- Trigger: **${report.retrospective.trigger === "manual_excellent" ? "Manual (Excellent Run)" : "Auto (Turn Complete)"}**`,
   ];
 
   const findings = report.findings.length
@@ -74,6 +76,31 @@ export function renderToolMonitorMarkdown(
       })
       .join("\n\n")
     : "_No tool calls recorded in assistant message._";
+
+  const errorsEncountered = report.retrospective.errorsEncountered.length
+    ? report.retrospective.errorsEncountered
+      .map(
+        (item, index) =>
+          `${index + 1}. **${escapeInline(item.tool)}**\n   - Error: ${escapeInline(item.message)}\n   - Avoid next time: ${escapeInline(item.avoidNextTime)}`,
+      )
+      .join("\n")
+    : "_No major tool errors were captured in this turn._";
+
+  const preventionChecklist = report.retrospective.preventionChecklist.length
+    ? report.retrospective.preventionChecklist.map((item) => `- ${item}`).join("\n")
+    : "- _No prevention checklist available._";
+
+  const lessonsLearned = report.retrospective.lessonsLearned.length
+    ? report.retrospective.lessonsLearned.map((item) => `- ${item}`).join("\n")
+    : "- _No explicit lessons captured._";
+
+  const applicableScenarios = report.retrospective.applicableScenarios.length
+    ? report.retrospective.applicableScenarios.map((item) => `- ${item}`).join("\n")
+    : "- _No scenario suggestions available._";
+
+  const shortestPath = report.retrospective.shortestPath.length
+    ? report.retrospective.shortestPath.map((step, index) => `${index + 1}. ${step}`).join("\n")
+    : "_No shortest path generated._";
 
   const conversation = (() => {
     const user = (report.userTextPreview ?? "").trim();
@@ -111,6 +138,22 @@ export function renderToolMonitorMarkdown(
     "## Findings",
     findings,
     "",
+    "## Retrospective",
+    "### Errors Encountered",
+    errorsEncountered,
+    "",
+    "### How To Avoid Next Time",
+    preventionChecklist,
+    "",
+    "### Lessons Learned",
+    lessonsLearned,
+    "",
+    "### Applicable Scenarios",
+    applicableScenarios,
+    "",
+    "### Shortest Path",
+    shortestPath,
+    "",
     "## Tool Calls",
     toolRows,
     debug ? `\n\n${debug}\n` : "",
@@ -118,4 +161,3 @@ export function renderToolMonitorMarkdown(
     .filter(Boolean)
     .join("\n");
 }
-

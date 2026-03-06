@@ -469,9 +469,11 @@ export default function PartView(props: Props) {
   const panelBgClass = () => (tone() === "dark" ? "bg-gray-2/10" : "bg-gray-2/30");
   const toolOnly = () => true;
   const showToolOutput = () => true;
+  const normalizeMarkdownSource = (value: string) => value.replace(/^[\s\u00A0]+/, "");
   const markdownSource = createMemo(() => {
     if (!renderMarkdown() || p().type !== "text") return "";
-    return "text" in p() ? String((p() as { text: string }).text ?? "") : "";
+    const raw = "text" in p() ? String((p() as { text: string }).text ?? "") : "";
+    return normalizeMarkdownSource(raw);
   });
   const throttledMarkdownSource = useThrottledValue(markdownSource, markdownThrottleMs);
   const renderedMarkdown = createMemo(() => {

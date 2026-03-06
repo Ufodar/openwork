@@ -1864,6 +1864,60 @@ export function createDocumentRoutes(routes: unknown[]) {
 
     routes.push({
         method: "POST",
+        regex: /^\/w\/([^/]+)\/document\/move$/,
+        keys: ["id"],
+        auth: "client",
+        handler: async (ctx: RequestContext) => {
+            const workspaceId = ctx.params.id;
+            const sessionId = parseDocumentSessionId(ctx.url.searchParams.get("session"));
+            const workspace = ctx.config.workspaces.find((w: WorkspaceInfo) => w.id === workspaceId);
+            if (!workspace) throw new ApiError(404, "not_found", "Workspace not found");
+
+            const payload = (await ctx.request.json().catch(() => null)) as any;
+            const fromRequested = typeof payload?.from === "string" ? payload.from : "";
+            const toRequested = typeof payload?.to === "string" ? payload.to : "";
+            const fromPath = normalizeDocumentPath(fromRequested);
+            const toPath = normalizeDocumentPath(toRequested);
+            if (!fromPath) throw new ApiError(400, "invalid_request", "Source path is required");
+            if (!toPath) throw new ApiError(400, "invalid_request", "Target path is required");
+            if (fromPath === toPath) throw new ApiError(400, "invalid_request", "Source and target paths are the same");
+
+            const docsDir = resolveDocumentsDir(workspace.path, sessionId);
+            await ensureDir(docsDir);
+
+            const fromAbs = resolveDocumentPathSafe(docsDir, fromPath);
+            if (!(await exists(fromAbs))) throw new ApiError(404, "not_found", "Source path not found");
+            const fromInfo = await stat(fromAbs);
+            if (!fromInfo.isFile() && !fromInfo.isDirectory()) {
+                throw new ApiError(400, "invalid_request", "Source path must be a file or folder");
+            }
+            const isDirectory = fromInfo.isDirectory();
+
+            if (isDirectory) {
+                validateDocumentMutationPath(fromPath);
+                validateDocumentMutationPath(toPath);
+                if (toPath === fromPath || toPath.startsWith(`${fromPath}/`)) {
+                    throw new ApiError(400, "invalid_request", "Cannot move a folder into itself");
+                }
+            } else {
+                validateDocumentMutationPath(fromPath, { allowHiddenLeafFile: true });
+                validateDocumentMutationPath(toPath, { allowHiddenLeafFile: true });
+            }
+
+            const toAbs = resolveDocumentPathSafe(docsDir, toPath);
+            if (await exists(toAbs)) {
+                throw new ApiError(409, "conflict", "Target path already exists");
+            }
+
+            await ensureDir(dirname(toAbs));
+            await rename(fromAbs, toAbs);
+
+            return jsonResponse({ ok: true, from: fromPath, to: toPath, isDirectory });
+        },
+    });
+
+    routes.push({
+        method: "POST",
         regex: /^\/w\/([^/]+)\/document\/delete$/,
         keys: ["id"],
         auth: "client",

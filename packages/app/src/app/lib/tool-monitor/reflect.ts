@@ -111,34 +111,13 @@ const parseJsonFromText = (value: string) => {
   return null;
 };
 
-const buildMessagesContext = (messages: MessageWithParts[], _focusAssistantMessageId: string) => {
+const buildMessagesContext = (messages: MessageWithParts[]) => {
   return messages.map((message) => {
     const info = (message.info ?? {}) as Record<string, unknown>;
-    const role = typeof info.role === "string" ? info.role : "unknown";
-    const id = typeof info.id === "string" ? info.id : "";
-    const text = (message.parts ?? [])
-      .filter((part) => part.type === "text")
-      .map((part) => {
-        const value = (part as any)?.text;
-        return typeof value === "string" ? value : "";
-      })
-      .filter(Boolean)
-      .join("\n\n");
-    const tools = (message.parts ?? [])
-      .filter((part) => part.type === "tool")
-      .map((part) => {
-        const tool = typeof (part as any)?.tool === "string" ? (part as any).tool : "tool";
-        const status = typeof (part as any)?.state?.status === "string" ? (part as any).state.status : "unknown";
-        const title = typeof (part as any)?.state?.title === "string" ? (part as any).state.title : "";
-        return { tool: truncateText(tool, 100), status: truncateText(status, 24), title: truncateText(title, 140) };
-      });
-
-    return {
-      id,
-      role,
-      text: truncateText(text, 650),
-      tools,
-    };
+    const parts = (message.parts ?? []).filter(
+      (part) => part.type === "text" || part.type === "reasoning" || part.type === "tool",
+    );
+    return { info, parts };
   });
 };
 
@@ -164,13 +143,15 @@ const buildReflectionPrompt = (input: {
     agent: input.agent,
     assistantMessageId: input.assistantMessageId,
     trigger: input.trigger,
-    recentConversation: buildMessagesContext(input.messages, input.assistantMessageId),
+    sessionMessages: buildMessagesContext(input.messages),
     latestTurnTools: buildToolContext(input.tools),
   };
 
   return [
-    "You are a strict execution reviewer for an AI coding agent.",
-    "Analyze the provided session context and identify where the agent made mistakes, drifted, or took unnecessary detours.",
+    "You are a strict execution reviewer subagent for an AI coding agent.",
+    "You are running in a child analysis session and must analyze the parent session context provided below.",
+    "The context includes messages and tool parts from the main session only.",
+    "Figure out the root causes, detours, and recovery quality from raw evidence.",
     "Return JSON only (no markdown, no explanation) using this exact schema:",
     '{\"errorsEncountered\":[{\"tool\":\"string\",\"message\":\"string\",\"avoidNextTime\":\"string\"}],\"preventionChecklist\":[\"string\"],\"lessonsLearned\":[\"string\"],\"applicableScenarios\":[\"string\"],\"shortestPath\":[\"string\"],\"patchSuggestions\":[{\"target\":\"string\",\"section\":\"string\",\"action\":\"add|modify|remove\",\"suggestion\":\"string\",\"evidence\":\"string\"}]}',
     "Rules:",
@@ -193,15 +174,6 @@ const parseErrorMessage = async (response: Response) => {
   } catch {
     return fallback;
   }
-};
-
-const buildServerUrl = (baseUrl: string, pathname: string, query?: URLSearchParams) => {
-  const parsed = new URL(baseUrl);
-  const basePath = parsed.pathname.replace(/\/+$/, "");
-  const normalizedPath = pathname.startsWith("/") ? pathname : `/${pathname}`;
-  parsed.pathname = `${basePath}${normalizedPath}`.replace(/\/{2,}/g, "/");
-  parsed.search = query ? query.toString() : "";
-  return parsed.toString();
 };
 
 const requestJson = async <T>(url: string, token: string, init?: RequestInit): Promise<T> => {
@@ -321,7 +293,10 @@ export async function requestToolMonitorModelRetrospective(input: {
   try {
     const created = await requestJson<{ id?: string }>(createUrl, input.token, {
       method: "POST",
-      body: JSON.stringify({ title: "Tool Monitor Reflection (temp)" }),
+      body: JSON.stringify({
+        title: "Tool Monitor Reflection",
+        parentID: input.sessionId,
+      }),
     });
     reflectionSessionId = typeof created?.id === "string" ? created.id.trim() : "";
     if (!reflectionSessionId) {
@@ -356,17 +331,5 @@ export async function requestToolMonitorModelRetrospective(input: {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Model reflection failed.";
     return { retrospective: input.fallback, source: "fallback", error: message };
-  } finally {
-    if (reflectionSessionId) {
-      const cleanupUrl = buildServerUrl(
-        input.baseUrl,
-        `/workspace/${encodeURIComponent(input.workspaceId)}/sessions/${encodeURIComponent(reflectionSessionId)}`,
-      );
-      try {
-        await requestJson<unknown>(cleanupUrl, input.token, { method: "DELETE" });
-      } catch {
-        // no-op
-      }
-    }
   }
 }

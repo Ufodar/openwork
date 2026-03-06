@@ -1,6 +1,6 @@
 import { For, Show, createEffect, createMemo, createResource, createSignal, on, onCleanup } from "solid-js";
 import type { Agent } from "@opencode-ai/sdk/v2/client";
-import { ArrowLeft, AtSign, Check, ChevronDown, ChevronRight, Download, FileText, Folder, FolderOpen, FolderPlus, ListTodo, Minimize2, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Trash2 } from "lucide-solid";
+import { ArrowLeft, AtSign, Check, ChevronDown, ChevronRight, Download, FileText, Folder, FolderOpen, FolderPlus, ListTodo, Minimize2, MoveRight, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Trash2 } from "lucide-solid";
 import { useNavigate } from "@solidjs/router";
 
 import type { ComposerDraft, SlashCommandOption } from "../types";
@@ -270,6 +270,22 @@ const parentDirPath = (path: string) => {
   if (!normalized) return "";
   const index = normalized.lastIndexOf("/");
   return index === -1 ? "" : normalized.slice(0, index);
+};
+
+const remapPathAfterMove = (
+  value: string | null,
+  fromPath: string,
+  toPath: string,
+  options?: { isDirectory?: boolean },
+) => {
+  const normalized = normalizeRelativePath(value ?? "", "");
+  if (!normalized) return null;
+  if (normalized === fromPath) return toPath;
+  if (!options?.isDirectory) return normalized;
+  const prefix = `${fromPath}/`;
+  if (!normalized.startsWith(prefix)) return normalized;
+  const suffix = normalized.slice(prefix.length);
+  return suffix ? `${toPath}/${suffix}` : toPath;
 };
 
 function buildFileTree(items: DocumentItem[], directories: string[]): FileTreeNode[] {
@@ -549,6 +565,7 @@ export default function DocumentAgentView(props: SessionViewProps) {
   const [uploadProgress, setUploadProgress] = createSignal<UploadProgressState | null>(null);
   const [deleteBusyPath, setDeleteBusyPath] = createSignal<string | null>(null);
   const [downloadBusyPath, setDownloadBusyPath] = createSignal<string | null>(null);
+  const [moveBusyPath, setMoveBusyPath] = createSignal<string | null>(null);
   const [activeFolder, setActiveFolder] = createSignal("");
   const [lastSessionStatus, setLastSessionStatus] = createSignal(props.sessionStatus ?? "idle");
   const [nearBottom, setNearBottom] = createSignal(true);
@@ -568,6 +585,27 @@ export default function DocumentAgentView(props: SessionViewProps) {
 
   const documentsList = createMemo(() => documents()?.items ?? []);
   const documentDirs = createMemo(() => documents()?.dirs ?? []);
+  const documentFileSet = createMemo(
+    () =>
+      new Set(
+        documentsList()
+          .map((item) => normalizeRelativePath(item.name, ""))
+          .filter(Boolean),
+      ),
+  );
+  const documentDirSet = createMemo(
+    () =>
+      new Set(
+        documentDirs()
+          .map((dir) => normalizeRelativePath(dir, ""))
+          .filter(Boolean),
+      ),
+  );
+  const documentPathExists = (path: string) => {
+    const normalized = normalizeRelativePath(path, "");
+    if (!normalized) return false;
+    return documentFileSet().has(normalized) || documentDirSet().has(normalized);
+  };
   const refreshDocumentsKeepingScroll = async () => {
     const previousScrollTop = documentsScrollEl?.scrollTop ?? 0;
     await refetchDocuments();
@@ -690,6 +728,19 @@ export default function DocumentAgentView(props: SessionViewProps) {
             aria-label={nodeProps.node.isDirectory ? tr("docagent.download_folder") : tr("docagent.download_file")}
           >
             <Download size={12} />
+          </button>
+          <button
+            type="button"
+            class="p-1 rounded hover:bg-dls-active text-dls-secondary hover:text-dls-text disabled:opacity-50"
+            onClick={(event) => {
+              event.stopPropagation();
+              void moveDocumentNode(nodeProps.node.path, { isDirectory: nodeProps.node.isDirectory });
+            }}
+            disabled={Boolean(moveBusyPath())}
+            title={nodeProps.node.isDirectory ? tr("docagent.move_folder") : tr("docagent.move_file")}
+            aria-label={nodeProps.node.isDirectory ? tr("docagent.move_folder") : tr("docagent.move_file")}
+          >
+            <MoveRight size={12} />
           </button>
           <button
             type="button"
@@ -1011,6 +1062,194 @@ export default function DocumentAgentView(props: SessionViewProps) {
       setToastMessage(message);
     } finally {
       setUploadBusy(false);
+    }
+  };
+
+  const moveDocumentNode = async (from: string, options?: { isDirectory?: boolean }) => {
+    const cfg = apiConfig();
+    const fromPath = normalizeRelativePath(from, "");
+    if (!cfg || !fromPath) return;
+    if (moveBusyPath()) return;
+
+    const isDirectory = Boolean(options?.isDirectory);
+    const promptLabel = isDirectory
+      ? trf("docagent.move_folder_prompt", { path: fromPath })
+      : trf("docagent.move_file_prompt", { path: fromPath });
+    const input = window.prompt(promptLabel, fromPath);
+    if (input == null) return;
+    const toPath = normalizeRelativePath(input, "");
+    if (!toPath) {
+      setToastMessage(tr("docagent.move_path_required"));
+      return;
+    }
+    if (toPath === fromPath) {
+      setToastMessage(tr("docagent.move_path_same"));
+      return;
+    }
+    if (documentPathExists(toPath)) {
+      setToastMessage(tr("docagent.move_target_exists"));
+      return;
+    }
+    if (isDirectory && (toPath === fromPath || toPath.startsWith(`${fromPath}/`))) {
+      setToastMessage(tr("docagent.move_folder_into_self"));
+      return;
+    }
+
+    const moveRouteMissing = (error: unknown) => {
+      if (!(error instanceof Error)) return false;
+      const raw = error.message.trim();
+      if (!raw) return false;
+      if (raw.toLowerCase() === "not found") return true;
+      try {
+        const parsed = JSON.parse(raw) as { code?: unknown; message?: unknown } | null;
+        const code = typeof parsed?.code === "string" ? parsed.code.trim().toLowerCase() : "";
+        const message = typeof parsed?.message === "string" ? parsed.message.trim().toLowerCase() : "";
+        return code === "not_found" && message === "not found";
+      } catch {
+        return false;
+      }
+    };
+
+    const copyFileViaApi = async (sourcePath: string, destinationPath: string) => {
+      const query = new URLSearchParams();
+      query.set("docId", sourcePath);
+      query.set("session", cfg.sessionId);
+      const downloadUrl = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/file", query);
+      const headers = new Headers();
+      if (cfg.token) headers.set("Authorization", `Bearer ${cfg.token}`);
+      const response = await fetch(downloadUrl, { headers });
+      if (!response.ok) {
+        throw new Error(await parseErrorMessage(response));
+      }
+      const blob = await response.blob();
+      const uploadQuery = new URLSearchParams();
+      uploadQuery.set("session", cfg.sessionId);
+      const uploadUrl = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/upload", uploadQuery);
+      const form = new FormData();
+      form.append("file", blob, destinationPath.split("/").pop() ?? "file");
+      form.append("path", destinationPath);
+      await fetchJson(uploadUrl, cfg.token, {
+        method: "POST",
+        body: form,
+      });
+    };
+
+    const deleteFileViaApi = async (filePath: string) => {
+      const query = new URLSearchParams();
+      query.set("session", cfg.sessionId);
+      const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/delete", query);
+      await fetchJson(url, cfg.token, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: filePath }),
+      });
+    };
+
+    const createFolderViaApi = async (folderPath: string) => {
+      const query = new URLSearchParams();
+      query.set("session", cfg.sessionId);
+      const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/mkdir", query);
+      await fetchJson(url, cfg.token, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: folderPath }),
+      });
+    };
+
+    const removeFolderViaApi = async (folderPath: string) => {
+      const query = new URLSearchParams();
+      query.set("session", cfg.sessionId);
+      const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/rmdir", query);
+      await fetchJson(url, cfg.token, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: folderPath }),
+      });
+    };
+
+    const fallbackMoveFile = async () => {
+      await copyFileViaApi(fromPath, toPath);
+      await deleteFileViaApi(fromPath);
+    };
+
+    const fallbackMoveFolder = async () => {
+      await createFolderViaApi(toPath);
+      const fromPrefix = `${fromPath}/`;
+      const files = documentsList()
+        .map((item) => normalizeRelativePath(item.name, ""))
+        .filter((name) => Boolean(name) && name.startsWith(fromPrefix))
+        .sort((a, b) => a.localeCompare(b));
+      for (const source of files) {
+        const suffix = source.slice(fromPrefix.length);
+        if (!suffix) continue;
+        const destination = `${toPath}/${suffix}`;
+        if (documentPathExists(destination)) {
+          throw new Error(tr("docagent.move_target_exists"));
+        }
+        await copyFileViaApi(source, destination);
+      }
+      await removeFolderViaApi(fromPath);
+    };
+
+    setMoveBusyPath(fromPath);
+    setToastMessage(null);
+    try {
+      const query = new URLSearchParams();
+      query.set("session", cfg.sessionId);
+      const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/move", query);
+      try {
+        await fetchJson(url, cfg.token, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ from: fromPath, to: toPath }),
+        });
+      } catch (error) {
+        if (!moveRouteMissing(error)) throw error;
+        if (isDirectory) {
+          await fallbackMoveFolder();
+        } else {
+          await fallbackMoveFile();
+        }
+      }
+
+      const remap = (value: string | null) => remapPathAfterMove(value, fromPath, toPath, { isDirectory });
+      const nextTarget = remap(targetDoc());
+      const nextActive = remap(activeDoc());
+      const nextFolder = remap(activeFolder());
+
+      setTargetDoc(nextTarget);
+      setActiveDoc(nextActive);
+      setActiveFolder(nextFolder ?? parentDirPath(toPath));
+
+      if (isDirectory) {
+        setExpandedFolders((prev) => {
+          const next = new Set<string>();
+          for (const path of prev) {
+            const mapped = remapPathAfterMove(path, fromPath, toPath, { isDirectory: true });
+            if (!mapped) continue;
+            next.add(mapped);
+          }
+          return next;
+        });
+        expandFolderPath(toPath);
+      } else {
+        const toParent = parentDirPath(toPath);
+        if (toParent) expandFolderPath(toParent);
+      }
+
+      await refetchDocuments();
+      setToastMessage(
+        (isDirectory ? tr("docagent.moved_folder") : tr("docagent.moved_file")).replace("{path}", toPath),
+      );
+    } catch (error) {
+      const message = error instanceof Error
+        ? error.message
+        : isDirectory
+          ? tr("docagent.failed_move_folder")
+          : tr("docagent.failed_move_file");
+      setToastMessage(message);
+    } finally {
+      setMoveBusyPath(null);
     }
   };
 

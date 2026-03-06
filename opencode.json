@@ -177,6 +177,13 @@
         "BOCAI_API_KEY": "{env:BOCAI_API_KEY}",
         "BOCAI_API_URL": "{env:BOCAI_API_URL}"
       }
+    },
+    "ragflow": {
+      "type": "remote",
+      "url": "http://192.168.2.35:30467/sse",
+      "headers": {
+        "Authorization": "Bearer ragflow-gxUFI3kz9FNaFFqwktSncGIq8g4erPmuYK_DcixIV7Q"
+      }
     }
   },
   "model": "my-company/Kimi-K2.5",

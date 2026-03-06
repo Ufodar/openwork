@@ -611,7 +611,9 @@ export default function MessageList(props: MessageListProps) {
     const StepItem = (itemProps: { part: Part }) => {
       const isReasoning = () => itemProps.part.type === "reasoning";
       const [toolExpanded, setToolExpanded] = createSignal(false);
-      const showContent = () => isReasoning() || toolExpanded();
+      // Reasoning steps already render an inline summary card in StepRow.
+      // Keep the expandable PartView for tool steps only to avoid duplicated "Thinking" content.
+      const showContent = () => !isReasoning() && toolExpanded();
 
       return (
         <div>
@@ -986,7 +988,7 @@ export default function MessageList(props: MessageListProps) {
                         ? "max-w-full px-3.5 py-2.5 rounded-2xl bg-gray-3 text-gray-12 text-[14px] leading-normal"
                         : "max-w-2xl px-6 py-4 rounded-[24px] bg-gray-3 text-gray-12 text-[15px] leading-relaxed")
                       : (props.compact
-                        ? "w-full text-[14px] leading-6 text-gray-12 group"
+                        ? "w-full text-[13px] leading-6 text-gray-12 group"
                         : "max-w-[68ch] text-[15px] leading-7 text-gray-12 group pl-2")
                     } ${searchOutlineClass}`}
                 >
@@ -1015,7 +1017,7 @@ export default function MessageList(props: MessageListProps) {
                       ? "max-w-full px-3.5 py-2.5 rounded-2xl bg-gray-3 text-gray-12 text-[14px] leading-normal"
                       : "max-w-2xl px-6 py-4 rounded-[24px] bg-gray-3 text-gray-12 text-[15px] leading-relaxed")
                     : (props.compact
-                      ? "w-full text-[14px] leading-6 text-gray-12 group"
+                      ? "w-full text-[13px] leading-6 text-gray-12 group"
                       : "max-w-[68ch] text-[15px] leading-7 text-gray-12 group pl-2")
                   } ${searchOutlineClass}`}
               >

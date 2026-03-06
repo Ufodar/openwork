@@ -1,6 +1,7 @@
 import {
   Match,
   Switch,
+  batch,
   createEffect,
   createMemo,
   createSignal,
@@ -506,6 +507,11 @@ export default function App() {
 
   const openworkServerAuth = createMemo(
     () => {
+      if (!isTauriRuntime()) {
+        const settingsToken = openworkServerSettings().token?.trim() ?? "";
+        return { token: settingsToken || undefined, hostToken: undefined };
+      }
+
       const pref = startupPreference();
       const hostInfo = openworkServerHostInfo();
       const settingsToken = openworkServerSettings().token?.trim() ?? "";
@@ -2745,11 +2751,30 @@ export default function App() {
     if (!hasWebAuthSession()) return false;
     return openworkAccessTokenPresent();
   });
+  const clearInvalidWebAuthSession = () => {
+    const current = openworkServerSettings();
+    setWebAuthSessionUser(null);
+    updateOpenworkServerSettings({
+      ...current,
+      token: undefined,
+    });
+  };
   createEffect(() => {
     if (!requiresWebServerAuth()) return;
     if (!hasWebAuthSession()) return;
     if (openworkAccessTokenPresent()) return;
-    setWebAuthSessionUser(null);
+    clearInvalidWebAuthSession();
+  });
+  createEffect(() => {
+    if (!requiresWebServerAuth()) return;
+    if (!hasWebAuthSession()) return;
+    if (!openworkAccessTokenPresent()) return;
+    if (!openworkServerCheckedAt()) return;
+    if (openworkServerStatus() !== "limited") return;
+    clearInvalidWebAuthSession();
+    if (currentView() !== "login") {
+      navigate("/login", { replace: true });
+    }
   });
   const devtoolsCapabilities = createMemo(() => openworkServerCapabilities());
   const resolvedDevtoolsWorkspaceId = createMemo(() => devtoolsWorkspaceId() ?? openworkServerWorkspaceId());
@@ -3616,14 +3641,16 @@ export default function App() {
       ? await client.authRegister({ username, password })
       : await client.authLogin({ username, password });
 
-    updateOpenworkServerSettings({
-      ...openworkServerSettings(),
-      urlOverride: baseUrl,
-      token: result.token,
+    batch(() => {
+      updateOpenworkServerSettings({
+        ...openworkServerSettings(),
+        urlOverride: baseUrl,
+        token: result.token,
+      });
+      setWebAuthSessionUser(result.user.username);
+      setOpenworkServerStatus("connected");
+      setOpenworkServerCheckedAt(Date.now());
     });
-    setWebAuthSessionUser(result.user.username);
-    setOpenworkServerStatus("connected");
-    setOpenworkServerCheckedAt(Date.now());
     goToDashboard("agents", { replace: true });
   };
 

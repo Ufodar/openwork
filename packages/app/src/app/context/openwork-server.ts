@@ -68,6 +68,11 @@ export function createOpenworkServerStore(options: {
   });
 
   const auth = createMemo(() => {
+    if (!isTauriRuntime()) {
+      const settingsToken = settings().token?.trim() ?? "";
+      return { token: settingsToken || undefined, hostToken: undefined };
+    }
+
     const pref = options.startupPreference();
     const info = hostInfo();
     const settingsToken = settings().token?.trim() ?? "";

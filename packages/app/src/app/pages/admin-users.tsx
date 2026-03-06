@@ -37,6 +37,7 @@ export default function AdminUsersView(props: AdminUsersViewProps) {
   const [warnings, setWarnings] = createSignal<OpenworkAdminWarning[]>([]);
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
+  const [initialLoadAttempted, setInitialLoadAttempted] = createSignal(false);
   const [expandedUserId, setExpandedUserId] = createSignal<string | null>(null);
   const [sessionsByUserId, setSessionsByUserId] = createSignal<Record<string, OpenworkAdminSession[]>>({});
   const [sessionWarningsByUserId, setSessionWarningsByUserId] = createSignal<Record<string, OpenworkAdminWarning[]>>({});
@@ -122,8 +123,18 @@ export default function AdminUsersView(props: AdminUsersViewProps) {
   };
 
   createEffect(() => {
-    if (!props.active || !props.enabled) return;
-    if (users().length || busy()) return;
+    props.client;
+    if (!props.enabled) {
+      setInitialLoadAttempted(false);
+      return;
+    }
+    setInitialLoadAttempted(false);
+  });
+
+  createEffect(() => {
+    if (!props.active || !props.enabled || !props.client) return;
+    if (initialLoadAttempted()) return;
+    setInitialLoadAttempted(true);
     void loadUsers();
   });
 

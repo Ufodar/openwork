@@ -28,6 +28,14 @@ export type ToolMonitorRetrospectiveError = {
   avoidNextTime: string;
 };
 
+export type ToolMonitorPatchSuggestion = {
+  target: string;
+  section: string;
+  action: "add" | "modify" | "remove";
+  suggestion: string;
+  evidence: string;
+};
+
 export type ToolMonitorRetrospective = {
   trigger: "auto" | "manual_excellent";
   errorsEncountered: ToolMonitorRetrospectiveError[];
@@ -35,6 +43,7 @@ export type ToolMonitorRetrospective = {
   lessonsLearned: string[];
   applicableScenarios: string[];
   shortestPath: string[];
+  patchSuggestions: ToolMonitorPatchSuggestion[];
 };
 
 export type ToolMonitorTurnReport = {

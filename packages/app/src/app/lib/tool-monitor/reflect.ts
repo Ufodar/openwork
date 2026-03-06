@@ -1,5 +1,5 @@
 import type { MessageWithParts } from "../../types";
-import type { ToolMonitorRetrospective, ToolMonitorToolCall } from "./types";
+import type { ToolMonitorPatchSuggestion, ToolMonitorRetrospective, ToolMonitorToolCall } from "./types";
 import { buildWorkspaceUrl } from "./persist";
 
 type ReflectionCallResult = {
@@ -47,6 +47,29 @@ const normalizeErrors = (value: unknown, fallback: ToolMonitorRetrospective["err
     seen.add(key);
     next.push({ tool, message, avoidNextTime });
     if (next.length >= 8) break;
+  }
+  return next.length ? next : fallback;
+};
+
+const normalizePatchSuggestions = (value: unknown, fallback: ToolMonitorPatchSuggestion[]): ToolMonitorPatchSuggestion[] => {
+  if (!Array.isArray(value)) return fallback;
+  const next: ToolMonitorPatchSuggestion[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const target = truncateText(typeof (item as any).target === "string" ? (item as any).target : "", 200);
+    const section = truncateText(typeof (item as any).section === "string" ? (item as any).section : "", 200);
+    const rawAction = typeof (item as any).action === "string" ? (item as any).action.trim().toLowerCase() : "";
+    const action: ToolMonitorPatchSuggestion["action"] =
+      rawAction === "add" || rawAction === "modify" || rawAction === "remove" ? rawAction : "add";
+    const suggestion = truncateText(typeof (item as any).suggestion === "string" ? (item as any).suggestion : "", 500);
+    const evidence = truncateText(typeof (item as any).evidence === "string" ? (item as any).evidence : "", 400);
+    if (!target || !suggestion) continue;
+    const key = `${target.toLowerCase()}|${suggestion.toLowerCase().slice(0, 60)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    next.push({ target, section, action, suggestion, evidence });
+    if (next.length >= 6) break;
   }
   return next.length ? next : fallback;
 };
@@ -149,12 +172,13 @@ const buildReflectionPrompt = (input: {
     "You are a strict execution reviewer for an AI coding agent.",
     "Analyze the provided session context and identify where the agent made mistakes, drifted, or took unnecessary detours.",
     "Return JSON only (no markdown, no explanation) using this exact schema:",
-    '{\"errorsEncountered\":[{\"tool\":\"string\",\"message\":\"string\",\"avoidNextTime\":\"string\"}],\"preventionChecklist\":[\"string\"],\"lessonsLearned\":[\"string\"],\"applicableScenarios\":[\"string\"],\"shortestPath\":[\"string\"]}',
+    '{\"errorsEncountered\":[{\"tool\":\"string\",\"message\":\"string\",\"avoidNextTime\":\"string\"}],\"preventionChecklist\":[\"string\"],\"lessonsLearned\":[\"string\"],\"applicableScenarios\":[\"string\"],\"shortestPath\":[\"string\"],\"patchSuggestions\":[{\"target\":\"string\",\"section\":\"string\",\"action\":\"add|modify|remove\",\"suggestion\":\"string\",\"evidence\":\"string\"}]}',
     "Rules:",
     "- Base your analysis only on the provided context.",
     "- Mention concrete mistakes and how to avoid them.",
     "- shortestPath must be the minimum viable step sequence to reach the same outcome, max 5 steps.",
-    "- If there are no clear errors, still provide lessons and shortestPath.",
+    "- patchSuggestions: propose specific changes to agent instructions or skill files. target is a file path (e.g., '.opencode/agent/document-writer.md' or '.opencode/skills/docx/SKILL.md'). section is the section name to modify. action is add/modify/remove. suggestion is the concrete text to add or change. evidence is the tool call or error that justifies this change. Max 4 suggestions, only for clear improvements.",
+    "- If there are no clear errors, still provide lessons, shortestPath, and patchSuggestions.",
     "Context JSON:",
     JSON.stringify(context, null, 2),
   ].join("\n");
@@ -259,6 +283,7 @@ const mergeWithFallback = (
     lessonsLearned: normalizeStringList(parsed.lessonsLearned, fallback.lessonsLearned),
     applicableScenarios: normalizeStringList(parsed.applicableScenarios, fallback.applicableScenarios),
     shortestPath: normalizeStringList(parsed.shortestPath, fallback.shortestPath, 5, 240),
+    patchSuggestions: normalizePatchSuggestions(parsed.patchSuggestions, fallback.patchSuggestions),
   };
 };
 

@@ -3,6 +3,7 @@ import type { Part } from "@opencode-ai/sdk/v2/client";
 
 import type {
   ToolMonitorFinding,
+  ToolMonitorPatchSuggestion,
   ToolMonitorRetrospective,
   ToolMonitorToolCall,
   ToolMonitorTurnReport,
@@ -274,6 +275,80 @@ const buildShortestPath = (calls: ToolMonitorToolCall[]) => {
   });
 };
 
+const buildPatchSuggestions = (
+  calls: ToolMonitorToolCall[],
+  findings: ToolMonitorFinding[],
+): ToolMonitorPatchSuggestion[] => {
+  const suggestions: ToolMonitorPatchSuggestion[] = [];
+
+  // Detect repeated bash failures with scripts (code generation reflex)
+  const bashErrors = calls.filter(
+    (c) => c.status === "error" && c.tool === "bash" && c.errorText,
+  );
+  const scriptCreationErrors = bashErrors.filter((c) => {
+    const input = typeof c.input === "object" && c.input ? JSON.stringify(c.input) : "";
+    return /python.*-c|node.*-e|\.py\b|\.js\b|\.sh\b/i.test(input);
+  });
+  if (scriptCreationErrors.length >= 2) {
+    suggestions.push({
+      target: ".opencode/agent/document-writer.md",
+      section: "Core Principles / Principle #7",
+      action: "modify",
+      suggestion: `Agent generated scripts ${scriptCreationErrors.length} times and failed. Strengthen the no-script constraint with concrete error pattern: "${truncateText(scriptCreationErrors[0].errorText ?? "", 120)}"`,
+      evidence: `${scriptCreationErrors.length} failed bash calls with script generation (parts: ${scriptCreationErrors.map((c) => c.partId).join(", ")})`,
+    });
+  }
+
+  // Detect invalid tool calls — agent tried tools that don't exist
+  const invalidFindings = findings.filter((f) => f.code === "invalid_tool_call");
+  for (const finding of invalidFindings) {
+    suggestions.push({
+      target: ".opencode/agent/document-writer.md",
+      section: "Available Skills",
+      action: "add",
+      suggestion: `Agent attempted non-existent tool. Add explicit note: "${finding.title}" is not available. Use the correct alternative.`,
+      evidence: finding.detail,
+    });
+  }
+
+  // Detect repeated failures on same operation (2-strike pattern)
+  const errorsByTool = new Map<string, ToolMonitorToolCall[]>();
+  for (const call of calls.filter((c) => c.status === "error")) {
+    const existing = errorsByTool.get(call.tool) ?? [];
+    existing.push(call);
+    errorsByTool.set(call.tool, existing);
+  }
+  for (const [tool, errors] of errorsByTool) {
+    if (errors.length >= 3) {
+      suggestions.push({
+        target: ".opencode/agent/document-writer.md",
+        section: "Error Handling / 2-Strike Rule",
+        action: "modify",
+        suggestion: `Tool "${tool}" failed ${errors.length} times in one turn. The 2-strike rule may need reinforcement or the agent is not reading it. Consider adding a concrete example for this failure pattern.`,
+        evidence: `${errors.length} failures: ${errors.map((e) => truncateText(e.errorText ?? "", 80)).join(" | ")}`,
+      });
+    }
+  }
+
+  // Detect docx-related errors that could improve the docx skill
+  const docxErrors = bashErrors.filter((c) => {
+    const combined = `${JSON.stringify(c.input ?? "")} ${c.errorText ?? ""}`.toLowerCase();
+    return combined.includes("docx") || combined.includes("xml") || combined.includes("unpack") || combined.includes("pack");
+  });
+  if (docxErrors.length > 0) {
+    const errorSummary = docxErrors.map((c) => truncateText(c.errorText ?? "", 100)).join(" | ");
+    suggestions.push({
+      target: ".opencode/skills/docx/SKILL.md",
+      section: "Common Pitfalls",
+      action: "add",
+      suggestion: `New docx error pattern encountered. Consider adding pitfall entry: "${truncateText(errorSummary, 200)}"`,
+      evidence: `${docxErrors.length} docx-related bash error(s) in this turn`,
+    });
+  }
+
+  return suggestions.slice(0, 6);
+};
+
 const buildRetrospective = (
   calls: ToolMonitorToolCall[],
   findings: ToolMonitorFinding[],
@@ -337,6 +412,7 @@ const buildRetrospective = (
       ? applicableScenarios
       : ["General tool-assisted execution where concise, low-detour workflows are preferred."],
     shortestPath: buildShortestPath(calls),
+    patchSuggestions: buildPatchSuggestions(calls, findings),
   };
 };
 

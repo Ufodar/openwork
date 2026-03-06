@@ -102,6 +102,20 @@ export function renderToolMonitorMarkdown(
     ? report.retrospective.shortestPath.map((step, index) => `${index + 1}. ${step}`).join("\n")
     : "_No shortest path generated._";
 
+  const patchSuggestions = report.retrospective.patchSuggestions.length
+    ? report.retrospective.patchSuggestions
+      .map((patch, index) => {
+        const actionLabel = patch.action === "add" ? "➕ Add" : patch.action === "modify" ? "✏️ Modify" : "🗑️ Remove";
+        return [
+          `${index + 1}. **${escapeInline(patch.target)}** → ${patch.section ? escapeInline(patch.section) : "(general)"}`,
+          `   - Action: ${actionLabel}`,
+          `   - Suggestion: ${escapeInline(patch.suggestion)}`,
+          patch.evidence ? `   - Evidence: ${escapeInline(patch.evidence)}` : "",
+        ].filter(Boolean).join("\n");
+      })
+      .join("\n")
+    : "_No patch suggestions for this turn._";
+
   const conversation = (() => {
     const user = (report.userTextPreview ?? "").trim();
     const assistant = (report.assistantTextPreview ?? "").trim();
@@ -153,6 +167,9 @@ export function renderToolMonitorMarkdown(
     "",
     "### Shortest Path",
     shortestPath,
+    "",
+    "### Patch Suggestions",
+    patchSuggestions,
     "",
     "## Tool Calls",
     toolRows,

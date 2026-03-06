@@ -1,6 +1,6 @@
 import { For, Show, createEffect, createMemo, createResource, createSignal, on, onCleanup } from "solid-js";
 import type { Agent } from "@opencode-ai/sdk/v2/client";
-import { AtSign, Check, ChevronDown, ChevronRight, Download, FileText, Folder, FolderOpen, FolderPlus, ListTodo, Minimize2, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Trash2 } from "lucide-solid";
+import { ArrowLeft, AtSign, Check, ChevronDown, ChevronRight, Download, FileText, Folder, FolderOpen, FolderPlus, ListTodo, Minimize2, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Trash2 } from "lucide-solid";
 import { useNavigate } from "@solidjs/router";
 
 import type { ComposerDraft, SlashCommandOption } from "../types";
@@ -64,6 +64,10 @@ const RIGHT_PANEL_DEFAULT_WIDTH = 500;
 const RIGHT_PANEL_MIN_WIDTH = 360;
 const CENTER_PANEL_MIN_WIDTH = 520;
 const STREAM_SCROLL_MIN_INTERVAL_MS = 90;
+const DOC_TOOLBAR_BUTTON_CLASS =
+  "rounded-lg border border-dls-border bg-dls-surface px-2 py-1 text-xs text-dls-secondary transition-colors hover:bg-dls-hover hover:text-dls-text focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(var(--dls-accent-rgb),0.2)] disabled:cursor-not-allowed disabled:opacity-50";
+const DOC_TOOLBAR_BACK_BUTTON_CLASS =
+  "inline-flex items-center gap-1.5 rounded-lg border border-transparent bg-dls-accent px-2.5 py-1 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-[var(--dls-accent-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(var(--dls-accent-rgb),0.25)] disabled:cursor-not-allowed disabled:opacity-50";
 const IMAGE_PREVIEW_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".avif"]);
 const MARKDOWN_PREVIEW_EXTENSIONS = new Set([".md", ".mdx", ".markdown"]);
 const TEXT_PREVIEW_EXTENSIONS = new Set([
@@ -1879,7 +1883,19 @@ export default function DocumentAgentView(props: SessionViewProps) {
           <div class="flex items-center gap-2">
             <button
               type="button"
-              class="rounded-lg border border-dls-border bg-dls-surface px-2 py-1 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover disabled:opacity-50"
+              class={DOC_TOOLBAR_BACK_BUTTON_CLASS}
+              onClick={() => {
+                navigate("/dashboard/agents");
+              }}
+              title={tr("docagent.open_session_view")}
+              aria-label={tr("docagent.open_session_view")}
+            >
+              <ArrowLeft size={12} />
+              <span>{tr("docagent.session")}</span>
+            </button>
+            <button
+              type="button"
+              class={DOC_TOOLBAR_BUTTON_CLASS}
               onClick={() => {
                 const path = activeDocPath();
                 if (!path) return;
@@ -1895,25 +1911,12 @@ export default function DocumentAgentView(props: SessionViewProps) {
             </button>
             <button
               type="button"
-              class="rounded-lg border border-dls-border bg-dls-surface px-2 py-1 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover disabled:opacity-50"
+              class={DOC_TOOLBAR_BUTTON_CLASS}
               onClick={() => setConfigSeq((v) => v + 1)}
               disabled={!activeDoc() || activeDocKind() !== "onlyoffice"}
               title={tr("docagent.reload_onlyoffice_config")}
             >
               {tr("docagent.reload")}
-            </button>
-            <button
-              type="button"
-              class="rounded-lg border border-dls-border bg-dls-surface px-2 py-1 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover disabled:opacity-50"
-              onClick={() => {
-                const id = sessionId();
-                if (!id) return;
-                navigate(`/session/${id}/view/session`);
-              }}
-              disabled={!sessionId()}
-              title={tr("docagent.open_session_view")}
-            >
-              {tr("docagent.session")}
             </button>
           </div>
         </div>

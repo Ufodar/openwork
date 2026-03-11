@@ -22,7 +22,7 @@ OPENWORK_TOKEN="replace-with-openwork-token"
 OPENWORK_HOST_TOKEN="replace-with-openwork-host-token"
 
 PROVIDER_ID="my-company"
-MODEL_ID="MiniMax-2.5"
+MODEL_ID="Kimi-K2.5"
 MODEL_ALIAS="$PROVIDER_ID/$MODEL_ID"
 MODEL_BASE_URL="http://192.168.5.10:3002/v1"
 MODEL_API_KEY="replace-with-api-key"
@@ -77,17 +77,6 @@ JSON
   echo "Wrote $cfg_path"
 }
 
-write_workspace_opencode_config() {
-  local cfg_path="$WORKSPACE_DIR/opencode.jsonc"
-  cat > "$cfg_path" <<JSON
-{
-  "$schema": "https://opencode.ai/config.json",
-  "model": "$MODEL_ALIAS"
-}
-JSON
-  echo "Wrote $cfg_path"
-}
-
 clone_or_update_repo() {
   require_cmd git
   if [ ! -d "$REPO_DIR/.git" ]; then
@@ -113,7 +102,6 @@ bootstrap() {
   clone_or_update_repo
   install_deps
   write_global_opencode_config
-  write_workspace_opencode_config
 
   echo
   echo "Bootstrap complete"

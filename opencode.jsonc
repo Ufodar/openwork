@@ -106,7 +106,7 @@
       }
     }
   },
-  "model": "my-company/MiniMax-2.5",
+  "model": "my-company/Kimi-K2.5",
   "plugin": [
     "opencode-scheduler"
   ]

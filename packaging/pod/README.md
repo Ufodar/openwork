@@ -3,7 +3,7 @@
 This folder provides a static deployment path for a brand-new pod.
 
 Use this only when you are comfortable setting pod-local secrets during bootstrap.
-Tracked workspace config should stay secret-free.
+Tracked workspace config, if you choose to keep one, should stay secret-free.
 
 ## 1) Edit static config once
 
@@ -28,12 +28,11 @@ What bootstrap does:
 1. Clones/updates OpenWork repo to `REPO_DIR`
 2. Installs dependencies (`pnpm install --frozen-lockfile`)
 3. Writes global OpenCode config to `~/.config/opencode/opencode.json`
-4. Writes workspace-local model config to `$WORKSPACE_DIR/opencode.jsonc`
 
 Config split:
 
-- Global `~/.config/opencode/opencode.json`: provider, API key, shared model catalog.
-- Workspace `$WORKSPACE_DIR/opencode.jsonc`: workspace-local model/defaults only.
+- Global `~/.config/opencode/opencode.json`: provider, API key, shared model catalog, and the default model used when no workspace override exists.
+- Workspace `$WORKSPACE_DIR/opencode.jsonc`: optional. Add it only when this workspace needs project-local model, plugin, or MCP overrides.
 - Do not put real API keys or bearer tokens into tracked repo `opencode.json*`.
 
 ## 3) Start services
@@ -75,5 +74,6 @@ Use this checklist for each fresh pod:
 ## Notes
 
 - The actual OpenWork workspace is `WORKSPACE_DIR`, not `REPO_DIR`.
+- OpenWork may create a bare `opencode.jsonc` later if you use product features that persist project-level config.
 - This script intentionally keeps deployment static and explicit.
 - If you later want to support multiple pods, duplicate the script per pod profile and only change the top constants.

@@ -140,15 +140,16 @@ Plugins are the **native** way to extend OpenCode. OpenWork now manages them fro
 reading and writing the active OpenCode config.
 
 - **Global scope**: `~/.config/opencode/opencode.json` (or `$XDG_CONFIG_HOME/opencode/opencode.json`) for provider definitions, API keys, model catalogs, and other machine-wide defaults.
-- **Project scope**: `<workspace>/opencode.jsonc` preferred, with `<workspace>/opencode.json` as a compatibility fallback, for workspace-local defaults such as model selection, MCP overrides, and plugins.
+- **Project scope**: optional. If a workspace needs project-local defaults such as model selection, MCP overrides, or plugins, prefer `<workspace>/opencode.jsonc`; `<workspace>/opencode.json` is the compatibility fallback.
 
-OpenWork launching OpenCode as a sidecar does **not** change this split: the sidecar still loads global config and then merges the active workspace config.
+OpenWork launching OpenCode as a sidecar does **not** change this split: the sidecar still loads global config and then merges the active workspace config. If the workspace has no `opencode.jsonc` or `opencode.json`, OpenCode simply runs from global config only.
 
 Recommended practice:
 
 - Keep real API keys and bearer tokens out of repo-scoped `opencode.json*`.
 - Put provider credentials in global config or pod-local secret files outside git.
-- In this repo, `scripts/start-pod.sh` and `scripts/restart-pod.sh` treat `opencode.jsonc` as the project source of truth and sync `opencode.json` from it for compatibility.
+- There is no `opencode.jsonl` config format here; the supported project files are `opencode.jsonc` and `opencode.json`.
+- In this repo, `scripts/start-pod.sh` and `scripts/restart-pod.sh` only mirror `opencode.jsonc` to `opencode.json` when a project config already exists and a compatibility copy is needed.
 
 You can still edit `opencode.json` manually; OpenWork uses the same format as the OpenCode CLI:
 

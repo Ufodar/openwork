@@ -46,6 +46,17 @@ load_runtime_env() {
     done
 }
 
+sync_global_opencode_config() {
+    local sync_script="$SCRIPT_DIR/sync-global-opencode-config.py"
+    if [ ! -f "$sync_script" ]; then
+        echo "[start-pod] Missing sync helper: $sync_script" >&2
+        exit 1
+    fi
+
+    echo "[start-pod] Syncing global OpenCode config from runtime env..."
+    python3 "$sync_script"
+}
+
 sync_opencode_config_files() {
     local json_path="$PROJECT_DIR/opencode.json"
     local jsonc_path="$PROJECT_DIR/opencode.jsonc"
@@ -346,6 +357,10 @@ kill_old_processes() {
 # Run
 # ============================================
 load_runtime_env
+export OPENWORK_PROVIDER_ID="${OPENWORK_PROVIDER_ID:-my-company}"
+export OPENWORK_MODEL_BASE_URL="${OPENWORK_MODEL_BASE_URL:-http://${OPENWORK_POD_IP}:3002/v1}"
+export OPENWORK_DEFAULT_MODEL="${OPENWORK_DEFAULT_MODEL:-Kimi-K2.5}"
+sync_global_opencode_config
 sync_opencode_config_files
 install_system_deps
 install_python_deps

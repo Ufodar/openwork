@@ -148,6 +148,7 @@ Recommended practice:
 
 - Keep real API keys and bearer tokens out of repo-scoped `opencode.json*`.
 - Put provider credentials in global config or pod-local secret files outside git.
+- In this repo, tracked project config intentionally omits `provider` and `model`, so pod/global runtime config controls credentials and the default model.
 - There is no `opencode.jsonl` config format here; the supported project files are `opencode.jsonc` and `opencode.json`.
 - In this repo, `scripts/start-pod.sh` and `scripts/restart-pod.sh` only mirror `opencode.jsonc` to `opencode.json` when a project config already exists and a compatibility copy is needed.
 

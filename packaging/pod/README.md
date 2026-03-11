@@ -33,6 +33,7 @@ Config split:
 
 - Global `~/.config/opencode/opencode.json`: provider, API key, shared model catalog, and the default model used when no workspace override exists.
 - Workspace `$WORKSPACE_DIR/opencode.jsonc`: optional. Add it only when this workspace needs project-local model, plugin, or MCP overrides.
+- This repo intentionally leaves `provider` and `model` out of tracked workspace config so pod-local secrets can control the default model.
 - Do not put real API keys or bearer tokens into tracked repo `opencode.json*`.
 
 ## 3) Start services

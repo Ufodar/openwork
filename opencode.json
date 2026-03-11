@@ -1,85 +1,5 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "provider": {
-    "my-company": {
-      "options": {
-        "baseURL": "http://192.168.5.10:3002/v1",
-        "apiKey": "sk-ICERFam8VpvQ3tsE3413B6B6Fc674966B1330cFaFbEd2836"
-      },
-      "models": {
-        "Kimi-K2.5": {
-          "name": "Kimi-K2.5",
-          "capabilities": {
-            "input": {
-              "text": true,
-              "image": true,
-              "audio": true,
-              "video": true,
-              "pdf": true
-            },
-            "output": {
-              "text": true,
-              "image": true,
-              "audio": false,
-              "video": false,
-              "pdf": false
-            },
-            "attachment": true,
-            "interleaved": true,
-            "toolcall": true
-          }
-        },
-        "GLM-5": {
-          "name": "GLM-5",
-          "capabilities": {
-            "input": {
-              "text": true
-            },
-            "output": {
-              "text": true
-            },
-            "attachment": false,
-            "toolcall": true
-          }
-        },
-        "MiniMax-2.1": {
-          "name": "MiniMax-2.1",
-          "capabilities": {
-            "input": {
-              "text": true
-            },
-            "output": {
-              "text": true
-            },
-            "attachment": false,
-            "toolcall": true
-          }
-        },
-        "Qwen3.5-397B-A17B": {
-          "name": "Qwen3.5-397B-A17B",
-          "capabilities": {
-            "input": {
-              "text": true,
-              "image": true,
-              "audio": true,
-              "video": true,
-              "pdf": true
-            },
-            "output": {
-              "text": true,
-              "image": true,
-              "audio": false,
-              "video": false,
-              "pdf": false
-            },
-            "attachment": true,
-            "interleaved": true,
-            "toolcall": true
-          }
-        }
-      }
-    }
-  },
   "mcp": {
     "control-chrome": {
       "type": "local",
@@ -95,7 +15,7 @@
         "npx",
         "-y",
         "@modelcontextprotocol/server-filesystem",
-        "/root/ai_staff/openwork"
+        "."
       ]
     },
     "git": {
@@ -112,7 +32,7 @@
         "uvx",
         "mcp-server-sqlite",
         "--db-path",
-        "/root/.config/opencode/mcp-global.db"
+        ".opencode/opencode.db"
       ],
       "enabled": false
     },
@@ -180,13 +100,13 @@
     },
     "ragflow": {
       "type": "remote",
-      "url": "http://192.168.2.35:30467/sse",
+      "url": "{env:RAGFLOW_MCP_URL}",
       "headers": {
-        "Authorization": "Bearer ragflow-gxUFI3kz9FNaFFqwktSncGIq8g4erPmuYK_DcixIV7Q"
+        "Authorization": "Bearer {env:RAGFLOW_API_KEY}"
       }
     }
   },
-  "model": "my-company/Kimi-K2.5",
+  "model": "my-company/MiniMax-2.5",
   "plugin": [
     "opencode-scheduler"
   ]

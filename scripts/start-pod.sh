@@ -50,6 +50,8 @@ sync_opencode_config_files() {
     local json_path="$PROJECT_DIR/opencode.json"
     local jsonc_path="$PROJECT_DIR/opencode.jsonc"
 
+    # Keep opencode.jsonc as the editable project source of truth and mirror a
+    # plain JSON copy for tooling paths that still expect opencode.json.
     if [ -f "$jsonc_path" ] && [ ! -f "$json_path" ]; then
         cp "$jsonc_path" "$json_path"
         echo "[start-pod] Created opencode.json from opencode.jsonc"

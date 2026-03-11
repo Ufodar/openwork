@@ -137,10 +137,18 @@ pnpm dlx opkg install <package>
 ## OpenCode Plugins
 
 Plugins are the **native** way to extend OpenCode. OpenWork now manages them from the Skills tab by
-reading and writing `opencode.json`.
+reading and writing the active OpenCode config.
 
-- **Project scope**: `<workspace>/opencode.json`
-- **Global scope**: `~/.config/opencode/opencode.json` (or `$XDG_CONFIG_HOME/opencode/opencode.json`)
+- **Global scope**: `~/.config/opencode/opencode.json` (or `$XDG_CONFIG_HOME/opencode/opencode.json`) for provider definitions, API keys, model catalogs, and other machine-wide defaults.
+- **Project scope**: `<workspace>/opencode.jsonc` preferred, with `<workspace>/opencode.json` as a compatibility fallback, for workspace-local defaults such as model selection, MCP overrides, and plugins.
+
+OpenWork launching OpenCode as a sidecar does **not** change this split: the sidecar still loads global config and then merges the active workspace config.
+
+Recommended practice:
+
+- Keep real API keys and bearer tokens out of repo-scoped `opencode.json*`.
+- Put provider credentials in global config or pod-local secret files outside git.
+- In this repo, `scripts/start-pod.sh` and `scripts/restart-pod.sh` treat `opencode.jsonc` as the project source of truth and sync `opencode.json` from it for compatibility.
 
 You can still edit `opencode.json` manually; OpenWork uses the same format as the OpenCode CLI:
 

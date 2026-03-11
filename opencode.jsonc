@@ -1,37 +1,5 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "provider": {
-    "my-company": {
-      "options": {
-        "baseURL": "http://192.168.5.10:3000/v1",
-        "apiKey": "{env:MY_COMPANY_API_KEY}"
-      },
-      "models": {
-        "Kimi-K2.5": {
-          "name": "Kimi-K2.5",
-          "capabilities": {
-            "input": {
-              "text": true,
-              "image": true,
-              "audio": true,
-              "video": true,
-              "pdf": true
-            },
-            "output": {
-              "text": true,
-              "image": true,
-              "audio": false,
-              "video": false,
-              "pdf": false
-            },
-            "attachment": true,
-            "interleaved": true,
-            "toolcall": true
-          }
-        }
-      }
-    }
-  },
   "mcp": {
     "control-chrome": {
       "type": "local",
@@ -47,7 +15,7 @@
         "npx",
         "-y",
         "@modelcontextprotocol/server-filesystem",
-        "/root/ai_staff/openwork"
+        "."
       ]
     },
     "git": {
@@ -64,7 +32,7 @@
         "uvx",
         "mcp-server-sqlite",
         "--db-path",
-        "/root/.config/opencode/mcp-global.db"
+        ".opencode/opencode.db"
       ],
       "enabled": false
     },
@@ -138,7 +106,7 @@
       }
     }
   },
-  "model": "my-company/Kimi-K2.5",
+  "model": "my-company/MiniMax-2.5",
   "plugin": [
     "opencode-scheduler"
   ]

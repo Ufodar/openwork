@@ -785,6 +785,26 @@ async function scanAdminSessions(
   return { items, warnings };
 }
 
+export async function countAdminSessionsByOwner(
+  config: ServerConfig,
+  sessionOwnership: SessionOwnershipService,
+): Promise<Map<string, number>> {
+  const counts = new Map<string, number>();
+
+  await Promise.all(
+    config.workspaces.map(async (workspace) => {
+      const entries = await sessionOwnership.listEntries(workspace.id);
+      for (const entry of Object.values(entries)) {
+        const ownerKey = entry.ownerKey?.trim();
+        if (!ownerKey) continue;
+        counts.set(ownerKey, (counts.get(ownerKey) ?? 0) + 1);
+      }
+    }),
+  );
+
+  return counts;
+}
+
 function buildOpenCodeRouterProxyUrl(baseUrl: string, path: string, search: string) {
   const target = new URL(baseUrl);
   const trimmedPath = path.replace(/^\/opencode-router/, "");
@@ -1857,14 +1877,10 @@ function createRoutes(
   });
 
   addRoute(routes, "GET", "/admin/users", "host", async () => {
-    const [users, scanned] = await Promise.all([
+    const [users, sessionCountByOwnerKey] = await Promise.all([
       auth.listUsers(),
-      scanAdminSessions(config, sessionOwnership, sessionWorkspaces),
+      countAdminSessionsByOwner(config, sessionOwnership),
     ]);
-    const sessionCountByOwnerKey = new Map<string, number>();
-    for (const session of scanned.items) {
-      sessionCountByOwnerKey.set(session.ownerKey, (sessionCountByOwnerKey.get(session.ownerKey) ?? 0) + 1);
-    }
 
     const items = users
       .map((user) => ({
@@ -1884,7 +1900,7 @@ function createRoutes(
         return left.username.localeCompare(right.username, "zh-CN");
       });
 
-    return jsonResponse({ items, warnings: scanned.warnings });
+    return jsonResponse({ items, warnings: [] });
   });
 
   addRoute(routes, "GET", "/admin/users/:id/sessions", "host", async (ctx) => {

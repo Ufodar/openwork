@@ -132,7 +132,6 @@ export function createWorkspaceStore(options: {
   setPendingPermissions: (value: any[]) => void;
   setSessionStatusById: (value: Record<string, string>) => void;
   defaultModel: () => any;
-  modelVariant: () => string | null;
   refreshSkills: (options?: { force?: boolean }) => Promise<void>;
   refreshPlugins: () => Promise<void>;
   engineSource: () => "path" | "sidecar" | "custom";

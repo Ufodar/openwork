@@ -181,9 +181,6 @@ export type SessionViewProps = {
   setPrompt: (value: string) => void;
   selectedSessionModelLabel: string;
   openSessionModelPicker: () => void;
-  modelVariantLabel: string;
-  modelVariant: string | null;
-  setModelVariant: (value: string) => void;
   activePermission: PendingPermission | null;
   showTryNotionPrompt: boolean;
   onTryNotionPrompt: () => void;
@@ -246,15 +243,7 @@ const STREAM_RENDER_BATCH_MS = 220;
 const MAIN_THREAD_LAG_INTERVAL_MS = 200;
 const MAIN_THREAD_LAG_WARN_MS = 180;
 
-type CommandPaletteMode = "root" | "sessions" | "thinking";
-
-const COMMAND_PALETTE_THINKING_OPTIONS = [
-  { value: "none" },
-  { value: "low" },
-  { value: "medium" },
-  { value: "high" },
-  { value: "xhigh" },
-] as const;
+type CommandPaletteMode = "root" | "sessions";
 
 export default function SessionView(props: SessionViewProps) {
   const tr = (key: string) => t(key, currentLocale());
@@ -887,17 +876,6 @@ export default function SessionView(props: SessionViewProps) {
     };
     window.addEventListener("click", closeMenu);
     onCleanup(() => window.removeEventListener("click", closeMenu));
-  });
-  const attachmentsEnabled = createMemo(() => {
-    if (props.activeWorkspaceDisplay.workspaceType !== "remote") return true;
-    return props.openworkServerStatus === "connected";
-  });
-  const attachmentsDisabledReason = createMemo(() => {
-    if (attachmentsEnabled()) return null;
-    if (props.openworkServerStatus === "limited") {
-      return "Add a server token to attach files.";
-    }
-    return "Connect to OpenWork server to attach files.";
   });
 
   createEffect(() => {
@@ -2229,47 +2207,6 @@ export default function SessionView(props: SessionViewProps) {
 
   const isSandboxWorkspace = createMemo(() => Boolean((props.activeWorkspaceDisplay as any)?.sandboxContainerName?.trim()));
 
-  const uploadInboxFiles = async (
-    files: File[],
-    options?: { notify?: boolean },
-  ): Promise<Array<{ name: string; path: string }>> => {
-    const notify = options?.notify ?? true;
-    const client = props.openworkServerClient;
-    const workspaceId = props.openworkServerWorkspaceId?.trim() ?? "";
-    if (!client || !workspaceId) {
-      if (notify) {
-        setToastMessage("Connect to the OpenWork server to upload inbox files.");
-      }
-      return [];
-    }
-    if (!files.length) return [];
-
-    const label = files.length === 1 ? files[0]?.name ?? "file" : `${files.length} files`;
-    if (notify) {
-      setToastMessage(`Uploading ${label} to inbox...`);
-    }
-
-    try {
-      const uploaded: Array<{ name: string; path: string }> = [];
-      for (const file of files) {
-        const result = await client.uploadInbox(workspaceId, file);
-        const path = result.path?.trim() || file.name;
-        uploaded.push({ name: file.name || path, path });
-      }
-      if (notify) {
-        const summary = uploaded.map((file) => file.name).filter(Boolean).join(", ");
-        setToastMessage(summary ? `Uploaded to inbox: ${summary}` : "Uploaded to inbox.");
-      }
-      return uploaded;
-    } catch (error) {
-      if (notify) {
-        const message = error instanceof Error ? error.message : "Inbox upload failed";
-        setToastMessage(message);
-      }
-      return [];
-    }
-  };
-
   const handleDraftChange = (draft: ComposerDraft) => {
     props.setPrompt(draft.text);
   };
@@ -2386,18 +2323,6 @@ export default function SessionView(props: SessionViewProps) {
           });
         },
       },
-      {
-        id: "thinking",
-        title: tr("session.change_thinking"),
-        detail: tr("session.current_with_value").replace("{value}", props.modelVariantLabel),
-        meta: tr("session.meta_adjust"),
-        action: () => {
-          setCommandPaletteMode("thinking");
-          setCommandPaletteQuery("");
-          setCommandPaletteActiveIndex(0);
-          focusCommandPaletteInput();
-        },
-      },
     ];
 
     const query = commandPaletteQuery().trim().toLowerCase();
@@ -2426,50 +2351,21 @@ export default function SessionView(props: SessionViewProps) {
     }));
   });
 
-  const commandPaletteThinkingItems = createMemo<CommandPaletteItem[]>(() => {
-    const normalizedRaw = (props.modelVariant ?? "none").trim().toLowerCase();
-    const activeVariant =
-      normalizedRaw === "balanced" || normalizedRaw === "balance" ? "none" : normalizedRaw;
-    const query = commandPaletteQuery().trim().toLowerCase();
-
-    return COMMAND_PALETTE_THINKING_OPTIONS
-      .filter((option) => {
-        if (!query) return true;
-        return `${tr(`session.variant_${option.value}`)} ${tr(`session.variant_detail_${option.value}`)}`
-          .toLowerCase()
-          .includes(query);
-      })
-      .map((option) => ({
-        id: `thinking:${option.value}`,
-        title: tr(`session.variant_${option.value}`),
-        detail: tr(`session.variant_detail_${option.value}`),
-        meta: activeVariant === option.value ? tr("session.active") : undefined,
-        action: () => {
-          props.setModelVariant(option.value);
-          closeCommandPalette();
-          setToastMessage(`${tr("session.thinking")} ${tr(`session.variant_${option.value}`)}.`);
-        },
-      }));
-  });
-
   const commandPaletteItems = createMemo<CommandPaletteItem[]>(() => {
     const mode = commandPaletteMode();
     if (mode === "sessions") return commandPaletteSessionItems();
-    if (mode === "thinking") return commandPaletteThinkingItems();
     return commandPaletteRootItems();
   });
 
   const commandPaletteTitle = createMemo(() => {
     const mode = commandPaletteMode();
     if (mode === "sessions") return tr("session.search_sessions");
-    if (mode === "thinking") return tr("session.change_thinking");
     return tr("session.quick_actions");
   });
 
   const commandPalettePlaceholder = createMemo(() => {
     const mode = commandPaletteMode();
     if (mode === "sessions") return tr("session.find_by_session_or_worker");
-    if (mode === "thinking") return tr("session.filter_thinking_options");
     return tr("session.search_actions");
   });
 
@@ -3494,9 +3390,6 @@ export default function SessionView(props: SessionViewProps) {
         onDraftChange={handleDraftChange}
         selectedModelLabel={props.selectedSessionModelLabel || "Model"}
         onModelClick={props.openSessionModelPicker}
-        modelVariantLabel={props.modelVariantLabel}
-        modelVariant={props.modelVariant}
-        onModelVariantChange={props.setModelVariant}
         agentLabel={agentLabel()}
         selectedAgent={props.selectedSessionAgent}
         agentPickerOpen={agentPickerOpen()}
@@ -3523,9 +3416,6 @@ export default function SessionView(props: SessionViewProps) {
         listCommands={props.listCommands}
         isRemoteWorkspace={props.activeWorkspaceDisplay.workspaceType === "remote"}
         isSandboxWorkspace={isSandboxWorkspace()}
-        onUploadInboxFiles={uploadInboxFiles}
-        attachmentsEnabled={attachmentsEnabled()}
-        attachmentsDisabledReason={attachmentsDisabledReason()}
       />
 
         <StatusBar

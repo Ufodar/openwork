@@ -4,13 +4,12 @@ export const MODEL_PREF_KEY = "openwork.defaultModel";
 export const SESSION_MODEL_PREF_KEY = "openwork.sessionModels";
 export const THINKING_PREF_KEY = "openwork.showThinking";
 export const TOOL_MONITOR_PREF_KEY = "openwork.toolMonitorEnabled";
-export const VARIANT_PREF_KEY = "openwork.modelVariant";
 export const LANGUAGE_PREF_KEY = "openwork.language";
 export const HIDE_TITLEBAR_PREF_KEY = "openwork.hideTitlebar";
 
 export const DEFAULT_MODEL: ModelRef = {
-  providerID: "opencode",
-  modelID: "big-pickle",
+  providerID: "my-company",
+  modelID: "Qwen3.5-397B-A17B",
 };
 
 export const SUGGESTED_PLUGINS: SuggestedPlugin[] = [

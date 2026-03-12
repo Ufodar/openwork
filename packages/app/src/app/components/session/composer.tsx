@@ -1,7 +1,7 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import type { Agent } from "@opencode-ai/sdk/v2/client";
 import fuzzysort from "fuzzysort";
-import { ArrowUp, AtSign, Check, ChevronDown, File as FileIcon, Paperclip, Square, Terminal, X, Zap } from "lucide-solid";
+import { ArrowUp, AtSign, Check, ChevronDown, File as FileIcon, Square, Terminal, X, Zap } from "lucide-solid";
 
 import type { ComposerAttachment, ComposerDraft, ComposerPart, PromptMode, SlashCommandOption } from "../../types";
 import { perfNow, recordPerfLog } from "../../lib/perf-log";
@@ -31,9 +31,6 @@ type ComposerProps = {
   onDraftChange: (draft: ComposerDraft) => void;
   selectedModelLabel: string;
   onModelClick: () => void;
-  modelVariantLabel: string;
-  modelVariant: string | null;
-  onModelVariantChange: (value: string) => void;
   agentLabel: string;
   selectedAgent: string | null;
   agentPickerOpen: boolean;
@@ -54,154 +51,7 @@ type ComposerProps = {
   searchFiles: (query: string) => Promise<string[]>;
   isRemoteWorkspace: boolean;
   isSandboxWorkspace: boolean;
-  onUploadInboxFiles?: (
-    files: File[],
-    options?: { notify?: boolean },
-  ) => void | Promise<Array<{ name: string; path: string }> | void>;
-  attachmentsEnabled: boolean;
-  attachmentsDisabledReason: string | null;
   listCommands: () => Promise<SlashCommandOption[]>;
-};
-
-const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
-const IMAGE_COMPRESS_MAX_PX = 2048;
-const IMAGE_COMPRESS_QUALITY = 0.82;
-const IMAGE_COMPRESS_TARGET_BYTES = 1_500_000;
-const ACCEPTED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
-const ACCEPTED_FILE_TYPES = [...ACCEPTED_IMAGE_TYPES, "application/pdf"];
-const FILE_URL_RE = /^file:\/\//i;
-const HTTP_URL_RE = /^https?:\/\//i;
-const WINDOWS_PATH_RE = /^[a-zA-Z]:\\/;
-const UNC_PATH_RE = /^\\\\/;
-
-const isImageMime = (mime: string) => ACCEPTED_IMAGE_TYPES.includes(mime);
-const isSupportedAttachmentType = (mime: string) => ACCEPTED_FILE_TYPES.includes(mime);
-
-const escapeMarkdownLabel = (value: string) =>
-  value
-    .replace(/\\/g, "\\\\")
-    .replace(/\[/g, "\\[")
-    .replace(/\]/g, "\\]");
-
-const normalizeLinkTarget = (value: string) => {
-  const trimmed = value.trim();
-  if (!trimmed) return "";
-  if (FILE_URL_RE.test(trimmed) || HTTP_URL_RE.test(trimmed)) {
-    return encodeURI(trimmed);
-  }
-  if (WINDOWS_PATH_RE.test(trimmed)) {
-    return `file:///${encodeURI(trimmed.replace(/\\/g, "/"))}`;
-  }
-  if (UNC_PATH_RE.test(trimmed)) {
-    const normalized = trimmed.replace(/\\/g, "/").replace(/^\/+/, "");
-    return `file://${encodeURI(normalized)}`;
-  }
-  if (trimmed.startsWith("/")) {
-    return `file://${encodeURI(trimmed)}`;
-  }
-  return "";
-};
-
-const parseClipboardLinks = (clipboard: DataTransfer) => {
-  const values = [
-    clipboard.getData("text/uri-list") ?? "",
-    clipboard.getData("text/plain") ?? "",
-    clipboard.getData("text") ?? "",
-  ];
-  const links: string[] = [];
-  const seen = new Set<string>();
-  for (const value of values) {
-    const lines = value
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter((line) => line && !line.startsWith("#"));
-    for (const line of lines) {
-      const target = normalizeLinkTarget(line);
-      if (!target || seen.has(target)) continue;
-      seen.add(target);
-      links.push(target);
-    }
-  }
-  return links;
-};
-
-const inboxPathToLink = (path: string) => {
-  const normalized = path.trim().replace(/\\/g, "/").replace(/^\.\/+/, "").replace(/^\/+/, "");
-  if (!normalized) return "";
-  if (normalized.startsWith(".opencode/openwork/inbox/")) {
-    return normalized;
-  }
-  return `.opencode/openwork/inbox/${normalized}`;
-};
-
-const formatLinks = (links: Array<{ name: string; target: string }>) =>
-  links
-    .filter((entry) => entry.target)
-    .map((entry) => `[${escapeMarkdownLabel(entry.name || "file")}](${entry.target})`)
-    .join("\n");
-
-const fileToDataUrl = (file: File) =>
-  new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error("Failed to read attachment"));
-    reader.onload = () => {
-      const result = typeof reader.result === "string" ? reader.result : "";
-      resolve(result);
-    };
-    reader.readAsDataURL(file);
-  });
-
-/**
- * Compress an image file to JPEG using OffscreenCanvas (off main thread when possible).
- * Falls back to regular canvas if OffscreenCanvas is unavailable.
- * Returns a new File with compressed data, or the original if compression isn't beneficial.
- */
-const compressImageFile = async (file: File): Promise<File> => {
-  // Skip GIFs (animated) and already-small images
-  if (file.type === "image/gif" || file.size <= IMAGE_COMPRESS_TARGET_BYTES) {
-    return file;
-  }
-
-  const bitmap = await createImageBitmap(file);
-  const { width, height } = bitmap;
-
-  // Calculate scaled dimensions
-  const maxDim = Math.max(width, height);
-  const scale = maxDim > IMAGE_COMPRESS_MAX_PX ? IMAGE_COMPRESS_MAX_PX / maxDim : 1;
-  const targetW = Math.round(width * scale);
-  const targetH = Math.round(height * scale);
-
-  let blob: Blob | null = null;
-
-  if (typeof OffscreenCanvas !== "undefined") {
-    const offscreen = new OffscreenCanvas(targetW, targetH);
-    const ctx = offscreen.getContext("2d");
-    if (ctx) {
-      ctx.drawImage(bitmap, 0, 0, targetW, targetH);
-      blob = await offscreen.convertToBlob({ type: "image/jpeg", quality: IMAGE_COMPRESS_QUALITY });
-    }
-  }
-
-  if (!blob) {
-    const canvas = document.createElement("canvas");
-    canvas.width = targetW;
-    canvas.height = targetH;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return file;
-    ctx.drawImage(bitmap, 0, 0, targetW, targetH);
-    blob = await new Promise<Blob | null>((resolve) =>
-      canvas.toBlob(resolve, "image/jpeg", IMAGE_COMPRESS_QUALITY),
-    );
-  }
-
-  bitmap.close();
-
-  if (!blob || blob.size >= file.size) {
-    return file; // Compression didn't help
-  }
-
-  const ext = file.name.replace(/\.[^.]+$/, "");
-  return new File([blob], `${ext || "image"}.jpg`, { type: "image/jpeg" });
 };
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
@@ -210,8 +60,6 @@ const normalizeText = (value: string) => value.replace(/\u00a0/g, " ");
 const RECENT_EMIT_TTL_MS = 30_000;
 const MAX_RECENT_EMITS = 400;
 const DRAFT_FLUSH_DEBOUNCE_MS = 140;
-
-const MODEL_VARIANT_OPTIONS = ["none", "low", "medium", "high", "xhigh"] as const;
 
 const partsToText = (parts: ComposerPart[]) =>
   parts
@@ -444,21 +292,12 @@ const buildRangeFromOffsets = (root: HTMLElement, start: number, end: number) =>
 export default function Composer(props: ComposerProps) {
   const tr = (key: string) => t(key, currentLocale());
   let editorRef: HTMLDivElement | undefined;
-  let fileInputRef: HTMLInputElement | undefined;
-  let inboxFileInputRef: HTMLInputElement | undefined;
-  let variantPickerRef: HTMLDivElement | undefined;
   let mentionSearchRun = 0;
   let suppressPromptSync = false;
   let pasteCounter = 0;
   let draftScheduledAt = 0;
   let lastInputAt = 0;
   const pasteTextById = new Map<string, string>();
-  const objectUrls = new Set<string>();
-  const createObjectUrl = (file: File) => {
-    const url = URL.createObjectURL(file);
-    objectUrls.add(url);
-    return url;
-  };
   // Track IME composition state so we can combine it with keyCode === 229 to
   // reliably suppress Enter during CJK input across Chrome, Safari, and WebKit.
   let imeComposing = false;
@@ -474,18 +313,7 @@ export default function Composer(props: ComposerProps) {
   const [historySnapshot, setHistorySnapshot] = createSignal<ComposerDraft | null>(null);
   const [historyIndex, setHistoryIndex] = createSignal({ prompt: -1, shell: -1 });
   const [history, setHistory] = createSignal({ prompt: [] as ComposerDraft[], shell: [] as ComposerDraft[] });
-  const [variantMenuOpen, setVariantMenuOpen] = createSignal(false);
-  const [showInboxUploadAction, setShowInboxUploadAction] = createSignal(false);
-  const activeVariant = createMemo(() => props.modelVariant ?? "none");
-  const attachmentsDisabled = createMemo(() => !props.attachmentsEnabled);
   const hasDraftContent = createMemo(() => draftText().trim().length > 0 || attachments().length > 0);
-
-  onCleanup(() => {
-    for (const url of objectUrls) {
-      URL.revokeObjectURL(url);
-    }
-    objectUrls.clear();
-  });
 
   const createPasteSpan = (part: Extract<ComposerPart, { type: "paste" }>) => {
     pasteTextById.set(part.id, part.text);
@@ -1062,47 +890,8 @@ export default function Composer(props: ComposerProps) {
     setHistorySnapshot(null);
   };
 
-  const addAttachments = async (files: File[]) => {
-    if (attachmentsDisabled()) {
-      props.onToast(props.attachmentsDisabledReason ?? tr("session.attachments_unavailable"));
-      return;
-    }
-    const next: ComposerAttachment[] = [];
-    for (const file of files) {
-      if (!isSupportedAttachmentType(file.type)) {
-        props.onToast(`${file.name} is not a supported attachment type.`);
-        continue;
-      }
-      if (file.size > MAX_ATTACHMENT_BYTES) {
-        props.onToast(`${file.name} exceeds the 8MB limit.`);
-        continue;
-      }
-      try {
-        // Compress images before encoding to data URL
-        const processed = isImageMime(file.type) ? await compressImageFile(file) : file;
-        const dataUrl = await fileToDataUrl(processed);
-        // Pre-check: data URL will be embedded in JSON body; reject if too large
-        const estimatedJsonBytes = dataUrl.length + 512; // data URL + JSON overhead
-        if (estimatedJsonBytes > MAX_ATTACHMENT_BYTES) {
-          props.onToast(`${file.name} is too large after encoding. Try a smaller image.`);
-          continue;
-        }
-        next.push({
-          id: `${processed.name}-${file.lastModified}-${Math.random().toString(36).slice(2)}`,
-          name: processed.name,
-          mimeType: processed.type || "application/octet-stream",
-          size: processed.size,
-          kind: isImageMime(processed.type) ? "image" : "file",
-          dataUrl,
-        });
-      } catch (error) {
-        props.onToast(error instanceof Error ? error.message : "Failed to read attachment");
-      }
-    }
-    if (next.length) {
-      setAttachments((current: ComposerAttachment[]) => [...current, ...next]);
-      emitDraftChange();
-    }
+  const notifyUseSidebarUploads = () => {
+    props.onToast(tr("session.upload_from_sidebar"));
   };
 
   const insertPlainTextAtSelection = (text: string) => {
@@ -1183,53 +972,6 @@ export default function Composer(props: ComposerProps) {
     emitDraftChange();
   };
 
-  const insertUnsupportedFileLinks = async (files: File[], clipboardLinks: string[]) => {
-    const fallbackLinks = () =>
-      files.map((file, index) => ({
-        name: file.name || `file-${index + 1}`,
-        target: clipboardLinks[index] || createObjectUrl(file),
-      }));
-
-    if (props.isSandboxWorkspace && props.onUploadInboxFiles) {
-      const uploaded = await Promise.resolve(props.onUploadInboxFiles(files, { notify: false }));
-      if (Array.isArray(uploaded) && uploaded.length) {
-        const links = uploaded
-          .map((item, index) => {
-            const target = inboxPathToLink(item.path ?? "");
-            const fallbackName = files[index]?.name || `file-${index + 1}`;
-            const name = item.name?.trim() || fallbackName;
-            return { name, target };
-          })
-          .filter((entry) => entry.target);
-        const text = formatLinks(links);
-        if (text) {
-          insertPlainTextAtSelection(text);
-          updateMentionQuery();
-          updateSlashQuery();
-          emitDraftChange();
-          props.onToast(
-            links.length === 1
-              ? `Uploaded ${links[0].name} to inbox and inserted a link.`
-              : `Uploaded ${links.length} files to inbox and inserted links.`,
-          );
-          return;
-        }
-      }
-      props.onToast("Couldn't upload to inbox. Inserted local links instead.");
-    }
-
-    const text = formatLinks(fallbackLinks());
-    if (!text) {
-      props.onToast("Unsupported attachment type.");
-      return;
-    }
-    insertPlainTextAtSelection(text);
-    updateMentionQuery();
-    updateSlashQuery();
-    emitDraftChange();
-    props.onToast("Inserted links for unsupported files.");
-  };
-
   const handlePaste = (event: ClipboardEvent) => {
     if (!event.clipboardData) return;
     const clipboard = event.clipboardData;
@@ -1241,15 +983,7 @@ export default function Composer(props: ComposerProps) {
     const allFiles = files.length ? files : itemFiles;
     if (allFiles.length) {
       event.preventDefault();
-      const supported = allFiles.filter((file) => isSupportedAttachmentType(file.type));
-      const unsupported = allFiles.filter((file) => !isSupportedAttachmentType(file.type));
-      if (supported.length) {
-        void addAttachments(supported);
-      }
-      if (unsupported.length) {
-        const links = parseClipboardLinks(clipboard);
-        void insertUnsupportedFileLinks(unsupported, links);
-      }
+      notifyUseSidebarUploads();
       return;
     }
 
@@ -1260,10 +994,7 @@ export default function Composer(props: ComposerProps) {
       const hasAbsolutePosix = /(^|\s)\/(Users|home|var|etc|opt|tmp|private|Volumes|Applications)\//.test(trimmedForCheck);
       const hasAbsoluteWindows = /(^|\s)[a-zA-Z]:\\/.test(trimmedForCheck);
       if (hasFileUrl || hasAbsolutePosix || hasAbsoluteWindows) {
-        props.onToast(
-          "This is a remote worker. Sandboxes are remote too. To share files with it, upload them to the Inbox in the sidebar.",
-        );
-        setShowInboxUploadAction(Boolean(props.onUploadInboxFiles));
+        props.onToast(tr("session.remote_upload_from_sidebar"));
       }
     }
 
@@ -1286,17 +1017,12 @@ export default function Composer(props: ComposerProps) {
     emitDraftChange();
   };
 
-  createEffect(() => {
-    if (!props.toast) {
-      setShowInboxUploadAction(false);
-    }
-  });
-
   const handleDrop = (event: DragEvent) => {
     if (!event.dataTransfer) return;
-    event.preventDefault();
     const files = Array.from(event.dataTransfer.files || []);
-    if (files.length) void addAttachments(files);
+    if (!files.length) return;
+    event.preventDefault();
+    notifyUseSidebarUploads();
   };
 
   const handleKeyDown = (event: KeyboardEvent) => {
@@ -1501,19 +1227,6 @@ export default function Composer(props: ComposerProps) {
     setSlashQuery("");
   });
 
-
-
-  createEffect(() => {
-    if (!variantMenuOpen()) return;
-    const handler = (event: MouseEvent) => {
-      if (!variantPickerRef) return;
-      if (variantPickerRef.contains(event.target as Node)) return;
-      setVariantMenuOpen(false);
-    };
-    window.addEventListener("mousedown", handler);
-    onCleanup(() => window.removeEventListener("mousedown", handler));
-  });
-
   createEffect(() => {
     const handler = () => {
       editorRef?.focus();
@@ -1537,8 +1250,9 @@ export default function Composer(props: ComposerProps) {
             }`}
           onDrop={handleDrop}
           onDragOver={(event: DragEvent) => {
-            if (attachmentsDisabled()) return;
-            event.preventDefault();
+            if (event.dataTransfer?.types?.includes("Files")) {
+              event.preventDefault();
+            }
           }}
         >
           <Show when={mentionOpen()}>
@@ -1702,18 +1416,7 @@ export default function Composer(props: ComposerProps) {
             <div class="relative min-h-[120px]">
               <Show when={props.toast}>
                 <div class="absolute bottom-full right-0 mb-2 z-30 rounded-xl border border-dls-border bg-dls-surface px-3 py-2 text-xs text-dls-secondary shadow-lg backdrop-blur-md">
-                  <div class="flex items-center gap-3">
-                    <span>{props.toast}</span>
-                    <Show when={showInboxUploadAction() && props.onUploadInboxFiles}>
-                      <button
-                        type="button"
-                        class="shrink-0 rounded-md border border-dls-border bg-dls-hover px-2 py-1 text-[10px] text-dls-text hover:bg-dls-active"
-                        onClick={() => inboxFileInputRef?.click()}
-                      >
-                        {tr("session.upload_to_inbox")}
-                      </button>
-                    </Show>
-                  </div>
+                  <span>{props.toast}</span>
                 </div>
               </Show>
 
@@ -1743,52 +1446,6 @@ export default function Composer(props: ComposerProps) {
 
                     <div class="mt-3 flex items-center justify-between px-2 pb-2">
                       <div class="flex items-center gap-2">
-                        <input
-                          ref={inboxFileInputRef}
-                          type="file"
-                          multiple
-                          class="hidden"
-                          onChange={(event: Event) => {
-                            const target = event.currentTarget as HTMLInputElement;
-                            const files = Array.from(target.files ?? []);
-                            if (files.length && props.onUploadInboxFiles) {
-                              void Promise.resolve(props.onUploadInboxFiles(files));
-                            }
-                            target.value = "";
-                          }}
-                        />
-                        <input
-                          ref={fileInputRef}
-                          type="file"
-                          multiple
-                          accept={ACCEPTED_FILE_TYPES.join(",")}
-                          class="hidden"
-                          disabled={attachmentsDisabled()}
-                          onChange={(event: Event) => {
-                            const target = event.currentTarget as HTMLInputElement;
-                            const files = Array.from(target.files ?? []);
-                            if (files.length) void addAttachments(files);
-                            target.value = "";
-                          }}
-                        />
-                        <button
-                          type="button"
-                          class={`p-1.5 hover:bg-dls-hover rounded-md text-dls-secondary transition-colors ${attachmentsDisabled() ? "cursor-not-allowed" : ""
-                            }`}
-                          onClick={() => {
-                            if (attachmentsDisabled()) return;
-                            fileInputRef?.click();
-                          }}
-                          disabled={attachmentsDisabled()}
-                          title={
-                            attachmentsDisabled()
-                              ? props.attachmentsDisabledReason ?? tr("session.attachments_unavailable")
-                              : tr("session.attach_files")
-                          }
-                        >
-                          <Paperclip size={16} />
-                        </button>
-
                         <div class="relative" ref={(el) => props.setAgentPickerRef(el)}>
                           <button
                             type="button"
@@ -1883,48 +1540,6 @@ export default function Composer(props: ComposerProps) {
                           {props.selectedModelLabel}
                           <ChevronDown size={14} />
                         </button>
-                        <div class="relative" ref={(el) => (variantPickerRef = el)}>
-                          <button
-                            type="button"
-                            class="flex items-center gap-1.5 px-2 py-1 hover:bg-dls-hover rounded-md text-xs font-medium text-dls-secondary hover:text-dls-text"
-                            onClick={() => setVariantMenuOpen((open) => !open)}
-                            disabled={props.busy}
-                            aria-expanded={variantMenuOpen()}
-                          >
-                            <span>{tr("session.thinking")}</span>
-                            <span class="font-mono text-dls-text">{props.modelVariantLabel}</span>
-                            <ChevronDown size={14} />
-                          </button>
-                          <Show when={variantMenuOpen()}>
-                            <div class="absolute left-0 bottom-full mb-2 w-48 rounded-xl border border-dls-border bg-dls-surface shadow-xl backdrop-blur-md overflow-hidden z-40">
-                              <div class="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-dls-secondary border-b border-dls-border">
-                                {tr("session.thinking_effort")}
-                              </div>
-                              <div class="p-2 space-y-1">
-                                <For each={MODEL_VARIANT_OPTIONS}>
-                                  {(option) => (
-                                    <button
-                                      type="button"
-                                      class={`w-full flex items-center justify-between rounded-lg px-3 py-2 text-left text-xs transition-colors ${activeVariant() === option
-                                        ? "bg-dls-active text-dls-text"
-                                        : "text-dls-secondary hover:bg-dls-hover"
-                                        }`}
-                                      onClick={() => {
-                                        props.onModelVariantChange(option);
-                                        setVariantMenuOpen(false);
-                                      }}
-                                    >
-                                      <span>{tr(`session.variant_${option}`)}</span>
-                                      <Show when={activeVariant() === option}>
-                                        <span class="text-[10px] uppercase tracking-wider text-dls-secondary">{tr("session.active")}</span>
-                                      </Show>
-                                    </button>
-                                  )}
-                                </For>
-                              </div>
-                            </div>
-                          </Show>
-                        </div>
                       </div>
                       <div class="flex items-center gap-3 text-dls-secondary">
                         <Show

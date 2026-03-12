@@ -423,6 +423,8 @@ export default {
   "session.insert_prompt": "插入提示",
   "session.placeholder": "向 OpenWork 提问...",
   "session.upload_to_inbox": "上传到收件箱",
+  "session.upload_from_sidebar": "请从左侧边栏上传文件。",
+  "session.remote_upload_from_sidebar": "这是远程工作区。若要共享文件，请从左侧边栏上传。",
   "session.remote_workspace": "远程工作区",
   "session.attachments_unavailable": "附件当前不可用。",
   "session.attach_files": "添加附件",

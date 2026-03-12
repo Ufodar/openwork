@@ -11,7 +11,6 @@ type LocalUIState = {
 
 type LocalPreferences = {
   showThinking: boolean;
-  modelVariant: string | null;
   defaultModel: ModelRef | null;
 };
 
@@ -38,7 +37,6 @@ export function LocalProvider(props: ParentProps) {
     Persist.global("local.preferences", ["openwork.preferences"]),
     createStore<LocalPreferences>({
       showThinking: true,
-      modelVariant: null,
       defaultModel: null,
     }),
   );

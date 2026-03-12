@@ -1155,7 +1155,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
       const remainder = refsItemRemainder(item.name);
       const segments = remainder.split("/").filter(Boolean);
       const categoryId = (segments[0] ?? "other").trim() || "other";
-      // Files are already in documents/sessions — just open directly.
+      // Reference files are already workspace-relative, so open them directly.
       if (categoryId === "templates" || isTemplateDocName(item.name)) {
         setTargetDoc(item.name);
       }
@@ -1798,18 +1798,6 @@ export default function DocumentWriterView(props: SessionViewProps) {
   const isSandboxWorkspace = createMemo(() =>
     Boolean((props.activeWorkspaceDisplay as any)?.sandboxContainerName?.trim()),
   );
-
-  const attachmentsEnabled = createMemo(() => {
-    if (props.activeWorkspaceDisplay.workspaceType !== "remote") return true;
-    return props.openworkServerStatus === "connected";
-  });
-  const attachmentsDisabledReason = createMemo(() => {
-    if (attachmentsEnabled()) return null;
-    if (props.openworkServerStatus === "limited") {
-      return tr("docagent.add_server_token_to_attach_files");
-    }
-    return tr("docagent.connect_server_to_attach_files");
-  });
 
   const handleDraftChange = (draft: ComposerDraft) => {
     props.setPrompt(draft.text);
@@ -2789,9 +2777,6 @@ export default function DocumentWriterView(props: SessionViewProps) {
           onDraftChange={handleDraftChange}
           selectedModelLabel={props.selectedSessionModelLabel || tr("session.model")}
           onModelClick={props.openSessionModelPicker}
-          modelVariantLabel={props.modelVariantLabel}
-          modelVariant={props.modelVariant}
-          onModelVariantChange={props.setModelVariant}
           agentLabel={agentLabel()}
           selectedAgent={props.selectedSessionAgent}
           agentPickerOpen={agentPickerOpen()}
@@ -2818,8 +2803,6 @@ export default function DocumentWriterView(props: SessionViewProps) {
           listCommands={listCommands}
           isRemoteWorkspace={props.activeWorkspaceDisplay.workspaceType === "remote"}
           isSandboxWorkspace={isSandboxWorkspace()}
-          attachmentsEnabled={attachmentsEnabled()}
-          attachmentsDisabledReason={attachmentsDisabledReason()}
         />
       </div>
 

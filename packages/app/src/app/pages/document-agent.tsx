@@ -1891,18 +1891,6 @@ export default function DocumentAgentView(props: SessionViewProps) {
     Boolean((props.activeWorkspaceDisplay as any)?.sandboxContainerName?.trim()),
   );
 
-  const attachmentsEnabled = createMemo(() => {
-    if (props.activeWorkspaceDisplay.workspaceType !== "remote") return true;
-    return props.openworkServerStatus === "connected";
-  });
-  const attachmentsDisabledReason = createMemo(() => {
-    if (attachmentsEnabled()) return null;
-    if (props.openworkServerStatus === "limited") {
-      return tr("docagent.add_server_token_to_attach_files");
-    }
-    return tr("docagent.connect_server_to_attach_files");
-  });
-
   const handleDraftChange = (draft: ComposerDraft) => {
     props.setPrompt(draft.text);
   };
@@ -2451,9 +2439,6 @@ export default function DocumentAgentView(props: SessionViewProps) {
           onDraftChange={handleDraftChange}
           selectedModelLabel={props.selectedSessionModelLabel || tr("session.model")}
           onModelClick={props.openSessionModelPicker}
-          modelVariantLabel={props.modelVariantLabel}
-          modelVariant={props.modelVariant}
-          onModelVariantChange={props.setModelVariant}
           agentLabel={agentLabel()}
           selectedAgent={props.selectedSessionAgent}
           agentPickerOpen={agentPickerOpen()}
@@ -2480,8 +2465,6 @@ export default function DocumentAgentView(props: SessionViewProps) {
           listCommands={listCommands}
           isRemoteWorkspace={props.activeWorkspaceDisplay.workspaceType === "remote"}
           isSandboxWorkspace={isSandboxWorkspace()}
-          attachmentsEnabled={attachmentsEnabled()}
-          attachmentsDisabledReason={attachmentsDisabledReason()}
         />
       </div>
 

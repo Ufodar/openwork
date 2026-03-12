@@ -54,7 +54,6 @@ import {
   SUGGESTED_PLUGINS,
   THINKING_PREF_KEY,
   TOOL_MONITOR_PREF_KEY,
-  VARIANT_PREF_KEY,
 } from "./constants";
 import { parseMcpServersFromContent, removeMcpFromConfig, validateMcpServerName } from "./mcp";
 import type {
@@ -100,7 +99,6 @@ import {
   isTauriRuntime,
   modelEquals,
   normalizeDirectoryPath,
-  sessionBelongsToWorkspace,
 } from "./utils";
 import { currentLocale, initLocale, setLocale, t, type Language } from "../i18n";
 import {
@@ -110,6 +108,7 @@ import {
   parseModelRef,
   readStartupPreference,
   safeStringify,
+  sessionBelongsToWorkspace,
   summarizeStep,
   addOpencodeCacheHint,
 } from "./utils";
@@ -1303,7 +1302,6 @@ export default function App() {
             arguments: command.arguments,
             agent: agent ?? undefined,
             model: modelString,
-            variant: modelVariant() ?? undefined,
             parts: files.length ? files : undefined,
           }),
         );
@@ -1313,7 +1311,6 @@ export default function App() {
           sessionID,
           model,
           agent: agent ?? undefined,
-          variant: modelVariant() ?? undefined,
           parts,
         });
         assertNoClientError(result);
@@ -1397,7 +1394,6 @@ export default function App() {
       sessionID,
       messageCount: visible.length,
       model: modelLabel,
-      variant: modelVariant() ?? null,
     });
 
     try {
@@ -2083,42 +2079,6 @@ export default function App() {
   const [showThinking, setShowThinking] = createSignal(true);
   const [toolMonitorEnabled, setToolMonitorEnabled] = createSignal(true);
   const [hideTitlebar, setHideTitlebar] = createSignal(false);
-  const [modelVariant, setModelVariant] = createSignal<string | null>(null);
-
-  const MODEL_VARIANT_OPTIONS = [
-    { value: "none" },
-    { value: "low" },
-    { value: "medium" },
-    { value: "high" },
-    { value: "xhigh" },
-  ];
-
-  const normalizeModelVariant = (value: string | null) => {
-    if (!value) return null;
-    const trimmed = value.trim().toLowerCase();
-    if (trimmed === "balance" || trimmed === "balanced") return "none";
-    const match = MODEL_VARIANT_OPTIONS.find((option) => option.value === trimmed);
-    return match ? match.value : null;
-  };
-
-  const formatModelVariantLabel = (value: string | null) => {
-    const normalized = normalizeModelVariant(value) ?? "none";
-    return t(`session.variant_${normalized}`, currentLocale());
-  };
-
-  const handleEditModelVariant = () => {
-    const next = window.prompt(
-      "Model variant (none, low, medium, high, xhigh)",
-      normalizeModelVariant(modelVariant()) ?? "none"
-    );
-    if (next == null) return;
-    const normalized = normalizeModelVariant(next);
-    if (!normalized) {
-      window.alert("Variant must be one of: none, low, medium, high, xhigh.");
-      return;
-    }
-    setModelVariant(normalized);
-  };
 
   const workspaceStore = createWorkspaceStore({
     startupPreference,
@@ -2153,7 +2113,6 @@ export default function App() {
     setPendingPermissions,
     setSessionStatusById,
     defaultModel,
-    modelVariant,
     refreshSkills,
     refreshPlugins,
     engineSource,
@@ -5361,14 +5320,6 @@ export default function App() {
           }
         }
 
-        const storedVariant = window.localStorage.getItem(VARIANT_PREF_KEY);
-        if (storedVariant && storedVariant.trim()) {
-          const normalized = normalizeModelVariant(storedVariant);
-          if (normalized) {
-            setModelVariant(normalized);
-          }
-        }
-
         const storedUpdateAutoCheck = window.localStorage.getItem(
           "openwork.updateAutoCheck"
         );
@@ -5807,19 +5758,6 @@ export default function App() {
 
   createEffect(() => {
     if (typeof window === "undefined") return;
-    try {
-      const value = modelVariant();
-      if (value) {
-        window.localStorage.setItem(VARIANT_PREF_KEY, value);
-      } else {
-        window.localStorage.removeItem(VARIANT_PREF_KEY);
-      }
-    } catch {
-      // ignore
-    }
-  });
-
-  createEffect(() => {
     const state = updateStatus();
     if (typeof window === "undefined") return;
     if (state.state === "idle" && state.lastCheckedAt) {
@@ -6224,8 +6162,6 @@ export default function App() {
       toggleToolMonitorEnabled: () => setToolMonitorEnabled((v) => !v),
       hideTitlebar: hideTitlebar(),
       toggleHideTitlebar: () => setHideTitlebar((v) => !v),
-      modelVariantLabel: formatModelVariantLabel(modelVariant()),
-      editModelVariant: handleEditModelVariant,
       updateAutoCheck: updateAutoCheck(),
       toggleUpdateAutoCheck: () => setUpdateAutoCheck((v) => !v),
       updateAutoDownload: updateAutoDownload(),
@@ -6364,9 +6300,6 @@ export default function App() {
     installUpdateAndRestart,
     selectedSessionModelLabel: selectedSessionModelLabel(),
     openSessionModelPicker: openSessionModelPicker,
-    modelVariantLabel: formatModelVariantLabel(modelVariant()),
-    modelVariant: modelVariant(),
-    setModelVariant: (value: string) => setModelVariant(value),
     activePlugins: sidebarPluginList(),
     activePluginStatus: sidebarPluginStatus(),
     mcpServers: mcpServers(),

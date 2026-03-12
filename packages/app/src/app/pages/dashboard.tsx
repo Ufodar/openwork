@@ -243,8 +243,6 @@ export type DashboardViewProps = {
   toggleToolMonitorEnabled: () => void;
   hideTitlebar: boolean;
   toggleHideTitlebar: () => void;
-  modelVariantLabel: string;
-  editModelVariant: () => void;
   updateAutoCheck: boolean;
   toggleUpdateAutoCheck: () => void;
   updateAutoDownload: boolean;
@@ -1553,8 +1551,6 @@ export default function DashboardView(props: DashboardViewProps) {
                   toggleToolMonitorEnabled={props.toggleToolMonitorEnabled}
                   hideTitlebar={props.hideTitlebar}
                   toggleHideTitlebar={props.toggleHideTitlebar}
-                  modelVariantLabel={props.modelVariantLabel}
-                  editModelVariant={props.editModelVariant}
                   updateAutoCheck={props.updateAutoCheck}
                   toggleUpdateAutoCheck={props.toggleUpdateAutoCheck}
                   updateAutoDownload={props.updateAutoDownload}

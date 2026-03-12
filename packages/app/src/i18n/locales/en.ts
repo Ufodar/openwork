@@ -423,6 +423,8 @@ export default {
   "session.insert_prompt": "Insert prompt",
   "session.placeholder": "Ask OpenWork...",
   "session.upload_to_inbox": "Upload to inbox",
+  "session.upload_from_sidebar": "Upload files from the left sidebar.",
+  "session.remote_upload_from_sidebar": "This is a remote worker. To share files with it, upload them from the left sidebar.",
   "session.remote_workspace": "Remote workspace",
   "session.attachments_unavailable": "Attachments are unavailable.",
   "session.attach_files": "Attach files",

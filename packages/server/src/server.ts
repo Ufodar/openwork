@@ -22,6 +22,7 @@ import { sanitizeCommandName, validateMcpName } from "./validators.js";
 import { TokenService } from "./tokens.js";
 import { AuthService } from "./auth.js";
 import { SessionOwnershipService } from "./session-ownership.js";
+import { buildSessionPermissionRules, provisionSessionWorkspace, SessionWorkspaceService, sessionDirectoryBelongsToWorkspace } from "./session-workspaces.js";
 import { TOY_UI_CSS, TOY_UI_HTML, TOY_UI_JS, cssResponse, htmlResponse, jsResponse } from "./toy-ui.js";
 import pkg from "../package.json" with { type: "json" };
 import { createDocumentRoutes } from "./document.js";
@@ -268,15 +269,16 @@ export function startServer(config: ServerConfig) {
   const tokens = new TokenService(config);
   const auth = new AuthService(config, tokens);
   const sessionOwnership = new SessionOwnershipService();
-  const routes = createRoutes(config, approvals, tokens, auth, sessionOwnership);
+  const sessionWorkspaces = new SessionWorkspaceService();
   const logger = createServerLogger(config);
+  const routes = createRoutes(config, approvals, tokens, auth, sessionOwnership, sessionWorkspaces, logger);
 
   // Run inbox guard on startup — clean up any AI-written files in inbox
   for (const ws of config.workspaces) {
     const inboxRoot = resolveInboxDir(ws.path);
     cleanInboxViolations(inboxRoot, logger).then((count) => {
       if (count > 0) {
-        logger.info(`[inbox-guard] Cleaned ${count} unauthorized file(s) from inbox at startup`);
+        logger.log("info", `[inbox-guard] Cleaned ${count} unauthorized file(s) from inbox at startup`);
       }
     }).catch(() => {/* ignore */});
   }
@@ -337,6 +339,7 @@ export function startServer(config: ServerConfig) {
             proxyPath: mount.restPath,
             actor,
             sessionOwnership,
+            sessionWorkspaces,
           });
           return finalize(response);
         } catch (error) {
@@ -406,6 +409,7 @@ export function startServer(config: ServerConfig) {
             workspace: config.workspaces[0],
             actor,
             sessionOwnership,
+            sessionWorkspaces,
           });
           return finalize(response);
         } catch (error) {
@@ -458,6 +462,14 @@ export function startServer(config: ServerConfig) {
           : route.auth === "client"
             ? await requireClient(request, config, tokens)
             : undefined;
+        const requestedWorkspaceId = extractWorkspaceIdFromPath(url.pathname);
+        if (requestedWorkspaceId && actor?.tokenHash && actor.scope !== "owner") {
+          const boundUser = await auth.getUserByOwnerKey(actor.tokenHash);
+          const boundWorkspaceId = boundUser?.workspace?.id?.trim() ?? "";
+          if (boundWorkspaceId && boundWorkspaceId !== requestedWorkspaceId) {
+            throw new ApiError(404, "workspace_not_found", "Workspace not found");
+          }
+        }
         const response = await route.handler({
           request,
           url,
@@ -517,6 +529,19 @@ function pathToRegex(path: string, keys: string[]): RegExp {
   return new RegExp(`^${pattern}$`);
 }
 
+function extractWorkspaceIdFromPath(pathname: string): string | null {
+  const mounted = parseWorkspaceMount(pathname);
+  if (mounted?.workspaceId) return mounted.workspaceId;
+
+  const direct = pathname.match(/^\/workspace\/([^/]+)/);
+  if (direct?.[1]) return decodeURIComponent(direct[1]);
+
+  const host = pathname.match(/^\/workspaces\/([^/]+)/);
+  if (host?.[1]) return decodeURIComponent(host[1]);
+
+  return null;
+}
+
 function buildOpencodeProxyUrl(baseUrl: string, path: string, search: string) {
   const target = new URL(baseUrl);
   const trimmedPath = path.replace(/^\/opencode/, "");
@@ -525,7 +550,11 @@ function buildOpencodeProxyUrl(baseUrl: string, path: string, search: string) {
   return target.toString();
 }
 
-async function fetchOpencodeJson(workspace: WorkspaceInfo, path: string, init: { method: string; body?: unknown }) {
+async function fetchOpencodeJson(
+  workspace: WorkspaceInfo,
+  path: string,
+  init: { method: string; body?: unknown; directory?: string | null },
+) {
   const baseUrl = workspace.baseUrl?.trim() ?? "";
   if (!baseUrl) {
     throw new ApiError(400, "opencode_unconfigured", "OpenCode base URL is missing for this workspace");
@@ -538,7 +567,7 @@ async function fetchOpencodeJson(workspace: WorkspaceInfo, path: string, init: {
   const headers = new Headers();
   headers.set("Content-Type", "application/json");
 
-  const directory = resolveOpencodeDirectory(workspace);
+  const directory = init.directory === undefined ? resolveOpencodeDirectory(workspace) : init.directory?.trim() ?? "";
   if (directory) {
     headers.set("x-opencode-directory", directory);
   }
@@ -569,6 +598,15 @@ async function fetchOpencodeJson(workspace: WorkspaceInfo, path: string, init: {
     });
   }
   return json;
+}
+
+function workspaceWithDirectory(workspace: WorkspaceInfo, directory: string | null | undefined): WorkspaceInfo {
+  const nextDirectory = (directory ?? "").trim();
+  if (!nextDirectory) return workspace;
+  return {
+    ...workspace,
+    directory: nextDirectory,
+  };
 }
 
 type AdminWorkspaceWarning = {
@@ -656,13 +694,14 @@ async function scanAdminSessions(
     config.workspaces.map(async (workspaceRef) => {
       try {
         const workspace = await resolveWorkspace(config, workspaceRef.id);
-        const payload = await fetchOpencodeJson(workspace, "/session", { method: "GET" });
+        const payload = await fetchOpencodeJson(workspace, "/session", { method: "GET", directory: null });
         const sessionItems = normalizeSessionListPayload(payload);
         const ownerEntries = await sessionOwnership.listEntries(workspace.id);
 
         const items = sessionItems
           .map((item) => parseListedSession(item))
           .filter((item): item is NonNullable<ReturnType<typeof parseListedSession>> => Boolean(item))
+          .filter((item) => sessionDirectoryBelongsToWorkspace(workspace.path, item.directory))
           .map((item) => {
             const owner = ownerEntries[item.id];
             if (!owner?.ownerKey) return null;
@@ -720,6 +759,7 @@ async function proxyOpencodeRequest(input: {
   proxyPath?: string;
   actor?: Actor;
   sessionOwnership: SessionOwnershipService;
+  sessionWorkspaces: SessionWorkspaceService;
 }) {
   const workspace = input.workspace;
   const baseUrl = workspace?.baseUrl?.trim() ?? "";
@@ -746,7 +786,7 @@ async function proxyOpencodeRequest(input: {
     }
   }
 
-  const targetUrl = buildOpencodeProxyUrl(baseUrl, proxyPath, input.url.search);
+  const targetUrl = new URL(buildOpencodeProxyUrl(baseUrl, proxyPath, input.url.search));
   const headers = new Headers(input.request.headers);
   headers.delete("authorization");
   headers.delete("x-openwork-host-token");
@@ -762,9 +802,17 @@ async function proxyOpencodeRequest(input: {
   headers.delete("transfer-encoding");
   headers.delete("upgrade");
 
-  const directory = workspace ? resolveOpencodeDirectory(workspace) : null;
+  const runtimeWorkspace =
+    workspace && workspaceId && pathSessionId
+      ? await input.sessionWorkspaces.getWorkspace(workspaceId, pathSessionId)
+      : null;
+  const runtimeDirectory = runtimeWorkspace?.runtimeDir?.trim() ?? "";
+  const directory = runtimeDirectory || (workspace ? resolveOpencodeDirectory(workspace) : null);
   if (directory && !headers.has("x-opencode-directory")) {
     headers.set("x-opencode-directory", directory);
+  }
+  if (runtimeDirectory) {
+    targetUrl.searchParams.set("directory", runtimeDirectory);
   }
 
   const auth = workspace ? buildOpencodeAuthHeader(workspace) : null;
@@ -773,12 +821,52 @@ async function proxyOpencodeRequest(input: {
   }
 
   const method = input.request.method.toUpperCase();
-  const body = method === "GET" || method === "HEAD" ? undefined : input.request.body;
+  const requestDirectory = input.url.searchParams.get("directory")?.trim() ?? "";
+  const shouldScopeSessionList = Boolean(
+    workspace &&
+    workspaceId &&
+    method === "GET" &&
+    normalizedProxyPath === "/session" &&
+    requestDirectory &&
+    resolve(requestDirectory) === resolve(workspace.path),
+  );
+  if (shouldScopeSessionList) {
+    targetUrl.searchParams.delete("directory");
+  }
+
+  let provisionedRuntime: { runtimeId: string; runtimeDir: string } | null = null;
+  let body: BodyInit | undefined = method === "GET" || method === "HEAD" ? undefined : (input.request.body ?? undefined);
+  if (workspace && workspaceId && requesterKey && method === "POST" && normalizedProxyPath === "/session") {
+    provisionedRuntime = await provisionSessionWorkspace(workspace.path);
+    targetUrl.searchParams.set("directory", provisionedRuntime.runtimeDir);
+    headers.delete("x-opencode-directory");
+    const rawBody = await input.request.text();
+    let payload: Record<string, unknown> = {};
+    try {
+      payload = rawBody.trim() ? JSON.parse(rawBody) as Record<string, unknown> : {};
+    } catch {
+      throw new ApiError(400, "invalid_json", "Invalid JSON body");
+    }
+    const existingPermissions = Array.isArray(payload.permission) ? payload.permission : [];
+    const nextPermissions = [
+      ...existingPermissions.filter((entry) => {
+        if (!entry || typeof entry !== "object") return false;
+        return (entry as any).permission !== "external_directory";
+      }),
+      ...buildSessionPermissionRules(),
+    ];
+    payload.permission = nextPermissions;
+    headers.set("Content-Type", "application/json");
+    body = JSON.stringify(payload);
+  }
+  if (shouldScopeSessionList) {
+    headers.delete("x-opencode-directory");
+  }
   const timeoutController = new AbortController();
   const timeoutId = setTimeout(() => timeoutController.abort(new Error("OpenCode proxy timeout")), 10_000);
   const signal = AbortSignal.any([input.request.signal, timeoutController.signal]);
   try {
-    const response = await fetch(targetUrl, { method, headers, body, signal });
+    const response = await fetch(targetUrl.toString(), { method, headers, body, signal });
 
     if (workspaceId && !isOwnerScope && requesterKey && method === "GET" && normalizedProxyPath === "/session" && response.ok) {
       const raw = await response.text();
@@ -800,7 +888,10 @@ async function proxyOpencodeRequest(input: {
       const visible = await input.sessionOwnership.filterVisibleSessionIds(workspaceId, sessionIds, requesterKey);
       const filteredItems = items.filter((item) => {
         const id = item && typeof item === "object" ? String((item as any).id ?? "") : "";
-        return id.trim() && visible.has(id);
+        if (!id.trim() || !visible.has(id)) return false;
+        if (!shouldScopeSessionList || !workspace) return true;
+        const parsedItem = parseListedSession(item);
+        return Boolean(parsedItem && sessionDirectoryBelongsToWorkspace(workspace.path, parsedItem.directory));
       });
 
       const payload = Array.isArray(parsed)
@@ -828,16 +919,34 @@ async function proxyOpencodeRequest(input: {
           : "";
       if (createdSessionId) {
         await input.sessionOwnership.setOwner(workspaceId, createdSessionId, requesterKey);
+        if (provisionedRuntime) {
+          await input.sessionWorkspaces.setWorkspace(workspaceId, createdSessionId, {
+            runtimeId: provisionedRuntime.runtimeId,
+            runtimeDir: provisionedRuntime.runtimeDir,
+            createdAt: Date.now(),
+          });
+        }
       }
       return new Response(raw, { status: response.status, headers: response.headers });
     }
 
     if (workspaceId && method === "DELETE" && pathSessionId && response.ok) {
       await input.sessionOwnership.removeOwner(workspaceId, pathSessionId);
+      await input.sessionWorkspaces.removeWorkspace(workspaceId, pathSessionId);
+      if (runtimeDirectory) {
+        await rm(runtimeDirectory, { recursive: true, force: true }).catch(() => undefined);
+      }
+    }
+
+    if (provisionedRuntime && method === "POST" && normalizedProxyPath === "/session" && !response.ok) {
+      await rm(provisionedRuntime.runtimeDir, { recursive: true, force: true }).catch(() => undefined);
     }
 
     return response;
   } catch (error) {
+    if (provisionedRuntime) {
+      await rm(provisionedRuntime.runtimeDir, { recursive: true, force: true }).catch(() => undefined);
+    }
     const isTimeout = timeoutController.signal.aborted;
     throw new ApiError(
       isTimeout ? 504 : 503,
@@ -888,7 +997,7 @@ async function proxyOpenCodeRouterRequest(input: {
   headers.delete("upgrade");
 
   const method = input.request.method.toUpperCase();
-  const body = method === "GET" || method === "HEAD" ? undefined : input.request.body;
+  const body = method === "GET" || method === "HEAD" ? undefined : (input.request.body ?? undefined);
   try {
     const timeoutController = new AbortController();
     const timeoutId = setTimeout(() => timeoutController.abort(new Error("Owpenbot proxy timeout")), 10_000);
@@ -1116,28 +1225,27 @@ const INBOX_VIOLATION_PATTERNS = [
 async function scanInboxViolations(inboxRoot: string): Promise<string[]> {
   const violations: string[] = [];
   async function walk(dir: string) {
-    let entries: Awaited<ReturnType<typeof readdir>>;
     try {
-      entries = await readdir(dir, { withFileTypes: true });
+      const entries = await readdir(dir, { withFileTypes: true, encoding: "utf8" });
+      for (const entry of entries) {
+        const fullPath = join(dir, entry.name);
+        if (INBOX_VIOLATION_PATTERNS.some((p) => p.test(entry.name))) {
+          violations.push(fullPath);
+          continue; // Don't recurse into node_modules etc.
+        }
+        if (entry.isDirectory()) {
+          await walk(fullPath);
+        }
+      }
     } catch {
       return;
-    }
-    for (const entry of entries) {
-      const fullPath = join(dir, entry.name);
-      if (INBOX_VIOLATION_PATTERNS.some((p) => p.test(entry.name))) {
-        violations.push(fullPath);
-        continue; // Don't recurse into node_modules etc.
-      }
-      if (entry.isDirectory()) {
-        await walk(fullPath);
-      }
     }
   }
   await walk(inboxRoot);
   return violations;
 }
 
-async function cleanInboxViolations(inboxRoot: string, logger?: { info: (...args: unknown[]) => void }): Promise<number> {
+async function cleanInboxViolations(inboxRoot: string, logger?: ServerLogger): Promise<number> {
   const violations = await scanInboxViolations(inboxRoot);
   for (const v of violations) {
     try {
@@ -1147,7 +1255,7 @@ async function cleanInboxViolations(inboxRoot: string, logger?: { info: (...args
       } else {
         await unlink(v);
       }
-      logger?.info(`[inbox-guard] Removed unauthorized file: ${v}`);
+      logger?.log("info", `[inbox-guard] Removed unauthorized file: ${v}`);
     } catch {
       // ignore cleanup errors
     }
@@ -1438,15 +1546,34 @@ function serializeWorkspace(workspace: ServerConfig["workspaces"][number]) {
   };
 }
 
+function upsertWorkspace(config: ServerConfig, workspace: { id: string; name: string; path: string }) {
+  const normalized: WorkspaceInfo = {
+    id: workspace.id,
+    name: workspace.name,
+    path: workspace.path,
+    workspaceType: "local",
+  };
+  config.workspaces = [
+    normalized,
+    ...config.workspaces.filter((entry) => entry.id !== normalized.id),
+  ];
+  const resolvedPath = resolve(normalized.path);
+  if (!config.authorizedRoots.some((root) => resolve(root) === resolvedPath)) {
+    config.authorizedRoots = [...config.authorizedRoots, resolvedPath];
+  }
+}
+
 function createRoutes(
   config: ServerConfig,
   approvals: ApprovalService,
   tokens: TokenService,
   auth: AuthService,
   sessionOwnership: SessionOwnershipService,
+  sessionWorkspaces: SessionWorkspaceService,
+  logger: ServerLogger,
 ): Route[] {
   const routes: Route[] = [];
-  createDocumentRoutes(routes);
+  createDocumentRoutes(routes, sessionWorkspaces);
 
   addRoute(routes, "GET", "/health", "none", async () => {
     return jsonResponse({ ok: true, version: SERVER_VERSION, uptimeMs: Date.now() - config.startedAt });
@@ -1551,9 +1678,13 @@ function createRoutes(
     return jsonResponse(buildCapabilities(config));
   });
 
-  addRoute(routes, "GET", "/workspaces", "client", async () => {
-    const active = config.workspaces[0] ?? null;
-    const items = config.workspaces.map(serializeWorkspace);
+  addRoute(routes, "GET", "/workspaces", "client", async (ctx) => {
+    const boundUser = ctx.actor?.tokenHash ? await auth.getUserByOwnerKey(ctx.actor.tokenHash) : null;
+    const visible = boundUser?.workspace
+      ? config.workspaces.filter((workspace) => workspace.id === boundUser.workspace?.id)
+      : config.workspaces;
+    const active = visible[0] ?? null;
+    const items = visible.map(serializeWorkspace);
     return jsonResponse({ items, activeId: active?.id ?? null });
   });
 
@@ -1564,6 +1695,9 @@ function createRoutes(
     const password = typeof body.password === "string" ? body.password : "";
     try {
       const result = await auth.register({ username, password });
+      if (result.workspace) {
+        upsertWorkspace(config, result.workspace);
+      }
       return jsonResponse({ ok: true, ...result }, 201);
     } catch (error) {
       const message = error instanceof Error ? error.message : "注册失败。";
@@ -1578,6 +1712,9 @@ function createRoutes(
     const password = typeof body.password === "string" ? body.password : "";
     try {
       const result = await auth.login({ username, password });
+      if (result.workspace) {
+        upsertWorkspace(config, result.workspace);
+      }
       return jsonResponse({ ok: true, ...result });
     } catch (error) {
       const message = error instanceof Error ? error.message : "登录失败。";
@@ -1770,12 +1907,19 @@ function createRoutes(
       }
     }
 
+    const runtimeWorkspace = await sessionWorkspaces.getWorkspace(workspace.id, sessionId);
+    const sessionWorkspace = workspaceWithDirectory(workspace, runtimeWorkspace?.runtimeDir);
+
     // OpenCode session deletion via the upstream API.
-    await fetchOpencodeJson(workspace, `/session/${encodeURIComponent(sessionId)}`, {
+    await fetchOpencodeJson(sessionWorkspace, `/session/${encodeURIComponent(sessionId)}`, {
       method: "DELETE",
     });
 
     await sessionOwnership.removeOwner(workspace.id, sessionId);
+    await sessionWorkspaces.removeWorkspace(workspace.id, sessionId);
+    if (runtimeWorkspace?.runtimeDir) {
+      await rm(runtimeWorkspace.runtimeDir, { recursive: true, force: true }).catch(() => undefined);
+    }
 
     return jsonResponse({ ok: true });
   });
@@ -2812,7 +2956,7 @@ function createRoutes(
     }
     const inboxRoot = resolveInboxDir(workspace.path);
     const prefix = (ctx.url.searchParams.get("prefix") ?? "").trim();
-    const items = await listInboxFiles(inboxRoot, { prefix });
+    const items = await listInbox(inboxRoot, { prefix });
     return jsonResponse({ items });
   });
 
@@ -3569,12 +3713,26 @@ function createRoutes(
     }
 
     const now = Date.now();
-    const created = await fetchOpencodeJson(workspace, "/session", {
-      method: "POST",
-      body: { title: `Automation: ${automation.name}` },
-    });
-    const sessionId = typeof created?.id === "string" ? created.id : String(created?.id ?? "");
+    const provisionedRuntime = await provisionSessionWorkspace(workspace.path);
+    const runtimeWorkspace = workspaceWithDirectory(workspace, provisionedRuntime.runtimeDir);
+    let created: unknown;
+    try {
+      created = await fetchOpencodeJson(runtimeWorkspace, "/session", {
+        method: "POST",
+        body: {
+          title: `Automation: ${automation.name}`,
+          permission: buildSessionPermissionRules(),
+        },
+      });
+    } catch (error) {
+      await rm(provisionedRuntime.runtimeDir, { recursive: true, force: true }).catch(() => undefined);
+      throw error;
+    }
+    const createdSession = created && typeof created === "object" ? created as Record<string, unknown> : null;
+    const sessionId =
+      typeof createdSession?.id === "string" ? createdSession.id : String(createdSession?.id ?? "");
     if (!sessionId.trim()) {
+      await rm(provisionedRuntime.runtimeDir, { recursive: true, force: true }).catch(() => undefined);
       throw new ApiError(502, "opencode_failed", "OpenCode session did not return an id");
     }
 
@@ -3582,13 +3740,25 @@ function createRoutes(
     if (requesterKey) {
       await sessionOwnership.setOwner(workspace.id, sessionId, requesterKey);
     }
-
-    await fetchOpencodeJson(workspace, `/session/${encodeURIComponent(sessionId)}/prompt_async`, {
-      method: "POST",
-      body: {
-        parts: [{ type: "text", text: automation.prompt }],
-      },
+    await sessionWorkspaces.setWorkspace(workspace.id, sessionId, {
+      runtimeId: provisionedRuntime.runtimeId,
+      runtimeDir: provisionedRuntime.runtimeDir,
+      createdAt: now,
     });
+
+    try {
+      await fetchOpencodeJson(runtimeWorkspace, `/session/${encodeURIComponent(sessionId)}/prompt_async`, {
+        method: "POST",
+        body: {
+          parts: [{ type: "text", text: automation.prompt }],
+        },
+      });
+    } catch (error) {
+      await sessionOwnership.removeOwner(workspace.id, sessionId);
+      await sessionWorkspaces.removeWorkspace(workspace.id, sessionId);
+      await rm(provisionedRuntime.runtimeDir, { recursive: true, force: true }).catch(() => undefined);
+      throw error;
+    }
 
     automation.lastRunAt = now;
     automation.lastRunSessionId = sessionId;

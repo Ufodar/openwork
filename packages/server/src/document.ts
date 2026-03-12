@@ -7,6 +7,7 @@ import jwt from "jsonwebtoken";
 import type { ServerConfig, WorkspaceInfo, Actor } from "./types.js";
 import { ApiError } from "./errors.js";
 import { ensureDir, exists, shortId } from "./utils.js";
+import type { SessionWorkspaceService } from "./session-workspaces.js";
 
 // Local types to avoid circular dependencies
 interface RequestContext {
@@ -168,9 +169,16 @@ function parseDocumentSessionId(rawSessionId: string | null): string | null {
     return value;
 }
 
-function resolveDocumentsDir(workspacePath: string, sessionId?: string | null): string {
+async function resolveDocumentsDir(
+    workspacePath: string,
+    sessionId?: string | null,
+    options?: { workspaceId?: string; sessionWorkspaces?: SessionWorkspaceService },
+): Promise<string> {
     const root = join(workspacePath, "documents");
     if (!sessionId) return root;
+    if (options?.workspaceId && options.sessionWorkspaces) {
+        return await options.sessionWorkspaces.resolveDocumentsDir(options.workspaceId, workspacePath, sessionId);
+    }
     return join(root, "sessions", sessionId);
 }
 
@@ -314,14 +322,19 @@ async function resolveSessionFileRef({
     sessionId,
     docPath,
     inboxId,
+    sessionWorkspaces,
 }: {
     workspace: WorkspaceInfo;
     sessionId: string;
     docPath?: string;
     inboxId?: string;
+    sessionWorkspaces?: SessionWorkspaceService;
 }): Promise<{ absPath: string }> {
     if (docPath) {
-        const docsDir = resolveDocumentsDir(workspace.path, sessionId);
+        const docsDir = await resolveDocumentsDir(workspace.path, sessionId, {
+            workspaceId: workspace.id,
+            sessionWorkspaces,
+        });
         const absPath = resolveDocumentPathSafe(docsDir, docPath);
         if (!(await exists(absPath))) throw new ApiError(404, "not_found", `Document file not found: ${docPath}`);
         return { absPath };
@@ -342,13 +355,18 @@ async function writeSessionReport({
     sessionId,
     moduleId,
     content,
+    sessionWorkspaces,
 }: {
     workspace: WorkspaceInfo;
     sessionId: string;
     moduleId: string;
     content: string;
+    sessionWorkspaces?: SessionWorkspaceService;
 }): Promise<{ docPath: string }> {
-    const docsDir = resolveDocumentsDir(workspace.path, sessionId);
+    const docsDir = await resolveDocumentsDir(workspace.path, sessionId, {
+        workspaceId: workspace.id,
+        sessionWorkspaces,
+    });
     const stamp = nowStampForFilename();
     const relPath = `reports/${moduleId}/${stamp}.md`;
     const absPath = resolveDocumentPathSafe(docsDir, relPath);
@@ -365,14 +383,19 @@ async function writeSessionArtifactFromFile({
     moduleId,
     filename,
     absSourcePath,
+    sessionWorkspaces,
 }: {
     workspace: WorkspaceInfo;
     sessionId: string;
     moduleId: string;
     filename: string;
     absSourcePath: string;
+    sessionWorkspaces?: SessionWorkspaceService;
 }): Promise<{ docPath: string }> {
-    const docsDir = resolveDocumentsDir(workspace.path, sessionId);
+    const docsDir = await resolveDocumentsDir(workspace.path, sessionId, {
+        workspaceId: workspace.id,
+        sessionWorkspaces,
+    });
     const stamp = nowStampForFilename();
     const safeName = (filename || "artifact").trim().replace(/[\\/]+/g, "-");
     const relPath = `reports/${moduleId}/${stamp}-${safeName}`;
@@ -390,14 +413,19 @@ async function writeSessionVisibleArtifactFromFile({
     moduleId,
     filename,
     absSourcePath,
+    sessionWorkspaces,
 }: {
     workspace: WorkspaceInfo;
     sessionId: string;
     moduleId: string;
     filename: string;
     absSourcePath: string;
+    sessionWorkspaces?: SessionWorkspaceService;
 }): Promise<{ docPath: string }> {
-    const docsDir = resolveDocumentsDir(workspace.path, sessionId);
+    const docsDir = await resolveDocumentsDir(workspace.path, sessionId, {
+        workspaceId: workspace.id,
+        sessionWorkspaces,
+    });
     await ensureDir(docsDir);
     const stamp = nowStampForFilename();
     const safeName = (filename || "artifact").trim().replace(/[\\/]+/g, "-");
@@ -712,7 +740,13 @@ function buildOnlyOfficeDownloadCandidates(rawUrl: string): string[] {
     return candidates;
 }
 
-export function createDocumentRoutes(routes: unknown[]) {
+export function createDocumentRoutes(routes: unknown[], sessionWorkspaces?: SessionWorkspaceService) {
+    const docsDirFor = (workspace: WorkspaceInfo, sessionId?: string | null) =>
+        resolveDocumentsDir(workspace.path, sessionId, {
+            workspaceId: workspace.id,
+            sessionWorkspaces,
+        });
+
     // List documents
     routes.push({
         method: "GET",
@@ -725,7 +759,7 @@ export function createDocumentRoutes(routes: unknown[]) {
             const workspace = ctx.config.workspaces.find((w: WorkspaceInfo) => w.id === workspaceId);
             if (!workspace) throw new ApiError(404, "not_found", "Workspace not found");
 
-            const docsDir = resolveDocumentsDir(workspace.path, sessionId);
+            const docsDir = await docsDirFor(workspace, sessionId);
             await ensureDir(docsDir);
 
             const docs: Array<{ name: string; updatedAt: number; size: number; type: string }> = [];
@@ -787,7 +821,7 @@ export function createDocumentRoutes(routes: unknown[]) {
             const includeRefs = Boolean(payload.includeRefs);
             if (!keep) throw new ApiError(400, "invalid_request", "keep is required");
 
-            const docsDir = resolveDocumentsDir(workspace.path, sessionId);
+            const docsDir = await docsDirFor(workspace, sessionId);
             await ensureDir(docsDir);
 
             const keepAbs = resolveDocumentPathSafe(docsDir, keep);
@@ -855,7 +889,7 @@ export function createDocumentRoutes(routes: unknown[]) {
             if (!inboxInfo.isFile()) throw new ApiError(404, "not_found", "Inbox file not found");
 
             const inboxRel = relative(resolve(inboxRoot), inboxAbs).replace(/\\/g, "/");
-            const docsDir = resolveDocumentsDir(workspace.path, sessionId);
+            const docsDir = await docsDirFor(workspace, sessionId);
             await ensureDir(docsDir);
 
             const destOverride = (ctx.url.searchParams.get("dest") ?? "").trim();
@@ -920,7 +954,7 @@ export function createDocumentRoutes(routes: unknown[]) {
             const workspace = ctx.config.workspaces.find((w: WorkspaceInfo) => w.id === workspaceId);
             if (!workspace) throw new ApiError(404, "not_found", "Workspace not found");
 
-            const docsDir = resolveDocumentsDir(workspace.path, sessionId);
+            const docsDir = await docsDirFor(workspace, sessionId);
             const targetAbs = resolveDocumentPathSafe(docsDir, targetDoc);
             if (!(await exists(targetAbs))) throw new ApiError(404, "not_found", "Target document not found");
             const targetExt = extname(targetAbs).toLowerCase();
@@ -965,6 +999,7 @@ export function createDocumentRoutes(routes: unknown[]) {
                         sessionId,
                         docPath: techXlsxDocPath || undefined,
                         inboxId: techXlsxInboxId || undefined,
+                        sessionWorkspaces,
                     });
                     techAbs = absPath;
                 }
@@ -974,6 +1009,7 @@ export function createDocumentRoutes(routes: unknown[]) {
                         sessionId,
                         docPath: equipXlsxDocPath || undefined,
                         inboxId: equipXlsxInboxId || undefined,
+                        sessionWorkspaces,
                     });
                     equipAbs = absPath;
                 }
@@ -1018,6 +1054,7 @@ export function createDocumentRoutes(routes: unknown[]) {
                     sessionId,
                     moduleId: "fill",
                     content: reportText,
+                    sessionWorkspaces,
                 });
 
                 if (result.status !== 0) {
@@ -1051,7 +1088,7 @@ export function createDocumentRoutes(routes: unknown[]) {
             const workspace = ctx.config.workspaces.find((w: WorkspaceInfo) => w.id === workspaceId);
             if (!workspace) throw new ApiError(404, "not_found", "Workspace not found");
 
-            const docsDir = resolveDocumentsDir(workspace.path, sessionId);
+            const docsDir = await docsDirFor(workspace, sessionId);
             const targetAbs = resolveDocumentPathSafe(docsDir, targetDoc);
             if (!(await exists(targetAbs))) throw new ApiError(404, "not_found", "Target document not found");
             const targetExt = extname(targetAbs).toLowerCase();
@@ -1081,6 +1118,7 @@ export function createDocumentRoutes(routes: unknown[]) {
                 sessionId,
                 docPath: tenderDocPath || undefined,
                 inboxId: tenderInboxId || undefined,
+                sessionWorkspaces,
             });
             const tenderDocxAbs = await ensureDocxZipPath(workspace.path, tenderAbs);
 
@@ -1139,6 +1177,7 @@ export function createDocumentRoutes(routes: unknown[]) {
                 moduleId: "facts",
                 filename: "facts.json",
                 absSourcePath: factsAbs,
+                sessionWorkspaces,
             });
 
             let reportContent = "";
@@ -1159,6 +1198,7 @@ export function createDocumentRoutes(routes: unknown[]) {
                 sessionId,
                 moduleId: "facts",
                 content: reportContent,
+                sessionWorkspaces,
             });
 
             await rm(tmpReport, { force: true }).catch(() => undefined);
@@ -1190,7 +1230,7 @@ export function createDocumentRoutes(routes: unknown[]) {
             const workspace = ctx.config.workspaces.find((w: WorkspaceInfo) => w.id === workspaceId);
             if (!workspace) throw new ApiError(404, "not_found", "Workspace not found");
 
-            const docsDir = resolveDocumentsDir(workspace.path, sessionId);
+            const docsDir = await docsDirFor(workspace, sessionId);
             const targetAbs = resolveDocumentPathSafe(docsDir, targetDoc);
             if (!(await exists(targetAbs))) throw new ApiError(404, "not_found", "Target document not found");
             const targetExt = extname(targetAbs).toLowerCase();
@@ -1271,6 +1311,7 @@ export function createDocumentRoutes(routes: unknown[]) {
                     sessionId,
                     moduleId: "qc",
                     content: reportText,
+                    sessionWorkspaces,
                 });
 
                 return jsonResponse({ ok: true, passed, mode, report, stdout, stderr });
@@ -1298,7 +1339,7 @@ export function createDocumentRoutes(routes: unknown[]) {
             const workspace = ctx.config.workspaces.find((w: WorkspaceInfo) => w.id === workspaceId);
             if (!workspace) throw new ApiError(404, "not_found", "Workspace not found");
 
-            const docsDir = resolveDocumentsDir(workspace.path, sessionId);
+            const docsDir = await docsDirFor(workspace, sessionId);
             const targetAbs = resolveDocumentPathSafe(docsDir, targetDoc);
             if (!(await exists(targetAbs))) throw new ApiError(404, "not_found", "Target document not found");
             const targetExt = extname(targetAbs).toLowerCase();
@@ -1435,6 +1476,7 @@ export function createDocumentRoutes(routes: unknown[]) {
                         moduleId: "dedupe",
                         filename: "media.zip",
                         absSourcePath: tmpMediaZip,
+                        sessionWorkspaces,
                     });
                     mediaDoc = await writeSessionVisibleArtifactFromFile({
                         workspace,
@@ -1442,6 +1484,7 @@ export function createDocumentRoutes(routes: unknown[]) {
                         moduleId: "dedupe",
                         filename: "media.zip",
                         absSourcePath: tmpMediaZip,
+                        sessionWorkspaces,
                     });
                 }
             }
@@ -1473,6 +1516,7 @@ export function createDocumentRoutes(routes: unknown[]) {
                 sessionId,
                 moduleId: "dedupe",
                 content: reportContent,
+                sessionWorkspaces,
             });
 
             await rm(tmpReport, { force: true }).catch(() => undefined);
@@ -1508,7 +1552,7 @@ export function createDocumentRoutes(routes: unknown[]) {
             const workspace = ctx.config.workspaces.find((w: WorkspaceInfo) => w.id === workspaceId);
             if (!workspace) throw new ApiError(404, "not_found", "Workspace not found");
 
-            const docsDir = resolveDocumentsDir(workspace.path, sessionId);
+            const docsDir = await docsDirFor(workspace, sessionId);
             const targetAbs = resolveDocumentPathSafe(docsDir, targetDoc);
             if (!(await exists(targetAbs))) throw new ApiError(404, "not_found", "Target document not found");
 
@@ -1566,6 +1610,7 @@ export function createDocumentRoutes(routes: unknown[]) {
                     moduleId: "preview",
                     filename: `${basename(targetAbs, targetExt)}.pdf`,
                     absSourcePath: pdfAbs,
+                    sessionWorkspaces,
                 });
                 const pdfDoc = await writeSessionVisibleArtifactFromFile({
                     workspace,
@@ -1573,6 +1618,7 @@ export function createDocumentRoutes(routes: unknown[]) {
                     moduleId: "preview",
                     filename: `${basename(targetAbs, targetExt)}.pdf`,
                     absSourcePath: pdfAbs,
+                    sessionWorkspaces,
                 });
 
                 const reportText = [
@@ -1593,6 +1639,7 @@ export function createDocumentRoutes(routes: unknown[]) {
                     sessionId,
                     moduleId: "preview",
                     content: reportText,
+                    sessionWorkspaces,
                 });
 
                 return jsonResponse({ ok: true, pdf, pdfDoc, report });
@@ -1619,7 +1666,7 @@ export function createDocumentRoutes(routes: unknown[]) {
             const workspace = ctx.config.workspaces.find((w: WorkspaceInfo) => w.id === workspaceId);
             if (!workspace) throw new ApiError(404, "not_found", "Workspace not found");
 
-            const docsDir = resolveDocumentsDir(workspace.path, sessionId);
+            const docsDir = await docsDirFor(workspace, sessionId);
             const filePath = resolveDocumentPathSafe(docsDir, docName);
 
             if (!(await exists(filePath))) {
@@ -1686,7 +1733,7 @@ export function createDocumentRoutes(routes: unknown[]) {
             const workspace = ctx.config.workspaces.find((w: WorkspaceInfo) => w.id === workspaceId);
             if (!workspace) throw new ApiError(404, "not_found", "Workspace not found");
 
-            const docsDir = resolveDocumentsDir(workspace.path, sessionId);
+            const docsDir = await docsDirFor(workspace, sessionId);
             const filePath = resolveDocumentPathSafe(docsDir, docName);
 
             if (!(await exists(filePath))) throw new ApiError(404, "not_found", "File not found");
@@ -1739,7 +1786,7 @@ export function createDocumentRoutes(routes: unknown[]) {
             if (body.status === 2 || body.status === 6) {
                 console.log("[onlyoffice] Callback received", { document: docName, status: body.status });
                 if (body.url) {
-                    const docsDir = resolveDocumentsDir(workspace.path, sessionId);
+                    const docsDir = await docsDirFor(workspace, sessionId);
                     await ensureDir(docsDir);
                     const filePath = resolveDocumentPathSafe(docsDir, docName);
                     const candidateUrls = buildOnlyOfficeDownloadCandidates(body.url);
@@ -1792,7 +1839,7 @@ export function createDocumentRoutes(routes: unknown[]) {
             if (!dirPath) throw new ApiError(400, "invalid_request", "Folder path is required");
             validateDocumentMutationPath(dirPath);
 
-            const docsDir = resolveDocumentsDir(workspace.path, sessionId);
+            const docsDir = await docsDirFor(workspace, sessionId);
             await ensureDir(docsDir);
 
             const absPath = resolveDocumentPathSafe(docsDir, dirPath);
@@ -1848,7 +1895,7 @@ export function createDocumentRoutes(routes: unknown[]) {
             if (!dirPath) throw new ApiError(400, "invalid_request", "Folder path is required");
             validateDocumentMutationPath(dirPath);
 
-            const docsDir = resolveDocumentsDir(workspace.path, sessionId);
+            const docsDir = await docsDirFor(workspace, sessionId);
             await ensureDir(docsDir);
 
             const absPath = resolveDocumentPathSafe(docsDir, dirPath);
@@ -1882,7 +1929,7 @@ export function createDocumentRoutes(routes: unknown[]) {
             if (!toPath) throw new ApiError(400, "invalid_request", "Target path is required");
             if (fromPath === toPath) throw new ApiError(400, "invalid_request", "Source and target paths are the same");
 
-            const docsDir = resolveDocumentsDir(workspace.path, sessionId);
+            const docsDir = await docsDirFor(workspace, sessionId);
             await ensureDir(docsDir);
 
             const fromAbs = resolveDocumentPathSafe(docsDir, fromPath);
@@ -1933,7 +1980,7 @@ export function createDocumentRoutes(routes: unknown[]) {
             if (!relPath) throw new ApiError(400, "invalid_request", "File path is required");
             validateDocumentMutationPath(relPath, { allowHiddenLeafFile: true });
 
-            const docsDir = resolveDocumentsDir(workspace.path, sessionId);
+            const docsDir = await docsDirFor(workspace, sessionId);
             await ensureDir(docsDir);
 
             const absPath = resolveDocumentPathSafe(docsDir, relPath);
@@ -1963,7 +2010,7 @@ export function createDocumentRoutes(routes: unknown[]) {
             if (!dirPath) throw new ApiError(400, "invalid_request", "Folder path is required");
             validateDocumentMutationPath(dirPath);
 
-            const docsDir = resolveDocumentsDir(workspace.path, sessionId);
+            const docsDir = await docsDirFor(workspace, sessionId);
             await ensureDir(docsDir);
 
             const absPath = resolveDocumentPathSafe(docsDir, dirPath);
@@ -1995,7 +2042,7 @@ export function createDocumentRoutes(routes: unknown[]) {
                 throw new ApiError(400, "invalid_request", "File is required");
             }
 
-            const docsDir = resolveDocumentsDir(workspace.path, sessionId);
+            const docsDir = await docsDirFor(workspace, sessionId);
             await ensureDir(docsDir);
 
             const name = basename(file.name);

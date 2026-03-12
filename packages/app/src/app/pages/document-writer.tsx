@@ -536,14 +536,12 @@ export default function DocumentWriterView(props: SessionViewProps) {
   });
 
   const sessionDocumentsRoot = createMemo(() => {
-    const id = sessionId();
-    if (!id) return "";
-    return `documents/sessions/${id}`;
+    return "";
   });
 
   const refsWorkspaceRoot = createMemo(() => {
     const root = sessionDocumentsRoot();
-    if (!root) return "";
+    if (!root) return "refs";
     return `${root}/refs`;
   });
 
@@ -556,7 +554,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
 
   const reportsWorkspaceRoot = createMemo(() => {
     const root = sessionDocumentsRoot();
-    if (!root) return "";
+    if (!root) return "reports";
     return `${root}/reports`;
   });
 
@@ -800,9 +798,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
     setRefsOpenBusyId(item.name);
     setRefsError(null);
     try {
-      const root = sessionDocumentsRoot();
-      if (!root) throw new Error(tr("docagent.no_session_selected"));
-      insertRefInPrompt(`${root}/${item.name}`);
+      insertRefInPrompt(item.name);
     } catch (error) {
       const message = error instanceof Error ? error.message : tr("docwriter.failed_import_document");
       setRefsError(message);
@@ -1348,7 +1344,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
       const reportPath = typeof result?.report?.docPath === "string" ? result.report.docPath : "";
       const mediaPath = typeof result?.mediaZip?.docPath === "string" ? result.mediaZip.docPath : "";
       const mediaDocPath = typeof result?.mediaDoc?.docPath === "string" ? result.mediaDoc.docPath : "";
-      const mediaDocWorkspacePath = mediaDocPath ? `documents/sessions/${cfg.sessionId}/${mediaDocPath}` : "";
+      const mediaDocWorkspacePath = mediaDocPath;
       const hint = [
         reportPath ? tr("docwriter.dedupe_report_saved") : tr("docwriter.dedupe_complete"),
         mediaPath ? tr("docwriter.dedupe_media_saved") : "",
@@ -1427,7 +1423,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
       };
       const pdfPath = typeof result?.pdf?.docPath === "string" ? result.pdf.docPath : "";
       const pdfDocPath = typeof result?.pdfDoc?.docPath === "string" ? result.pdfDoc.docPath : "";
-      const pdfDocWorkspacePath = pdfDocPath ? `documents/sessions/${cfg.sessionId}/${pdfDocPath}` : "";
+      const pdfDocWorkspacePath = pdfDocPath;
       setToastMessage(
         pdfPath || pdfDocPath
           ? [tr("docwriter.preview_pdf_saved"), pdfDocWorkspacePath ? trf("docwriter.output_suffix", { path: pdfDocWorkspacePath }) : ""]
@@ -1455,9 +1451,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
     if (!doc) return "";
     const normalized = doc.trim().replace(/^\/+/, "");
     if (!normalized) return "";
-    const session = apiConfig()?.sessionId ?? sessionId();
-    if (!session) return "";
-    return `documents/sessions/${session}/${normalized}`;
+    return normalized;
   });
   const activeDocKind = createMemo<"none" | "image" | "pdf" | "markdown" | "text" | "onlyoffice" | "unsupported">(() => {
     const doc = activeDoc();

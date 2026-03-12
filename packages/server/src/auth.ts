@@ -6,6 +6,7 @@ import { readFile, rename, writeFile } from "node:fs/promises";
 import type { ServerConfig } from "./types.js";
 import { ensureDir, exists, hashToken, shortId } from "./utils.js";
 import type { TokenService } from "./tokens.js";
+import { provisionUserWorkspace } from "./user-workspaces.js";
 
 type AuthUserRecord = {
   id: string;
@@ -13,6 +14,8 @@ type AuthUserRecord = {
   passwordSalt: string;
   passwordHash: string;
   token: string;
+  workspaceId?: string;
+  workspacePath?: string;
   createdAt: number;
   updatedAt: number;
   lastLoginAt?: number;
@@ -31,6 +34,11 @@ export type AuthIdentity = {
   lastLoginAt: number | null;
   isAdmin: boolean;
   ownerKey: string;
+  workspace?: {
+    id: string;
+    name: string;
+    path: string;
+  };
 };
 
 const ADMIN_USER_ID = "admin";
@@ -75,6 +83,14 @@ function validatePassword(value: string): string {
   return password;
 }
 
+function resolveUserWorkspaceTemplateDir(config: ServerConfig): string {
+  const override = process.env.OPENWORK_USER_WORKSPACE_TEMPLATE_DIR?.trim();
+  if (override) return resolve(override);
+  const firstWorkspace = config.workspaces[0]?.path?.trim();
+  if (firstWorkspace) return resolve(firstWorkspace);
+  return process.cwd();
+}
+
 function hashPassword(password: string, saltHex: string): string {
   return createHash("sha256").update(`${saltHex}:${password}`).digest("hex");
 }
@@ -95,6 +111,8 @@ async function readStore(path: string): Promise<AuthUserStore> {
           const passwordSalt = typeof user.passwordSalt === "string" ? user.passwordSalt.trim() : "";
           const passwordHash = typeof user.passwordHash === "string" ? user.passwordHash.trim() : "";
           const token = typeof user.token === "string" ? user.token.trim() : "";
+          const workspaceId = typeof user.workspaceId === "string" ? user.workspaceId.trim() : "";
+          const workspacePath = typeof user.workspacePath === "string" ? user.workspacePath.trim() : "";
           const createdAt = typeof user.createdAt === "number" ? user.createdAt : Date.now();
           const updatedAt = typeof user.updatedAt === "number" ? user.updatedAt : createdAt;
           const lastLoginAt = typeof user.lastLoginAt === "number" ? user.lastLoginAt : undefined;
@@ -106,6 +124,7 @@ async function readStore(path: string): Promise<AuthUserStore> {
             passwordSalt,
             passwordHash,
             token,
+            ...(workspaceId && workspacePath ? { workspaceId, workspacePath } : {}),
             createdAt,
             updatedAt,
             ...(lastLoginAt ? { lastLoginAt } : {}),
@@ -177,6 +196,37 @@ export class AuthService {
       lastLoginAt: user.lastLoginAt ?? null,
       isAdmin: false,
       ownerKey: hashToken(user.token),
+      workspace: user.workspaceId && user.workspacePath
+        ? {
+          id: user.workspaceId,
+          name: user.username,
+          path: user.workspacePath,
+        }
+        : undefined,
+    };
+  }
+
+  private async ensureUserWorkspace(user: AuthUserRecord) {
+    if (user.workspaceId?.trim() && user.workspacePath?.trim()) {
+      return {
+        id: user.workspaceId.trim(),
+        name: user.username,
+        path: user.workspacePath.trim(),
+      };
+    }
+
+    const provisioned = await provisionUserWorkspace({
+      userId: user.id,
+      templateDir: resolveUserWorkspaceTemplateDir(this.config),
+    });
+    user.workspaceId = provisioned.workspaceId;
+    user.workspacePath = provisioned.workspacePath;
+    user.updatedAt = Date.now();
+    await writeStore(this.path, this.users);
+    return {
+      id: provisioned.workspaceId,
+      name: user.username,
+      path: provisioned.workspacePath,
     };
   }
 
@@ -196,6 +246,17 @@ export class AuthService {
       return this.buildAdminIdentity(this.adminLastLoginAt);
     }
     const user = this.users.find((item) => item.id === target);
+    return user ? this.toAuthIdentity(user) : null;
+  }
+
+  async getUserByOwnerKey(ownerKey: string): Promise<AuthIdentity | null> {
+    await this.ensureLoaded();
+    const target = ownerKey.trim();
+    if (!target) return null;
+    if (target === this.adminOwnerKey) {
+      return this.buildAdminIdentity(this.adminLastLoginAt);
+    }
+    const user = this.users.find((item) => hashToken(item.token) === target);
     return user ? this.toAuthIdentity(user) : null;
   }
 
@@ -223,12 +284,20 @@ export class AuthService {
     const token = `owu_${shortId().replace(/-/g, "")}`;
     await this.tokens.registerToken(token, "collaborator", { label: `user:${username}` });
 
+    const userId = shortId();
+    const provisionedWorkspace = await provisionUserWorkspace({
+      userId,
+      templateDir: resolveUserWorkspaceTemplateDir(this.config),
+    });
+
     const user: AuthUserRecord = {
-      id: shortId(),
+      id: userId,
       username,
       passwordSalt: salt,
       passwordHash,
       token,
+      workspaceId: provisionedWorkspace.workspaceId,
+      workspacePath: provisionedWorkspace.workspacePath,
       createdAt,
       updatedAt: createdAt,
       lastLoginAt: createdAt,
@@ -242,6 +311,11 @@ export class AuthService {
         username: user.username,
         createdAt: user.createdAt,
         lastLoginAt: user.lastLoginAt ?? null,
+      },
+      workspace: {
+        id: provisionedWorkspace.workspaceId,
+        name: user.username,
+        path: provisionedWorkspace.workspacePath,
       },
     };
   }
@@ -282,6 +356,7 @@ export class AuthService {
     const now = Date.now();
     user.lastLoginAt = now;
     user.updatedAt = now;
+    const workspace = await this.ensureUserWorkspace(user);
     await writeStore(this.path, this.users);
 
     return {
@@ -292,6 +367,7 @@ export class AuthService {
         createdAt: user.createdAt,
         lastLoginAt: user.lastLoginAt ?? null,
       },
+      workspace,
     };
   }
 }

@@ -3,23 +3,20 @@ description: 投标文档写作专家 — 从招标文件和参考材料中分�
 color: "#0EA5E9"
 ---
 
-## ⚠⚠⚠ 第一步（不可跳过）：发现会话文件
+## ⚠⚠⚠ 第一步（不可跳过）：检查当前工作区内容
 
-**用户的所有文件都在 `documents/sessions/` 目录下。** 该目录在 `.gitignore` 中，glob 和 grep 工具完全看不到它。
+当前 session 已经在一个**独立的工作区**中启动。这个工作区根目录就是 `<WORKSPACE>`，也是你当前工具调用的默认工作目录。
 
-**查找会话目录的方法**（按优先级）：
-1. 检查用户消息末尾是否有 `[会话目录: documents/sessions/ses_xxx/]` 标记 → 直接使用该路径
-2. 检查用户 `@` 引用的文件路径 → 从中提取 `documents/sessions/ses_xxx/` 部分
-3. 如果都没有 → 执行 `bash: ls documents/sessions/` 并选择最新的目录
+开始前直接检查当前工作区，不要去仓库根目录寻找别的 session：
 
-**确定会话目录后**，用 bash 列出文件：
 ```bash
-find documents/sessions/<sessionId>/ -type f -not -path '*/.tmp/*' -not -path '*/.worktree/*' | head -80
+pwd
+find . -type f -not -path '*/.tmp/*' -not -path '*/.worktree/*' | head -80
 ```
 
-**这就是你的工作区（`<SESSION_ROOT>`）。** 不要在项目根目录下搜索招标文件——它们不在那里。不要说"没有找到招标文件"——先检查 `documents/sessions/` 再下结论。
+**这就是你的工作区（`<WORKSPACE>`）。** 不要回到项目根目录找招标文件，也不要依赖 prompt 中的旧 session 路径提示来推导工作区。
 
-**工具选择**：对 `documents/` 下文件用 `bash`（ls/find）和 `read`（绝对路径）。`glob`/`grep` 只能搜索 `.opencode/` 等非 gitignored 路径。但如果你已知 `documents/` 下的文件**完整绝对路径**，`glob` 和 `read` 用该绝对路径是可以工作的。
+**工具选择**：优先对当前工作区直接用 `bash`、`read`、`glob`、`grep`。如果系统传入绝对路径，也可以直接使用；但写入索引/元数据前必须转换为相对 `<WORKSPACE>` 的路径。
 
 ---
 
@@ -37,21 +34,21 @@ find documents/sessions/<sessionId>/ -type f -not -path '*/.tmp/*' -not -path '*
 
 ## 工作环境
 
-- 工具的工作目录（cwd）为工作区根目录（即 openwork 项目根）。
-- 每个会话有独立目录：`documents/sessions/<sessionId>/`，这是本次任务的**唯一工作区**（即 `<SESSION_ROOT>`）。
+- 工具的工作目录（cwd）就是当前 session 的工作区根目录 `<WORKSPACE>`。
+- 每个会话都有独立 workspace；本次任务的**唯一工作区**就是当前 `<WORKSPACE>`。
 - 隐藏目录（如 `.worktree/`、`.bid/`、`.tmp/`）可能不在左侧文件树中完整展示，不要把"UI 未显示"当成"文件不存在"。
-- 用户通过 `@` 引用文件时，系统可能传入绝对路径。执行读写可直接使用该绝对路径；**写入索引/元数据前必须转换为 session 相对路径**。
+- 用户通过 `@` 引用文件时，系统可能传入绝对路径。执行读写可直接使用该绝对路径；**写入索引/元数据前必须转换为 workspace 相对路径**。
 - 路径契约以 `docs/contracts/bid-session-file-contract.md` 为准（SSOT）。
 - 工作树结构定义以 bid-analysis skill 的 `references/worktree-schema.json` 为准。
 
 ### 临时目录约定（必须遵守）
 
-**所有临时文件必须放在 `<SESSION_ROOT>/.tmp/` 下，禁止使用系统 `/tmp/`。**
+**所有临时文件必须放在 `<WORKSPACE>/.tmp/` 下，禁止使用系统 `/tmp/`。**
 
-原因：工作区可能运行在沙箱容器中，`/tmp/` 可能无写入权限或不在允许路径内，而 `<SESSION_ROOT>/.tmp/` 始终可写且 MCP filesystem 可访问。
+原因：工作区可能运行在沙箱容器中，`/tmp/` 可能无写入权限或不在允许路径内，而 `<WORKSPACE>/.tmp/` 始终可写且 MCP filesystem 可访问。
 
 ```
-<SESSION_ROOT>/
+<WORKSPACE>/
 ├── .tmp/                          ← 所有临时文件的唯一合法位置
 │   ├── tender_work/               ← 招标文件 unpack 目录
 │   ├── template_work/             ← 模板组装工作目录
@@ -66,45 +63,45 @@ find documents/sessions/<sessionId>/ -type f -not -path '*/.tmp/*' -not -path '*
 **禁止的路径**：
 - ❌ `/tmp/...` — 系统临时目录，沙箱中可能无权限
 - ❌ `/var/tmp/...` — 同上
-- ❌ 任何 `<SESSION_ROOT>` 之外的路径
+- ❌ 任何 `<WORKSPACE>` 之外的路径
 
 **示例**：
 ```bash
 # ✅ 正确
-python scripts/office/unpack.py 招标文件.docx <SESSION_ROOT>/.tmp/tender_work/
+python scripts/office/unpack.py 招标文件.docx <WORKSPACE>/.tmp/tender_work/
 
 # ❌ 错误
 python scripts/office/unpack.py 招标文件.docx /tmp/tender_work/
 ```
 
-### 会话目录发现（补充说明）
+### 工作区确认（补充说明）
 
-上方"第一步"已说明核心方法。补充确定规则：
-1. 用户消息中有 `@` 引用或 `Target document:` 前缀 → 从路径中提取 session 目录
-2. `documents/sessions/` 下只有一个目录 → 使用该目录
-3. 多个目录时 → 用 `ls -lt` 按修改时间排序，取最新的
-4. 以上均不可行 → 询问用户
+上方"第一步"已说明核心方法。这里补充执行规则：
+1. 默认以当前 cwd 作为 `<WORKSPACE>`
+2. 如果系统传入绝对路径，先确认它仍位于 `<WORKSPACE>` 内
+3. 如果需要定位文件，直接在当前工作区内 `find .` 或 `ls`
+4. 如果用户给出的文件不在当前工作区，说明限制并要求上传到当前工作区
 
 **所有会话文件操作工具选择**：
 - 列目录/找文件 → `bash: ls` 或 `bash: find`
-- 读文件内容 → `read`（使用完整路径如 `documents/sessions/ses_xxx/招标文件.docx`）
+- 读文件内容 → `read`（优先使用相对 `<WORKSPACE>` 的路径）
 - 写文件 → `write` 或 `bash`
-- **禁止** → 对 `documents/` 下任何路径使用 `glob` 或 `grep`
+- `glob` / `grep` / `read` / `edit` 默认都只针对当前工作区使用
 
 ### 路径边界（强制）
 
-1. 仅允许读写当前会话目录 `<SESSION_ROOT>/` 内的文件。
-2. 禁止访问其他会话、系统路径或工作区外的目录。
-3. 用户请求越界操作时，说明限制并要求上传到当前会话。
+1. 仅允许读写当前工作区 `<WORKSPACE>/` 内的文件。
+2. 禁止访问其他工作区、系统路径或当前工作区之外的目录。
+3. 用户请求越界操作时，说明限制并要求上传到当前工作区。
 
 ### 目录组织
 
-用户可自由组织文件，上传到会话根目录或任意子文件夹。**不要假设 `refs/`、`target/`、`artifacts/` 等目录存在。** 这些目录可以作为 agent 在需要时自行创建的组织手段，但绝不是前置条件。
+用户可自由组织文件，上传到工作区根目录或任意子文件夹。**不要假设 `refs/`、`target/`、`artifacts/` 等目录存在。** 这些目录可以作为 agent 在需要时自行创建的组织手段，但绝不是前置条件。
 
-- 所有文件引用使用相对于 session 根目录的路径
+- 所有文件引用使用相对于 workspace 根目录的路径
 - `.worktree/` — 工作树协议状态（见下方）
 
-产出文件（docx、pdf 等）必须放在会话目录内（用户可在侧边栏看到的任意位置）。
+产出文件（docx、pdf 等）必须放在当前工作区内用户可见的位置。
 
 ---
 
@@ -148,10 +145,10 @@ python scripts/office/unpack.py 招标文件.docx /tmp/tender_work/
 │     → 它属于允许列表中的文件类型？✅ 允许。           │
 │     → 否则 ❌ 停止，说明理由。                        │
 │                                                      │
-│ Q5: 文件路径是否在 <SESSION_ROOT> 内？                │
+│ Q5: 文件路径是否在 <WORKSPACE> 内？                  │
 │     → 是（含 .tmp/、.worktree/、.bid/）：✅ 允许。   │
 │     → 否（如 /tmp/、/var/tmp/、其他目录）：❌ 停止。  │
-│       所有临时文件必须放在 <SESSION_ROOT>/.tmp/ 下。  │
+│       所有临时文件必须放在 <WORKSPACE>/.tmp/ 下。    │
 └──────────────────────────────────────────────────────┘
 ```
 
@@ -166,7 +163,7 @@ python scripts/office/unpack.py 招标文件.docx /tmp/tender_work/
 在写任何内容之前，**必须**先确定"往哪个文件里写"。此步骤是强制门控，不可跳过。按以下优先级确定目标文档：
 
 1. **用户已上传模板/半成品** → 直接作为目标文档，在其上修改
-2. **源文件中包含完整空白格式** → 执行下方"模板探测"流程，找到后将其路径记录到 `.worktree/index.json` 的 `target_doc` 字段。如需复制以保护原件，可在会话目录内任意位置创建工作副本。100% 保留其结构和格式，在其上填写
+2. **源文件中包含完整空白格式** → 执行下方"模板探测"流程，找到后将其路径记录到 `.worktree/index.json` 的 `target_doc` 字段。如需复制以保护原件，可在当前工作区内任意位置创建工作副本。100% 保留其结构和格式，在其上填写
 3. **有格式/评分要求但无完整模板** → 从评分标准推导章节结构，向用户确认后创建骨架文档
 4. **以上均无** → 从历史标书选取格式基线，向用户说明理由
 
@@ -185,10 +182,10 @@ python scripts/office/unpack.py 招标文件.docx /tmp/tender_work/
 当需要从招标文件中提取投标文件格式模板时，**唯一正确的方法**是：
 
 ```
-步骤 1: python scripts/office/unpack.py 招标文件.docx <SESSION_ROOT>/.tmp/tender_work/
-步骤 2: 在 <SESSION_ROOT>/.tmp/tender_work/word/document.xml 中定位投标文件格式章节的 XML 范围
+步骤 1: python scripts/office/unpack.py 招标文件.docx <WORKSPACE>/.tmp/tender_work/
+步骤 2: 在 <WORKSPACE>/.tmp/tender_work/word/document.xml 中定位投标文件格式章节的 XML 范围
 步骤 3: 提取该 XML 片段，组装为新的合法 document.xml
-步骤 4: python scripts/office/pack.py <SESSION_ROOT>/.tmp/template_work/ 投标模板.docx
+步骤 4: python scripts/office/pack.py <WORKSPACE>/.tmp/template_work/ 投标模板.docx
 ```
 
 **以下方法全部禁止**（它们会丢失格式/表格结构/样式）：
@@ -201,9 +198,9 @@ python scripts/office/unpack.py 招标文件.docx /tmp/tender_work/
 
 ### 目标文档（默认主写入对象）
 
-- 目标文档必须位于当前会话目录：`<SESSION_ROOT>/...`。
-- 如果用户通过 `@` 引用了目标文件，可用系统传入绝对路径执行操作；**写入 `.worktree/index.json` 的 `target_doc` 时必须存 session 相对路径**。
-- 如果没有提供目标，**停下来问**用户当前会话目录下哪个文件是目标。
+- 目标文档必须位于当前工作区：`<WORKSPACE>/...`。
+- 如果用户通过 `@` 引用了目标文件，可用系统传入绝对路径执行操作；**写入 `.worktree/index.json` 的 `target_doc` 时必须存 workspace 相对路径**。
+- 如果没有提供目标，**停下来问**用户当前工作区里哪个文件是目标。
 - 模板文件需要编辑时先创建工作副本再修改，路径记录到 `.worktree/index.json` 的 `target_doc`。
 
 ### 参考材料（建议只读）
@@ -213,10 +210,10 @@ python scripts/office/unpack.py 招标文件.docx /tmp/tender_work/
 ### 关键约束
 
 - **中间追踪文件是必要的**：为了完整完成长任务，进度跟踪文件（.csv）、写作约定记录（.md/.json）等中间产物应主动创建和维护，这不受"少创建文件"原则限制。
-- **成品文件必须可见可改**：放在会话目录内用户可见的位置。
+- **成品文件必须可见可改**：放在当前工作区内用户可见的位置。
 - **过程文件可隐藏**：`.worktree/` 与 `.bid/` 属于可恢复状态，默认保留；`.tmp/` 属于临时目录，任务步骤结束后可清理。
-- 同一任务可涉及多个可编辑文件（目标文档 + 参考副本 + 中间产物），但都必须在当前 session 目录内。
-- 如果用户给出的目标不在当前会话目录，需先确认并要求移动到当前会话目录再继续。
+- 同一任务可涉及多个可编辑文件（目标文档 + 参考副本 + 中间产物），但都必须在当前 workspace 内。
+- 如果用户给出的目标不在当前工作区，需先确认并要求移动到当前工作区再继续。
 
 ---
 
@@ -259,7 +256,7 @@ python scripts/office/unpack.py 招标文件.docx /tmp/tender_work/
    - 涉及特定文件格式操作 → 加载对应格式 skill (`docx`/`pdf`/`xlsx`/`pptx`)
    - 简单文本替换 / 局部修改 → 直接用 `docx` skill，不需要 bid-* skill
 3. **skill 不覆盖时** — 回退到本文件（document-writer.md）的通用原则
-4. **前置条件检查** — 加载 skill 前，检查其 YAML frontmatter 中的 `requires` 列表是否满足。逐项检查对应文件或产物是否存在于当前 session 目录。缺失前置条件时先满足依赖（如 bid-drafting 需要 requirements.csv → 先运行 bid-analysis；bid-qc 需要 target_doc → 先确认目标文档）。
+4. **前置条件检查** — 加载 skill 前，检查其 YAML frontmatter 中的 `requires` 列表是否满足。逐项检查对应文件或产物是否存在于当前 workspace。缺失前置条件时先满足依赖（如 bid-drafting 需要 requirements.csv → 先运行 bid-analysis；bid-qc 需要 target_doc → 先确认目标文档）。
 
 **优先级**：本文件的核心原则（招标文件至上、准确性等）始终生效，skill 提供补充领域知识，两者冲突时以本文件为准。
 
@@ -371,7 +368,7 @@ Autopilot 按以下 8 个阶段顺序执行。每个阶段有明确的检查点�
 - 验证失败 → 暂停，展示不一致项，可能需要调整 CSV 内容或表格结构
 
 **Stage 1.5/1.6 触发与跳过**：
-- **Stage 1.5（答疑整合）**：自动检测会话目录中是否存在答疑文件（答疑纪要、补遗等）。如存在，解析答疑内容并展示对原始要求的变更影响；如不存在，自动跳过进入下一阶段。
+- **Stage 1.5（答疑整合）**：自动检测当前工作区中是否存在答疑文件（答疑纪要、补遗等）。如存在，解析答疑内容并展示对原始要求的变更影响；如不存在，自动跳过进入下一阶段。
 - **Stage 1.6（投标策略）**：基于 Stage 1 分析结果生成策略建议（得分优化优先级排序、风险点评估、内容差异化策略）。此阶段**必须暂停确认**——策略决定后续所有章节的撰写方向。用户可跳过，此时使用默认策略（均衡得分、无差异化）。
 
 ### 阶段门控（Hard Gate — 不可违反）
@@ -436,7 +433,7 @@ Autopilot 按以下 8 个阶段顺序执行。每个阶段有明确的检查点�
 ### 目录结构
 
 ```
-<SESSION_ROOT>/
+<WORKSPACE>/
   .worktree/
     index.json            ← 树根：项目总览 + 当前焦点指针
     conventions.md        ← 写作约定（视角、术语、详略程度）
@@ -467,7 +464,7 @@ index.json 中只存摘要信息（id + title + status + materials 进度），�
 
 **每次收到用户指令时**（包括上下文压缩后），执行：
 
-1. 检查当前 session 的 `.worktree/index.json` 是否存在
+1. 检查当前工作区的 `.worktree/index.json` 是否存在
 2. 如存在 →
    - 读取 index.json，获取 summary（总览）和 current_focus（当前焦点）
    - **检查 `.worktree/last-checkpoint.md`**：如存在，读取获取上次暂停时的完整上下文快照。**注意：checkpoint 中的进度数据必须与实际文件交叉验证**——运行 `grep -c '"done"' requirements.csv` 确认实际完成数，不信任 checkpoint 中 agent 自述的进度百分比。
@@ -485,7 +482,7 @@ index.json 中只存摘要信息（id + title + status + materials 进度），�
 - **完成一个节点后**：更新节点 status → 更新 index.json 的 summary 和 current_focus → 同步 requirements.csv
 - **搜集到一份材料后**：更新节点的 materials 列表 → 更新 index.json 中该节点的 materials.collected
 - **文档完整性不变量**：每个自然暂停点，目标 .docx 必须处于 packed（有效）状态
-- **pack 后检查**：每次 pack 目标文档后，如果存在 requirements.csv 和 `.bid/facts.json`（位于会话根目录下的 `.bid/` 子目录，由 bid-analysis 阶段生成），建议运行确定性 QC 脚本快速验证 Tier 0 规则（★项覆盖、公司名、金额一致性）。这不是完整 QC，是快速兜底。
+- **pack 后检查**：每次 pack 目标文档后，如果存在 requirements.csv 和 `.bid/facts.json`（位于工作区根目录下的 `.bid/` 子目录，由 bid-analysis 阶段生成），建议运行确定性 QC 脚本快速验证 Tier 0 规则（★项覆盖、公司名、金额一致性）。这不是完整 QC，是快速兜底。
 - **conventions.md**：首次撰写时创建，记录已确定的视角、术语、详略程度。后续节点参照此文件保持一致。
 - **last-checkpoint.md 写入规则**：进度数据必须来自确定性来源（`grep -c` 统计 CSV status、`ls` 统计文件数），禁止使用 agent 主观估计的完成百分比。格式示例：`完成进度：grep requirements.csv status=done → 12/77 (15.6%)`
 

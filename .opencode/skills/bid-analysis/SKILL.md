@@ -22,14 +22,14 @@ provides:
 
 ### Step 0: 文件分类（File Triage）
 
-**触发条件**：会话目录下文件数 ≥ 10。低于 10 个文件时跳过此步，直接进入 Step 1。
+**触发条件**：当前工作区内文件数 ≥ 10。低于 10 个文件时跳过此步，直接进入 Step 1。
 
 当用户上传大量文件时，agent 需要先了解"手里有什么"再开始分析。
 
 **流程：**
 
-1. **快速扫描** — 对会话目录下所有文件（递归），仅读取：
-   - **重要**：`documents/` 目录在 `.gitignore` 中，glob/grep 无法搜索。使用 `bash: find <SESSION_ROOT>/ -type f` 列出文件。
+1. **快速扫描** — 对当前工作区内所有文件（递归），仅读取：
+   - 直接使用 `bash: find <WORKSPACE>/ -type f`，或在当前 cwd 下执行 `find . -type f` 列出文件。
    - 扫描前先排除目录：`.tmp/`、`.worktree/`、`.bid/`、`reports/`、`.archive/`、`artifacts/`
    - 文件名 + 扩展名 + 文件大小
 
@@ -63,7 +63,7 @@ provides:
    | `archive` | ZIP/RAR 等压缩包——如内含已提取的文件则跳过，否则标记待提取 |
    | `other` | 无法确信分类的文件 |
 
-4. **输出** — 在会话根目录写入 `file-triage.json`（v2）：
+4. **输出** — 在工作区根目录写入 `file-triage.json`（v2）：
 
    ```json
    {
@@ -92,7 +92,7 @@ provides:
    }
    ```
 
-   > 每个 entry 的字段：`rel_path`（session 相对路径）、`name`、`size`。`image_asset` 条目额外包含 `source_pdf` 字段指向关联的 PDF。完整字段约束见 `docs/contracts/bid-session-file-contract.md` Section 7。
+   > 每个 entry 的字段：`rel_path`（workspace 相对路径）、`name`、`size`。`image_asset` 条目额外包含 `source_pdf` 字段指向关联的 PDF。完整字段约束见 `docs/contracts/bid-session-file-contract.md` Section 7。
    > 兼容说明：如读到 v1（类别值为字符串数组），可兼容读取；**新写入必须为 v2**。
 
 5. **确认** — 向用户展示分类摘要（按类别汇总数量，不逐文件列出），重点确认：
@@ -113,12 +113,12 @@ provides:
 读取用户指定的招标文件（通常是 PDF 或 Word）。如果 Step 0 已执行，直接从 `file-triage.json` 的 `tender_main[].rel_path` 取文件路径。
 
 **文本提取方法**（按优先级）：
-1. **缓存优先** → 检查 `<SESSION_ROOT>/.tmp/tender_text.txt` 是否存在。如存在且非空，直接读取缓存，**跳过重新提取**。这避免了重复提取同一招标文件消耗大量 token。
-2. **DOCX** → `bash: python3 -c "import zipfile,re; z=zipfile.ZipFile('<path>'); xml=z.read('word/document.xml').decode(); print(re.sub(r'<[^>]+>','',xml))" > <SESSION_ROOT>/.tmp/tender_text.txt`
-3. **PDF** → `bash: python3 -c "..."` 使用 `pdfplumber` 或 `PyPDF2`，输出到 `<SESSION_ROOT>/.tmp/tender_text.txt`；如未安装则使用 `read` 工具直接读 PDF（Claude 原生支持读 PDF）
+1. **缓存优先** → 检查 `<WORKSPACE>/.tmp/tender_text.txt` 是否存在。如存在且非空，直接读取缓存，**跳过重新提取**。这避免了重复提取同一招标文件消耗大量 token。
+2. **DOCX** → `bash: python3 -c "import zipfile,re; z=zipfile.ZipFile('<path>'); xml=z.read('word/document.xml').decode(); print(re.sub(r'<[^>]+>','',xml))" > <WORKSPACE>/.tmp/tender_text.txt`
+3. **PDF** → `bash: python3 -c "..."` 使用 `pdfplumber` 或 `PyPDF2`，输出到 `<WORKSPACE>/.tmp/tender_text.txt`；如未安装则使用 `read` 工具直接读 PDF（Claude 原生支持读 PDF）
 4. 回退 → 使用 `read` 工具直接读文件（Claude 可读 docx/pdf）
 
-**重要**：提取结果必须缓存到 `<SESSION_ROOT>/.tmp/tender_text.txt`。后续所有需要引用招标文件全文的步骤（Step 2-5）应读取此缓存文件，而非重新提取原始文档。这可节省数百万 token 的重复消耗。
+**重要**：提取结果必须缓存到 `<WORKSPACE>/.tmp/tender_text.txt`。后续所有需要引用招标文件全文的步骤（Step 2-5）应读取此缓存文件，而非重新提取原始文档。这可节省数百万 token 的重复消耗。
 
 **分段阅读策略**：招标文件通常 40-100 页。不要一次读全文（可能超 context），按以下顺序分段：
 1. 首先读**目录**（通常在前 2 页）→ 了解整体结构和页码范围
@@ -156,12 +156,12 @@ provides:
      - **四、格式快照**：空框架，由 document-writer Phase 2 确定目标文档后填充（字体、标题层级、编号格式、表格边框、段落间距）
      - **五、质量基线**：空框架，由 bid-drafting 完成前 3 个节点后自动填充（平均应答字数、实质内容比、偏离标注完整率）
   4. 两者的 status 字段保持同步
-  5. 如有需要，生成 `.bid/facts.json`（schema 参见 `references/facts-template.json`），记录项目关键事实（公司名、项目名、项目编号、截止日期、预算等）。此文件供后续 bid-qc 确定性脚本使用。`.bid/` 目录位于会话根目录下，如不存在则创建。
+  5. 如有需要，生成 `.bid/facts.json`（schema 参见 `references/facts-template.json`），记录项目关键事实（公司名、项目名、项目编号、截止日期、预算等）。此文件供后续 bid-qc 确定性脚本使用。`.bid/` 目录位于工作区根目录下，如不存在则创建。
 - 如 < 10 条 → 默认只写 requirements.csv；若后续需要执行 Step 4.5（参考文件 ≥ 5），创建**轻量工作树**（`.worktree/index.json` + `conventions.md`，不创建 `nodes/`）以承载 `material-registry.json` 和恢复状态。
 
-### Step 4.5: 构建材料索引（当会话目录下的参考文件 >= 5 个时）
+### Step 4.5: 构建材料索引（当当前工作区内参考文件 >= 5 个时）
 
-浏览会话目录下的参考文件（用户可能上传到根目录、子目录或任意位置——不要假设 `refs/` 目录存在），构建 `.worktree/material-registry.json`（schema 参见 `references/material-registry-template.json`）。
+浏览当前工作区内的参考文件（用户可能上传到根目录、子目录或任意位置——不要假设 `refs/` 目录存在），构建 `.worktree/material-registry.json`（schema 参见 `references/material-registry-template.json`）。
 扫描时排除目录：`.tmp/`、`.worktree/`、`.bid/`、`reports/`、`.archive/`、`artifacts/`。
 
 #### 分批策略（当 file-triage.json 存在时使用）

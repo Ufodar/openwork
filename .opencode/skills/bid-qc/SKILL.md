@@ -15,7 +15,7 @@ provides:
 
 ### Step 1: 确认检查范围
 必须有：目标文档（投标文件 .docx） + 招标文件（校验基线）。
-可选：`.worktree/index.json` 或 `requirements.csv`（检查清单骨架）、`.bid/facts.json`（事实校验基线，位于会话根目录下的 `.bid/` 子目录，由 bid-analysis 阶段生成）。
+可选：`.worktree/index.json` 或 `requirements.csv`（检查清单骨架）、`.bid/facts.json`（事实校验基线，位于工作区根目录下的 `.bid/` 子目录，由 bid-analysis 阶段生成）。
 如有工作树 → 利用节点信息定位每条要求在目标文档中的位置，提高检查精度。
 
 ### Step 2a: 确定性初筛（硬规则预检层）
@@ -24,10 +24,10 @@ provides:
 
 ```bash
 python .opencode/skills/bid-qc/scripts/check_deterministic.py \
-  --unpacked <SESSION_ROOT>/.tmp/unpacked/<docname>/ \
-  --facts <SESSION_ROOT>/.bid/facts.json \
-  --requirements <SESSION_ROOT>/requirements.csv \
-  --output <SESSION_ROOT>/reports/qc-deterministic.json
+  --unpacked <WORKSPACE>/.tmp/unpacked/<docname>/ \
+  --facts <WORKSPACE>/.bid/facts.json \
+  --requirements <WORKSPACE>/requirements.csv \
+  --output <WORKSPACE>/reports/qc-deterministic.json
 ```
 
 `--facts` 和 `--requirements` 为可选参数——脚本在未传入时优雅降级（对应检查标记为 skip），不会报错。

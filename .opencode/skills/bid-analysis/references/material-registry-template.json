@@ -1,5 +1,5 @@
 {
-  "_doc": "Project-level material registry. Built during material collection phase, reused by all subsequent nodes. Stored at .worktree/material-registry.json. Keys must be unique paths relative to session root (never absolute).",
+  "_doc": "Project-level material registry. Built during material collection phase, reused by all subsequent nodes. Stored at .worktree/material-registry.json. Keys must be unique paths relative to workspace root (never absolute).",
   "example": {
     "partners/h3c/S6860-datasheet.pdf": {
       "type": "产品数据手册",
@@ -39,7 +39,7 @@
     }
   },
   "field_definitions": {
-    "key": "Session-root relative path, globally unique inside this session (example: 合作方A/营业执照.pdf)",
+    "key": "Workspace-root relative path, globally unique inside this workspace (example: 合作方A/营业执照.pdf)",
     "type": "Material type: 招标文件 | 招标附件 | 产品数据手册 | 历史标书 | 资质文件 | 方案文档 | 报价参考 | 其他",
     "format": "File format: pdf | docx | xlsx | pptx | doc | image",
     "covers": "List of content topics this material covers",

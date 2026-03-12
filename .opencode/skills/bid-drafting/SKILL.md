@@ -83,7 +83,7 @@ CSV 写入完成后，由 Step 4.7 的确定性脚本负责将 CSV 内容组装�
 2. **材料查找流程**（按优先级）：
    a. 如有 `.worktree/material-registry.json` → 先查索引的 `useful_for_reqs` 字段定位候选材料
    b. 如无 registry 或 registry 中无匹配 → 按 `file-triage.json` 的分类筛选（product_doc + historical_bid 优先）
-   c. 如连 triage 也无 → 用 `bash: find` 搜索会话目录，排除 `.tmp/`、`.worktree/`、`.bid/` 等
+   c. 如连 triage 也无 → 用 `bash: find` 搜索当前工作区，排除 `.tmp/`、`.worktree/`、`.bid/` 等
    d. **★/# 项的材料搜索不可跳过** — 即使 registry 标记为 material_gap，也要尝试从产品文档中提取相关能力描述
 3. 读取节点的 node.json（获取招标原文和已搜集材料）
 4. 从候选材料中提取/组装内容（组装优先于生成）
@@ -105,9 +105,9 @@ CSV 写入完成后，由 Step 4.7 的确定性脚本负责将 CSV 内容组装�
 
 ```bash
 python .opencode/skills/bid-drafting/scripts/check_drafting_quality.py \
-  --requirements <SESSION_ROOT>/requirements.csv \
-  --conventions <SESSION_ROOT>/.worktree/conventions.md \
-  --output <SESSION_ROOT>/reports/drafting-quality.json
+  --requirements <WORKSPACE>/requirements.csv \
+  --conventions <WORKSPACE>/.worktree/conventions.md \
+  --output <WORKSPACE>/reports/drafting-quality.json
 ```
 
 处理结果：
@@ -123,10 +123,10 @@ python .opencode/skills/bid-drafting/scripts/check_drafting_quality.py \
 
 ```bash
 python .opencode/skills/bid-drafting/scripts/assemble_response_table.py \
-  --requirements <SESSION_ROOT>/requirements.csv \
-  --target <SESSION_ROOT>/<target_doc> \
-  --output <SESSION_ROOT>/<target_doc> \
-  --report <SESSION_ROOT>/reports/assembly-report.json
+  --requirements <WORKSPACE>/requirements.csv \
+  --target <WORKSPACE>/<target_doc> \
+  --output <WORKSPACE>/<target_doc> \
+  --report <WORKSPACE>/reports/assembly-report.json
 ```
 
 **注意**：`--target` 和 `--output` 可以是同一路径（原地更新）。脚本按**内容匹配**（而非行索引）将 CSV 的响应内容写入 docx 表格的正确行，从根本上避免 off-by-N 错位问题。
@@ -144,9 +144,9 @@ python .opencode/skills/bid-drafting/scripts/assemble_response_table.py \
 
 ```bash
 python .opencode/skills/bid-drafting/scripts/verify_docx_table.py \
-  --requirements <SESSION_ROOT>/requirements.csv \
-  --target <SESSION_ROOT>/<target_doc> \
-  --output <SESSION_ROOT>/reports/verify-report.json
+  --requirements <WORKSPACE>/requirements.csv \
+  --target <WORKSPACE>/<target_doc> \
+  --output <WORKSPACE>/reports/verify-report.json
 ```
 
 处理验证结果：
@@ -280,7 +280,7 @@ python .opencode/skills/bid-drafting/scripts/verify_docx_table.py \
    - 如平均字数下降 > 30% → 警告信号
    - 检查最近 5 个应答是否出现笼统用语（"符合"、"满足"、"响应"）
    - 检查偏离标注是否变得模糊或缺失
-   - 可选：运行 `python .opencode/skills/bid-drafting/scripts/check_drafting_quality.py --requirements <SESSION_ROOT>/requirements.csv --trend-only --output <SESSION_ROOT>/reports/quality-trend.json`
+   - 可选：运行 `python .opencode/skills/bid-drafting/scripts/check_drafting_quality.py --requirements <WORKSPACE>/requirements.csv --trend-only --output <WORKSPACE>/reports/quality-trend.json`
 3. **如发现衰减** → 向用户报告衰减指标（"前3节点平均287字，最近5节点平均98字"），建议暂停
 4. **更新 index.json 进度** → 标记安全暂停点
 5. **更新 conventions.md 五、质量基线** → 追加本轮检查点的质量快照（时间戳、节点范围、指标值）

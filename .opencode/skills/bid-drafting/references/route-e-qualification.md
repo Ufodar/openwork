@@ -47,7 +47,7 @@
 
 ## 输出产物
 
-`reports/drafting/<timestamp>-qualification-mapping.json`（路径相对于 session 根目录）
+`reports/drafting/<timestamp>-qualification-mapping.json`（路径相对于 workspace 根目录）
 
 ```json
 {

@@ -2,18 +2,18 @@
 name: bid-dedupe
 description: 跨标书查重，检测串标风险，比较多份投标文件的文字和图片重复。触发词：标书查重、投标文件去重、串标检测、对比标书、标书重复检查。仅用于投标文档间的对比，不适用于普通文档查重。
 requires:
-  - bid_docs: "≥2 份投标文件 .docx (必须在同一 SESSION_ROOT 内)"
+  - bid_docs: "≥2 份投标文件 .docx (必须在同一 WORKSPACE 内)"
 provides:
   - reports/dedupe/<timestamp>-dedupe-report.md: "查重报告"
 ---
 
 ## Workflow
 
-### Session 边界（硬约束）
+### Workspace 边界（硬约束）
 
-- 仅比较当前 `<SESSION_ROOT>` 内的文件。
-- 禁止读取或比较其他 session 的文件（即使用户提供绝对路径）。
-- 所有比较对象在落盘记录中使用 session 相对路径。
+- 仅比较当前 `<WORKSPACE>` 内的文件。
+- 禁止读取或比较其他 workspace 的文件（即使用户提供绝对路径）。
+- 所有比较对象在落盘记录中使用 workspace 相对路径。
 
 ### Step 1: 解包所有待比较标书
 通过 docx skill 解包所有待比较的标书文件。
@@ -71,7 +71,7 @@ provides:
 
 **汇总**：报告顶部包含摘要——总发现数、按风险级别分布、需处理项数。
 
-建议输出路径：`reports/dedupe/<timestamp>-dedupe-report.md`（session 相对路径）。
+建议输出路径：`reports/dedupe/<timestamp>-dedupe-report.md`（workspace 相对路径）。
 
 ---
 

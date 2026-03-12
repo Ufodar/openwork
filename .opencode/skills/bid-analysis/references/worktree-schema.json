@@ -1,5 +1,5 @@
 {
-  "_doc": "Work-Tree schema reference. Two structures: index.json (tree root) and node files (nodes/<id>.json). All persisted paths must be relative to session root.",
+  "_doc": "Work-Tree schema reference. Two structures: index.json (tree root) and node files (nodes/<id>.json). All persisted paths must be relative to workspace root.",
 
   "index.json": {
     "version": 1,
@@ -81,7 +81,7 @@
     "index.json": {
       "version": "Schema version, always 1",
       "project": "Project name from tender document",
-      "tender_file": "Relative path to the tender file in session directory",
+      "tender_file": "Relative path to the tender file in the current workspace",
       "target_doc": "Relative path to the target document being written. Must never be absolute path. Set by document-writer Phase 2, consumed by all skills.",
       "facts_ref": "Optional relative path to facts file. Recommended value: .bid/facts.json",
       "phase": "Current phase: 需求分析 | 材料搜集 | 技术标撰写 | 商务标撰写 | 质量检查",
@@ -112,7 +112,7 @@
         "source": "Relative path to materials/<id>-<name>.md, null if not yet collected",
         "status": "pending | collected | not_found",
         "key_facts": "Optional: key facts extracted from the material",
-        "search_scope": "Optional: directories within session root to search for this material",
+        "search_scope": "Optional: directories within workspace root to search for this material",
         "searched_paths": "Array of { path, verdict, time } recording search attempts. path=directory searched, verdict=what was found/not found, time=which round. Survives context compression."
       },
       "response": {

@@ -12,18 +12,31 @@ afterEach(() => {
 });
 
 describe("scanAdminSessions", () => {
-  test("filters by owner key before fetching per-session details", async () => {
-    const requestedSessionIds: string[] = [];
+  test("filters by owner key from a single session list fetch", async () => {
+    const requestedPaths: string[] = [];
     globalThis.fetch = (async (input) => {
       const url = typeof input === "string" ? input : input.toString();
-      const sessionId = url.split("/").pop() ?? "";
-      requestedSessionIds.push(sessionId);
-      return new Response(JSON.stringify({
-        id: sessionId,
-        title: `Session ${sessionId}`,
-        directory: `/root/.openwork/user-workspaces/alice/documents/sessions/${sessionId}`,
-        time: { created: 1, updated: 2 },
-      }), {
+      requestedPaths.push(new URL(url).pathname);
+      return new Response(JSON.stringify([
+        {
+          id: "ses_alice_1",
+          title: "Session ses_alice_1",
+          directory: "/root/.openwork/user-workspaces/alice/documents/sessions/ses_alice_1",
+          time: { created: 1, updated: 2 },
+        },
+        {
+          id: "ses_alice_2",
+          title: "Session ses_alice_2",
+          directory: "/root/.openwork/user-workspaces/alice/documents/sessions/ses_alice_2",
+          time: { created: 1, updated: 3 },
+        },
+        {
+          id: "ses_bob_1",
+          title: "Session ses_bob_1",
+          directory: "/root/.openwork/user-workspaces/bob/documents/sessions/ses_bob_1",
+          time: { created: 1, updated: 4 },
+        },
+      ]), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
@@ -64,6 +77,6 @@ describe("scanAdminSessions", () => {
     );
 
     expect(result.items.map((item) => item.id).sort()).toEqual(["ses_alice_1", "ses_alice_2"]);
-    expect(requestedSessionIds.sort()).toEqual(["ses_alice_1", "ses_alice_2"]);
+    expect(requestedPaths).toEqual(["/session"]);
   });
 });

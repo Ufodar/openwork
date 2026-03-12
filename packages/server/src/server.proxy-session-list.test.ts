@@ -12,17 +12,17 @@ afterEach(() => {
 });
 
 describe("proxyOpencodeRequest session listing", () => {
-  test("aggregates workspace-root session lists through per-session runtime directories", async () => {
+  test("aggregates workspace-root session lists from a shared session index", async () => {
     const captured: { url?: string; headers?: Headers } = {};
     globalThis.fetch = (async (input, init) => {
       captured.url = typeof input === "string" ? input : input.toString();
       captured.headers = new Headers(init?.headers);
-      return new Response(JSON.stringify({
+      return new Response(JSON.stringify([{
         id: "ses_123",
         title: "Migrated Session",
         directory: "/root/ai_staff/openwork/documents/sessions/ses_123",
         time: { created: 1, updated: 2 },
-      }), {
+      }]), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
@@ -66,7 +66,7 @@ describe("proxyOpencodeRequest session listing", () => {
     const payload = await response.json() as Array<{ id: string }>;
     expect(payload).toHaveLength(1);
     expect(payload[0]?.id).toBe("ses_123");
-    expect(captured.url).toBe("http://127.0.0.1:33459/session/ses_123");
-    expect(captured.headers?.get("x-opencode-directory")).toBe("/root/ai_staff/openwork/documents/sessions/ses_123");
+    expect(captured.url).toBe("http://127.0.0.1:33459/session");
+    expect(captured.headers?.get("x-opencode-directory")).toBe("/root/ai_staff/openwork");
   });
 });

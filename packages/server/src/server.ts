@@ -700,30 +700,37 @@ async function listWorkspaceSessions(input: {
       if (!ownerKey) return true;
       return entry.ownerKey === ownerKey;
     });
+  if (targetEntries.length === 0) {
+    return [];
+  }
 
-  const items = await Promise.all(
-    targetEntries.map(async ([sessionId, owner]) => {
-      const runtimeWorkspace = await input.sessionWorkspaces.getWorkspace(input.workspace.id, sessionId);
-      const runtimeDir = runtimeWorkspace?.runtimeDir?.trim() || join(input.workspace.path, "documents", "sessions", sessionId);
-      const sessionWorkspace = workspaceWithDirectory(input.workspace, runtimeDir);
-      try {
-        const payload = await fetchOpencodeJson(
-          sessionWorkspace,
-          `/session/${encodeURIComponent(sessionId)}`,
-          { method: "GET", directory: runtimeDir },
-        );
-        const parsed = parseListedSession(payload);
-        if (!parsed) return null;
-        if (!sessionDirectoryBelongsToWorkspace(input.workspace.path, parsed.directory)) {
-          return null;
-        }
-        return {
-          ...parsed,
-          ownerKey: owner.ownerKey,
-        } satisfies WorkspaceListedSession;
-      } catch {
+  const ownersBySessionId = new Map(
+    targetEntries.map(([sessionId, owner]) => [sessionId, owner]),
+  );
+  const payload = await fetchOpencodeJson(input.workspace, "/session", {
+    method: "GET",
+    directory: input.workspace.path,
+  });
+
+  const items: Array<WorkspaceListedSession | null> = await Promise.all(
+    normalizeSessionListPayload(payload).map(async (value) => {
+      const parsed = parseListedSession(value);
+      if (!parsed) return null;
+      const owner = ownersBySessionId.get(parsed.id);
+      if (!owner) return null;
+
+      const runtimeWorkspace = await input.sessionWorkspaces.getWorkspace(input.workspace.id, parsed.id);
+      const runtimeDir = runtimeWorkspace?.runtimeDir?.trim() || join(input.workspace.path, "documents", "sessions", parsed.id);
+      const directory: string | null = parsed.directory?.trim() || runtimeDir;
+      if (!sessionDirectoryBelongsToWorkspace(input.workspace.path, directory)) {
         return null;
       }
+
+      return {
+        ...parsed,
+        directory,
+        ownerKey: owner.ownerKey,
+      } satisfies WorkspaceListedSession;
     }),
   );
 

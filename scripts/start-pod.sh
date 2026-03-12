@@ -84,6 +84,27 @@ sync_opencode_config_files() {
     fi
 }
 
+configure_global_node_path() {
+    if ! command -v npm &>/dev/null; then
+        return
+    fi
+
+    local npm_root=""
+    npm_root="$(npm root -g 2>/dev/null || true)"
+    if [ -z "$npm_root" ] || [ ! -d "$npm_root" ]; then
+        return
+    fi
+
+    case ":${NODE_PATH:-}:" in
+        *":$npm_root:"*) ;;
+        *)
+            export NODE_PATH="${NODE_PATH:+$NODE_PATH:}$npm_root"
+            ;;
+    esac
+
+    echo "[start-pod] NODE_PATH includes global npm modules: $npm_root"
+}
+
 # ============================================
 # Phase 1: Install system dependencies
 # ============================================
@@ -279,6 +300,8 @@ install_node_skill_deps() {
         echo "[start-pod]   npm install -g ${failed[*]}"
     fi
 }
+
+configure_global_node_path
 
 # ============================================
 # Phase 2: Install runtimes (Node 22 + pnpm + Bun)

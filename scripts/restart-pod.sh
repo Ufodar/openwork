@@ -147,7 +147,29 @@ sync_opencode_config_files() {
     fi
 }
 
+configure_global_node_path() {
+    if ! command -v npm &>/dev/null; then
+        return
+    fi
+
+    local npm_root=""
+    npm_root="$(npm root -g 2>/dev/null || true)"
+    if [ -z "$npm_root" ] || [ ! -d "$npm_root" ]; then
+        return
+    fi
+
+    case ":${NODE_PATH:-}:" in
+        *":$npm_root:"*) ;;
+        *)
+            export NODE_PATH="${NODE_PATH:+$NODE_PATH:}$npm_root"
+            ;;
+    esac
+
+    echo "[restart-pod] NODE_PATH includes global npm modules: $npm_root"
+}
+
 load_runtime_env
+configure_global_node_path
 
 # ---- Pod IP (prefer OPENWORK_POD_IP in ~/.config/openwork/pod.env) ----
 export OPENWORK_POD_IP="${OPENWORK_POD_IP:-192.168.5.10}"

@@ -1546,12 +1546,33 @@ function serializeWorkspace(workspace: ServerConfig["workspaces"][number]) {
   };
 }
 
-function upsertWorkspace(config: ServerConfig, workspace: { id: string; name: string; path: string }) {
+function pickWorkspaceRuntimeTemplate(
+  config: ServerConfig,
+  workspaceId: string,
+): Pick<WorkspaceInfo, "baseUrl" | "opencodeUsername" | "opencodePassword"> {
+  const existing = config.workspaces.find((entry) => entry.id === workspaceId);
+  const template =
+    existing ??
+    config.workspaces.find((entry) =>
+      Boolean(entry.baseUrl?.trim()) ||
+      Boolean(entry.opencodeUsername?.trim()) ||
+      Boolean(entry.opencodePassword?.trim()),
+    );
+  return {
+    ...(template?.baseUrl?.trim() ? { baseUrl: template.baseUrl.trim() } : {}),
+    ...(template?.opencodeUsername?.trim() ? { opencodeUsername: template.opencodeUsername.trim() } : {}),
+    ...(template?.opencodePassword?.trim() ? { opencodePassword: template.opencodePassword.trim() } : {}),
+  };
+}
+
+export function upsertWorkspace(config: ServerConfig, workspace: { id: string; name: string; path: string }) {
+  const runtime = pickWorkspaceRuntimeTemplate(config, workspace.id);
   const normalized: WorkspaceInfo = {
     id: workspace.id,
     name: workspace.name,
     path: workspace.path,
     workspaceType: "local",
+    ...runtime,
   };
   config.workspaces = [
     normalized,

@@ -83,7 +83,7 @@ Why:
    - Ingest tender + materials → generate `.bid/facts.json` + `requirements.csv`.
    - Ask questions for missing values; do not draft yet.
 2. **Assemble / Draft (gate 2)**
-   - Create/modify the target `.docx` under `<SESSION_ROOT>/`.
+   - Create/modify the target `.docx` under `<WORKSPACE>/`.
    - Assembly routing by source format:
      - **DOCX sources** → `copy_docx_section.py` for format-preserving copy, then adapt values
      - **PDF sources** → extract text/tables via `pdf` skill → write into target using target's styles

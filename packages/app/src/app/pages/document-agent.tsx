@@ -918,15 +918,13 @@ export default function DocumentAgentView(props: SessionViewProps) {
   });
 
   const documentWorkspaceRoot = createMemo(() => {
-    const session = apiConfig()?.sessionId ?? sessionId();
-    if (!session) return "documents";
-    return `documents/sessions/${session}`;
+    return "";
   });
 
   const toWorkspaceRelativeDocumentPath = (path: string, options?: { directory?: boolean }) => {
     const normalized = normalizeRelativePath(path, "");
     const base = documentWorkspaceRoot();
-    const joined = normalized ? `${base}/${normalized}` : base;
+    const joined = base ? (normalized ? `${base}/${normalized}` : base) : normalized;
     return options?.directory ? `${joined}/` : joined;
   };
 
@@ -1407,9 +1405,7 @@ export default function DocumentAgentView(props: SessionViewProps) {
     if (!doc) return "";
     const normalized = doc.trim().replace(/^\/+/, "");
     if (!normalized) return "";
-    const session = apiConfig()?.sessionId ?? sessionId();
-    if (!session) return "";
-    return `documents/sessions/${session}/${normalized}`;
+    return normalized;
   });
   const activeDocKind = createMemo<"none" | "image" | "pdf" | "markdown" | "text" | "onlyoffice" | "unsupported">(() => {
     const doc = activeDoc();

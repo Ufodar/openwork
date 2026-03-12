@@ -189,6 +189,16 @@ export function normalizeDirectoryPath(input?: string | null) {
   return isWindowsPlatform() ? normalized.toLowerCase() : normalized;
 }
 
+export function sessionBelongsToWorkspace(workspaceRoot?: string | null, sessionDirectory?: string | null) {
+  const root = normalizeDirectoryPath(workspaceRoot);
+  const directory = normalizeDirectoryPath(sessionDirectory);
+  if (!root) return !directory;
+  if (!directory) return false;
+  if (directory === root) return true;
+  const sessionsRoot = normalizeDirectoryPath(`${root}/documents/sessions`);
+  return directory === sessionsRoot || directory.startsWith(`${sessionsRoot}/`);
+}
+
 export function normalizeEvent(raw: unknown): OpencodeEvent | null {
   if (!raw || typeof raw !== "object") {
     return null;

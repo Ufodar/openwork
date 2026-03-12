@@ -22,6 +22,7 @@ import {
   normalizeDirectoryPath,
   normalizeEvent,
   normalizeSessionStatus,
+  sessionBelongsToWorkspace,
   safeStringify,
 } from "../utils";
 import { unwrap } from "../lib/opencode";
@@ -293,8 +294,7 @@ export function createSessionStore(options: {
     const root = normalizeDirectoryPath(options.activeWorkspaceRoot());
     if (root) {
       const session = store.sessions.find((candidate) => candidate.id === part.sessionID) ?? null;
-      const sessionRoot = normalizeDirectoryPath(session?.directory ?? "");
-      if (!sessionRoot || sessionRoot !== root) {
+      if (!sessionBelongsToWorkspace(root, session?.directory ?? "")) {
         return;
       }
     }
@@ -528,7 +528,7 @@ export function createSessionStore(options: {
     // multiple roots (e.g. older servers or proxies).
     const root = normalizeDirectoryPath(scopeRoot);
     const filtered = root
-      ? list.filter((session) => normalizeDirectoryPath(session.directory) === root)
+      ? list.filter((session) => sessionBelongsToWorkspace(root, session.directory))
       : list;
     sessionDebug("sessions:load:filtered", { root: root || null, count: filtered.length });
     setStore("sessions", reconcile(sortSessionsByActivity(filtered), { key: "id" }));

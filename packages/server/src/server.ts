@@ -20,7 +20,7 @@ import { ensureDir, exists, hashToken, shortId } from "./utils.js";
 import { workspaceIdForPath } from "./workspaces.js";
 import { sanitizeCommandName, validateMcpName } from "./validators.js";
 import { TokenService } from "./tokens.js";
-import { AuthService } from "./auth.js";
+import { AuthService, type AuthIdentity } from "./auth.js";
 import { SessionOwnershipService } from "./session-ownership.js";
 import { buildSessionPermissionRules, provisionSessionWorkspace, SessionWorkspaceService, sessionDirectoryBelongsToWorkspace } from "./session-workspaces.js";
 import { TOY_UI_CSS, TOY_UI_HTML, TOY_UI_JS, cssResponse, htmlResponse, jsResponse } from "./toy-ui.js";
@@ -271,17 +271,12 @@ export function startServer(config: ServerConfig) {
   const sessionOwnership = new SessionOwnershipService();
   const sessionWorkspaces = new SessionWorkspaceService();
   const logger = createServerLogger(config);
+  const workspaceCatalogReady = preloadPersistedUserWorkspaces(config, auth, logger);
   const routes = createRoutes(config, approvals, tokens, auth, sessionOwnership, sessionWorkspaces, logger);
 
-  // Run inbox guard on startup — clean up any AI-written files in inbox
-  for (const ws of config.workspaces) {
-    const inboxRoot = resolveInboxDir(ws.path);
-    cleanInboxViolations(inboxRoot, logger).then((count) => {
-      if (count > 0) {
-        logger.log("info", `[inbox-guard] Cleaned ${count} unauthorized file(s) from inbox at startup`);
-      }
-    }).catch(() => {/* ignore */});
-  }
+  void workspaceCatalogReady.finally(() => {
+    runStartupInboxGuard(config, logger);
+  });
 
   const serverOptions: {
     hostname: string;
@@ -322,6 +317,8 @@ export function startServer(config: ServerConfig) {
       if (request.method === "OPTIONS") {
         return finalize(new Response(null, { status: 204 }));
       }
+
+      await workspaceCatalogReady;
 
       const mount = parseWorkspaceMount(url.pathname);
       if (mount && (mount.restPath === "/opencode" || mount.restPath.startsWith("/opencode/"))) {
@@ -1640,6 +1637,54 @@ export function upsertWorkspace(config: ServerConfig, workspace: { id: string; n
   if (!config.authorizedRoots.some((root) => resolve(root) === resolvedPath)) {
     config.authorizedRoots = [...config.authorizedRoots, resolvedPath];
   }
+}
+
+export function syncPersistedUserWorkspaces(config: ServerConfig, users: AuthIdentity[]): number {
+  let added = 0;
+  for (const user of users) {
+    const workspace = user.workspace;
+    if (!workspace?.id?.trim() || !workspace.path?.trim()) continue;
+    const existing = config.workspaces.find((entry) => entry.id === workspace.id);
+    const shouldCount =
+      !existing ||
+      resolve(existing.path) !== resolve(workspace.path) ||
+      existing.name !== workspace.name;
+    upsertWorkspace(config, workspace);
+    if (shouldCount) {
+      added += 1;
+    }
+  }
+  return added;
+}
+
+function runStartupInboxGuard(config: ServerConfig, logger: ServerLogger) {
+  for (const ws of config.workspaces) {
+    const inboxRoot = resolveInboxDir(ws.path);
+    cleanInboxViolations(inboxRoot, logger).then((count) => {
+      if (count > 0) {
+        logger.log("info", `[inbox-guard] Cleaned ${count} unauthorized file(s) from inbox at startup`);
+      }
+    }).catch(() => {/* ignore */});
+  }
+}
+
+function preloadPersistedUserWorkspaces(
+  config: ServerConfig,
+  auth: AuthService,
+  logger: ServerLogger,
+): Promise<void> {
+  return auth.listUsers()
+    .then((users) => {
+      const added = syncPersistedUserWorkspaces(config, users);
+      if (added > 0) {
+        logger.log("info", `[workspace-catalog] Loaded ${added} persisted user workspace(s)`);
+      }
+    })
+    .catch((error) => {
+      logger.log("warn", "[workspace-catalog] Failed to preload persisted user workspaces", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
 }
 
 function createRoutes(

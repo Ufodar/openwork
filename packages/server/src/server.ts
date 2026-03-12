@@ -736,10 +736,11 @@ async function listWorkspaceSessions(input: {
     });
 }
 
-async function scanAdminSessions(
+export async function scanAdminSessions(
   config: ServerConfig,
   sessionOwnership: SessionOwnershipService,
   sessionWorkspaces: SessionWorkspaceService,
+  ownerKey?: string | null,
 ): Promise<{ items: AdminScannedSession[]; warnings: AdminWorkspaceWarning[] }> {
   const results = await Promise.all(
     config.workspaces.map(async (workspaceRef) => {
@@ -749,6 +750,7 @@ async function scanAdminSessions(
           workspace,
           sessionOwnership,
           sessionWorkspaces,
+          ownerKey,
         }))
           .map((item) => ({
             ...item,
@@ -1909,9 +1911,8 @@ function createRoutes(
       throw new ApiError(404, "user_not_found", "用户不存在。");
     }
 
-    const scanned = await scanAdminSessions(config, sessionOwnership, sessionWorkspaces);
+    const scanned = await scanAdminSessions(config, sessionOwnership, sessionWorkspaces, user.ownerKey);
     const items = scanned.items
-      .filter((session) => session.ownerKey === user.ownerKey)
       .map(({ ownerKey: _ownerKey, ...session }) => session);
 
     return jsonResponse({

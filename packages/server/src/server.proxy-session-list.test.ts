@@ -2,8 +2,8 @@ import { afterEach, describe, expect, test } from "bun:test";
 
 import type { WorkspaceInfo } from "./types.js";
 import { proxyOpencodeRequest } from "./server.js";
-import { SessionOwnershipService } from "./session-ownership.js";
-import { SessionWorkspaceService } from "./session-workspaces.js";
+import type { SessionOwnershipService } from "./session-ownership.js";
+import type { SessionWorkspaceService } from "./session-workspaces.js";
 
 const originalFetch = globalThis.fetch;
 
@@ -12,12 +12,17 @@ afterEach(() => {
 });
 
 describe("proxyOpencodeRequest session listing", () => {
-  test("keeps x-opencode-directory when stripping workspace-root directory query", async () => {
+  test("aggregates workspace-root session lists through per-session runtime directories", async () => {
     const captured: { url?: string; headers?: Headers } = {};
     globalThis.fetch = (async (input, init) => {
       captured.url = typeof input === "string" ? input : input.toString();
       captured.headers = new Headers(init?.headers);
-      return new Response("[]", {
+      return new Response(JSON.stringify({
+        id: "ses_123",
+        title: "Migrated Session",
+        directory: "/root/ai_staff/openwork/documents/sessions/ses_123",
+        time: { created: 1, updated: 2 },
+      }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
@@ -31,7 +36,21 @@ describe("proxyOpencodeRequest session listing", () => {
       baseUrl: "http://127.0.0.1:33459",
     };
 
-    await proxyOpencodeRequest({
+    const sessionOwnership = {
+      listEntries: async () => ({
+        ses_123: { ownerKey: "host-owner", updatedAt: 1 },
+      }),
+    } as unknown as SessionOwnershipService;
+
+    const sessionWorkspaces = {
+      getWorkspace: async () => ({
+        runtimeId: "ses_123",
+        runtimeDir: "/root/ai_staff/openwork/documents/sessions/ses_123",
+        createdAt: 1,
+      }),
+    } as unknown as SessionWorkspaceService;
+
+    const response = await proxyOpencodeRequest({
       request: new Request(
         "http://openwork.local/w/ws_shared/opencode/session?directory=/root/ai_staff/openwork",
         { method: "GET" },
@@ -40,11 +59,14 @@ describe("proxyOpencodeRequest session listing", () => {
       workspace,
       proxyPath: "/session",
       actor: { type: "remote", scope: "owner", tokenHash: "host-owner" },
-      sessionOwnership: new SessionOwnershipService(),
-      sessionWorkspaces: new SessionWorkspaceService(),
+      sessionOwnership,
+      sessionWorkspaces,
     });
 
-    expect(captured.url).toBe("http://127.0.0.1:33459/session");
-    expect(captured.headers?.get("x-opencode-directory")).toBe("/root/ai_staff/openwork");
+    const payload = await response.json() as Array<{ id: string }>;
+    expect(payload).toHaveLength(1);
+    expect(payload[0]?.id).toBe("ses_123");
+    expect(captured.url).toBe("http://127.0.0.1:33459/session/ses_123");
+    expect(captured.headers?.get("x-opencode-directory")).toBe("/root/ai_staff/openwork/documents/sessions/ses_123");
   });
 });

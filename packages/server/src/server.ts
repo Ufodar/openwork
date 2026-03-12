@@ -686,34 +686,79 @@ function parseListedSession(value: unknown): {
   };
 }
 
+type WorkspaceListedSession = NonNullable<ReturnType<typeof parseListedSession>> & {
+  ownerKey: string;
+};
+
+async function listWorkspaceSessions(input: {
+  workspace: WorkspaceInfo;
+  sessionOwnership: SessionOwnershipService;
+  sessionWorkspaces: SessionWorkspaceService;
+  ownerKey?: string | null;
+}): Promise<WorkspaceListedSession[]> {
+  const ownerEntries = await input.sessionOwnership.listEntries(input.workspace.id);
+  const targetEntries = Object.entries(ownerEntries)
+    .filter(([, entry]) => {
+      const ownerKey = input.ownerKey?.trim() ?? "";
+      if (!ownerKey) return true;
+      return entry.ownerKey === ownerKey;
+    });
+
+  const items = await Promise.all(
+    targetEntries.map(async ([sessionId, owner]) => {
+      const runtimeWorkspace = await input.sessionWorkspaces.getWorkspace(input.workspace.id, sessionId);
+      const runtimeDir = runtimeWorkspace?.runtimeDir?.trim() || join(input.workspace.path, "documents", "sessions", sessionId);
+      const sessionWorkspace = workspaceWithDirectory(input.workspace, runtimeDir);
+      try {
+        const payload = await fetchOpencodeJson(
+          sessionWorkspace,
+          `/session/${encodeURIComponent(sessionId)}`,
+          { method: "GET", directory: runtimeDir },
+        );
+        const parsed = parseListedSession(payload);
+        if (!parsed) return null;
+        if (!sessionDirectoryBelongsToWorkspace(input.workspace.path, parsed.directory)) {
+          return null;
+        }
+        return {
+          ...parsed,
+          ownerKey: owner.ownerKey,
+        } satisfies WorkspaceListedSession;
+      } catch {
+        return null;
+      }
+    }),
+  );
+
+  return items
+    .filter((item): item is WorkspaceListedSession => Boolean(item))
+    .sort((left, right) => {
+      const leftTime = left.updatedAt ?? left.createdAt ?? 0;
+      const rightTime = right.updatedAt ?? right.createdAt ?? 0;
+      return rightTime - leftTime;
+    });
+}
+
 async function scanAdminSessions(
   config: ServerConfig,
   sessionOwnership: SessionOwnershipService,
+  sessionWorkspaces: SessionWorkspaceService,
 ): Promise<{ items: AdminScannedSession[]; warnings: AdminWorkspaceWarning[] }> {
   const results = await Promise.all(
     config.workspaces.map(async (workspaceRef) => {
       try {
         const workspace = await resolveWorkspace(config, workspaceRef.id);
-        const payload = await fetchOpencodeJson(workspace, "/session", { method: "GET", directory: null });
-        const sessionItems = normalizeSessionListPayload(payload);
-        const ownerEntries = await sessionOwnership.listEntries(workspace.id);
-
-        const items = sessionItems
-          .map((item) => parseListedSession(item))
-          .filter((item): item is NonNullable<ReturnType<typeof parseListedSession>> => Boolean(item))
-          .filter((item) => sessionDirectoryBelongsToWorkspace(workspace.path, item.directory))
-          .map((item) => {
-            const owner = ownerEntries[item.id];
-            if (!owner?.ownerKey) return null;
-            return {
-              ...item,
-              workspaceId: workspace.id,
-              workspaceName: workspaceLabel(workspace),
-              workspaceType: workspace.workspaceType,
-              ownerKey: owner.ownerKey,
-            } satisfies AdminScannedSession;
-          })
-          .filter((item): item is AdminScannedSession => Boolean(item));
+        const items = (await listWorkspaceSessions({
+          workspace,
+          sessionOwnership,
+          sessionWorkspaces,
+        }))
+          .map((item) => ({
+            ...item,
+            workspaceId: workspace.id,
+            workspaceName: workspaceLabel(workspace),
+            workspaceType: workspace.workspaceType,
+          } satisfies AdminScannedSession));
 
         return { items, warning: null as AdminWorkspaceWarning | null };
       } catch (error) {
@@ -832,6 +877,22 @@ export async function proxyOpencodeRequest(input: {
   );
   if (shouldScopeSessionList) {
     targetUrl.searchParams.delete("directory");
+  }
+  if (shouldScopeSessionList && workspace && workspaceId) {
+    if (!isOwnerScope && !requesterKey) {
+      throw new ApiError(403, "forbidden", "Missing requester identity");
+    }
+    const listed = await listWorkspaceSessions({
+      workspace,
+      sessionOwnership: input.sessionOwnership,
+      sessionWorkspaces: input.sessionWorkspaces,
+      ownerKey: isOwnerScope ? null : requesterKey,
+    });
+    const payload = listed.map(({ ownerKey: _ownerKey, ...item }) => item);
+    return new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
   let provisionedRuntime: { runtimeId: string; runtimeDir: string } | null = null;
@@ -1753,7 +1814,7 @@ function createRoutes(
   addRoute(routes, "GET", "/admin/users", "host", async () => {
     const [users, scanned] = await Promise.all([
       auth.listUsers(),
-      scanAdminSessions(config, sessionOwnership),
+      scanAdminSessions(config, sessionOwnership, sessionWorkspaces),
     ]);
     const sessionCountByOwnerKey = new Map<string, number>();
     for (const session of scanned.items) {
@@ -1787,7 +1848,7 @@ function createRoutes(
       throw new ApiError(404, "user_not_found", "用户不存在。");
     }
 
-    const scanned = await scanAdminSessions(config, sessionOwnership);
+    const scanned = await scanAdminSessions(config, sessionOwnership, sessionWorkspaces);
     const items = scanned.items
       .filter((session) => session.ownerKey === user.ownerKey)
       .map(({ ownerKey: _ownerKey, ...session }) => session);

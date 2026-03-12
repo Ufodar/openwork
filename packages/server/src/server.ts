@@ -752,7 +752,7 @@ function buildOpenCodeRouterProxyUrl(baseUrl: string, path: string, search: stri
   return target.toString();
 }
 
-async function proxyOpencodeRequest(input: {
+export async function proxyOpencodeRequest(input: {
   request: Request;
   url: URL;
   workspace?: WorkspaceInfo;
@@ -858,9 +858,6 @@ async function proxyOpencodeRequest(input: {
     payload.permission = nextPermissions;
     headers.set("Content-Type", "application/json");
     body = JSON.stringify(payload);
-  }
-  if (shouldScopeSessionList) {
-    headers.delete("x-opencode-directory");
   }
   const timeoutController = new AbortController();
   const timeoutId = setTimeout(() => timeoutController.abort(new Error("OpenCode proxy timeout")), 10_000);

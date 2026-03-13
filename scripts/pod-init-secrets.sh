@@ -32,13 +32,16 @@ if global_config_path.exists():
 
 model_ref = config.get("model", "")
 provider_id = "my-company"
-default_model = "Kimi-K2.5"
+default_model = "Qwen3.5-397B-A17B"
 if isinstance(model_ref, str) and "/" in model_ref:
     maybe_provider, maybe_model = model_ref.split("/", 1)
     if maybe_provider.strip():
         provider_id = maybe_provider.strip()
     if maybe_model.strip():
         default_model = maybe_model.strip()
+
+if default_model in {"Kimi-K2.5", "GLM-5"}:
+    default_model = "Qwen3.5-397B-A17B"
 
 provider = config.get("provider", {}).get(provider_id, {})
 provider_options = provider.get("options", {}) if isinstance(provider, dict) else {}
@@ -82,7 +85,7 @@ lines = [
     f"export MY_COMPANY_API_KEY={shell_quote(my_company_api_key or '')}",
     f"export OPENWORK_PROVIDER_ID={shell_quote(provider_id)}",
     f"export OPENWORK_MODEL_BASE_URL={shell_quote(model_base_url or 'http://192.168.5.10:3002/v1')}",
-    "# Supported values: Kimi-K2.5, GLM-5, MiniMax-2.5, Qwen3.5-397B-A17B",
+    "# Supported values: MiniMax-2.5, Qwen3.5-397B-A17B",
     f"export OPENWORK_DEFAULT_MODEL={shell_quote(default_model)}",
     f"export BOCAI_API_KEY={shell_quote(bocai_api_key or '')}",
     f"export BOCAI_API_URL={shell_quote(bocai_api_url or 'https://api.bochaai.com/v1/web-search')}",

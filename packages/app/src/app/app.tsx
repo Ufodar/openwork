@@ -99,6 +99,7 @@ import {
   isTauriRuntime,
   modelEquals,
   normalizeDirectoryPath,
+  resolveSupportedModel,
 } from "./utils";
 import { currentLocale, initLocale, setLocale, t, type Language } from "../i18n";
 import {
@@ -880,6 +881,14 @@ export default function App() {
   const [providerAuthBusy, setProviderAuthBusy] = createSignal(false);
   const [providerAuthError, setProviderAuthError] = createSignal<string | null>(null);
   const [providerAuthMethods, setProviderAuthMethods] = createSignal<Record<string, ProviderAuthMethod[]>>({});
+
+  createEffect(() => {
+    const current = defaultModel();
+    const normalized = resolveSupportedModel(current, providers(), DEFAULT_MODEL);
+    if (!modelEquals(current, normalized)) {
+      setDefaultModel(normalized);
+    }
+  });
 
   const sessionStore = createSessionStore({
     client,
@@ -4273,19 +4282,20 @@ export default function App() {
   });
 
   const selectedSessionModel = createMemo<ModelRef>(() => {
+    const fallback = resolveSupportedModel(defaultModel(), providers(), DEFAULT_MODEL);
     const id = selectedSessionId();
-    if (!id) return defaultModel();
+    if (!id) return fallback;
 
     const override = sessionModelOverrideById()[id];
-    if (override) return override;
+    if (override) return resolveSupportedModel(override, providers(), fallback);
 
     const known = sessionModelById()[id];
-    if (known) return known;
+    if (known) return resolveSupportedModel(known, providers(), fallback);
 
     const fromMessages = lastUserModelFromMessages(messages());
-    if (fromMessages) return fromMessages;
+    if (fromMessages) return resolveSupportedModel(fromMessages, providers(), fallback);
 
-    return defaultModel();
+    return fallback;
   });
 
   const selectedSessionAgent = createMemo(() => {
@@ -5286,8 +5296,9 @@ export default function App() {
         const storedDefaultModel = window.localStorage.getItem(MODEL_PREF_KEY);
         const parsedDefaultModel = parseModelRef(storedDefaultModel);
         if (parsedDefaultModel) {
-          setDefaultModel(parsedDefaultModel);
-          setLegacyDefaultModel(parsedDefaultModel);
+          const normalizedDefaultModel = resolveSupportedModel(parsedDefaultModel, providers(), DEFAULT_MODEL);
+          setDefaultModel(normalizedDefaultModel);
+          setLegacyDefaultModel(normalizedDefaultModel);
         } else {
           setDefaultModel(DEFAULT_MODEL);
           setLegacyDefaultModel(DEFAULT_MODEL);
@@ -5541,7 +5552,7 @@ export default function App() {
       }
 
       setDefaultModelExplicit(Boolean(configDefault));
-      const nextDefault = configDefault ?? legacyDefaultModel();
+      const nextDefault = resolveSupportedModel(configDefault ?? legacyDefaultModel(), providers(), DEFAULT_MODEL);
       const currentDefault = untrack(defaultModel);
       if (nextDefault && !modelEquals(currentDefault, nextDefault)) {
         setDefaultModel(nextDefault);

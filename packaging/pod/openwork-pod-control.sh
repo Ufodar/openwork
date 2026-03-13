@@ -22,7 +22,7 @@ OPENWORK_TOKEN="replace-with-openwork-token"
 OPENWORK_HOST_TOKEN="replace-with-openwork-host-token"
 
 PROVIDER_ID="my-company"
-MODEL_ID="Kimi-K2.5"
+MODEL_ID="Qwen3.5-397B-A17B"
 MODEL_ALIAS="$PROVIDER_ID/$MODEL_ID"
 MODEL_BASE_URL="http://192.168.5.10:3002/v1"
 MODEL_API_KEY="replace-with-api-key"

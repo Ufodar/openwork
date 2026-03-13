@@ -6,37 +6,6 @@ from pathlib import Path
 
 
 SUPPORTED_MODELS = {
-    "Kimi-K2.5": {
-        "name": "Kimi-K2.5",
-        "capabilities": {
-            "input": {
-                "text": True,
-                "image": True,
-                "audio": True,
-                "video": True,
-                "pdf": True,
-            },
-            "output": {
-                "text": True,
-                "image": True,
-                "audio": False,
-                "video": False,
-                "pdf": False,
-            },
-            "attachment": True,
-            "interleaved": True,
-            "toolcall": True,
-        },
-    },
-    "GLM-5": {
-        "name": "GLM-5",
-        "capabilities": {
-            "input": {"text": True},
-            "output": {"text": True},
-            "attachment": False,
-            "toolcall": True,
-        },
-    },
     "MiniMax-2.5": {
         "name": "MiniMax-2.5",
         "capabilities": {
@@ -70,6 +39,8 @@ SUPPORTED_MODELS = {
     },
 }
 
+DEFAULT_MODEL_ID = "Qwen3.5-397B-A17B"
+
 
 def resolve_default_base_url() -> str:
     explicit = os.environ.get("OPENWORK_MODEL_BASE_URL", "").strip()
@@ -98,17 +69,17 @@ def main() -> int:
         os.environ.get("OPENWORK_GLOBAL_CONFIG", str(Path.home() / ".config" / "opencode" / "opencode.json"))
     )
     provider_id = os.environ.get("OPENWORK_PROVIDER_ID", "my-company").strip() or "my-company"
-    default_model = os.environ.get("OPENWORK_DEFAULT_MODEL", "Kimi-K2.5").strip() or "Kimi-K2.5"
+    default_model = os.environ.get("OPENWORK_DEFAULT_MODEL", DEFAULT_MODEL_ID).strip() or DEFAULT_MODEL_ID
     base_url = resolve_default_base_url()
     api_key = os.environ.get("MY_COMPANY_API_KEY", "").strip()
 
     if default_model not in SUPPORTED_MODELS:
         print(
-            f"[sync-global-opencode-config] Unsupported OPENWORK_DEFAULT_MODEL={default_model!r}. "
-            f"Supported: {', '.join(SUPPORTED_MODELS)}",
+            f"[sync-global-opencode-config] Unsupported OPENWORK_DEFAULT_MODEL={default_model!r}; "
+            f"falling back to {DEFAULT_MODEL_ID}. Supported: {', '.join(SUPPORTED_MODELS)}",
             file=sys.stderr,
         )
-        return 1
+        default_model = DEFAULT_MODEL_ID
 
     config = load_json(global_path)
     config["$schema"] = "https://opencode.ai/config.json"

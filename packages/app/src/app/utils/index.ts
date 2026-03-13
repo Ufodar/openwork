@@ -28,6 +28,36 @@ export function modelEquals(a: ModelRef, b: ModelRef) {
   return a.providerID === b.providerID && a.modelID === b.modelID;
 }
 
+const RETIRED_MODEL_REFS = new Set([
+  "my-company/Kimi-K2.5",
+  "my-company/GLM-5",
+]);
+
+export function isRetiredModel(model: ModelRef) {
+  return RETIRED_MODEL_REFS.has(formatModelRef(model));
+}
+
+export function providerHasModel(model: ModelRef, providers: ProviderListItem[] = []) {
+  const provider = providers.find((item) => item.id === model.providerID);
+  return Boolean(provider?.models?.[model.modelID]);
+}
+
+export function resolveSupportedModel(
+  model: ModelRef,
+  providers: ProviderListItem[] = [],
+  fallback: ModelRef,
+) {
+  if (isRetiredModel(model)) {
+    return fallback;
+  }
+
+  if (providers.length > 0 && !providerHasModel(model, providers)) {
+    return fallback;
+  }
+
+  return model;
+}
+
 const FRIENDLY_PROVIDER_LABELS: Record<string, string> = {
   opencode: "OpenCode",
   openai: "OpenAI",

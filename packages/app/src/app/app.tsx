@@ -46,6 +46,12 @@ import {
 } from "./lib/opencode-session";
 import { clearPerfLogs, finishPerf, perfNow, recordPerfLog } from "./lib/perf-log";
 import {
+  type OpenworkSessionPrefs,
+  normalizeStoredAgent,
+  normalizeStoredView,
+  resolveSessionPreferences,
+} from "./lib/session-preferences";
+import {
   DEFAULT_MODEL,
   HIDE_TITLEBAR_PREF_KEY,
   MCP_QUICK_CONNECT,
@@ -421,7 +427,7 @@ export default function App() {
     navigate(`/document-agent/${trimmed}`, options);
   };
 
-  const queueDocumentAgentRedirect = (sessionId: string) => {
+  const queueDocumentAgentRedirect = (sessionId: string, options?: { title?: string | null }) => {
     const trimmed = sessionId.trim();
     if (!trimmed || typeof window === "undefined") return;
     if (queuedDocumentAgentRedirect?.sessionId === trimmed) return;
@@ -435,8 +441,8 @@ export default function App() {
       const expectedSessionPath = `/session/${trimmed.toLowerCase()}`;
       if (location.pathname.trim().toLowerCase() !== expectedSessionPath) return;
       if (new URLSearchParams(location.search).get("view") === "session") return;
-      const preferred = getSessionPreferredView(trimmed);
-      if (preferred !== "document-writer" && preferred !== "document-agent") return;
+      const preferred = resolveSessionPreferenceState(trimmed, { title: options?.title }).view.value;
+      if (preferred !== "document-agent") return;
       goToDocumentAgent(trimmed, { replace: true });
     }, 0);
 
@@ -1665,10 +1671,8 @@ export default function App() {
     const id = sessionID.trim();
     if (!id) return;
     const lock = untrack(() => {
-      const stored = getSessionPreferredAgentLock(id);
-      if (stored) return stored;
       const title = sessions().find((session) => session.id === id)?.title ?? null;
-      return inferSessionPreferredAgentLock(title);
+      return resolveSessionPreferenceState(id, { title }).agentLock.value;
     });
     const trimmed = (lock ?? agent ?? "").trim();
     setSessionAgentById((current) => {
@@ -2753,29 +2757,6 @@ export default function App() {
   const devtoolsCapabilities = createMemo(() => openworkServerCapabilities());
   const resolvedDevtoolsWorkspaceId = createMemo(() => devtoolsWorkspaceId() ?? openworkServerWorkspaceId());
 
-  type OpenworkSessionPrefs = { view?: View | null; agent?: string | null; agentLock?: string | null; [key: string]: unknown };
-
-  const normalizeStoredView = (value: unknown): View | null => {
-    switch (value) {
-      case "onboarding":
-      case "dashboard":
-      case "session":
-      case "proto":
-      case "document-writer":  // legacy — mapped to document-agent at view resolution
-      case "document-agent":
-        return value;
-      default:
-        return null;
-    }
-  };
-
-  const normalizeStoredAgent = (value: unknown): string | null => {
-    if (typeof value !== "string") return null;
-    const trimmed = value.trim();
-    if (!trimmed) return null;
-    return trimmed;
-  };
-
   const parseOpenworkSessionPrefs = (openwork: Record<string, unknown>): Record<string, OpenworkSessionPrefs> => {
     const sessions = openwork.sessions;
     if (!sessions || typeof sessions !== "object" || Array.isArray(sessions)) {
@@ -2947,23 +2928,22 @@ export default function App() {
     }
   };
 
-  const getSessionPreferredView = (sessionId: string): View => {
+  const getStoredSessionPrefs = (sessionId: string): OpenworkSessionPrefs | null => {
     const id = sessionId.trim();
-    if (!id) return "session";
-    const view = openworkSessionPrefsById()[id]?.view;
-    return view === "document-writer" ? "document-agent" : view === "document-agent" ? "document-agent" : "session";
+    if (!id) return null;
+    return openworkSessionPrefsById()[id] ?? null;
   };
 
-  const getSessionPreferredAgent = (sessionId: string): string | null => {
+  const resolveSessionPreferenceState = (sessionId: string, options?: { title?: string | null }) =>
+    resolveSessionPreferences({
+      stored: getStoredSessionPrefs(sessionId),
+      title: options?.title,
+    });
+
+  const getStoredSessionPreferredAgent = (sessionId: string): string | null => {
     const id = sessionId.trim();
     if (!id) return null;
     return openworkSessionPrefsById()[id]?.agent ?? null;
-  };
-
-  const getSessionPreferredAgentLock = (sessionId: string): string | null => {
-    const id = sessionId.trim();
-    if (!id) return null;
-    return openworkSessionPrefsById()[id]?.agentLock ?? null;
   };
 
   const ensureOpenworkSessionPrefsLoaded = async (): Promise<void> => {
@@ -3291,47 +3271,18 @@ export default function App() {
   });
 
   createEffect(() => {
+    if (currentView() !== "session") return;
+    const sessionId = activeSessionId();
+    if (!sessionId) return;
+    persistSessionPreferredView(sessionId, "session").catch(() => undefined);
+  });
+
+  createEffect(() => {
     if (currentView() !== "document-agent") return;
     const sessionId = activeSessionId();
     if (!sessionId) return;
     persistSessionPreferredView(sessionId, "document-agent").catch(() => undefined);
   });
-
-  const inferSessionPreferredView = (title?: string | null): View | null => {
-    const normalized = (title ?? "").trim().toLowerCase();
-    if (!normalized) return null;
-    if (normalized.includes("document writer")) return "document-agent";
-    if (normalized.includes("bid writer")) return "document-agent";
-    if (normalized.includes("bid dedupe")) return "document-agent";
-    if (normalized.includes("document agent")) return "document-agent";
-    if (normalized.includes("文档智能体")) return "document-agent";
-    if (normalized.includes("标书写作助手")) return "document-agent";
-    return null;
-  };
-
-  const inferSessionPreferredAgent = (title?: string | null): string | null => {
-    const normalized = (title ?? "").trim().toLowerCase();
-    if (!normalized) return null;
-    if (normalized.includes("document writer")) return "document-writer";
-    if (normalized.includes("bid writer")) return "bid-writer";
-    if (normalized.includes("bid dedupe")) return "bid-dedupe";
-    if (normalized.includes("document agent")) return "common-work";
-    if (normalized.includes("文档智能体")) return "common-work";
-    if (normalized.includes("标书写作助手")) return "document-writer";
-    return null;
-  };
-
-  const inferSessionPreferredAgentLock = (title?: string | null): string | null => {
-    const normalized = (title ?? "").trim().toLowerCase();
-    if (!normalized) return null;
-    if (normalized.includes("document agent")) return "common-work";
-    if (normalized.includes("文档智能体")) return "common-work";
-    // "Bid Writer" is a guided flow that must remain on document-writer (not bid-writer).
-    if (normalized.includes("bid writer")) return "document-writer";
-    if (normalized.includes("document writer")) return "document-writer";
-    if (normalized.includes("标书写作助手")) return "document-writer";
-    return null;
-  };
 
   const openSessionInPreferredView = async (sessionId: string, options?: { title?: string | null }): Promise<void> => {
     const id = sessionId.trim();
@@ -3341,31 +3292,29 @@ export default function App() {
     } catch {
       // ignore
     }
-    const stored = getSessionPreferredView(id);
-    const inferred = inferSessionPreferredView(options?.title);
-    const resolved = stored !== "session" ? stored : inferred ?? stored;
-
-    const storedLock = getSessionPreferredAgentLock(id);
-    const inferredLock = inferSessionPreferredAgentLock(options?.title);
-    const resolvedLock = storedLock ?? inferredLock ?? null;
+    const resolvedPrefs = resolveSessionPreferenceState(id, { title: options?.title });
+    const resolved = resolvedPrefs.view.value;
+    const resolvedLock = resolvedPrefs.agentLock.value;
     if (resolvedLock) {
-      if (storedLock !== resolvedLock) {
+      if (resolvedPrefs.agentLock.source === "legacy") {
         persistSessionPreferredAgentLock(id, resolvedLock).catch(() => undefined);
       }
       setSessionAgent(id, resolvedLock);
-      persistSessionPreferredAgent(id, resolvedLock).catch(() => undefined);
+      if (getStoredSessionPreferredAgent(id) !== resolvedLock) {
+        persistSessionPreferredAgent(id, resolvedLock).catch(() => undefined);
+      }
     } else {
-      const storedAgent = getSessionPreferredAgent(id);
-      const inferredAgent = inferSessionPreferredAgent(options?.title);
-      const resolvedAgent = storedAgent ?? inferredAgent ?? null;
+      const resolvedAgent = resolvedPrefs.agent.value;
       if (resolvedAgent !== null) {
         setSessionAgent(id, resolvedAgent);
-        persistSessionPreferredAgent(id, resolvedAgent).catch(() => undefined);
+        if (resolvedPrefs.agent.source === "legacy") {
+          persistSessionPreferredAgent(id, resolvedAgent).catch(() => undefined);
+        }
       }
     }
 
     setView(resolved, id);
-    if (resolved === "document-writer" || resolved === "document-agent") {
+    if (resolved === "document-agent" && resolvedPrefs.view.source === "legacy") {
       persistSessionPreferredView(id, "document-agent").catch(() => undefined);
     }
   };
@@ -3379,13 +3328,17 @@ export default function App() {
           (selectedSessionId() === sessionId ? selectedSession()?.title : null) ??
           sessions().find((session) => session.id === sessionId)?.title ??
           null;
-
-        const storedLock = getSessionPreferredAgentLock(sessionId);
-        const inferredLock = inferSessionPreferredAgentLock(title);
-        const resolvedLock = storedLock ?? inferredLock ?? null;
+        const resolvedPrefs = resolveSessionPreferenceState(sessionId, { title });
+        const resolvedLock = resolvedPrefs.agentLock.value;
+        if (resolvedPrefs.view.value === "document-agent" && resolvedPrefs.view.source === "legacy") {
+          persistSessionPreferredView(sessionId, "document-agent").catch(() => undefined);
+        }
         if (resolvedLock) {
-          if (storedLock !== resolvedLock) {
+          if (resolvedPrefs.agentLock.source === "legacy") {
             persistSessionPreferredAgentLock(sessionId, resolvedLock).catch(() => undefined);
+          }
+          if (getStoredSessionPreferredAgent(sessionId) !== resolvedLock) {
+            persistSessionPreferredAgent(sessionId, resolvedLock).catch(() => undefined);
           }
           const current = sessionAgentById()[sessionId] ?? null;
           if (current === resolvedLock) return;
@@ -3393,11 +3346,14 @@ export default function App() {
           return;
         }
 
-        const storedAgent = getSessionPreferredAgent(sessionId);
-        if (!storedAgent) return;
+        const resolvedAgent = resolvedPrefs.agent.value;
+        if (!resolvedAgent) return;
+        if (resolvedPrefs.agent.source === "legacy") {
+          persistSessionPreferredAgent(sessionId, resolvedAgent).catch(() => undefined);
+        }
         const current = sessionAgentById()[sessionId] ?? null;
-        if (current === storedAgent) return;
-        setSessionAgent(sessionId, storedAgent);
+        if (current === resolvedAgent) return;
+        setSessionAgent(sessionId, resolvedAgent);
       })
       .catch(() => undefined);
   });
@@ -4307,10 +4263,8 @@ export default function App() {
   const selectedSessionAgentLock = createMemo(() => {
     const id = selectedSessionId();
     if (!id) return null;
-    const stored = getSessionPreferredAgentLock(id);
-    if (stored) return stored;
     const title = selectedSession()?.title ?? sessions().find((session) => session.id === id)?.title ?? null;
-    return inferSessionPreferredAgentLock(title);
+    return resolveSessionPreferenceState(id, { title }).agentLock.value;
   });
 
   createEffect(() => {
@@ -6536,12 +6490,10 @@ export default function App() {
       ensureRouteSessionHydrated(id);
 
       if (!forcedView) {
-        const stored = getSessionPreferredView(id);
         const title = sessions().find((session) => session.id === id)?.title ?? null;
-        const inferred = inferSessionPreferredView(title);
-        const resolved = stored !== "session" ? stored : inferred ?? stored;
-        if (resolved === "document-writer" || resolved === "document-agent") {
-          queueDocumentAgentRedirect(id);
+        const resolved = resolveSessionPreferenceState(id, { title }).view.value;
+        if (resolved === "document-agent") {
+          queueDocumentAgentRedirect(id, { title });
         }
 
         void (async () => {
@@ -6552,9 +6504,10 @@ export default function App() {
           }
           if (location.pathname.trim().toLowerCase() !== `/session/${id.toLowerCase()}`) return;
           if (new URLSearchParams(location.search).get("view") === "session") return;
-          const preferred = getSessionPreferredView(id);
-          if (preferred === "document-writer" || preferred === "document-agent") {
-            queueDocumentAgentRedirect(id);
+          const nextTitle = sessions().find((session) => session.id === id)?.title ?? null;
+          const preferred = resolveSessionPreferenceState(id, { title: nextTitle }).view.value;
+          if (preferred === "document-agent") {
+            queueDocumentAgentRedirect(id, { title: nextTitle });
             return;
           }
         })();

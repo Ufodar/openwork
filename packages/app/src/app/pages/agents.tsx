@@ -121,20 +121,20 @@ export default function AgentsView(props: AgentsViewProps) {
     if (featured.status === "coming-soon") return;
 
     if (featured.id === "general-assistant") {
-      props.createSessionAndOpen({ title: tr(featured.nameKey), view: "session" });
+      props.createSessionAndOpen({ view: "session" });
       return;
     }
 
     if (featured.id === "document-agent" || featured.id === "document-writer") {
       const fallback = featured.id === "document-agent" ? "common-work" : "document-writer";
       const agent = resolveFeaturedAgentName(featured) ?? fallback;
-      props.createSessionAndOpen({ title: tr(featured.nameKey), agent, agentLock: agent, view: "document-agent" });
+      props.createSessionAndOpen({ agent, agentLock: agent, view: "document-agent" });
       return;
     }
 
     if (!isFeaturedAgentAvailable(featured)) return;
     const agent = resolveFeaturedAgentName(featured);
-    props.createSessionAndOpen({ title: tr(featured.nameKey), agent });
+    props.createSessionAndOpen({ agent });
   }
 
   return (

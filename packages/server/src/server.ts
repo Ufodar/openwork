@@ -797,19 +797,15 @@ export async function scanAdminSessions(
 export async function countAdminSessionsByOwner(
   config: ServerConfig,
   sessionOwnership: SessionOwnershipService,
+  sessionWorkspaces: SessionWorkspaceService,
 ): Promise<Map<string, number>> {
+  const scanned = await scanAdminSessions(config, sessionOwnership, sessionWorkspaces);
   const counts = new Map<string, number>();
-
-  await Promise.all(
-    config.workspaces.map(async (workspace) => {
-      const entries = await sessionOwnership.listEntries(workspace.id);
-      for (const entry of Object.values(entries)) {
-        const ownerKey = entry.ownerKey?.trim();
-        if (!ownerKey) continue;
-        counts.set(ownerKey, (counts.get(ownerKey) ?? 0) + 1);
-      }
-    }),
-  );
+  for (const entry of scanned.items) {
+    const ownerKey = entry.ownerKey?.trim();
+    if (!ownerKey) continue;
+    counts.set(ownerKey, (counts.get(ownerKey) ?? 0) + 1);
+  }
 
   return counts;
 }
@@ -1886,9 +1882,10 @@ function createRoutes(
   });
 
   addRoute(routes, "GET", "/admin/users", "host", async () => {
-    const [users, sessionCountByOwnerKey] = await Promise.all([
+    const [users, sessionCountByOwnerKey, scanned] = await Promise.all([
       auth.listUsers(),
-      countAdminSessionsByOwner(config, sessionOwnership),
+      countAdminSessionsByOwner(config, sessionOwnership, sessionWorkspaces),
+      scanAdminSessions(config, sessionOwnership, sessionWorkspaces),
     ]);
 
     const items = users
@@ -1909,7 +1906,7 @@ function createRoutes(
         return left.username.localeCompare(right.username, "zh-CN");
       });
 
-    return jsonResponse({ items, warnings: [] });
+    return jsonResponse({ items, warnings: scanned.warnings });
   });
 
   addRoute(routes, "GET", "/admin/users/:id/sessions", "host", async (ctx) => {

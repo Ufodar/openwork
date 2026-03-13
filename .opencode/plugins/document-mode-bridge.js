@@ -55,6 +55,7 @@ function sampleWorkspace(rootDir, maxDepth = 3, maxFiles = 120) {
 
   function walk(currentDir, depth) {
     if (files.length >= maxFiles) return;
+
     let entries = [];
     try {
       entries = fs.readdirSync(currentDir, { withFileTypes: true });
@@ -65,6 +66,7 @@ function sampleWorkspace(rootDir, maxDepth = 3, maxFiles = 120) {
     for (const entry of entries) {
       if (files.length >= maxFiles) return;
       if (entry.name.startsWith(".") && entry.name !== ".tmp" && entry.name !== ".worktree") continue;
+
       const fullPath = path.join(currentDir, entry.name);
       if (entry.isDirectory()) {
         if (depth >= maxDepth) continue;
@@ -72,6 +74,7 @@ function sampleWorkspace(rootDir, maxDepth = 3, maxFiles = 120) {
         walk(fullPath, depth + 1);
         continue;
       }
+
       files.push(fullPath);
     }
   }
@@ -116,25 +119,25 @@ function buildSystemBridge(mode) {
   return `<DOCUMENT_MODE_BRIDGE>
 Document mode is active for this workspace because the sampled files look document-heavy (office=${mode.officeCount}, text=${mode.textDocCount}, code=${mode.codeCount}).
 
-When the current task is document-centric rather than code-centric:
-- Pick exactly 1 primary skill for the core outcome.
-- Add at most 2 companion skills for concrete gaps.
-- Add at most 1 process skill when complexity or failure pattern requires it.
-- Prefer document/process skills over code-only superpowers unless the task is actually software implementation.
+Document-native operating rules:
+- Read real files early. Do not stay in planning-only mode for long.
+- Prefer format-specific skills and real file evidence over generic writing or organizing skills.
+- Choose the format skill that matches the current authoritative file or target output.
+- If the task spans formats, handle one sub-step at a time and switch formats by stage.
+- Identify the authoritative source hierarchy before drafting.
+- Keep one stable target document instead of creating many drifting variants.
+- Persist reusable state in workspace files instead of relying on short-term chat memory.
 
-Recommended document combinations:
-- Structure + final .docx output -> doc-coauthoring + docx
-- Evidence/citations/research + final deliverable -> content-research-writer + docx or pdf
-- Internal announcement / report tone + final .docx -> internal-comms + docx
-- Many messy source files before extraction -> file-organizer + one format/domain skill
+Whole-document quality rules:
+- Before major edits to a long document, reread the title, outline, adjacent sections, and current conclusions.
+- Local edits must preserve global logic, terminology, numbering, cross-references, and section dependencies.
+- Before claiming a whole document is done, reread the whole document or a faithful extracted representation.
 
-Process skills are conditional:
-- brainstorming -> route is ambiguous or there are multiple plausible approaches
-- writing-plans -> task is multi-phase, multi-file, or long-running
-- systematic-debugging -> repeated failures or environment/tool mismatch
-- verification-before-completion -> before claiming completion or pass status
-
-Before switching primary skills, persist reusable state in workspace files rather than relying on short-term chat memory.
+Process routing:
+- Use writing-plans only for clearly multi-round, multi-file, or multi-output tasks.
+- Use systematic-debugging only after repeated failure, environment mismatch, or conflicting results.
+- Use verification-before-completion only before claiming completion, verification, or delivery.
+- Do not auto-route to generic brainstorming or generic writing skills unless the user explicitly asks for that kind of help after real-file review.
 </DOCUMENT_MODE_BRIDGE>`;
 }
 
@@ -143,31 +146,34 @@ function buildCompactionBridge(mode) {
 This workspace currently looks document-heavy (office=${mode.officeCount}, text=${mode.textDocCount}, code=${mode.codeCount}).
 
 When summarizing for continuation, preserve if present:
-- the target output document and canonical input filenames
-- which skill acted as primary and which were companions
-- state files already written (for example requirements.csv, .worktree/index.json, .worktree/conventions.md, .bid/facts.json)
-- any unresolved blockers, TBD facts, or pending document sections
-- the single best next action for the next agent
+- the authoritative source files and the stable target document
+- the current stage: intake, authority resolution, extraction, revision, coherence check, or delivery
+- canonical filenames and workspace-relative paths
+- state files already written, such as requirements.csv, .worktree/index.json, .worktree/conventions.md, .worktree/facts.json, and reports/*
+- the current outline, section dependencies, terminology commitments, and unresolved cross-section issues
+- unresolved blockers, TBD facts, and the single best next action
 
-Do not collapse exact filenames, paths, or document roles into vague summaries.`;
+Do not collapse exact filenames, paths, document roles, or open coherence issues into vague summaries.`;
 }
 
 function appendSystemPrompt(output, prompt) {
   if (!prompt) return;
+
   if (typeof output.system === "string") {
     output.system = `${output.system}\n\n${prompt}`;
     return;
   }
+
   if (Array.isArray(output.system) && output.system.length > 0) {
     output.system[0] = `${output.system[0]}\n\n${prompt}`;
     return;
   }
+
   output.system = [prompt];
 }
 
 export const DocumentModeBridge = async ({ directory }) => {
   const workspaceDir = typeof directory === "string" && directory ? directory : process.cwd();
-
   const classify = () => classifyWorkspace(workspaceDir);
 
   return {

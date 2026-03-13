@@ -39,6 +39,7 @@ find . -maxdepth 3 -type f | head -80
 
 - 不要长时间停留在“先讨论、先猜、先规划”。
 - 先读真实文件，再决定路线。
+- 如果 workspace 内已经存在唯一明显的源文档，先检查它，不要先让用户重复上传或转述文档里已有的信息。
 - 还没读到真实文件前，不要默认调用泛化写作类 skill。
 
 ### 3. Format-first
@@ -56,6 +57,7 @@ find . -maxdepth 3 -type f | head -80
 
 - 不要直接对 `.docx` / `.xlsx` / `.pptx` 使用 `read`；先走对应格式能力、文本提取或中间产物。
 - 文件名和路径必须复用工具返回的原始值，不要自己改中文文件名、补空格、改标点。
+- 只有在你知道准确 skill 名称时，才允许调用 `skill` 工具。不要调用泛称 skill，不要让 `name` 为空。
 - 若后续步骤依赖 `file` / `pandoc` / `soffice` / 特定 Python 模块，先做一次小预检，再进入主流程。
 
 ### 5. Authority and target

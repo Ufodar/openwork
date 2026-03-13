@@ -83,20 +83,29 @@ function sampleWorkspace(rootDir, maxDepth = 3, maxFiles = 120) {
   return files;
 }
 
+function toWorkspaceRelative(rootDir, filePath) {
+  const relative = path.relative(rootDir, filePath);
+  return relative && !relative.startsWith("..") ? relative : filePath;
+}
+
 function classifyWorkspace(rootDir) {
   const files = sampleWorkspace(rootDir);
   let officeCount = 0;
   let textDocCount = 0;
   let codeCount = 0;
+  const officeFiles = [];
+  const textFiles = [];
 
   for (const file of files) {
     const ext = path.extname(file).toLowerCase();
     if (OFFICE_EXTENSIONS.has(ext)) {
       officeCount += 1;
+      officeFiles.push(toWorkspaceRelative(rootDir, file));
       continue;
     }
     if (TEXT_DOCUMENT_EXTENSIONS.has(ext)) {
       textDocCount += 1;
+      textFiles.push(toWorkspaceRelative(rootDir, file));
       continue;
     }
     if (CODE_EXTENSIONS.has(ext)) {
@@ -112,17 +121,28 @@ function classifyWorkspace(rootDir) {
     officeCount,
     textDocCount,
     codeCount,
+    officeFiles: officeFiles.slice(0, 8),
+    textFiles: textFiles.slice(0, 8),
   };
 }
 
 function buildSystemBridge(mode) {
+  const candidates = mode.officeFiles.length ? mode.officeFiles : mode.textFiles;
+  const candidateLine = candidates.length
+    ? `Detected document candidates in workspace (use exact names if you open them): ${candidates.join(", ")}`
+    : "";
+
   return `<DOCUMENT_MODE_BRIDGE>
 Document mode is active for this workspace because the sampled files look document-heavy (office=${mode.officeCount}, text=${mode.textDocCount}, code=${mode.codeCount}).
+${candidateLine ? `\n${candidateLine}` : ""}
 
 Document-native operating rules:
 - Read real files early. Do not stay in planning-only mode for long.
+- If the workspace already contains a likely source document, inspect it before asking the user to upload files or restate facts that can be extracted directly.
 - Prefer format-specific skills and real file evidence over generic writing or organizing skills.
 - Choose the format skill that matches the current authoritative file or target output.
+- If you use the skill tool, pass an exact installed skill name such as docx, pdf, xlsx, pptx, writing-plans, systematic-debugging, or verification-before-completion.
+- Never call the skill tool with a generic label like "document expert", "writing expert", or an empty name.
 - If the task spans formats, handle one sub-step at a time and switch formats by stage.
 - Identify the authoritative source hierarchy before drafting.
 - Keep one stable target document instead of creating many drifting variants.

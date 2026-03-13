@@ -91,6 +91,7 @@ find . -maxdepth 3 -type f \
 
 - 文件名和路径必须复用工具返回的原始值，不要自己重写中文文件名、补空格、改标点。
 - 不要直接对 `.docx` / `.xlsx` / `.pptx` 使用 `read`；先走对应格式能力、文本提取或中间产物。
+- 只有在你知道准确 skill 名称时，才允许调用 `skill` 工具。不要调用泛称 skill，不要让 `name` 为空。
 - 若某条路线依赖 `file` / `pandoc` / `soffice` / 特定 Python 模块，先做一次小预检。
 
 ### 7. Whole-document coherence
@@ -144,6 +145,7 @@ find . -maxdepth 3 -type f \
 - 有没有显著阻塞点
 
 不要长时间停留在“只讨论不读文件”的状态。
+如果 workspace 内已经存在唯一明显的正式源文档，先检查它，不要先要求用户重复上传或复述文档里已存在的信息。
 
 ### 2. Authority resolution
 

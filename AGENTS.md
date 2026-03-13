@@ -70,6 +70,18 @@ Required format:
 
 If the user request references multiple repos and the intended edit location is ambiguous, stop after discovery and ask for a single repo target before editing files.
 
+## Markdown And Prompt Editing (Required)
+
+When editing `.md` files that act as prompts, instructions, plans, or contracts, do not treat the task as a local line patch.
+
+Required discipline:
+
+* Read the whole file before editing.
+* Optimize for full-document coherence, not just the nearby block being changed.
+* Remove or rewrite stale surrounding text if a local change would leave duplication, contradiction, dead guidance, or attention noise.
+* Prefer fewer strong rules over long overlapping lists.
+* After editing, re-read the full file and verify headings, ordering, cross-references, and overall logic still make sense.
+
 ## New Feature Workflow (Required)
 
 When the user asks to create a new feature, follow this exact procedure:
@@ -113,6 +125,20 @@ Design principles for hot reload:
 * **Session continuity**: before reload, capture running session IDs, agents, and models. After reload, optionally relaunch those sessions so the user experiences seamless continuity.
 * **Per-workspace isolation**: the desktop file watcher only watches the active workspace root and its `.opencode/` directory. The server reload event store is already keyed by `workspaceId`.
 
+## Hosted Runtime Constraints
+
+For the current multi-user hosted deployment model, treat these as product constraints, not implementation details:
+
+* **User isolation**: each authenticated user gets a dedicated workspace root under `~/.openwork/user-workspaces/<userId>`.
+* **Session isolation**: each new session gets its own runtime workspace under `<userWorkspace>/documents/sessions/<runtimeId>`. Do not assume the directory name equals the OpenCode `sessionId`; the server persists a `sessionId -> runtimeDir` mapping.
+* **Workspace terminology**: in current hosted mode, the active OpenCode workspace for a running task is the current session runtime directory. Prefer the term `<WORKSPACE>` over ad-hoc terms like `<SESSION_ROOT>`.
+* **Document placement**: uploaded files, generated files, and session-scoped temp files should live inside the current session workspace. Avoid designing flows that rely on a shared cross-session document root.
+* **File safety boundary**: session isolation relies on the runtime workspace plus `external_directory=deny`. This protects OpenCode file tools from crossing session boundaries, but it is not a full container sandbox.
+* **Shell boundary**: `bash` still runs in the shared pod environment unless a stronger sandbox is introduced. Do not assume shell commands are confined the same way file tools are.
+* **Shared system toolchain**: hosted sessions share the pod's installed system environment. `scripts/start-pod.sh` provisions the common toolchain on a fresh pod. `scripts/restart-pod.sh` reuses that environment, warns if optional document helpers are missing, and may refresh repo dependencies after a pull, but it is not a full environment bootstrap.
+* **Shared global modules**: pod startup exports global npm modules via `NODE_PATH`, so session-local `node` processes can resolve preinstalled global packages. Prefer using the shared environment before adding per-session installs.
+* **Model default**: the current hosted default model is `my-company/Qwen3.5-397B-A17B`. `Kimi-K2.5` and `GLM-5` are retired in this deployment path and should not be reintroduced as active defaults without an explicit product decision.
+
 ## Technology Stack
 
 | Layer                | Technology                |
@@ -130,6 +156,8 @@ Design principles for hot reload:
 ## Dev Debugging
 
 * If you change `packages/server/src`, rebuild the OpenWork server binary (`pnpm --filter openwork-server build:bin`) because `openwork` (openwork-orchestrator) runs the compiled server, not the TS sources.
+* If you touch session isolation, event streaming, or message rendering, remember that runtime sessions are scoped by directory. Real-time updates must subscribe to the selected session runtime directory as well as the workspace root; otherwise new messages may only appear after a manual refresh.
+* When debugging hosted document flows, prefer verifying against the current session workspace path rather than assuming legacy shared `documents/sessions/<sessionId>` behavior.
 
 ## Local Structure
 

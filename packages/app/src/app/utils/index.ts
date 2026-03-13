@@ -219,6 +219,24 @@ export function normalizeDirectoryPath(input?: string | null) {
   return isWindowsPlatform() ? normalized.toLowerCase() : normalized;
 }
 
+export function getEventSubscriptionDirectories(workspaceRoot?: string | null, sessionDirectory?: string | null) {
+  const candidates = [workspaceRoot, sessionDirectory];
+  const seen = new Set<string>();
+  const next: string[] = [];
+
+  for (const candidate of candidates) {
+    const trimmed = (candidate ?? "").trim();
+    if (!trimmed) continue;
+
+    const normalized = normalizeDirectoryPath(trimmed);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    next.push(trimmed.replace(/\\/g, "/").replace(/\/+$/, "") || "/");
+  }
+
+  return next;
+}
+
 export function sessionBelongsToWorkspace(workspaceRoot?: string | null, sessionDirectory?: string | null) {
   const root = normalizeDirectoryPath(workspaceRoot);
   const directory = normalizeDirectoryPath(sessionDirectory);

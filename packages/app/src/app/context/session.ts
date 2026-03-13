@@ -18,6 +18,7 @@ import type {
 } from "../types";
 import {
   addOpencodeCacheHint,
+  getEventSubscriptionDirectories,
   modelFromUserMessage,
   normalizeDirectoryPath,
   normalizeEvent,
@@ -1086,10 +1087,19 @@ export function createSessionStore(options: {
   createEffect(() => {
     const c = options.client();
     if (!c) return;
+    const subscriptionDirectories = getEventSubscriptionDirectories(
+      options.activeWorkspaceRoot(),
+      selectedSession()?.directory ?? "",
+    );
+    const targets = subscriptionDirectories.length
+      ? subscriptionDirectories.map((directory) => ({ key: directory, directory }))
+      : [{ key: "workspace", directory: undefined as string | undefined }];
 
     let cancelled = false;
-    let reconnectAttempt = 0;
-    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+    const reconnectAttempts = new Map<string, number>();
+    const reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
+    const connectedTargets = new Set<string>();
+    const controllers = new Map<string, AbortController>();
 
     let queue: Array<OpencodeEvent | undefined> = [];
     const coalesced = new Map<string, number>();
@@ -1180,15 +1190,31 @@ export function createSessionStore(options: {
       timer = setTimeout(flush, Math.max(0, interval - elapsed));
     };
 
-    const connectSse = async (controller: AbortController) => {
+    const syncSseConnected = () => {
+      options.setSseConnected(connectedTargets.size > 0);
+    };
+
+    const labelForTarget = (target: { directory?: string }) =>
+      target.directory ?? options.activeWorkspaceRoot() ?? "workspace";
+
+    const connectSse = async (
+      target: { key: string; directory?: string },
+      controller: AbortController,
+    ) => {
       try {
-        const sub = await c.event.subscribe(undefined, { signal: controller.signal });
+        const sub = await c.event.subscribe(
+          target.directory ? { directory: target.directory } : undefined,
+          { signal: controller.signal },
+        );
         let yielded = Date.now();
         let lastArrivalAt = Date.now();
 
-        // Reset reconnect counter on successful connection
-        reconnectAttempt = 0;
-        recordPerfLog(sessionDebugEnabled(), "session.sse", "connected");
+        reconnectAttempts.set(target.key, 0);
+        connectedTargets.add(target.key);
+        syncSseConnected();
+        recordPerfLog(sessionDebugEnabled(), "session.sse", "connected", {
+          directory: labelForTarget(target),
+        });
 
         for await (const raw of sub.stream) {
           if (cancelled) break;
@@ -1237,9 +1263,12 @@ export function createSessionStore(options: {
 
         // Stream ended normally - attempt reconnect unless cancelled
         if (!cancelled) {
-          options.setSseConnected(false);
-          recordPerfLog(sessionDebugEnabled(), "session.sse", "stream-ended");
-          scheduleReconnect(controller);
+          connectedTargets.delete(target.key);
+          syncSseConnected();
+          recordPerfLog(sessionDebugEnabled(), "session.sse", "stream-ended", {
+            directory: labelForTarget(target),
+          });
+          scheduleReconnect(target, controller);
         }
       } catch (e) {
         if (cancelled) return;
@@ -1247,41 +1276,65 @@ export function createSessionStore(options: {
         const message = e instanceof Error ? e.message : String(e);
         if (message.toLowerCase().includes("abort")) return;
 
-        // Mark SSE as disconnected and schedule reconnect
-        options.setSseConnected(false);
+        connectedTargets.delete(target.key);
+        syncSseConnected();
         recordPerfLog(sessionDebugEnabled(), "session.sse", "stream-error", {
+          directory: labelForTarget(target),
           error: message,
         });
-        scheduleReconnect(controller);
+        scheduleReconnect(target, controller);
       }
     };
 
-    const scheduleReconnect = (oldController: AbortController) => {
+    const scheduleReconnect = (
+      target: { key: string; directory?: string },
+      oldController: AbortController,
+    ) => {
       if (cancelled) return;
       oldController.abort();
 
-      // Exponential backoff: 1s, 2s, 4s, 8s, 16s, max 30s
-      reconnectAttempt++;
-      const delay = Math.min(1000 * Math.pow(2, reconnectAttempt - 1), 30000);
+      const existingTimer = reconnectTimers.get(target.key);
+      if (existingTimer) {
+        clearTimeout(existingTimer);
+        reconnectTimers.delete(target.key);
+      }
+
+      const attempt = (reconnectAttempts.get(target.key) ?? 0) + 1;
+      reconnectAttempts.set(target.key, attempt);
+      const delay = Math.min(1000 * Math.pow(2, attempt - 1), 30000);
       recordPerfLog(sessionDebugEnabled(), "session.sse", "reconnect-scheduled", {
-        attempt: reconnectAttempt,
+        directory: labelForTarget(target),
+        attempt,
         delayMs: delay,
       });
 
-      reconnectTimer = setTimeout(() => {
+      const nextTimer = setTimeout(() => {
         if (cancelled) return;
         const newController = new AbortController();
-        void connectSse(newController);
+        controllers.set(target.key, newController);
+        void connectSse(target, newController);
       }, delay);
+      reconnectTimers.set(target.key, nextTimer);
     };
 
-    const controller = new AbortController();
-    void connectSse(controller);
+    for (const target of targets) {
+      const controller = new AbortController();
+      controllers.set(target.key, controller);
+      void connectSse(target, controller);
+    }
 
     onCleanup(() => {
       cancelled = true;
-      controller.abort();
-      if (reconnectTimer) clearTimeout(reconnectTimer);
+      for (const controller of controllers.values()) {
+        controller.abort();
+      }
+      controllers.clear();
+      connectedTargets.clear();
+      syncSseConnected();
+      for (const timer of reconnectTimers.values()) {
+        clearTimeout(timer);
+      }
+      reconnectTimers.clear();
       flush();
     });
   });

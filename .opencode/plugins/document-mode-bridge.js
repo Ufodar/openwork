@@ -152,6 +152,19 @@ When summarizing for continuation, preserve if present:
 Do not collapse exact filenames, paths, or document roles into vague summaries.`;
 }
 
+function appendSystemPrompt(output, prompt) {
+  if (!prompt) return;
+  if (typeof output.system === "string") {
+    output.system = `${output.system}\n\n${prompt}`;
+    return;
+  }
+  if (Array.isArray(output.system) && output.system.length > 0) {
+    output.system[0] = `${output.system[0]}\n\n${prompt}`;
+    return;
+  }
+  output.system = [prompt];
+}
+
 export const DocumentModeBridge = async ({ directory }) => {
   const workspaceDir = typeof directory === "string" && directory ? directory : process.cwd();
 
@@ -161,7 +174,7 @@ export const DocumentModeBridge = async ({ directory }) => {
     "experimental.chat.system.transform": async (_input, output) => {
       const mode = classify();
       if (!mode.documentLikely) return;
-      (output.system ||= []).push(buildSystemBridge(mode));
+      appendSystemPrompt(output, buildSystemBridge(mode));
     },
     "experimental.session.compacting": async (_input, output) => {
       const mode = classify();

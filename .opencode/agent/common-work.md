@@ -58,6 +58,63 @@ find . -maxdepth 3 -type f | head -80
 3. **先做能力预检**：若后续步骤依赖 `file` / `pandoc` / `soffice` / 特定 Python 模块，先用 `command -v ...` 或一次性小型 import 检查，再执行主流程。
 4. **两次失败就换路**：同一路径或同一方法连续失败 2 次后，改用别的工具、别的提取方式，或只问用户一个真正阻塞的问题。
 
+## Skill 编排规则
+
+skill 的 `description` 只负责暴露“什么时候可能该用它”。  
+多个 skill 之间的配合顺序、主次关系、切换时机，以这里的规则为准。
+
+### 先选一个 primary skill
+
+- 输出或最终落盘是 `.docx` / `.pdf` / `.xlsx` / `.pptx`  
+  → 对应格式 skill 是 primary
+- 任务重点是“共创结构、章节推进、读者视角、段落组织”  
+  → `doc-coauthoring` 是 primary
+- 任务重点是“补证据、补引用、补研究、补外部材料”  
+  → `content-research-writer` 是 primary
+- 任务重点是“公文语气、汇报口径、内部沟通格式”  
+  → `internal-comms` 是 primary
+- 任务重点是“先把很多文件分组、归类、筛选、找主文件”  
+  → `file-organizer` 是 primary
+
+### 再补 companion skills
+
+- 需要真正读写 `.docx` 成品时，即使 `doc-coauthoring` 或 `internal-comms` 是 primary，`docx` 仍应作为 companion
+- 需要研究、证据、引用时，在 primary 之外补 `content-research-writer`
+- 需要内部沟通语气或管理汇报口径时，在 primary 之外补 `internal-comms`
+- 需要先整理大量输入文件时，在格式 skill 之外补 `file-organizer`
+
+### process skills 只按复杂度触发
+
+- 需求不清、路径不止一条、需要先定方法  
+  → `brainstorming`
+- 任务跨多轮、跨多文件、跨多个输出物，或明显需要阶段化推进  
+  → `writing-plans`
+- 连续失败、环境异常、行为和预期不一致  
+  → `systematic-debugging`
+- 准备声称完成、交付、通过校验前  
+  → `verification-before-completion`
+
+### 组合上限
+
+- 同时最多加载：`1 个 process skill + 1 个 primary skill + 2 个 companion skills`
+- 不要把所有看起来“可能有用”的 skill 一次性全部加载
+
+### 常用组合
+
+- 结构化长文写作并落成 `.docx`  
+  → `doc-coauthoring` + `docx`
+- 有外部事实和引用要求的正式文档  
+  → `content-research-writer` + `docx` 或 `pdf`
+- 内部汇报/公文/通告并最终交付 `.docx`  
+  → `internal-comms` + `docx`
+- 多文件 intake 之后再进入某一格式处理  
+  → `file-organizer` + 一个格式 skill
+
+### 切换 skill 前的动作
+
+- 在工作区内留下中间产物、提取结果或状态文件，再切换 primary skill
+- 不要把跨 skill 的交接完全寄托在短期上下文记忆里
+
 ---
 
 除上述“工作区边界与可见性”外，不额外约束具体执行策略（包括批量检索、批量修改、多文件处理流程）。

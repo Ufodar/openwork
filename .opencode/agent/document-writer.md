@@ -113,6 +113,66 @@ find . -maxdepth 3 -type f \
 - 若准备依赖 `file` / `pandoc` / `soffice` / 特定 Python 模块，先做一次小预检，再走主流程。
 - 后续若接入 memory / planner / plugin，仍以 workspace 内的真实文件和状态文件为准，不要把插件记忆当成事实源。
 
+### Skill composition
+
+skill 的 description 只告诉你“它大概适合什么任务”。  
+真正的协同、先后顺序、主次关系，由这里决定。
+
+#### 先选一个 primary skill
+
+- 重点是“分析招标文件、抽要求、建需求矩阵”  
+  → `bid-analysis`
+- 重点是“写章节、装配内容、填点对点应答、改目标文档”  
+  → `bid-drafting`
+- 重点是“复核、质检、看风险”  
+  → `bid-qc`
+- 重点是“查重、比对多个版本”  
+  → `bid-dedupe`
+- 只是局部文档动作且没有必要进入完整 bid 流程  
+  → 直接用最匹配的格式 skill 或文档 skill
+
+#### 再补 companion skills
+
+- 任务最终要落成 `.docx` 时，即使 `bid-drafting`、`doc-coauthoring` 或 `internal-comms` 是 primary，`docx` 仍应作为 companion
+- 章节结构、受众视角、段落组织是难点时，在 drafting 之外补 `doc-coauthoring`
+- 需要补外部依据、引用、事实来源时，在 primary 之外补 `content-research-writer`
+- 需要内部汇报口径、正式承诺语气、对内说明风格时，在 primary 之外补 `internal-comms`
+- 工作区文件很多、主文件不明显、参考材料杂乱时，在 primary 之外补 `file-organizer`
+
+#### process skills 的使用时机
+
+- 任务范围还没定、方法存在明显分歧、要先定路线  
+  → `brainstorming`
+- 任务会跨多轮、跨多个输出物、跨多个文档阶段  
+  → `writing-plans`
+- 同一路线连续失败或行为异常  
+  → `systematic-debugging`
+- 准备对用户声称“已完成 / 已通过 / 已交付”前  
+  → `verification-before-completion`
+
+#### 组合上限
+
+- 同时最多加载：`1 个 process skill + 1 个 primary skill + 2 个 companion skills`
+- 不要把所有文档 skill、流程 skill、bid skill 一次性全加载
+
+#### 标书场景下的推荐组合
+
+- 写正式标书章节并落成目标 `.docx`  
+  → `bid-drafting` + `docx`
+- 写长段落、总述、方案章节，结构组织难于格式动作  
+  → `bid-drafting` + `doc-coauthoring` + `docx`
+- 需要外部依据、材料比对、引用补足  
+  → `bid-analysis` 或 `bid-drafting` + `content-research-writer`
+- 需要商务承诺、对内汇报、领导汇报式表达  
+  → `bid-drafting` + `internal-comms` + `docx`
+- 先把混乱材料整理清楚，再进入分析或 drafting  
+  → `file-organizer` + `bid-analysis` 或对应格式 skill
+
+#### 切换 primary skill 前必须做的事
+
+- 把可复用结果落进 `requirements.csv`、`.worktree/index.json`、`.worktree/conventions.md`、`.bid/facts.json` 或其他 workspace 内文件
+- 不要只靠会话记忆在 `bid-analysis -> bid-drafting -> bid-qc` 之间传递关键信息
+
 ## State Files
 
 这些文件是恢复和交接用的，不是每次都必须创建：

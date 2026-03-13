@@ -2219,104 +2219,121 @@ export default function App() {
   };
 
   const sidebarRefreshSeqByWorkspaceId: Record<string, number> = {};
+  const sidebarRefreshInFlightByWorkspaceId = new Map<string, Promise<void>>();
   const SIDEBAR_SESSION_LIMIT = 200;
   const refreshSidebarWorkspaceSessions = async (workspaceId: string) => {
     const id = workspaceId.trim();
     if (!id) return;
 
-    const config = resolveSidebarClientConfig(id);
-    if (!config) return;
-
-    // For local workspaces, avoid thrashing UI with errors if the engine is offline.
-    if (!config.baseUrl) {
-      let changed = false;
-      setSidebarSessionStatusByWorkspaceId((prev) => {
-        if (prev[id] === "idle") return prev;
-        changed = true;
-        return { ...prev, [id]: "idle" };
-      });
-      setSidebarSessionErrorByWorkspaceId((prev) => {
-        if ((prev[id] ?? null) === null) return prev;
-        changed = true;
-        return { ...prev, [id]: null };
-      });
-      if (changed) {
-        wsDebug("sidebar:skip", { id, reason: "no-baseUrl" });
-      }
-      return;
+    const existing = sidebarRefreshInFlightByWorkspaceId.get(id);
+    if (existing) {
+      return existing;
     }
 
-    sidebarRefreshSeqByWorkspaceId[id] = (sidebarRefreshSeqByWorkspaceId[id] ?? 0) + 1;
-    const seq = sidebarRefreshSeqByWorkspaceId[id];
+    const run = (async () => {
+      const config = resolveSidebarClientConfig(id);
+      if (!config) return;
 
-    setSidebarSessionStatusByWorkspaceId((prev) => ({ ...prev, [id]: "loading" }));
-    setSidebarSessionErrorByWorkspaceId((prev) => ({ ...prev, [id]: null }));
-
-    try {
-      const start = Date.now();
-      let directory = config.directory;
-      let c = createClient(config.baseUrl, directory || undefined, config.auth);
-
-      if (!directory) {
-        try {
-          const pathInfo = unwrap(await c.path.get());
-          const discovered = normalizeDirectoryPath(pathInfo.directory ?? "");
-          if (discovered) {
-            directory = discovered;
-            c = createClient(config.baseUrl, directory, config.auth);
-          }
-        } catch {
-          // ignore
+      // For local workspaces, avoid thrashing UI with errors if the engine is offline.
+      if (!config.baseUrl) {
+        let changed = false;
+        setSidebarSessionStatusByWorkspaceId((prev) => {
+          if (prev[id] === "idle") return prev;
+          changed = true;
+          return { ...prev, [id]: "idle" };
+        });
+        setSidebarSessionErrorByWorkspaceId((prev) => {
+          if ((prev[id] ?? null) === null) return prev;
+          changed = true;
+          return { ...prev, [id]: null };
+        });
+        if (changed) {
+          wsDebug("sidebar:skip", { id, reason: "no-baseUrl" });
         }
+        return;
       }
 
-      const queryDirectory = (() => {
-        const trimmed = (directory ?? "").trim();
-        if (!trimmed) return undefined;
-        const unified = trimmed.replace(/\\/g, "/");
-        const withoutTrailing = unified.replace(/\/+$/, "");
-        return withoutTrailing || "/";
-      })();
+      sidebarRefreshSeqByWorkspaceId[id] = (sidebarRefreshSeqByWorkspaceId[id] ?? 0) + 1;
+      const seq = sidebarRefreshSeqByWorkspaceId[id];
 
-      // Fetch sessions scoped to the workspace directory to avoid loading the
-      // full global session list for every workspace.
-      const list = unwrap(
-        await c.session.list({ directory: queryDirectory, roots: true, limit: SIDEBAR_SESSION_LIMIT }),
-      );
-      wsDebug("sidebar:list", {
-        id,
-        baseUrl: config.baseUrl,
-        directory: directory || null,
-        queryDirectory: queryDirectory ?? null,
-        count: list.length,
-        ms: Date.now() - start,
-      });
-      if (sidebarRefreshSeqByWorkspaceId[id] !== seq) return;
+      setSidebarSessionStatusByWorkspaceId((prev) => ({ ...prev, [id]: "loading" }));
+      setSidebarSessionErrorByWorkspaceId((prev) => ({ ...prev, [id]: null }));
 
-      // Defensive client-side filter in case upstream ignores the directory query.
-      const root = normalizeDirectoryPath(directory);
-      const filtered = root ? list.filter((session) => sessionBelongsToWorkspace(root, session.directory)) : list;
+      try {
+        const start = Date.now();
+        let directory = config.directory;
+        let c = createClient(config.baseUrl, directory || undefined, config.auth);
 
-      const sorted = sortSessionsByActivity(filtered);
-      const items: SidebarSessionItem[] = sorted.map((session) => ({
-        id: session.id,
-        title: session.title,
-        slug: session.slug,
-        time: session.time,
-        directory: session.directory,
-      }));
+        if (!directory) {
+          try {
+            const pathInfo = unwrap(await c.path.get());
+            const discovered = normalizeDirectoryPath(pathInfo.directory ?? "");
+            if (discovered) {
+              directory = discovered;
+              c = createClient(config.baseUrl, directory, config.auth);
+            }
+          } catch {
+            // ignore
+          }
+        }
 
-      setSidebarSessionsByWorkspaceId((prev) => ({
-        ...prev,
-        [id]: items,
-      }));
-      setSidebarSessionStatusByWorkspaceId((prev) => ({ ...prev, [id]: "ready" }));
-    } catch (error) {
-      if (sidebarRefreshSeqByWorkspaceId[id] !== seq) return;
-      const message = error instanceof Error ? error.message : safeStringify(error);
-      wsDebug("sidebar:error", { id, message });
-      setSidebarSessionStatusByWorkspaceId((prev) => ({ ...prev, [id]: "error" }));
-      setSidebarSessionErrorByWorkspaceId((prev) => ({ ...prev, [id]: message }));
+        const queryDirectory = (() => {
+          const trimmed = (directory ?? "").trim();
+          if (!trimmed) return undefined;
+          const unified = trimmed.replace(/\\/g, "/");
+          const withoutTrailing = unified.replace(/\/+$/, "");
+          return withoutTrailing || "/";
+        })();
+
+        // Fetch sessions scoped to the workspace directory to avoid loading the
+        // full global session list for every workspace.
+        const list = unwrap(
+          await c.session.list({ directory: queryDirectory, roots: true, limit: SIDEBAR_SESSION_LIMIT }),
+        );
+        wsDebug("sidebar:list", {
+          id,
+          baseUrl: config.baseUrl,
+          directory: directory || null,
+          queryDirectory: queryDirectory ?? null,
+          count: list.length,
+          ms: Date.now() - start,
+        });
+        if (sidebarRefreshSeqByWorkspaceId[id] !== seq) return;
+
+        // Defensive client-side filter in case upstream ignores the directory query.
+        const root = normalizeDirectoryPath(directory);
+        const filtered = root ? list.filter((session) => sessionBelongsToWorkspace(root, session.directory)) : list;
+
+        const sorted = sortSessionsByActivity(filtered);
+        const items: SidebarSessionItem[] = sorted.map((session) => ({
+          id: session.id,
+          title: session.title,
+          slug: session.slug,
+          time: session.time,
+          directory: session.directory,
+        }));
+
+        setSidebarSessionsByWorkspaceId((prev) => ({
+          ...prev,
+          [id]: items,
+        }));
+        setSidebarSessionStatusByWorkspaceId((prev) => ({ ...prev, [id]: "ready" }));
+      } catch (error) {
+        if (sidebarRefreshSeqByWorkspaceId[id] !== seq) return;
+        const message = error instanceof Error ? error.message : safeStringify(error);
+        wsDebug("sidebar:error", { id, message });
+        setSidebarSessionStatusByWorkspaceId((prev) => ({ ...prev, [id]: "error" }));
+        setSidebarSessionErrorByWorkspaceId((prev) => ({ ...prev, [id]: message }));
+      }
+    })();
+
+    sidebarRefreshInFlightByWorkspaceId.set(id, run);
+    try {
+      await run;
+    } finally {
+      if (sidebarRefreshInFlightByWorkspaceId.get(id) === run) {
+        sidebarRefreshInFlightByWorkspaceId.delete(id);
+      }
     }
   };
 
@@ -3670,13 +3687,13 @@ export default function App() {
       }
     }
 
+    await openSessionInPreferredView(sessionId, { title: session.title });
+
     setOpenworkServerWorkspaceId(targetWorkspaceId);
     const activeWorkspaceId = workspaceStore.activeWorkspaceId().trim();
     if (activeWorkspaceId) {
-      await refreshSidebarWorkspaceSessions(activeWorkspaceId);
+      void refreshSidebarWorkspaceSessions(activeWorkspaceId).catch(() => undefined);
     }
-
-    await openSessionInPreferredView(sessionId, { title: session.title });
   };
 
   const openWorkspaceConnectionSettings = (workspaceId: string) => {

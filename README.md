@@ -195,7 +195,7 @@ This file is not part of the repo and is loaded automatically by:
 
 `scripts/start-pod.sh` will preinstall document-processing deps (if missing), including:
 
-- System: LibreOffice / Pandoc / Poppler / qpdf / ffmpeg / tesseract
+- System: `file` / `lsof` / LibreOffice / Pandoc / Poppler / qpdf / ffmpeg / tesseract
 - Python: pypdf / pdfplumber / openpyxl / pandas / python-docx / markitdown[pptx]
 - Node (global): docx / pptxgenjs / sharp / react-icons / exceljs / xlsx / mammoth / jszip / pdf-lib / pdfjs-dist
 
@@ -205,11 +205,20 @@ If your Pod uses a mirror, set this in `~/.config/openwork/secrets.env`:
 export OPENWORK_NPM_REGISTRY="https://registry.npmmirror.com"
 ```
 
-### Daily update on Pod (after syncing GitHub -> Gitee)
+### Daily restart on Pod
 
 ```bash
 cd /root/ai_staff/openwork
-bash scripts/pod-pull-restart.sh
+bash scripts/restart-pod.sh
+```
+
+This is the main day-to-day command. It restarts OpenWork quickly and reuses the existing pod environment.
+
+### Daily pull + restart on Pod (after syncing GitHub -> Gitee)
+
+```bash
+cd /root/ai_staff/openwork
+bash scripts/restart-pod.sh --pull
 ```
 
 This does:
@@ -217,6 +226,19 @@ This does:
 1. `git pull --ff-only`
 2. `pnpm install` when revisions changed
 3. restart OpenWork
+
+### Pod script surface
+
+Only remember these two primary lifecycle commands:
+
+- Fresh pod bootstrap: `scripts/start-pod.sh`
+- Normal daily usage: `scripts/restart-pod.sh`
+
+Optional helper scripts:
+
+- `scripts/pod-init-secrets.sh`: generate pod-local secrets once
+- `scripts/openwork-pod-tunnel.sh`: local browser/API tunnel
+- `scripts/sync-skills-to-pod.sh`: push local skills to the pod
 
 ### Local tunnel for browser testing
 

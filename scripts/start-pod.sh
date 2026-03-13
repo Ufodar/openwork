@@ -125,11 +125,13 @@ install_system_deps() {
     command -v make      &>/dev/null || pkgs+=(build-essential pkg-config libssl-dev)
     command -v tar       &>/dev/null || pkgs+=(tar)
     command -v unzip     &>/dev/null || pkgs+=(unzip)
+    command -v lsof      &>/dev/null || pkgs+=(lsof)
 
     # Python
     command -v python3   &>/dev/null || pkgs+=(python3 python3-pip python3-venv)
 
     # Document processing
+    command -v file      &>/dev/null || pkgs+=(file)
     command -v pandoc    &>/dev/null || pkgs+=(pandoc)
     command -v soffice   &>/dev/null || pkgs+=(libreoffice-nogui)
     command -v pdftotext &>/dev/null || pkgs+=(poppler-utils)

@@ -101,8 +101,17 @@ find . -maxdepth 3 -type f \
 - `.xlsx/.xls/.csv` → `xlsx` skill
 - `.pptx` → `pptx` skill
 
+先加载与当前主文件匹配的 skill，不要为了“文档任务”一次性加载 `docx` + `xlsx` + `pptx` + `pdf` 全家桶。
+
 优先使用 `read` / `glob` / `grep` / 专用 skill。  
 只有在需要格式提取、批处理、调用现有脚本、运行校验时，再用 `bash`。
+
+### Binary and path safety
+
+- 不要直接对 `.docx` / `.xlsx` / `.pptx` 使用 `read`；先走对应 skill、文本提取、或格式转换。
+- 文件名和路径必须复用工具返回的原始值，不要自己“规范化”中文文件名或补空格。
+- 若准备依赖 `file` / `pandoc` / `soffice` / 特定 Python 模块，先做一次小预检，再走主流程。
+- 后续若接入 memory / planner / plugin，仍以 workspace 内的真实文件和状态文件为准，不要把插件记忆当成事实源。
 
 ## State Files
 

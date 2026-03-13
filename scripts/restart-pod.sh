@@ -9,9 +9,37 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 RUNTIME_ENV_DIR_DEFAULT="$HOME/.config/openwork"
+PULL_REQUESTED=""
 
 # ---- Bun path ----
 export PATH="$HOME/.bun/bin:$PATH"
+
+usage() {
+    cat <<'EOF'
+Usage: bash scripts/restart-pod.sh [--pull]
+
+  --pull    Run git pull + dependency sync before restarting
+  --help    Show this help
+EOF
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --pull)
+            PULL_REQUESTED="1"
+            ;;
+        --help|-h)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "[restart-pod] Unknown argument: $1" >&2
+            usage >&2
+            exit 1
+            ;;
+    esac
+    shift
+done
 
 kill_pids_gracefully() {
     local reason="$1"
@@ -109,6 +137,99 @@ load_runtime_env() {
     done
 }
 
+auto_restore_common_pod_local_changes() {
+    if [ "${OPENWORK_AUTO_RESTORE_POD_LOCAL_CHANGES:-1}" != "1" ]; then
+        return 0
+    fi
+
+    local restore_paths=(
+        "scripts/pod-init-secrets.sh"
+        "scripts/restart-pod.sh"
+        "scripts/start-pod.sh"
+        "scripts/secrets.env.example"
+    )
+    local status_output
+    status_output="$(git status --porcelain -- "${restore_paths[@]}" || true)"
+    if [ -z "$status_output" ]; then
+        return 0
+    fi
+
+    local backup_dir="${OPENWORK_RUNTIME_ENV_DIR:-$RUNTIME_ENV_DIR_DEFAULT}/backups"
+    local stamp
+    stamp="$(date +%Y%m%d-%H%M%S)"
+    mkdir -p "$backup_dir"
+    local patch_file="$backup_dir/pod-local-script-changes-$stamp.patch"
+
+    git diff -- "${restore_paths[@]}" >"$patch_file" || true
+    git restore --staged --worktree -- "${restore_paths[@]}" || true
+    if [ ! -s "$patch_file" ]; then
+        rm -f "$patch_file"
+    fi
+
+    echo "[restart-pod] Auto-restored local changes in common pod scripts to avoid pull conflicts."
+    echo "[restart-pod] Controlled by OPENWORK_AUTO_RESTORE_POD_LOCAL_CHANGES=1 (default)."
+}
+
+git_pull_ff_only() {
+    local remote="${OPENWORK_GIT_REMOTE:-origin}"
+    local branch="${OPENWORK_GIT_BRANCH:-$(git rev-parse --abbrev-ref HEAD)}"
+    local password="${OPENWORK_GIT_TOKEN:-${OPENWORK_GIT_PASSWORD:-}}"
+
+    if [ -n "${OPENWORK_GIT_USERNAME:-}" ] && [ -n "$password" ]; then
+        local askpass
+        askpass="$(mktemp)"
+        cat >"$askpass" <<'EOF'
+#!/bin/sh
+case "$1" in
+  *sername*) printf '%s\n' "${OPENWORK_GIT_USERNAME}" ;;
+  *assword*) printf '%s\n' "${OPENWORK_GIT_TOKEN:-${OPENWORK_GIT_PASSWORD:-}}" ;;
+  *) printf '\n' ;;
+esac
+EOF
+        chmod 700 "$askpass"
+        if ! GIT_TERMINAL_PROMPT=0 GIT_ASKPASS="$askpass" git pull --ff-only "$remote" "$branch"; then
+            rm -f "$askpass"
+            return 1
+        fi
+        rm -f "$askpass"
+        return 0
+    fi
+
+    git pull --ff-only "$remote" "$branch"
+}
+
+maybe_pull_latest() {
+    cd "$PROJECT_DIR"
+    auto_restore_common_pod_local_changes
+
+    if ! git diff --quiet || ! git diff --cached --quiet; then
+        echo "[restart-pod] Working tree has local changes. Aborting pull to avoid conflicts."
+        git status --short
+        exit 1
+    fi
+
+    local before_rev after_rev
+    before_rev="$(git rev-parse HEAD)"
+    echo "[restart-pod] Pulling latest code..."
+    if ! git_pull_ff_only; then
+        echo "[restart-pod] git pull failed."
+        echo "[restart-pod] If this is a non-interactive run, set OPENWORK_GIT_USERNAME and OPENWORK_GIT_TOKEN in ~/.config/openwork/secrets.env"
+        exit 1
+    fi
+    after_rev="$(git rev-parse HEAD)"
+
+    if [ "$before_rev" != "$after_rev" ]; then
+        echo "[restart-pod] Code updated: $before_rev -> $after_rev"
+        echo "[restart-pod] Syncing dependencies..."
+        if ! pnpm install --frozen-lockfile; then
+            echo "[restart-pod] Frozen lockfile install failed, retrying normal install..."
+            pnpm install
+        fi
+    else
+        echo "[restart-pod] No code changes pulled."
+    fi
+}
+
 sync_global_opencode_config() {
     local sync_script="$SCRIPT_DIR/sync-global-opencode-config.py"
     if [ ! -f "$sync_script" ]; then
@@ -189,9 +310,43 @@ export OPENWORK_PROVIDER_ID="${OPENWORK_PROVIDER_ID:-my-company}"
 export OPENWORK_MODEL_BASE_URL="${OPENWORK_MODEL_BASE_URL:-http://${OPENWORK_POD_IP}:3002/v1}"
 export OPENWORK_DEFAULT_MODEL="${OPENWORK_DEFAULT_MODEL:-Qwen3.5-397B-A17B}"
 
-if [ "${OPENWORK_PULL_BEFORE_RESTART:-0}" = "1" ]; then
-    echo "[restart-pod] OPENWORK_PULL_BEFORE_RESTART=1, delegating to pod-pull-restart.sh"
-    OPENWORK_PULL_BEFORE_RESTART=0 exec "$SCRIPT_DIR/pod-pull-restart.sh"
+ensure_runtime_ready() {
+    local required=(bun pnpm python3 lsof)
+    local missing=()
+    local cmd
+    for cmd in "${required[@]}"; do
+        if ! command -v "$cmd" &>/dev/null; then
+            missing+=("$cmd")
+        fi
+    done
+
+    if [ "${#missing[@]}" -gt 0 ]; then
+        echo "[restart-pod] Missing required runtime commands: ${missing[*]}" >&2
+        echo "[restart-pod] On a fresh pod, run: bash scripts/start-pod.sh" >&2
+        exit 1
+    fi
+
+    local optional_doc=(file pandoc soffice pdftotext qpdf)
+    local missing_optional=()
+    for cmd in "${optional_doc[@]}"; do
+        if ! command -v "$cmd" &>/dev/null; then
+            missing_optional+=("$cmd")
+        fi
+    done
+    if [ "${#missing_optional[@]}" -gt 0 ]; then
+        echo "[restart-pod] Warning: document helper commands missing: ${missing_optional[*]}"
+        echo "[restart-pod] Run bash scripts/start-pod.sh on a fresh pod to install the full document toolchain."
+    fi
+}
+
+ensure_runtime_ready
+
+if [ -z "$PULL_REQUESTED" ]; then
+    PULL_REQUESTED="${OPENWORK_PULL_BEFORE_RESTART:-0}"
+fi
+
+if [ "$PULL_REQUESTED" = "1" ]; then
+    maybe_pull_latest
 fi
 
 # ============================================

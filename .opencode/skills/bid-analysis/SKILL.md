@@ -42,6 +42,13 @@ provides:
 所有写入状态文件的路径都必须使用 workspace 相对路径。  
 路径规则以 [bid-session-file-contract.md](/Users/storm/Documents/code/studyProject/opencode-docx/openwork/docs/contracts/bid-session-file-contract.md) 为准。
 
+### 4. Office / path safety at analysis start
+
+- 主文件路径必须直接复用 `find` / `glob` / `ls` 返回的精确值，不要重写中文文件名。
+- 不要直接对 `.docx` / `.xlsx` / `.pptx` 使用原始 `read`；优先走对应 Office skill、文本提取、或转换后的缓存文件。
+- 若提取方案依赖 `file` / `pandoc` / `soffice` / 特定 Python 模块，先做一次小预检，缺失就切备选路线。
+- 同一文件、同一提取方法连续失败 2 次后，必须换工具或换路径来源，不要继续撞同一个错误。
+
 ## Minimum Output Contract
 
 ### Always produce
@@ -95,6 +102,8 @@ provides:
 - `.docx`：优先直接读取或提取 XML 文本
 - `.pdf`：优先 PDF 读取能力
 - `.xlsx/.xls/.csv`：仅在其是附件或报价/清单要求时读取
+
+这里的“直接读取”是指走适合该格式的提取方式，不是对二进制 Office 文件直接使用 `read`。
 
 如果已经提取过全文缓存，优先复用：
 

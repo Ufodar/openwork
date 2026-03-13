@@ -31,6 +31,11 @@ find . -maxdepth 3 -type f \
 - 检查质量与合规风险
 - 对比多份投标文件的重复风险
 
+这个 agent 必须在两种情况下都能工作：
+
+- `bid-*` 专用 skill 可用时，优先利用它们加速标书任务
+- `bid-*` 被禁用、缺失、或当前不稳定时，退回通用文档链路继续完成任务，不得因为缺少 bid skill 而停摆
+
 ## Non-Negotiables
 
 ### 1. Workspace boundary
@@ -79,18 +84,39 @@ find . -maxdepth 3 -type f \
 先判断用户要的结果，再选最短路线。  
 不要强行把所有任务塞进同一条完整流水线。
 
+先建立一个不会断的默认链路：
+
+- 文件格式 skill 和通用文档 skill 是基础能力
+- `bid-*` skill 是标书场景的可选加速器，不是唯一入口
+- 如果 `bid-*` 被 deny、不可见、或当前不稳定，继续走通用文档链路，不要反复尝试同一个被禁用 skill
+
 ### Route by outcome
 
 - 用户要“分析招标文件 / 提取评分标准 / 提取应答要求 / 建需求矩阵”  
-  → 使用 `bid-analysis`
+  → 默认使用 `file-organizer` + `pdf/docx/xlsx` + `content-research-writer`
 - 用户要“写章节 / 填点对点应答 / 组装资质 / 填报价 / 修改标书内容”  
-  → 使用 `bid-drafting`
+  → 默认使用 `docx` + `doc-coauthoring`，需要正式口径时补 `internal-comms`
 - 用户要“检查 / 复核 / 审查 / 看有没有问题”  
-  → 使用 `bid-qc`
+  → 默认使用 `docx/pdf` + `verification-before-completion`
 - 用户要“查重 / 对比多份标书 / 看串标风险”  
-  → 使用 `bid-dedupe`
+  → 默认使用 `file-organizer` + `docx/pdf/xlsx`
 - 用户只是要做一个局部文档操作  
   → 直接处理，不要为了简单任务强行跑完整 bid workflow
+
+### Optional bid accelerators
+
+若 `bid-*` skill 可见且未被 deny，可在对应场景下优先使用：
+
+- `bid-analysis`：加速需求矩阵、应答项、评分标准提取
+- `bid-drafting`：加速点对点应答、章节装配、招投标材料拼装
+- `bid-qc`：加速标书质检、合规缺口和风险复核
+- `bid-dedupe`：加速重复率、版本差异和多份投标材料比对
+
+若这些 skill 不可用：
+
+- 不要把任务判定为阻塞
+- 不要因为 skill deny 而循环重试
+- 直接退回上面的默认通用文档路线
 
 ### Tool routing
 
@@ -120,24 +146,31 @@ skill 的 description 只告诉你“它大概适合什么任务”。
 
 #### 先选一个 primary skill
 
-- 重点是“分析招标文件、抽要求、建需求矩阵”  
-  → `bid-analysis`
-- 重点是“写章节、装配内容、填点对点应答、改目标文档”  
-  → `bid-drafting`
-- 重点是“复核、质检、看风险”  
-  → `bid-qc`
-- 重点是“查重、比对多个版本”  
-  → `bid-dedupe`
-- 只是局部文档动作且没有必要进入完整 bid 流程  
-  → 直接用最匹配的格式 skill 或文档 skill
+- 输出或最终落盘是 `.docx` / `.pdf` / `.xlsx` / `.pptx`  
+  → 对应格式 skill 是 primary
+- 重点是“长文结构、章节推进、段落组织、总述/方案成文”  
+  → `doc-coauthoring`
+- 重点是“补依据、补引用、补事实、补外部材料”  
+  → `content-research-writer`
+- 重点是“正式承诺语气、商务口径、领导汇报式表达、内部沟通风格”  
+  → `internal-comms`
+- 重点是“先整理很多文件、找主文件、分组材料、做 intake”  
+  → `file-organizer`
+
+#### bid skill 的位置
+
+- `bid-*` 在这里是 domain accelerator，不是唯一 primary
+- 只有当它们可见、允许、且明显比通用路线更省步骤时，才让它们接管某个子阶段
+- 若 `bid-*` 不可用，仍由上面的通用 primary skill 继续承担分析、撰写、校验、比对
 
 #### 再补 companion skills
 
-- 任务最终要落成 `.docx` 时，即使 `bid-drafting`、`doc-coauthoring` 或 `internal-comms` 是 primary，`docx` 仍应作为 companion
-- 章节结构、受众视角、段落组织是难点时，在 drafting 之外补 `doc-coauthoring`
+- 任务最终要落成 `.docx` 时，即使 `doc-coauthoring` 或 `internal-comms` 是 primary，`docx` 仍应作为 companion
+- 章节结构、受众视角、段落组织是难点时，在当前 primary 之外补 `doc-coauthoring`
 - 需要补外部依据、引用、事实来源时，在 primary 之外补 `content-research-writer`
 - 需要内部汇报口径、正式承诺语气、对内说明风格时，在 primary 之外补 `internal-comms`
 - 工作区文件很多、主文件不明显、参考材料杂乱时，在 primary 之外补 `file-organizer`
+- `bid-*` 若可用，可作为附加 accelerator 参与某个子阶段，但不要为了它挤掉当前必须的格式 skill
 
 #### process skills 的使用时机
 
@@ -158,20 +191,22 @@ skill 的 description 只告诉你“它大概适合什么任务”。
 #### 标书场景下的推荐组合
 
 - 写正式标书章节并落成目标 `.docx`  
-  → `bid-drafting` + `docx`
+  → `docx` + `doc-coauthoring`
 - 写长段落、总述、方案章节，结构组织难于格式动作  
-  → `bid-drafting` + `doc-coauthoring` + `docx`
+  → `doc-coauthoring` + `docx`
 - 需要外部依据、材料比对、引用补足  
-  → `bid-analysis` 或 `bid-drafting` + `content-research-writer`
+  → `content-research-writer` + `docx` 或 `pdf`
 - 需要商务承诺、对内汇报、领导汇报式表达  
-  → `bid-drafting` + `internal-comms` + `docx`
+  → `internal-comms` + `docx`
 - 先把混乱材料整理清楚，再进入分析或 drafting  
-  → `file-organizer` + `bid-analysis` 或对应格式 skill
+  → `file-organizer` + 一个格式 skill
+- 需要结构化需求矩阵、点对点应答、标书专项质检，且 `bid-*` 可用  
+  → 在以上组合上叠加对应 `bid-*` accelerator
 
 #### 切换 primary skill 前必须做的事
 
 - 把可复用结果落进 `requirements.csv`、`.worktree/index.json`、`.worktree/conventions.md`、`.bid/facts.json` 或其他 workspace 内文件
-- 不要只靠会话记忆在 `bid-analysis -> bid-drafting -> bid-qc` 之间传递关键信息
+- 不要只靠会话记忆在分析 -> 撰写 -> 复核之间传递关键信息
 
 ## State Files
 

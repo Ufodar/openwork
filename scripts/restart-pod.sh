@@ -9,10 +9,37 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 RUNTIME_ENV_DIR_DEFAULT="$HOME/.config/openwork"
+RUNTIME_GENERATED_ENV_FILE_NAME="generated-secrets.env"
 PULL_REQUESTED=""
 
 # ---- Bun path ----
-export PATH="$HOME/.bun/bin:$PATH"
+export PATH="$HOME/.bun/bin:$HOME/.opencode/bin:$HOME/.local/bin:$PATH"
+
+is_truthy() {
+    case "${1:-}" in
+        1|true|TRUE|yes|YES|on|ON)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+runtime_env_dir() {
+    printf '%s\n' "${OPENWORK_RUNTIME_ENV_DIR:-$RUNTIME_ENV_DIR_DEFAULT}"
+}
+
+runtime_generated_env_file() {
+    printf '%s/%s\n' "$(runtime_env_dir)" "$RUNTIME_GENERATED_ENV_FILE_NAME"
+}
+
+generate_runtime_token() {
+    python3 - <<'PY'
+import uuid
+print(uuid.uuid4())
+PY
+}
 
 usage() {
     cat <<'EOF'
@@ -119,9 +146,11 @@ ensure_port_free() {
 }
 
 load_runtime_env() {
-    local env_dir="${OPENWORK_RUNTIME_ENV_DIR:-$RUNTIME_ENV_DIR_DEFAULT}"
+    local env_dir
+    env_dir="$(runtime_env_dir)"
     local env_files=(
         "$env_dir/pod.env"
+        "$(runtime_generated_env_file)"
         "$env_dir/secrets.env"
         "$PROJECT_DIR/.env.pod.local"
     )
@@ -135,6 +164,27 @@ load_runtime_env() {
             set +a
         fi
     done
+}
+
+ensure_runtime_tokens() {
+    local generated_env
+    generated_env="$(runtime_generated_env_file)"
+    mkdir -p "$(runtime_env_dir)"
+
+    if [ -z "${OPENWORK_TOKEN:-}" ]; then
+        export OPENWORK_TOKEN
+        OPENWORK_TOKEN="$(generate_runtime_token)"
+    fi
+    if [ -z "${OPENWORK_HOST_TOKEN:-}" ]; then
+        export OPENWORK_HOST_TOKEN
+        OPENWORK_HOST_TOKEN="$(generate_runtime_token)"
+    fi
+
+    cat >"$generated_env" <<EOF
+export OPENWORK_TOKEN='$OPENWORK_TOKEN'
+export OPENWORK_HOST_TOKEN='$OPENWORK_HOST_TOKEN'
+EOF
+    chmod 600 "$generated_env" 2>/dev/null || true
 }
 
 auto_restore_common_pod_local_changes() {
@@ -290,6 +340,7 @@ configure_global_node_path() {
 }
 
 load_runtime_env
+ensure_runtime_tokens
 configure_global_node_path
 
 # ---- Pod IP (prefer OPENWORK_POD_IP in ~/.config/openwork/pod.env) ----
@@ -299,19 +350,27 @@ export OPENWORK_POD_IP="${OPENWORK_POD_IP:-192.168.5.10}"
 export OPENWORK_NETWORK_MODE="${OPENWORK_NETWORK_MODE:-pod}"
 export OPENWORK_HOST="${OPENWORK_HOST:-0.0.0.0}"
 export VITE_HOST="${VITE_HOST:-0.0.0.0}"
+export OPENWORK_WEB_HOST="${OPENWORK_WEB_HOST:-${HOST:-0.0.0.0}}"
 
 # ---- Ports ----
 export OPENWORK_PORT="${OPENWORK_PORT:-8789}"
 export PORT="${PORT:-5173}"
+export OPENWORK_WEB_PORT="${OPENWORK_WEB_PORT:-$PORT}"
 export OPENWORK_ONLYOFFICE_URL="${OPENWORK_ONLYOFFICE_URL:-http://${OPENWORK_POD_IP}:32764}"
 export OPENWORK_ONLYOFFICE_INTERNAL_URL="${OPENWORK_ONLYOFFICE_INTERNAL_URL:-http://onlyoffice:80}"
 export OPENWORK_ONLYOFFICE_PUBLIC_BASE_URL="${OPENWORK_ONLYOFFICE_PUBLIC_BASE_URL:-http://${OPENWORK_POD_IP}:32765/openwork}"
 export OPENWORK_PROVIDER_ID="${OPENWORK_PROVIDER_ID:-my-company}"
 export OPENWORK_MODEL_BASE_URL="${OPENWORK_MODEL_BASE_URL:-http://${OPENWORK_POD_IP}:3002/v1}"
 export OPENWORK_DEFAULT_MODEL="${OPENWORK_DEFAULT_MODEL:-Qwen3.5-397B-A17B}"
+export OPENWORK_WEB_DIST_DIR="${OPENWORK_WEB_DIST_DIR:-$PROJECT_DIR/packages/app/dist}"
+export OPENWORK_SERVER_BIN="${OPENWORK_SERVER_BIN:-$PROJECT_DIR/packages/server/dist/bin/openwork-server}"
+export OPENCODE_ROUTER_BIN="${OPENCODE_ROUTER_BIN:-$PROJECT_DIR/packages/opencode-router/dist/bin/opencode-router}"
+export OPENWORK_ORCHESTRATOR_BIN="${OPENWORK_ORCHESTRATOR_BIN:-$PROJECT_DIR/packages/orchestrator/dist/bin/openwork}"
+export OPENWORK_OPENCODE_ROUTER="${OPENWORK_OPENCODE_ROUTER:-1}"
+export OPENWORK_WEB_BACKEND_URL="${OPENWORK_WEB_BACKEND_URL:-http://127.0.0.1:${OPENWORK_PORT}}"
 
 ensure_runtime_ready() {
-    local required=(bun pnpm python3 lsof)
+    local required=(bun pnpm python3 lsof node curl)
     local missing=()
     local cmd
     for cmd in "${required[@]}"; do
@@ -339,7 +398,93 @@ ensure_runtime_ready() {
     fi
 }
 
+install_opencode() {
+    if command -v opencode &>/dev/null; then
+        echo "[restart-pod] opencode already installed: $(opencode --version 2>/dev/null || echo unknown)"
+        return
+    fi
+
+    local install_url="${OPENWORK_OPENCODE_INSTALL_URL:-https://opencode.ai/install}"
+    echo "[restart-pod] Installing opencode from $install_url ..."
+    curl -fsSL "$install_url" | bash
+    export PATH="$HOME/.bun/bin:$HOME/.opencode/bin:$HOME/.local/bin:$PATH"
+
+    if ! command -v opencode &>/dev/null; then
+        echo "[restart-pod] ERROR: opencode install finished but command is still unavailable." >&2
+        echo "[restart-pod] Check whether ~/.opencode/bin/opencode or ~/.local/bin/opencode exists and whether the install script succeeded." >&2
+        exit 1
+    fi
+
+    echo "[restart-pod] opencode installed: $(opencode --version 2>/dev/null || echo unknown)"
+}
+
 ensure_runtime_ready
+install_opencode
+
+build_frontend() {
+    echo "[restart-pod] Building web UI..."
+    (
+        cd "$PROJECT_DIR"
+        VITE_OPENWORK_URL="/openwork" \
+        VITE_SOLID_DEVTOOLS="0" \
+        pnpm --filter @different-ai/openwork-ui build
+    )
+}
+
+build_backend_binaries() {
+    echo "[restart-pod] Building openwork-server binary..."
+    (
+        cd "$PROJECT_DIR"
+        pnpm --filter openwork-server build:bin
+    )
+
+    if is_truthy "$OPENWORK_OPENCODE_ROUTER"; then
+        echo "[restart-pod] Building opencode-router binary..."
+        (
+            cd "$PROJECT_DIR"
+            pnpm --filter opencode-router build:bin
+        )
+    fi
+
+    echo "[restart-pod] Building openwork orchestrator binary..."
+    (
+        cd "$PROJECT_DIR"
+        pnpm --filter openwork-orchestrator build:bin
+    )
+}
+
+ensure_build_outputs() {
+    local required_files=(
+        "$OPENWORK_WEB_DIST_DIR/index.html"
+        "$OPENWORK_SERVER_BIN"
+        "$OPENWORK_ORCHESTRATOR_BIN"
+    )
+    local file
+    for file in "${required_files[@]}"; do
+        if [ ! -f "$file" ]; then
+            echo "[restart-pod] Missing build output: $file" >&2
+            exit 1
+        fi
+    done
+
+    if is_truthy "$OPENWORK_OPENCODE_ROUTER" && [ ! -f "$OPENCODE_ROUTER_BIN" ]; then
+        echo "[restart-pod] Missing build output: $OPENCODE_ROUTER_BIN" >&2
+        exit 1
+    fi
+}
+
+wait_for_http_ok() {
+    local url="$1"
+    local seconds="${2:-15}"
+    local deadline=$((SECONDS + seconds))
+    while [ "$SECONDS" -lt "$deadline" ]; do
+        if curl -fsS "$url" >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 0.5
+    done
+    return 1
+}
 
 if [ -z "$PULL_REQUESTED" ]; then
     PULL_REQUESTED="${OPENWORK_PULL_BEFORE_RESTART:-0}"
@@ -349,6 +494,12 @@ if [ "$PULL_REQUESTED" = "1" ]; then
     maybe_pull_latest
 fi
 
+sync_global_opencode_config
+sync_opencode_config_files
+build_frontend
+build_backend_binaries
+ensure_build_outputs
+
 # ============================================
 # Kill old processes
 # ============================================
@@ -357,8 +508,12 @@ echo "[restart-pod] Killing old processes..."
 # Kill known process signatures first (more reliable than port-only cleanup).
 kill_by_pattern "dev-headless-web wrapper" "bun scripts/dev-headless-web.ts"
 kill_by_pattern "openwork orchestrator for this workspace" "openwork-orchestrator.*start.*--workspace[ =]$PROJECT_DIR"
+kill_by_pattern "compiled openwork orchestrator" "$PROJECT_DIR/packages/orchestrator/dist/bin/openwork"
 kill_by_pattern "openwork server cli for this workspace" "$PROJECT_DIR/packages/server/src/cli.ts"
+kill_by_pattern "compiled openwork server" "$PROJECT_DIR/packages/server/dist/bin/openwork-server"
 kill_by_pattern "vite dev server for openwork-ui" "openwork-ui.*vite|vite/bin/vite.js.*--port 5173"
+kill_by_pattern "prod web server" "node .*scripts/serve-web-prod.mjs"
+kill_by_pattern "compiled opencode-router" "$PROJECT_DIR/packages/opencode-router/dist/bin/opencode-router"
 kill_by_pattern "orchestrator opencode sidecar" "/openwork-orchestrator/sidecars/opencode/.*/opencode serve"
 
 # Port-level fallback cleanup.
@@ -372,12 +527,6 @@ done
 
 sleep 1
 
-# ============================================
-# Start
-# ============================================
-sync_global_opencode_config
-sync_opencode_config_files
-
 # ---- Clean up inbox violations ----
 if [ -x "$PROJECT_DIR/scripts/inbox-guard.sh" ]; then
     echo "[restart-pod] Running inbox guard (cleanup)..."
@@ -386,4 +535,93 @@ fi
 
 echo "[restart-pod] Starting OpenWork (POD_IP=$OPENWORK_POD_IP)..."
 cd "$PROJECT_DIR"
-exec bun scripts/dev-headless-web.ts
+
+WEB_PID=""
+ORCHESTRATOR_PID=""
+
+cleanup_children() {
+    local status="${1:-0}"
+    trap - EXIT INT TERM
+    if [ -n "$ORCHESTRATOR_PID" ] && kill -0 "$ORCHESTRATOR_PID" 2>/dev/null; then
+        kill_pids_gracefully "OpenWork orchestrator" "$ORCHESTRATOR_PID"
+    fi
+    if [ -n "$WEB_PID" ] && kill -0 "$WEB_PID" 2>/dev/null; then
+        kill_pids_gracefully "prod web server" "$WEB_PID"
+    fi
+    exit "$status"
+}
+
+trap 'cleanup_children $?' EXIT
+trap 'cleanup_children 0' INT TERM
+
+echo "[restart-pod] Starting production web server on ${OPENWORK_WEB_HOST}:${OPENWORK_WEB_PORT}..."
+node "$SCRIPT_DIR/serve-web-prod.mjs" &
+WEB_PID=$!
+sleep 1
+if ! kill -0 "$WEB_PID" 2>/dev/null; then
+    echo "[restart-pod] Production web server failed to start." >&2
+    wait "$WEB_PID"
+    exit 1
+fi
+
+if ! wait_for_http_ok "http://127.0.0.1:${OPENWORK_WEB_PORT}/healthz" 10; then
+    echo "[restart-pod] Production web server health check failed." >&2
+    exit 1
+fi
+
+orchestrator_args=(
+    serve
+    --workspace "$PROJECT_DIR"
+    --approval auto
+    --allow-external
+    --no-opencode-auth
+    --sidecar-source external
+    --opencode-source external
+    --openwork-host "$OPENWORK_HOST"
+    --openwork-port "$OPENWORK_PORT"
+    --openwork-token "$OPENWORK_TOKEN"
+    --openwork-host-token "$OPENWORK_HOST_TOKEN"
+    --openwork-server-bin "$OPENWORK_SERVER_BIN"
+)
+
+if [ -n "${OPENWORK_OPENCODE_BIN:-}" ]; then
+    orchestrator_args+=(--opencode-bin "$OPENWORK_OPENCODE_BIN")
+fi
+
+if is_truthy "$OPENWORK_OPENCODE_ROUTER"; then
+    orchestrator_args+=(--opencode-router-bin "$OPENCODE_ROUTER_BIN")
+    if is_truthy "${OPENWORK_OPENCODE_ROUTER_REQUIRED:-0}"; then
+        orchestrator_args+=(--opencode-router-required)
+    fi
+else
+    orchestrator_args+=(--no-opencode-router)
+fi
+
+echo "[restart-pod] Starting compiled OpenWork orchestrator..."
+"$OPENWORK_ORCHESTRATOR_BIN" "${orchestrator_args[@]}" &
+ORCHESTRATOR_PID=$!
+sleep 1
+if ! kill -0 "$ORCHESTRATOR_PID" 2>/dev/null; then
+    echo "[restart-pod] OpenWork orchestrator failed to start." >&2
+    wait "$ORCHESTRATOR_PID"
+    exit 1
+fi
+
+if ! wait_for_http_ok "http://127.0.0.1:${OPENWORK_PORT}/health" 20; then
+    echo "[restart-pod] OpenWork health check failed." >&2
+    exit 1
+fi
+
+echo "[restart-pod] Deployment is up. Web: http://${OPENWORK_POD_IP}:32765  OpenWork: http://127.0.0.1:${OPENWORK_PORT}"
+
+while true; do
+    if ! kill -0 "$WEB_PID" 2>/dev/null; then
+        wait "$WEB_PID"
+        exit $?
+    fi
+    if ! kill -0 "$ORCHESTRATOR_PID" 2>/dev/null; then
+        wait "$ORCHESTRATOR_PID"
+        exit $?
+    fi
+    sleep 1
+done

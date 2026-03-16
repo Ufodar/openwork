@@ -21,7 +21,7 @@ export OPENWORK_ONLYOFFICE_INTERNAL_URL="${OPENWORK_ONLYOFFICE_INTERNAL_URL:-htt
 export OPENWORK_ONLYOFFICE_PUBLIC_BASE_URL="${OPENWORK_ONLYOFFICE_PUBLIC_BASE_URL:-http://${OPENWORK_POD_IP}:32765/openwork}"
 
 # ---- Bun path ----
-export PATH=$HOME/.bun/bin:$PATH
+export PATH=$HOME/.bun/bin:$HOME/.opencode/bin:$HOME/.local/bin:$PATH
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -334,7 +334,7 @@ install_bun() {
     else
         echo "[start-pod] Installing Bun..."
         curl -fsSL https://bun.sh/install | bash
-        export PATH=$HOME/.bun/bin:$PATH
+        export PATH=$HOME/.bun/bin:$HOME/.opencode/bin:$HOME/.local/bin:$PATH
     fi
 }
 
@@ -349,6 +349,37 @@ install_project_deps() {
     else
         echo "[start-pod] node_modules exists, skipping pnpm install. Run 'pnpm install' manually if needed."
     fi
+}
+
+install_opencode() {
+    if command -v opencode &>/dev/null; then
+        echo "[start-pod] opencode already installed: $(opencode --version 2>/dev/null || echo unknown)"
+        return
+    fi
+
+    local install_url="${OPENWORK_OPENCODE_INSTALL_URL:-https://opencode.ai/install}"
+    echo "[start-pod] Installing opencode from $install_url ..."
+    curl -fsSL "$install_url" | bash
+    export PATH=$HOME/.bun/bin:$HOME/.opencode/bin:$HOME/.local/bin:$PATH
+
+    if ! command -v opencode &>/dev/null; then
+        echo "[start-pod] ERROR: opencode install finished but command is still unavailable." >&2
+        echo "[start-pod] Check whether ~/.opencode/bin/opencode or ~/.local/bin/opencode exists and whether the install script succeeded." >&2
+        exit 1
+    fi
+
+    echo "[start-pod] opencode installed: $(opencode --version 2>/dev/null || echo unknown)"
+}
+
+ensure_opencode_ready() {
+    if command -v opencode &>/dev/null; then
+        echo "[start-pod] opencode already installed: $(opencode --version 2>/dev/null || echo unknown)"
+        return
+    fi
+
+    echo "[start-pod] ERROR: opencode command not found." >&2
+    echo "[start-pod] Install opencode in the pod first, then rerun start-pod.sh." >&2
+    exit 1
 }
 
 # ============================================
@@ -392,16 +423,10 @@ install_python_deps
 install_node
 install_pnpm
 install_bun
+install_opencode
 install_node_skill_deps
 install_project_deps
-kill_old_processes
+ensure_opencode_ready
 
-# ---- Clean up inbox violations (AI agent may have written scripts/deps there) ----
-if [ -x "$PROJECT_DIR/scripts/inbox-guard.sh" ]; then
-    echo "[start-pod] Running inbox guard (cleanup)..."
-    "$PROJECT_DIR/scripts/inbox-guard.sh" --clean || true
-fi
-
-echo "[start-pod] Starting OpenWork (POD_IP=$OPENWORK_POD_IP)..."
-cd "$PROJECT_DIR"
-exec bun scripts/dev-headless-web.ts
+echo "[start-pod] Environment is ready. Handing off to restart-pod.sh for build + launch..."
+exec bash "$SCRIPT_DIR/restart-pod.sh"

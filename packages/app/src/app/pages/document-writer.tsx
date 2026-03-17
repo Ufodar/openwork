@@ -1,6 +1,6 @@
 import { For, Show, createEffect, createMemo, createResource, createSignal, on, onCleanup } from "solid-js";
 import type { Agent } from "@opencode-ai/sdk/v2/client";
-import { ArrowLeft, ArrowRight, AtSign, Check, CheckCircle2, ChevronDown, Download, FileText, Folder, FolderArchive, ListTodo, Minimize2, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Search, Trash2, X } from "lucide-solid";
+import { ArrowLeft, AtSign, Check, ChevronDown, ChevronRight, Download, FileText, Folder, FolderOpen, FolderPlus, ListTodo, Minimize2, MoveRight, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Trash2 } from "lucide-solid";
 import { useNavigate } from "@solidjs/router";
 
 import type { ComposerDraft, SlashCommandOption } from "../types";
@@ -8,8 +8,19 @@ import type { SessionViewProps } from "./session";
 import OnlyOfficeEditor from "../components/onlyoffice-editor";
 import MessageList from "../components/session/message-list";
 import Composer from "../components/session/composer";
+import ToolMonitorPanel from "../components/tool-monitor/tool-monitor-panel";
 import { DOCUMENT_UPLOAD_ACCEPT } from "../lib/documents";
 import { currentLocale, t as i18n } from "../../i18n";
+import {
+  buildToolMonitorTurnReport,
+  selectLatestAssistantTurn,
+  selectNearestUserMessage,
+  shouldAnalyzeForAgent,
+} from "../lib/tool-monitor/analyze";
+import type { ToolMonitorTurnReport } from "../lib/tool-monitor/types";
+import { renderToolMonitorMarkdown } from "../lib/tool-monitor/markdown";
+import { uploadSessionMarkdownReport } from "../lib/tool-monitor/persist";
+import { requestToolMonitorModelRetrospective } from "../lib/tool-monitor/reflect";
 
 type DocumentItem = {
   name: string;
@@ -18,25 +29,23 @@ type DocumentItem = {
   type: string;
 };
 
+type DocumentListResult = {
+  items: DocumentItem[];
+  dirs: string[];
+};
+
+type UploadProgressState = {
+  phase: "preparing" | "uploading" | "processing";
+  done: number;
+  total: number;
+  preserveRelativePath: boolean;
+};
+
 type DocumentWriterUiState = {
   schemaVersion: 1;
   activeDoc?: string;
   leftPaneWidth?: number;
   rightPaneWidth?: number;
-};
-
-type RefFolderNode = {
-  name: string;
-  path: string;
-  folders: RefFolderNode[];
-  files: DocumentItem[];
-};
-
-type RefsUploadProgress = {
-  categoryId: string;
-  done: number;
-  total: number;
-  phase: "uploading" | "processing";
 };
 
 type OnlyOfficePayload = { documentServerUrl: string; config: any };
@@ -50,11 +59,13 @@ type EditorSource = {
   readonly: boolean;
 };
 
-const ONLYOFFICE_IMPORT_EXTENSIONS = new Set(
-  DOCUMENT_UPLOAD_ACCEPT.split(",")
-    .map((ext) => ext.trim().toLowerCase())
-    .filter(Boolean),
-);
+const LEFT_PANEL_COLLAPSED_WIDTH = 56;
+const LEFT_PANEL_DEFAULT_WIDTH = 256;
+const LEFT_PANEL_MIN_WIDTH = 220;
+const RIGHT_PANEL_DEFAULT_WIDTH = 500;
+const RIGHT_PANEL_MIN_WIDTH = 360;
+const CENTER_PANEL_MIN_WIDTH = 520;
+const STREAM_SCROLL_MIN_INTERVAL_MS = 90;
 const DOC_TOOLBAR_BUTTON_CLASS =
   "rounded-lg border border-dls-border bg-dls-surface px-2 py-1 text-xs text-dls-secondary transition-colors hover:bg-dls-hover hover:text-dls-text focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(var(--dls-accent-rgb),0.2)] disabled:cursor-not-allowed disabled:opacity-50";
 const DOC_TOOLBAR_BACK_BUTTON_CLASS =
@@ -168,34 +179,24 @@ const TEXT_PREVIEW_BASENAMES = new Set([
   "hosts",
 ]);
 const TEXT_PREVIEW_MAX_BYTES = 2 * 1024 * 1024;
-
-const isOnlyOfficeImportable = (path: string) => {
-  const base = path.split("/").pop() ?? path;
-  const match = base.toLowerCase().match(/\.[^.]+$/);
-  if (!match) return false;
-  return ONLYOFFICE_IMPORT_EXTENSIONS.has(match[0]);
-};
-
-const DOCX_SECTION_COPY_SOURCE_EXTENSIONS = new Set([".docx", ".docm", ".dotx", ".dotm", ".doc"]);
-const LEFT_PANEL_COLLAPSED_WIDTH = 56;
-const LEFT_PANEL_DEFAULT_WIDTH = 256;
-const LEFT_PANEL_MIN_WIDTH = 220;
-const RIGHT_PANEL_DEFAULT_WIDTH = 500;
-const RIGHT_PANEL_MIN_WIDTH = 360;
-const CENTER_PANEL_MIN_WIDTH = 520;
-const STREAM_SCROLL_MIN_INTERVAL_MS = 90;
-const BID_MODULES_ENABLED = false;
+const ONLYOFFICE_IMPORT_EXTENSIONS = new Set(
+  DOCUMENT_UPLOAD_ACCEPT.split(",")
+    .map((ext) => ext.trim().toLowerCase())
+    .filter(Boolean),
+);
 
 const clampNumber = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
-
 const getFileExtension = (value: string) => {
   const base = value.split("/").pop() ?? value;
   const match = base.toLowerCase().match(/\.[^.]+$/);
   return match ? match[0] : "";
 };
 const getFileBaseName = (value: string) => (value.split("/").pop() ?? value).toLowerCase();
+const isOnlyOfficeImportable = (path: string) => ONLYOFFICE_IMPORT_EXTENSIONS.has(getFileExtension(path));
 const isImagePreviewable = (path: string) => IMAGE_PREVIEW_EXTENSIONS.has(getFileExtension(path));
 const isMarkdownPreviewable = (path: string) => MARKDOWN_PREVIEW_EXTENSIONS.has(getFileExtension(path));
+const isTargetDocumentCandidate = (path: string) =>
+  isOnlyOfficeImportable(path) || isMarkdownPreviewable(path) || isTextPreviewable(path);
 const isTextPreviewable = (path: string) => {
   const ext = getFileExtension(path);
   if (TEXT_PREVIEW_EXTENSIONS.has(ext)) return true;
@@ -211,17 +212,17 @@ const formatPreviewBytes = (bytes: number) => {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 };
 
-const isDocxSectionCopySource = (value: string) => DOCX_SECTION_COPY_SOURCE_EXTENSIONS.has(getFileExtension(value));
-const isTemplateDocName = (value: string) => {
-  const normalized = value.trim().replace(/^\/+/, "");
-  return (
-    normalized.startsWith(".refs/templates/") ||
-    normalized.startsWith("refs/templates/") ||
-    normalized.startsWith("templates/")
-  );
+type FileTreeNode = {
+  name: string;
+  path: string;
+  isDirectory: boolean;
+  children: FileTreeNode[];
+  size?: number;
+  updatedAt?: number;
+  type?: string;
 };
 
-const normalizeRelativePath = (value: string, fallback = "file") => {
+const normalizeRelativePath = (value: string, fallback = "") => {
   const cleaned = value.replace(/\\/g, "/").replace(/^\/+/, "").trim();
   const parts = cleaned
     .split("/")
@@ -229,6 +230,9 @@ const normalizeRelativePath = (value: string, fallback = "file") => {
     .filter((segment) => segment && segment !== "." && segment !== "..");
   return parts.length ? parts.join("/") : fallback;
 };
+
+const joinRelativePath = (...parts: Array<string | null | undefined>) =>
+  normalizeRelativePath(parts.filter(Boolean).join("/"), "");
 
 const uploadRelativePath = (file: File) => {
   const candidate = (file as File & { webkitRelativePath?: string }).webkitRelativePath?.trim() || file.name;
@@ -261,24 +265,106 @@ const hasHiddenPathSegment = (path: string) => {
   });
 };
 
-const createRefFolderNode = (name: string, path: string): RefFolderNode => ({
-  name,
-  path,
-  folders: [],
-  files: [],
-});
+const parentDirPath = (path: string) => {
+  const normalized = normalizeRelativePath(path, "");
+  if (!normalized) return "";
+  const index = normalized.lastIndexOf("/");
+  return index === -1 ? "" : normalized.slice(0, index);
+};
+
+const remapPathAfterMove = (
+  value: string | null,
+  fromPath: string,
+  toPath: string,
+  options?: { isDirectory?: boolean },
+) => {
+  const normalized = normalizeRelativePath(value ?? "", "");
+  if (!normalized) return null;
+  if (normalized === fromPath) return toPath;
+  if (!options?.isDirectory) return normalized;
+  const prefix = `${fromPath}/`;
+  if (!normalized.startsWith(prefix)) return normalized;
+  const suffix = normalized.slice(prefix.length);
+  return suffix ? `${toPath}/${suffix}` : toPath;
+};
+
+function buildFileTree(items: DocumentItem[], directories: string[]): FileTreeNode[] {
+  const root: FileTreeNode = { name: "", path: "", isDirectory: true, children: [] };
+  const foldersByPath = new Map<string, FileTreeNode>([["", root]]);
+
+  const ensureFolder = (folderPath: string): FileTreeNode => {
+    const normalized = normalizeRelativePath(folderPath, "");
+    if (!normalized) return root;
+    const parts = normalized.split("/");
+    let current = root;
+    let currentPath = "";
+    for (const part of parts) {
+      currentPath = currentPath ? `${currentPath}/${part}` : part;
+      let folder = foldersByPath.get(currentPath);
+      if (!folder) {
+        folder = { name: part, path: currentPath, isDirectory: true, children: [] };
+        current.children.push(folder);
+        foldersByPath.set(currentPath, folder);
+      }
+      current = folder;
+    }
+    return current;
+  };
+
+  for (const directory of directories) {
+    const normalized = normalizeRelativePath(directory, "");
+    if (!normalized) continue;
+    ensureFolder(normalized);
+  }
+
+  for (const item of items) {
+    const normalized = normalizeRelativePath(item.name, "");
+    if (!normalized) continue;
+    const parts = normalized.split("/");
+    const fileName = parts.pop();
+    if (!fileName) continue;
+    const folderPath = parts.join("/");
+    const parent = ensureFolder(folderPath);
+    if (parent.children.some((child) => !child.isDirectory && child.path === normalized)) {
+      continue;
+    }
+    parent.children.push({
+      name: fileName,
+      path: normalized,
+      isDirectory: false,
+      children: [],
+      size: item.size,
+      updatedAt: item.updatedAt,
+      type: item.type,
+    });
+  }
+
+  const sortTree = (nodes: FileTreeNode[]) => {
+    nodes.sort((a, b) => {
+      if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+    for (const n of nodes) if (n.isDirectory) sortTree(n.children);
+  };
+  sortTree(root.children);
+  return root.children;
+}
 
 export default function DocumentWriterView(props: SessionViewProps) {
   const navigate = useNavigate();
   const tr = (key: string) => i18n(key, currentLocale());
   const trf = (key: string, vars?: Record<string, string | number>) => {
-    let template = tr(key);
-    if (!vars) return template;
-    for (const [name, value] of Object.entries(vars)) {
-      template = template.replaceAll(`{${name}}`, String(value));
+    let value = tr(key);
+    if (vars) {
+      for (const [name, token] of Object.entries(vars)) {
+        value = value.replaceAll(`{${name}}`, String(token));
+      }
     }
-    return template;
+    return value;
   };
+  let uploadInputEl: HTMLInputElement | undefined;
+  let uploadFolderInputEl: HTMLInputElement | undefined;
+  let documentsScrollEl: HTMLDivElement | undefined;
   let chatContainerEl: HTMLDivElement | undefined;
   let messagesEndEl: HTMLDivElement | undefined;
   let bottomVisibilityEl: HTMLDivElement | undefined;
@@ -290,12 +376,11 @@ export default function DocumentWriterView(props: SessionViewProps) {
   const workspaceId = createMemo(() => props.openworkServerWorkspaceId?.trim() ?? "");
   const isAgentRunning = createMemo(() => (props.sessionStatus ?? "idle") === "running");
 
-  // Lock agent to document-writer for document-writer page
   createEffect(() => {
     const sid = sessionId();
-    if (sid && props.selectedSessionAgent !== "document-writer") {
-      props.setSessionAgent(sid, "document-writer");
-    }
+    if (!sid) return;
+    if (props.selectedSessionAgent === "document-writer") return;
+    props.setSessionAgent(sid, "document-writer");
   });
 
   const serverReady = createMemo(
@@ -321,9 +406,6 @@ export default function DocumentWriterView(props: SessionViewProps) {
     },
     null,
     {
-      // Only trigger downstream refetches when the actual values change,
-      // not just the object reference (which changes on every parent render
-      // because spread props create new getter closures).
       equals: (prev, next) => {
         if (prev === next) return true;
         if (!prev || !next) return false;
@@ -388,13 +470,51 @@ export default function DocumentWriterView(props: SessionViewProps) {
           parsed?.details?.report?.docPath && typeof parsed.details.report.docPath === "string"
             ? parsed.details.report.docPath
             : "";
-        const suffix = reportPath ? `\n\n${trf("docwriter.report_suffix", { path: reportPath })}` : "";
-        throw new Error((message || trf("docwriter.request_failed_with_status", { status: response.status })) + suffix);
+        const suffix = reportPath ? `\n\nReport: ${reportPath}` : "";
+        throw new Error((message || `Request failed (${response.status})`) + suffix);
       } catch {
-        throw new Error(text || trf("docwriter.request_failed_with_status", { status: response.status }));
+        throw new Error(text || `Request failed (${response.status})`);
       }
     }
     return await response.json();
+  };
+
+  const parseErrorMessage = async (response: Response) => {
+    const text = await response.text().catch(() => "");
+    if (!text) return `Request failed (${response.status})`;
+    try {
+      const parsed = JSON.parse(text) as { message?: unknown } | null;
+      if (parsed && typeof parsed.message === "string" && parsed.message.trim()) {
+        return parsed.message;
+      }
+    } catch {
+      // ignore JSON parse errors and fallback to raw text
+    }
+    return text;
+  };
+
+  const parseDownloadFilename = (response: Response, fallback: string) => {
+    const disposition = response.headers.get("content-disposition") ?? "";
+    const match = disposition.match(/filename\\*=UTF-8''([^;]+)|filename=\"?([^\";]+)\"?/i);
+    const raw = match?.[1] ?? match?.[2] ?? "";
+    if (!raw) return fallback;
+    try {
+      return decodeURIComponent(raw);
+    } catch {
+      return raw;
+    }
+  };
+
+  const triggerBrowserDownload = (blob: Blob, filename: string) => {
+    const objectUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = filename || "download";
+    anchor.rel = "noopener";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1_000);
   };
 
   const docWriterStateKey = createMemo(() => {
@@ -431,24 +551,11 @@ export default function DocumentWriterView(props: SessionViewProps) {
   const [targetDoc, setTargetDoc] = createSignal<string | null>(null);
   const [activeDoc, setActiveDoc] = createSignal<string | null>(null);
   const [documentsCollapsed, setDocumentsCollapsed] = createSignal(false);
-  const [leftPaneWidth, setLeftPaneWidth] = createSignal(LEFT_PANEL_DEFAULT_WIDTH);
-  const [rightPaneWidth, setRightPaneWidth] = createSignal(RIGHT_PANEL_DEFAULT_WIDTH);
-  const [resizingPane, setResizingPane] = createSignal<"left" | "right" | null>(null);
-  const [configSeq, setConfigSeq] = createSignal(0);
-  const [archiveBusy, setArchiveBusy] = createSignal(false);
-  const [otherDocsExpanded, setOtherDocsExpanded] = createSignal(false);
-  const [lastSessionStatus, setLastSessionStatus] = createSignal(props.sessionStatus ?? "idle");
-  const [refsExpanded, setRefsExpanded] = createSignal<Record<string, boolean>>({});
-  const [refsFolderExpanded, setRefsFolderExpanded] = createSignal<Record<string, boolean>>({});
-  const [refsActionMenuKey, setRefsActionMenuKey] = createSignal<string | null>(null);
-  const [refsBusy, setRefsBusy] = createSignal(false);
-  const [refsError, setRefsError] = createSignal<string | null>(null);
-  const [refsUploadProgress, setRefsUploadProgress] = createSignal<RefsUploadProgress | null>(null);
-  const [refsDeleteBusyId, setRefsDeleteBusyId] = createSignal<string | null>(null);
-  const [refsOpenBusyId, setRefsOpenBusyId] = createSignal<string | null>(null);
-
-  const [modulesExpanded, setModulesExpanded] = createSignal(true);
   const [todoExpanded, setTodoExpanded] = createSignal(false);
+  const [toolMonitorExpanded, setToolMonitorExpanded] = createSignal(false);
+  const [toolMonitorReports, setToolMonitorReports] = createSignal<ToolMonitorTurnReport[]>([]);
+  const [toolMonitorManualTriggerBusy, setToolMonitorManualTriggerBusy] = createSignal(false);
+  let lastToolMonitorAssistantMessageId: string | null = null;
   const todoList = createMemo(() => (props.todos ?? []).filter((todo) => todo.content.trim()));
   const todoCount = createMemo(() => todoList().length);
   const todoCompletedCount = createMemo(() => todoList().filter((todo) => todo.status === "completed").length);
@@ -457,355 +564,217 @@ export default function DocumentWriterView(props: SessionViewProps) {
     if (!total) return "";
     return `${todoCompletedCount()} / ${total} ${tr("docwriter.tasks_completed")}`;
   });
-  const [moduleModal, setModuleModal] = createSignal<null | "facts" | "fill" | "dedupe" | "qc" | "preview">(null);
-  const [factsTenderSource, setFactsTenderSource] = createSignal<DocumentItem | null>(null);
-  const [factsApplyToTarget, setFactsApplyToTarget] = createSignal(true);
-  const [factsForce, setFactsForce] = createSignal(false);
-  const [factsInsertBlock, setFactsInsertBlock] = createSignal(true);
-  const [factsBusy, setFactsBusy] = createSignal(false);
-  const [factsError, setFactsError] = createSignal<string | null>(null);
-  const [fillTechXlsx, setFillTechXlsx] = createSignal<string>("");
-  const [fillEquipXlsx, setFillEquipXlsx] = createSignal<string>("");
-  const [fillBrand, setFillBrand] = createSignal(tr("docwriter.fill_default_brand"));
-  const [fillManufacturer, setFillManufacturer] = createSignal(tr("docwriter.fill_default_manufacturer"));
-  const [fillOrigin, setFillOrigin] = createSignal(tr("docwriter.fill_default_origin"));
-  const [fillUnit, setFillUnit] = createSignal(tr("docwriter.fill_default_unit"));
-  const [fillPricePlaceholder, setFillPricePlaceholder] = createSignal(tr("docwriter.fill_default_price_placeholder"));
-  const [fillSpecPlaceholder, setFillSpecPlaceholder] = createSignal(tr("docwriter.fill_default_spec_placeholder"));
-  const [fillBusy, setFillBusy] = createSignal(false);
-  const [fillError, setFillError] = createSignal<string | null>(null);
-  const [dedupeSelected, setDedupeSelected] = createSignal<Set<string>>(new Set());
-  const [dedupeQuery, setDedupeQuery] = createSignal("");
-  const [dedupeExcludeTables, setDedupeExcludeTables] = createSignal(true);
-  const [dedupeSimThreshold, setDedupeSimThreshold] = createSignal(0.92);
-  const [dedupeExportMedia, setDedupeExportMedia] = createSignal(false);
-  const [dedupeIncludeTitles, setDedupeIncludeTitles] = createSignal("");
-  const [dedupeExcludeTitles, setDedupeExcludeTitles] = createSignal("");
-  const [dedupeBusy, setDedupeBusy] = createSignal(false);
-  const [dedupeError, setDedupeError] = createSignal<string | null>(null);
-  const [previewBusy, setPreviewBusy] = createSignal(false);
-  const [previewError, setPreviewError] = createSignal<string | null>(null);
-  const [qcBusy, setQcBusy] = createSignal(false);
-  const [qcError, setQcError] = createSignal<string | null>(null);
-  const [qcMode, setQcMode] = createSignal<"draft" | "submit">("draft");
-  const [reportsExpanded, setReportsExpanded] = createSignal(false);
+  const [leftPaneWidth, setLeftPaneWidth] = createSignal(LEFT_PANEL_DEFAULT_WIDTH);
+  const [rightPaneWidth, setRightPaneWidth] = createSignal(RIGHT_PANEL_DEFAULT_WIDTH);
+  const [resizingPane, setResizingPane] = createSignal<"left" | "right" | null>(null);
+  const [configSeq, setConfigSeq] = createSignal(0);
+  const [uploadBusy, setUploadBusy] = createSignal(false);
+  const [uploadProgress, setUploadProgress] = createSignal<UploadProgressState | null>(null);
+  const [deleteBusyPath, setDeleteBusyPath] = createSignal<string | null>(null);
+  const [downloadBusyPath, setDownloadBusyPath] = createSignal<string | null>(null);
+  const [moveBusyPath, setMoveBusyPath] = createSignal<string | null>(null);
+  const [activeFolder, setActiveFolder] = createSignal("");
+  const [lastSessionStatus, setLastSessionStatus] = createSignal(props.sessionStatus ?? "idle");
   const [nearBottom, setNearBottom] = createSignal(true);
   let paneResizeCleanup: (() => void) | null = null;
 
   const [documents, { refetch: refetchDocuments }] = createResource(apiConfig, async (cfg) => {
-    if (!cfg) return [] as DocumentItem[];
+    if (!cfg) return { items: [], dirs: [] } satisfies DocumentListResult;
     const query = new URLSearchParams();
     query.set("session", cfg.sessionId);
     const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/documents", query);
-    const data = (await fetchJson(url, cfg.token)) as { items?: DocumentItem[] };
-    return Array.isArray(data.items) ? data.items : [];
+    const data = (await fetchJson(url, cfg.token)) as { items?: DocumentItem[]; dirs?: string[] };
+    return {
+      items: Array.isArray(data.items) ? data.items : [],
+      dirs: Array.isArray(data.dirs) ? data.dirs : [],
+    } satisfies DocumentListResult;
   });
 
-  const documentsList = createMemo(() => documents() ?? []);
-  const targetDocName = createMemo(() => (targetDoc() ?? "").trim());
-  const otherDocsList = createMemo(() => {
-    const name = targetDocName();
-    const items = documentsList() ?? [];
-    if (!name) return items;
-    return items.filter((doc) => doc.name !== name);
-  });
-
-  const REF_CATEGORIES = [
-    { id: "tender", labelKey: "docwriter.ref_category_tender" },
-    { id: "templates", labelKey: "docwriter.ref_category_templates" },
-    { id: "business", labelKey: "docwriter.ref_category_business" },
-    { id: "technical", labelKey: "docwriter.ref_category_technical" },
-    { id: "history", labelKey: "docwriter.ref_category_history" },
-    { id: "partners", labelKey: "docwriter.ref_category_partners" },
-    { id: "images", labelKey: "docwriter.ref_category_images" },
-    { id: "other", labelKey: "docwriter.ref_category_other" },
-  ] as const;
-  const refCategoryLabel = (categoryId: string) =>
-    tr(REF_CATEGORIES.find((c) => c.id === categoryId)?.labelKey ?? "docwriter.ref_category_reference");
-  const refsUploadStatusText = createMemo(() => {
-    const progress = refsUploadProgress();
+  const documentsList = createMemo(() => documents()?.items ?? []);
+  const documentDirs = createMemo(() => documents()?.dirs ?? []);
+  const documentFileSet = createMemo(
+    () =>
+      new Set(
+        documentsList()
+          .map((item) => normalizeRelativePath(item.name, ""))
+          .filter(Boolean),
+      ),
+  );
+  const documentDirSet = createMemo(
+    () =>
+      new Set(
+        documentDirs()
+          .map((dir) => normalizeRelativePath(dir, ""))
+          .filter(Boolean),
+      ),
+  );
+  const documentPathExists = (path: string) => {
+    const normalized = normalizeRelativePath(path, "");
+    if (!normalized) return false;
+    return documentFileSet().has(normalized) || documentDirSet().has(normalized);
+  };
+  const refreshDocumentsKeepingScroll = async () => {
+    const previousScrollTop = documentsScrollEl?.scrollTop ?? 0;
+    await refetchDocuments();
+    if (!documentsScrollEl) return;
+    requestAnimationFrame(() => {
+      if (!documentsScrollEl) return;
+      documentsScrollEl.scrollTop = previousScrollTop;
+    });
+  };
+  const uploadProgressLabel = createMemo(() => {
+    const progress = uploadProgress();
     if (!progress) return "";
+    if (progress.phase === "preparing") {
+      return trf("docagent.preparing_upload_count", { count: progress.total });
+    }
     if (progress.phase === "processing") {
-      return trf("docwriter.processing_category", { category: refCategoryLabel(progress.categoryId) });
+      return tr("docagent.processing_uploaded_documents");
     }
-    return trf("docwriter.uploading_category", {
-      category: refCategoryLabel(progress.categoryId),
-      done: progress.done,
-      total: progress.total,
-    });
+    return progress.preserveRelativePath
+      ? trf("docagent.uploading_folder_progress", { done: progress.done, total: progress.total })
+      : trf("docagent.uploading_documents_progress", { done: progress.done, total: progress.total });
   });
 
-  const sessionDocumentsRoot = createMemo(() => {
-    return "";
-  });
+  const fileTree = createMemo(() => buildFileTree(documentsList(), documentDirs()));
+  const [expandedFolders, setExpandedFolders] = createSignal<Set<string>>(new Set());
 
-  const refsWorkspaceRoot = createMemo(() => {
-    const root = sessionDocumentsRoot();
-    if (!root) return "refs";
-    return `${root}/refs`;
-  });
-
-  const refsList = createMemo(() => {
-    const items = documentsList();
-    return items.filter((item) => item.name.startsWith("refs/"));
-  });
-
-  const refsLoading = () => documents.loading;
-
-  const reportsWorkspaceRoot = createMemo(() => {
-    const root = sessionDocumentsRoot();
-    if (!root) return "reports";
-    return `${root}/reports`;
-  });
-
-  const refsItemRemainder = (itemName: string) => {
-    if (!itemName.startsWith("refs/")) return "";
-    return itemName.slice("refs/".length);
-  };
-
-  const reportsList = createMemo(() => {
-    const items = documentsList();
-    const filtered = items.filter((item) => item.name.startsWith("reports/"));
-    filtered.sort((a, b) => b.updatedAt - a.updatedAt);
-    return filtered;
-  });
-
-  const refsByCategory = createMemo(() => {
-    const items = refsList();
-    const result: Record<string, DocumentItem[]> = Object.fromEntries(REF_CATEGORIES.map((c) => [c.id, []]));
-
-    for (const item of items) {
-      const remainder = refsItemRemainder(item.name);
-      if (!remainder) continue;
-      const categoryId = remainder.split("/")[0] ?? "";
-      if (!categoryId) continue;
-      const bucket = result[categoryId];
-      if (bucket) bucket.push(item);
-      else result.other.push(item);
-    }
-
-    for (const list of Object.values(result)) {
-      list.sort((a, b) => b.updatedAt - a.updatedAt);
-    }
-    return result;
-  });
-
-  const tenderSources = createMemo(() => {
-    const byCategory = refsByCategory();
-    return (byCategory.tender ?? []).filter((item) => isDocxSectionCopySource(item.name));
-  });
-
-  const xlsxRefs = createMemo(() => {
-    const items = refsList();
-    return items.filter((item) => {
-      const ext = getFileExtension(item.name);
-      return ext === ".xlsx" || ext === ".xlsm";
-    });
-  });
-
-  const xlsxRefsById = createMemo(() => {
-    const map = new Map<string, DocumentItem>();
-    for (const item of xlsxRefs()) map.set(item.name, item);
-    return map;
-  });
-
-  type DedupeCandidate = {
-    key: string;
-    kind: "doc";
-    name: string;
-    updatedAt: number;
-    sourceLabel: string;
-  };
-
-  const dedupeCandidates = createMemo(() => {
-    const target = targetDoc();
-
-    const refNames = new Set(refsList().map((r) => r.name));
-
-    const docCandidates: DedupeCandidate[] = (documentsList() ?? [])
-      .filter((doc) => doc.name !== target)
-      .filter((doc) => isDocxSectionCopySource(doc.name))
-      .map((doc) => {
-        let sourceLabel = tr("docwriter.source_session_document");
-        if (refNames.has(doc.name)) {
-          const remainder = refsItemRemainder(doc.name);
-          const categoryId = (remainder.split("/")[0] ?? "other").trim() || "other";
-          sourceLabel = refCategoryLabel(categoryId);
-        }
-        return {
-          key: `doc:${doc.name}`,
-          kind: "doc" as const,
-          name: doc.name,
-          updatedAt: doc.updatedAt,
-          sourceLabel,
-        };
-      });
-
-    docCandidates.sort((a, b) => b.updatedAt - a.updatedAt);
-    return docCandidates;
-  });
-
-  const filteredDedupeCandidates = createMemo(() => {
-    const query = dedupeQuery().trim().toLowerCase();
-    const items = dedupeCandidates();
-    if (!query) return items;
-    return items.filter((item) => {
-      const name = item.name.split("/").pop() ?? item.name;
-      return name.toLowerCase().includes(query) || item.sourceLabel.toLowerCase().includes(query);
-    });
-  });
-
-  const toggleDedupeSelection = (key: string) => {
-    setDedupeSelected((current) => {
-      const next = new Set(current);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  };
-
-  const visibleReports = createMemo(() => {
-    const items = reportsList();
-    if (reportsExpanded()) return items;
-    return items.slice(0, 6);
-  });
-
-  const formatBytes = (bytes: number) => {
-    if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
-    const units = ["B", "KB", "MB", "GB"];
-    let value = bytes;
-    let idx = 0;
-    while (value >= 1024 && idx < units.length - 1) {
-      value /= 1024;
-      idx += 1;
-    }
-    const shown = idx === 0 ? String(Math.trunc(value)) : value.toFixed(value >= 10 ? 1 : 2);
-    return `${shown} ${units[idx]}`;
-  };
-
-  const downloadDocumentFile = async (item: DocumentItem, onError: (message: string) => void) => {
-    const cfg = apiConfig();
-    if (!cfg) return;
-    try {
-      const query = new URLSearchParams();
-      query.set("session", cfg.sessionId);
-      query.set("docId", item.name);
-      const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/file", query);
-      const response = await fetch(url, { headers: { Authorization: `Bearer ${cfg.token}` } });
-      if (!response.ok) throw new Error(trf("docwriter.request_failed_with_status", { status: response.status }));
-      const blob = await response.blob();
-      const dlUrl = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = dlUrl;
-      a.download = item.name.split("/").pop() ?? "download";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(dlUrl);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : tr("docagent.failed_download_file");
-      onError(message);
-    }
-  };
-
-  const toggleRefsCategory = (categoryId: string) => {
-    setRefsExpanded((current) => ({ ...current, [categoryId]: !current[categoryId] }));
-  };
-
-  const refsItemRelativePath = (categoryId: string, itemName: string) => {
-    const remainder = refsItemRemainder(itemName);
-    if (!remainder) return itemName;
-    const categoryPrefix = `${categoryId}/`;
-    if (remainder.startsWith(categoryPrefix)) {
-      return remainder.slice(categoryPrefix.length);
-    }
-    return remainder;
-  };
-
-  const buildRefsFolderTree = (categoryId: string, items: DocumentItem[]) => {
-    const root = createRefFolderNode("", "");
-    const folderByPath = new Map<string, RefFolderNode>([["", root]]);
-    for (const item of items) {
-      const relative = normalizeRelativePath(refsItemRelativePath(categoryId, item.name), item.name.split("/").pop() ?? "file");
-      const segments = relative.split("/").filter(Boolean);
-      const fileName = segments.pop();
-      if (!fileName) continue;
-
-      let parent = root;
-      let currentPath = "";
-      for (const segment of segments) {
-        const nextPath = currentPath ? `${currentPath}/${segment}` : segment;
-        let folder = folderByPath.get(nextPath);
-        if (!folder) {
-          folder = createRefFolderNode(segment, nextPath);
-          parent.folders.push(folder);
-          folderByPath.set(nextPath, folder);
-        }
-        parent = folder;
-        currentPath = nextPath;
-      }
-      parent.files.push(item);
-    }
-
-    const sortTree = (node: RefFolderNode) => {
-      node.folders.sort((a, b) => a.name.localeCompare(b.name, "zh-Hans-CN"));
-      node.files.sort((a, b) => {
-        const an = refsItemRelativePath(categoryId, a.name);
-        const bn = refsItemRelativePath(categoryId, b.name);
-        return an.localeCompare(bn, "zh-Hans-CN");
-      });
-      for (const child of node.folders) sortTree(child);
-    };
-    sortTree(root);
-    return root;
-  };
-
-  const refsFolderExpandedKey = (categoryId: string, path: string) => `${categoryId}:${path}`;
-
-  const isRefsFolderExpanded = (categoryId: string, path: string) => {
-    const key = refsFolderExpandedKey(categoryId, path);
-    const value = refsFolderExpanded()[key];
-    return value === undefined ? true : value;
-  };
-
-  const toggleRefsFolder = (categoryId: string, path: string) => {
-    const key = refsFolderExpandedKey(categoryId, path);
-    setRefsFolderExpanded((current) => {
-      const next = { ...current };
-      const value = next[key];
-      next[key] = value === undefined ? false : !value;
-      return next;
-    });
-  };
-
-  const refsFileMenuKey = (categoryId: string, itemId: string) => `file:${categoryId}:${itemId}`;
-  const refsFolderMenuKey = (categoryId: string, folderPath: string) => `folder:${categoryId}:${folderPath}`;
-  const categoryPromptPath = (categoryId: string) => {
-    const root = refsWorkspaceRoot();
-    if (!root) return "";
-    return `${root}/${categoryId}/`;
-  };
-  const folderPromptPath = (categoryId: string, folderPath: string) => {
-    const root = refsWorkspaceRoot();
-    if (!root) return "";
+  const expandFolderPath = (folderPath: string) => {
     const normalized = normalizeRelativePath(folderPath, "");
-    const suffix = normalized ? `/${normalized}` : "";
-    return `${root}/${categoryId}${suffix}/`;
+    if (!normalized) return;
+    setExpandedFolders((prev) => {
+      const next = new Set(prev);
+      const parts = normalized.split("/");
+      let current = "";
+      for (const part of parts) {
+        current = current ? `${current}/${part}` : part;
+        next.add(current);
+      }
+      return next;
+    });
   };
 
-  const useReferenceInPrompt = async (item: DocumentItem) => {
-    if (refsOpenBusyId()) return;
-    setRefsOpenBusyId(item.name);
-    setRefsError(null);
-    try {
-      insertRefInPrompt(item.name);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : tr("docwriter.failed_import_document");
-      setRefsError(message);
-    } finally {
-      setRefsOpenBusyId(null);
-    }
-  };
+  function TreeNodeView(nodeProps: { node: FileTreeNode; depth: number }) {
+    const expanded = createMemo(() => expandedFolders().has(nodeProps.node.path));
+    const isActive = createMemo(() =>
+      nodeProps.node.isDirectory ? activeFolder() === nodeProps.node.path : activeDoc() === nodeProps.node.path,
+    );
+    const workspacePath = createMemo(() =>
+      toWorkspaceRelativeDocumentPath(nodeProps.node.path, { directory: nodeProps.node.isDirectory }),
+    );
+    const toggleExpand = () => {
+      setExpandedFolders((prev) => {
+        const next = new Set(prev);
+        if (next.has(nodeProps.node.path)) next.delete(nodeProps.node.path);
+        else next.add(nodeProps.node.path);
+        return next;
+      });
+    };
+    return (
+      <div>
+        <div
+          class={`w-full flex items-center gap-1 px-2 py-1 text-xs rounded hover:bg-gray-4 ${
+            isActive() ? "bg-gray-5 text-gray-12 font-medium" : "text-gray-11"
+          }`}
+          style={{ "padding-left": `${8 + nodeProps.depth * 16}px` }}
+        >
+          <button
+            type="button"
+            class="min-w-0 flex-1 flex items-center gap-1.5 text-left"
+            onClick={() => {
+              if (nodeProps.node.isDirectory) {
+                setActiveFolder(nodeProps.node.path);
+                toggleExpand();
+              } else {
+                setActiveFolder(parentDirPath(nodeProps.node.path));
+                setActiveDoc(nodeProps.node.path);
+                if (isTargetDocumentCandidate(nodeProps.node.path)) {
+                  setTargetDoc(nodeProps.node.path);
+                }
+                setConfigSeq((v) => v + 1);
+              }
+            }}
+            title={workspacePath()}
+          >
+            <Show when={nodeProps.node.isDirectory}
+              fallback={<FileText size={14} class="shrink-0" />}>
+              <Show when={expanded()} fallback={<ChevronRight size={14} class="shrink-0" />}>
+                <ChevronDown size={14} class="shrink-0" />
+              </Show>
+              <Show when={expanded()} fallback={<Folder size={14} class="shrink-0" />}>
+                <FolderOpen size={14} class="shrink-0" />
+              </Show>
+            </Show>
+            <span class="truncate">{nodeProps.node.name}</span>
+          </button>
+          <button
+            type="button"
+            class="p-1 rounded hover:bg-dls-active text-dls-secondary hover:text-dls-text"
+            onClick={(event) => {
+              event.stopPropagation();
+              insertReferenceInPrompt(workspacePath());
+            }}
+            title={tr("docagent.use_in_prompt")}
+            aria-label={tr("docagent.use_in_prompt")}
+          >
+            <AtSign size={12} />
+          </button>
+          <button
+            type="button"
+            class="p-1 rounded hover:bg-dls-active text-dls-secondary hover:text-dls-text disabled:opacity-50"
+            onClick={(event) => {
+              event.stopPropagation();
+              if (nodeProps.node.isDirectory) {
+                void downloadDocumentFolder(nodeProps.node.path);
+              } else {
+                void downloadDocumentFile(nodeProps.node.path);
+              }
+            }}
+            disabled={Boolean(downloadBusyPath())}
+            title={nodeProps.node.isDirectory ? tr("docagent.download_folder") : tr("docagent.download_file")}
+            aria-label={nodeProps.node.isDirectory ? tr("docagent.download_folder") : tr("docagent.download_file")}
+          >
+            <Download size={12} />
+          </button>
+          <button
+            type="button"
+            class="p-1 rounded hover:bg-dls-active text-dls-secondary hover:text-dls-text disabled:opacity-50"
+            onClick={(event) => {
+              event.stopPropagation();
+              void moveDocumentNode(nodeProps.node.path, { isDirectory: nodeProps.node.isDirectory });
+            }}
+            disabled={Boolean(moveBusyPath())}
+            title={nodeProps.node.isDirectory ? tr("docagent.move_folder") : tr("docagent.move_file")}
+            aria-label={nodeProps.node.isDirectory ? tr("docagent.move_folder") : tr("docagent.move_file")}
+          >
+            <MoveRight size={12} />
+          </button>
+          <button
+            type="button"
+            class="p-1 rounded hover:bg-dls-active text-dls-secondary hover:text-red-11 disabled:opacity-50"
+            onClick={(event) => {
+              event.stopPropagation();
+              if (nodeProps.node.isDirectory) {
+                void deleteDocumentFolder(nodeProps.node.path);
+              } else {
+                void deleteDocumentFile(nodeProps.node.path);
+              }
+            }}
+            disabled={Boolean(deleteBusyPath())}
+            title={nodeProps.node.isDirectory ? tr("docagent.delete_folder") : tr("docagent.delete_file")}
+            aria-label={nodeProps.node.isDirectory ? tr("docagent.delete_folder") : tr("docagent.delete_file")}
+          >
+            <Trash2 size={12} />
+          </button>
+        </div>
+        <Show when={nodeProps.node.isDirectory && expanded()}>
+          <For each={nodeProps.node.children}>
+            {(child) => <TreeNodeView node={child} depth={nodeProps.depth + 1} />}
+          </For>
+        </Show>
+      </div>
+    );
+  }
 
   const scrollToLatest = (behavior: ScrollBehavior = "auto") => {
     const container = chatContainerEl;
@@ -876,7 +845,6 @@ export default function DocumentWriterView(props: SessionViewProps) {
     const startRight = rightPaneWidth();
     const collapsed = documentsCollapsed();
 
-    setRefsActionMenuKey(null);
     setResizingPane(pane);
 
     const previousUserSelect = document.body.style.userSelect;
@@ -932,12 +900,11 @@ export default function DocumentWriterView(props: SessionViewProps) {
     const cfg = apiConfig();
     const doc = activeDoc();
     if (!cfg || !doc || activeDocKind() !== "onlyoffice") return null;
-    const manualEditable = isTemplateDocName(doc);
     return {
       ...cfg,
       doc,
       seq: configSeq(),
-      readonly: isAgentRunning() || !manualEditable,
+      readonly: isAgentRunning(),
     } satisfies EditorSource;
   });
 
@@ -957,49 +924,55 @@ export default function DocumentWriterView(props: SessionViewProps) {
     return { documentServerUrl: "http://localhost:8080", config: data };
   });
 
-  const archiveOtherDocuments = async () => {
-    const cfg = apiConfig();
-    const keep = targetDoc();
-    if (!cfg || !keep) return;
-    if (archiveBusy()) return;
-    const ok = window.confirm(trf("docagent.archive_confirm", { keep }));
-    if (!ok) return;
+  const documentWorkspaceRoot = createMemo(() => {
+    return "";
+  });
 
-    setArchiveBusy(true);
+  const toWorkspaceRelativeDocumentPath = (path: string, options?: { directory?: boolean }) => {
+    const normalized = normalizeRelativePath(path, "");
+    const base = documentWorkspaceRoot();
+    const joined = base ? (normalized ? `${base}/${normalized}` : base) : normalized;
+    return options?.directory ? `${joined}/` : joined;
+  };
+
+  const insertReferenceInPrompt = (workspaceRelativePath: string) => {
+    const tag = `@${workspaceRelativePath}`;
+    const existing = props.prompt.trim();
+    const next = existing ? `${existing}\n${tag}` : tag;
+    props.setPrompt(next);
+  };
+
+  const uploadDocuments = async (
+    files: File[],
+    options?: { baseDir?: string; preserveRelativePath?: boolean },
+  ) => {
+    const cfg = apiConfig();
+    if (!cfg || !files.length) return;
+    if (uploadBusy()) return;
+
+    const baseDir = normalizeRelativePath(options?.baseDir ?? activeFolder(), "");
+    const preserveRelativePath = options?.preserveRelativePath ?? false;
+    const hiddenSkipMessage = (count: number) =>
+      tr("docagent.skipped_hidden_documents_count").replace("{count}", String(count));
+
+    setUploadBusy(true);
+    setUploadProgress({ phase: "preparing", done: 0, total: files.length, preserveRelativePath });
     setToastMessage(null);
+    let skippedHiddenCount = 0;
     try {
       const query = new URLSearchParams();
       query.set("session", cfg.sessionId);
-      const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/archive", query);
-      const result = (await fetchJson(url, cfg.token, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ keep }),
-      })) as { archived?: unknown[] };
-      const count = Array.isArray(result.archived) ? result.archived.length : 0;
-      setToastMessage(count ? trf("docagent.archived_documents", { count }) : tr("docagent.no_documents_to_archive"));
-      await refetchDocuments();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : tr("docagent.failed_archive_documents");
-      setToastMessage(message);
-    } finally {
-      setArchiveBusy(false);
-    }
-  };
-
-  const uploadReferenceFiles = async (categoryId: string, files: File[]) => {
-    const cfg = apiConfig();
-    if (!cfg) return;
-    if (!files.length) return;
-    if (refsBusy()) return;
-    setRefsBusy(true);
-    setRefsError(null);
-    let skippedHiddenCount = 0;
-    try {
+      const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/upload", query);
       const uploadEntries = files
-        .map((file) => ({ file, relative: uploadRelativePath(file) }))
+        .map((file) => {
+          const relativePath = preserveRelativePath
+            ? uploadRelativePath(file)
+            : normalizeRelativePath(file.name, file.name || "file");
+          const destination = joinRelativePath(baseDir, relativePath);
+          return { file, destination };
+        })
         .filter((entry) => {
-          if (hasHiddenPathSegment(entry.relative)) {
+          if (hasHiddenPathSegment(entry.destination)) {
             skippedHiddenCount += 1;
             return false;
           }
@@ -1007,51 +980,362 @@ export default function DocumentWriterView(props: SessionViewProps) {
         });
 
       if (!uploadEntries.length) {
-        setRefsError(trf("docagent.skipped_hidden_documents_count", { count: skippedHiddenCount }));
+        setUploadProgress(null);
+        setToastMessage(hiddenSkipMessage(skippedHiddenCount));
         return;
       }
 
-      setRefsUploadProgress({ categoryId, done: 0, total: uploadEntries.length, phase: "uploading" });
+      setUploadProgress({
+        phase: "uploading",
+        done: 0,
+        total: uploadEntries.length,
+        preserveRelativePath,
+      });
       let done = 0;
       for (const entry of uploadEntries) {
-        const dest = `refs/${categoryId}/${entry.relative}`;
-        const query = new URLSearchParams();
-        query.set("session", cfg.sessionId);
-        const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/upload", query);
-        const formData = new FormData();
-        formData.append("file", entry.file);
-        formData.append("path", dest);
-        await fetch(url, {
+        const form = new FormData();
+        form.append("file", entry.file);
+        if (entry.destination) {
+          form.append("path", entry.destination);
+        }
+        await fetchJson(url, cfg.token, {
           method: "POST",
-          body: formData,
-          headers: { Authorization: `Bearer ${cfg.token}` },
+          body: form,
         });
         done += 1;
-        setRefsUploadProgress({ categoryId, done, total: uploadEntries.length, phase: "uploading" });
+        setUploadProgress({
+          phase: "uploading",
+          done,
+          total: uploadEntries.length,
+          preserveRelativePath,
+        });
       }
-      setRefsUploadProgress({ categoryId, done: uploadEntries.length, total: uploadEntries.length, phase: "processing" });
+      setUploadProgress({
+        phase: "processing",
+        done: uploadEntries.length,
+        total: uploadEntries.length,
+        preserveRelativePath,
+      });
       await refetchDocuments();
-      setRefsExpanded((current) => ({ ...current, [categoryId]: true }));
-      if (skippedHiddenCount > 0) {
-        setRefsError(trf("docagent.skipped_hidden_documents_count", { count: skippedHiddenCount }));
-      }
+      const uploadedMessage =
+        uploadEntries.length === 1
+          ? tr("docagent.uploaded_one_document")
+          : tr("docagent.uploaded_documents_count").replace("{count}", String(uploadEntries.length));
+      setToastMessage(
+        skippedHiddenCount > 0 ? `${uploadedMessage}\n${hiddenSkipMessage(skippedHiddenCount)}` : uploadedMessage,
+      );
     } catch (error) {
-      const message = error instanceof Error ? error.message : tr("docwriter.failed_upload_reference_files");
-      setRefsError(message);
+      const message = error instanceof Error ? error.message : tr("docagent.failed_upload_documents");
+      setToastMessage(skippedHiddenCount > 0 ? `${message}\n${hiddenSkipMessage(skippedHiddenCount)}` : message);
     } finally {
-      setRefsUploadProgress(null);
-      setRefsBusy(false);
+      setUploadProgress(null);
+      setUploadBusy(false);
     }
   };
 
-  const deleteReferenceFile = async (item: DocumentItem) => {
+  const createFolder = async () => {
     const cfg = apiConfig();
     if (!cfg) return;
-    if (refsDeleteBusyId()) return;
-    const ok = window.confirm(trf("docwriter.confirm_delete_reference_file", { path: item.name }));
+    if (uploadBusy()) return;
+
+    const seed = activeFolder() ? `${activeFolder()}/` : "";
+    const input = window.prompt(tr("docagent.create_folder_prompt"), seed);
+    if (input == null) return;
+    const folderPath = normalizeRelativePath(input, "");
+    if (!folderPath) {
+      setToastMessage(tr("docagent.folder_path_required"));
+      return;
+    }
+
+    setUploadBusy(true);
+    setToastMessage(null);
+    try {
+      const query = new URLSearchParams();
+      query.set("session", cfg.sessionId);
+      const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/mkdir", query);
+      await fetchJson(url, cfg.token, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: folderPath }),
+      });
+      expandFolderPath(folderPath);
+      setActiveFolder(folderPath);
+      await refetchDocuments();
+      setToastMessage(tr("docagent.created_folder").replace("{path}", folderPath));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : tr("docagent.failed_create_folder");
+      setToastMessage(message);
+    } finally {
+      setUploadBusy(false);
+    }
+  };
+
+  const moveDocumentNode = async (from: string, options?: { isDirectory?: boolean }) => {
+    const cfg = apiConfig();
+    const fromPath = normalizeRelativePath(from, "");
+    if (!cfg || !fromPath) return;
+    if (moveBusyPath()) return;
+
+    const isDirectory = Boolean(options?.isDirectory);
+    const promptLabel = isDirectory
+      ? trf("docagent.move_folder_prompt", { path: fromPath })
+      : trf("docagent.move_file_prompt", { path: fromPath });
+    const input = window.prompt(promptLabel, fromPath);
+    if (input == null) return;
+    const toPath = normalizeRelativePath(input, "");
+    if (!toPath) {
+      setToastMessage(tr("docagent.move_path_required"));
+      return;
+    }
+    if (toPath === fromPath) {
+      setToastMessage(tr("docagent.move_path_same"));
+      return;
+    }
+    if (documentPathExists(toPath)) {
+      setToastMessage(tr("docagent.move_target_exists"));
+      return;
+    }
+    if (isDirectory && (toPath === fromPath || toPath.startsWith(`${fromPath}/`))) {
+      setToastMessage(tr("docagent.move_folder_into_self"));
+      return;
+    }
+
+    const moveRouteMissing = (error: unknown) => {
+      if (!(error instanceof Error)) return false;
+      const raw = error.message.trim();
+      if (!raw) return false;
+      if (raw.toLowerCase() === "not found") return true;
+      try {
+        const parsed = JSON.parse(raw) as { code?: unknown; message?: unknown } | null;
+        const code = typeof parsed?.code === "string" ? parsed.code.trim().toLowerCase() : "";
+        const message = typeof parsed?.message === "string" ? parsed.message.trim().toLowerCase() : "";
+        return code === "not_found" && message === "not found";
+      } catch {
+        return false;
+      }
+    };
+
+    const copyFileViaApi = async (sourcePath: string, destinationPath: string) => {
+      const query = new URLSearchParams();
+      query.set("docId", sourcePath);
+      query.set("session", cfg.sessionId);
+      const downloadUrl = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/file", query);
+      const headers = new Headers();
+      if (cfg.token) headers.set("Authorization", `Bearer ${cfg.token}`);
+      const response = await fetch(downloadUrl, { headers });
+      if (!response.ok) {
+        throw new Error(await parseErrorMessage(response));
+      }
+      const blob = await response.blob();
+      const uploadQuery = new URLSearchParams();
+      uploadQuery.set("session", cfg.sessionId);
+      const uploadUrl = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/upload", uploadQuery);
+      const form = new FormData();
+      form.append("file", blob, destinationPath.split("/").pop() ?? "file");
+      form.append("path", destinationPath);
+      await fetchJson(uploadUrl, cfg.token, {
+        method: "POST",
+        body: form,
+      });
+    };
+
+    const deleteFileViaApi = async (filePath: string) => {
+      const query = new URLSearchParams();
+      query.set("session", cfg.sessionId);
+      const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/delete", query);
+      await fetchJson(url, cfg.token, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: filePath }),
+      });
+    };
+
+    const createFolderViaApi = async (folderPath: string) => {
+      const query = new URLSearchParams();
+      query.set("session", cfg.sessionId);
+      const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/mkdir", query);
+      await fetchJson(url, cfg.token, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: folderPath }),
+      });
+    };
+
+    const removeFolderViaApi = async (folderPath: string) => {
+      const query = new URLSearchParams();
+      query.set("session", cfg.sessionId);
+      const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/rmdir", query);
+      await fetchJson(url, cfg.token, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: folderPath }),
+      });
+    };
+
+    const fallbackMoveFile = async () => {
+      await copyFileViaApi(fromPath, toPath);
+      await deleteFileViaApi(fromPath);
+    };
+
+    const fallbackMoveFolder = async () => {
+      await createFolderViaApi(toPath);
+      const fromPrefix = `${fromPath}/`;
+      const files = documentsList()
+        .map((item) => normalizeRelativePath(item.name, ""))
+        .filter((name) => Boolean(name) && name.startsWith(fromPrefix))
+        .sort((a, b) => a.localeCompare(b));
+      for (const source of files) {
+        const suffix = source.slice(fromPrefix.length);
+        if (!suffix) continue;
+        const destination = `${toPath}/${suffix}`;
+        if (documentPathExists(destination)) {
+          throw new Error(tr("docagent.move_target_exists"));
+        }
+        await copyFileViaApi(source, destination);
+      }
+      await removeFolderViaApi(fromPath);
+    };
+
+    setMoveBusyPath(fromPath);
+    setToastMessage(null);
+    try {
+      const query = new URLSearchParams();
+      query.set("session", cfg.sessionId);
+      const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/move", query);
+      try {
+        await fetchJson(url, cfg.token, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ from: fromPath, to: toPath }),
+        });
+      } catch (error) {
+        if (!moveRouteMissing(error)) throw error;
+        if (isDirectory) {
+          await fallbackMoveFolder();
+        } else {
+          await fallbackMoveFile();
+        }
+      }
+
+      const remap = (value: string | null) => remapPathAfterMove(value, fromPath, toPath, { isDirectory });
+      const nextTarget = remap(targetDoc());
+      const nextActive = remap(activeDoc());
+      const nextFolder = remap(activeFolder());
+
+      setTargetDoc(nextTarget);
+      setActiveDoc(nextActive);
+      setActiveFolder(nextFolder ?? parentDirPath(toPath));
+
+      if (isDirectory) {
+        setExpandedFolders((prev) => {
+          const next = new Set<string>();
+          for (const path of prev) {
+            const mapped = remapPathAfterMove(path, fromPath, toPath, { isDirectory: true });
+            if (!mapped) continue;
+            next.add(mapped);
+          }
+          return next;
+        });
+        expandFolderPath(toPath);
+      } else {
+        const toParent = parentDirPath(toPath);
+        if (toParent) expandFolderPath(toParent);
+      }
+
+      await refetchDocuments();
+      setToastMessage(
+        (isDirectory ? tr("docagent.moved_folder") : tr("docagent.moved_file")).replace("{path}", toPath),
+      );
+    } catch (error) {
+      const message = error instanceof Error
+        ? error.message
+        : isDirectory
+          ? tr("docagent.failed_move_folder")
+          : tr("docagent.failed_move_file");
+      setToastMessage(message);
+    } finally {
+      setMoveBusyPath(null);
+    }
+  };
+
+  const downloadDocumentFile = async (docPath: string) => {
+    const cfg = apiConfig();
+    const normalized = normalizeRelativePath(docPath, "");
+    if (!cfg || !normalized) return;
+    if (downloadBusyPath()) return;
+
+    setDownloadBusyPath(normalized);
+    setToastMessage(null);
+    try {
+      const query = new URLSearchParams();
+      query.set("docId", normalized);
+      query.set("session", cfg.sessionId);
+      const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/file", query);
+      const headers = new Headers();
+      if (cfg.token) headers.set("Authorization", `Bearer ${cfg.token}`);
+      const response = await fetch(url, { headers });
+      if (!response.ok) {
+        throw new Error(await parseErrorMessage(response));
+      }
+      const blob = await response.blob();
+      const fallbackName = normalized.split("/").pop() ?? "download";
+      const filename = parseDownloadFilename(response, fallbackName);
+      triggerBrowserDownload(blob, filename);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : tr("docagent.failed_download_file");
+      setToastMessage(message);
+    } finally {
+      setDownloadBusyPath(null);
+    }
+  };
+
+  const downloadDocumentFolder = async (folderPath: string) => {
+    const cfg = apiConfig();
+    const normalized = normalizeRelativePath(folderPath, "");
+    if (!cfg || !normalized) return;
+    if (downloadBusyPath()) return;
+
+    setDownloadBusyPath(normalized);
+    setToastMessage(null);
+    try {
+      const query = new URLSearchParams();
+      query.set("session", cfg.sessionId);
+      const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/folder/download", query);
+      const headers = new Headers({ "Content-Type": "application/json" });
+      if (cfg.token) headers.set("Authorization", `Bearer ${cfg.token}`);
+      const response = await fetch(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ path: normalized }),
+      });
+      if (!response.ok) {
+        throw new Error(await parseErrorMessage(response));
+      }
+      const blob = await response.blob();
+      const fallbackName = `${normalized.split("/").pop() ?? "folder"}.zip`;
+      const filename = parseDownloadFilename(response, fallbackName);
+      triggerBrowserDownload(blob, filename);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : tr("docagent.failed_download_folder");
+      setToastMessage(message);
+    } finally {
+      setDownloadBusyPath(null);
+    }
+  };
+
+  const deleteDocumentFile = async (docPath: string) => {
+    const cfg = apiConfig();
+    const normalized = normalizeRelativePath(docPath, "");
+    if (!cfg || !normalized) return;
+    if (deleteBusyPath()) return;
+
+    const ok = window.confirm(
+      tr("docagent.delete_file_confirm").replace("{path}", normalized),
+    );
     if (!ok) return;
-    setRefsDeleteBusyId(item.name);
-    setRefsError(null);
+
+    setDeleteBusyPath(normalized);
+    setToastMessage(null);
     try {
       const query = new URLSearchParams();
       query.set("session", cfg.sessionId);
@@ -1059,390 +1343,67 @@ export default function DocumentWriterView(props: SessionViewProps) {
       await fetchJson(url, cfg.token, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path: item.name }),
+        body: JSON.stringify({ path: normalized }),
       });
+      if (targetDoc() === normalized) setTargetDoc(null);
+      if (activeDoc() === normalized) setActiveDoc(null);
+      setToastMessage(tr("docagent.deleted_file").replace("{path}", normalized));
       await refetchDocuments();
     } catch (error) {
       const message = error instanceof Error ? error.message : tr("docagent.failed_delete_file");
-      setRefsError(message);
+      setToastMessage(message);
     } finally {
-      setRefsDeleteBusyId(null);
+      setDeleteBusyPath(null);
     }
   };
 
-  const downloadReferenceItem = async (item: DocumentItem, suggestedFilename?: string) => {
+  const deleteDocumentFolder = async (folderPath: string) => {
     const cfg = apiConfig();
-    if (!cfg) return;
+    const normalized = normalizeRelativePath(folderPath, "");
+    if (!cfg || !normalized) return;
+    if (deleteBusyPath()) return;
+
+    const count = documentsList().filter((item) => item.name.startsWith(`${normalized}/`)).length;
+    const ok = window.confirm(
+      tr("docagent.delete_folder_confirm")
+        .replace("{path}", normalized)
+        .replace("{count}", String(count)),
+    );
+    if (!ok) return;
+
+    setDeleteBusyPath(normalized);
+    setToastMessage(null);
     try {
       const query = new URLSearchParams();
       query.set("session", cfg.sessionId);
-      query.set("docId", item.name);
-      const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/file", query);
-      const response = await fetch(url, { headers: { Authorization: `Bearer ${cfg.token}` } });
-      if (!response.ok) throw new Error(trf("docwriter.request_failed_with_status", { status: response.status }));
-      const blob = await response.blob();
-      const dlUrl = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = dlUrl;
-      a.download = suggestedFilename ?? item.name.split("/").pop() ?? "download";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(dlUrl);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : tr("docagent.failed_download_file");
-      setRefsError(message);
-    }
-  };
-
-  const downloadReferenceFile = async (item: DocumentItem) => {
-    await downloadReferenceItem(item);
-  };
-
-  const downloadReferenceFolder = async (categoryId: string, folderPath: string, items: DocumentItem[]) => {
-    if (!items.length) return;
-    for (const item of items) {
-      const relative = refsItemRelativePath(categoryId, item.name);
-      const suffix = folderPath && relative.startsWith(`${folderPath}/`) ? relative.slice(folderPath.length + 1) : relative;
-      const filename = normalizeRelativePath(suffix, item.name.split("/").pop() ?? "download").replace(/\//g, "__");
-      await downloadReferenceItem(item, filename);
-    }
-  };
-
-  const deleteReferenceFolder = async (folderPath: string, items: DocumentItem[]) => {
-    const cfg = apiConfig();
-    if (!cfg) return;
-    if (refsBusy()) return;
-    if (!items.length) return;
-    const label = folderPath || tr("docwriter.ref_folder_root");
-    const ok = window.confirm(trf("docagent.delete_folder_confirm", { path: label, count: items.length }));
-    if (!ok) return;
-
-    setRefsBusy(true);
-    setRefsError(null);
-    try {
-      for (const item of items) {
-        const query = new URLSearchParams();
-        query.set("session", cfg.sessionId);
-        const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/delete", query);
-        await fetchJson(url, cfg.token, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ path: item.name }),
-        });
-      }
+      const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/rmdir", query);
+      await fetchJson(url, cfg.token, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: normalized }),
+      });
+      const prefix = `${normalized}/`;
+      const target = targetDoc();
+      const active = activeDoc();
+      const folder = activeFolder();
+      if (target && target.startsWith(prefix)) setTargetDoc(null);
+      if (active && active.startsWith(prefix)) setActiveDoc(null);
+      if (folder && (folder === normalized || folder.startsWith(prefix))) setActiveFolder("");
+      setExpandedFolders((prev) => {
+        const next = new Set<string>();
+        for (const path of prev) {
+          if (path === normalized || path.startsWith(prefix)) continue;
+          next.add(path);
+        }
+        return next;
+      });
+      setToastMessage(tr("docagent.deleted_folder").replace("{path}", normalized));
       await refetchDocuments();
     } catch (error) {
       const message = error instanceof Error ? error.message : tr("docagent.failed_delete_folder");
-      setRefsError(message);
+      setToastMessage(message);
     } finally {
-      setRefsBusy(false);
-    }
-  };
-
-  const insertRefInPrompt = (workspaceRelativePath: string) => {
-    const tag = `@${workspaceRelativePath}`;
-    const existing = props.prompt.trim();
-    const next = existing ? `${existing}\n\n${tag}\n` : `${tag}\n`;
-    props.setPrompt(next);
-  };
-
-  const openReferenceInEditor = async (item: DocumentItem) => {
-    if (refsOpenBusyId()) return;
-    setRefsOpenBusyId(item.name);
-    setRefsError(null);
-    try {
-      const remainder = refsItemRemainder(item.name);
-      const segments = remainder.split("/").filter(Boolean);
-      const categoryId = (segments[0] ?? "other").trim() || "other";
-      // Reference files are already workspace-relative, so open them directly.
-      if (categoryId === "templates" || isTemplateDocName(item.name)) {
-        setTargetDoc(item.name);
-      }
-      setActiveDoc(item.name);
-      setConfigSeq((v) => v + 1);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : tr("docwriter.failed_open_in_editor");
-      setRefsError(message);
-    } finally {
-      setRefsOpenBusyId(null);
-    }
-  };
-
-  const openModule = (key: "facts" | "fill" | "dedupe" | "qc" | "preview") => {
-    if (!BID_MODULES_ENABLED) {
-      setToastMessage("Bid 独立模块接口已下线，请通过 Agent 对话流程执行。");
-      return;
-    }
-    if (!serverReady()) return;
-    if (!targetDoc()) {
-      setToastMessage(tr("docwriter.select_target_first"));
-      return;
-    }
-    setFactsError(null);
-    setFillError(null);
-    setDedupeError(null);
-    setPreviewError(null);
-    setQcError(null);
-
-    if (key === "facts" && !factsTenderSource()) {
-      const first = tenderSources()[0] ?? null;
-      setFactsTenderSource(first);
-    }
-    if (key === "dedupe" && dedupeSelected().size === 0) {
-      const first = dedupeCandidates()[0];
-      if (first) setDedupeSelected(new Set([first.key]));
-    }
-    setModuleModal(key);
-  };
-
-  const closeModule = () => {
-    setModuleModal(null);
-    setFactsError(null);
-    setFillError(null);
-    setDedupeError(null);
-    setPreviewError(null);
-    setQcError(null);
-  };
-
-  const runFill = async () => {
-    const cfg = apiConfig();
-    const doc = targetDoc();
-    if (!cfg || !doc) return;
-    if (fillBusy()) return;
-    setFillBusy(true);
-    setFillError(null);
-
-    try {
-      if (activeDoc() !== doc) {
-        setActiveDoc(doc);
-      }
-      const query = new URLSearchParams();
-      query.set("session", cfg.sessionId);
-      query.set("doc", doc);
-      const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/bid/fill", query);
-      const payload = {
-        techXlsxDocPath: fillTechXlsx().trim() || undefined,
-        equipXlsxDocPath: fillEquipXlsx().trim() || undefined,
-        brand: fillBrand(),
-        manufacturer: fillManufacturer(),
-        origin: fillOrigin(),
-        unit: fillUnit(),
-        pricePlaceholder: fillPricePlaceholder(),
-        specPlaceholder: fillSpecPlaceholder(),
-      };
-      const result = (await fetchJson(url, cfg.token, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      })) as { report?: { docPath?: string } };
-      const reportPath = typeof result?.report?.docPath === "string" ? result.report.docPath : "";
-      setToastMessage(reportPath ? tr("docwriter.fill_complete_saved") : tr("docwriter.fill_complete"));
-      closeModule();
-      setConfigSeq((v) => v + 1);
-      await refetchDocuments();
-      await refetchDocuments();
-      setReportsExpanded(true);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : tr("docwriter.failed_fill");
-      setFillError(message);
-    } finally {
-      setFillBusy(false);
-    }
-  };
-
-  const runFacts = async () => {
-    const cfg = apiConfig();
-    const doc = targetDoc();
-    const tender = factsTenderSource();
-    if (!cfg || !doc || !tender) return;
-    if (factsBusy()) return;
-    setFactsBusy(true);
-    setFactsError(null);
-
-    try {
-      if (activeDoc() !== doc) {
-        setActiveDoc(doc);
-      }
-      const query = new URLSearchParams();
-      query.set("session", cfg.sessionId);
-      query.set("doc", doc);
-      const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/bid/facts", query);
-      const payload = {
-        tenderDocPath: tender.name,
-        applyToTarget: factsApplyToTarget(),
-        force: factsForce(),
-        ensureProjectInfoBlock: factsInsertBlock(),
-      };
-      const result = (await fetchJson(url, cfg.token, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      })) as { report?: { docPath?: string } };
-      const reportPath = typeof result?.report?.docPath === "string" ? result.report.docPath : "";
-      setToastMessage(reportPath ? tr("docwriter.facts_complete_saved") : tr("docwriter.facts_complete"));
-      closeModule();
-      setConfigSeq((v) => v + 1);
-      await refetchDocuments();
-      await refetchDocuments();
-      setReportsExpanded(true);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : tr("docwriter.failed_facts");
-      setFactsError(message);
-    } finally {
-      setFactsBusy(false);
-    }
-  };
-
-  const runDedupe = async () => {
-    const cfg = apiConfig();
-    const doc = targetDoc();
-    if (!cfg || !doc) return;
-    if (dedupeBusy()) return;
-
-    const selected = Array.from(dedupeSelected());
-    if (selected.length < 1) {
-      setDedupeError(tr("docwriter.dedupe_select_at_least_one"));
-      return;
-    }
-
-    setDedupeBusy(true);
-    setDedupeError(null);
-
-    try {
-      const parseRegexList = (raw: string) =>
-        raw
-          .split(/[\n,]+/)
-          .map((value) => value.trim())
-          .filter(Boolean);
-
-      const query = new URLSearchParams();
-      query.set("session", cfg.sessionId);
-      query.set("doc", doc);
-      const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/bid/dedupe", query);
-
-      const docPaths: string[] = [];
-      for (const key of selected) {
-        if (key.startsWith("doc:")) docPaths.push(key.slice("doc:".length));
-      }
-
-      const payload = {
-        docPaths,
-        excludeTables: dedupeExcludeTables(),
-        simThreshold: dedupeSimThreshold(),
-        exportMedia: dedupeExportMedia(),
-        includeTitleRegex: parseRegexList(dedupeIncludeTitles()),
-        excludeTitleRegex: parseRegexList(dedupeExcludeTitles()),
-      };
-
-      const result = (await fetchJson(url, cfg.token, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      })) as { report?: { docPath?: string }; mediaZip?: { docPath?: string }; mediaDoc?: { docPath?: string } };
-
-      const reportPath = typeof result?.report?.docPath === "string" ? result.report.docPath : "";
-      const mediaPath = typeof result?.mediaZip?.docPath === "string" ? result.mediaZip.docPath : "";
-      const mediaDocPath = typeof result?.mediaDoc?.docPath === "string" ? result.mediaDoc.docPath : "";
-      const mediaDocWorkspacePath = mediaDocPath;
-      const hint = [
-        reportPath ? tr("docwriter.dedupe_report_saved") : tr("docwriter.dedupe_complete"),
-        mediaPath ? tr("docwriter.dedupe_media_saved") : "",
-        mediaDocWorkspacePath ? trf("docwriter.output_suffix", { path: mediaDocWorkspacePath }) : "",
-      ]
-        .filter(Boolean)
-        .join(" ");
-      setToastMessage(hint);
-      closeModule();
-      if (mediaDocPath) {
-        await refetchDocuments();
-      }
-      await refetchDocuments();
-      setReportsExpanded(true);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : tr("docwriter.failed_dedupe");
-      setDedupeError(message);
-    } finally {
-      setDedupeBusy(false);
-    }
-  };
-
-  const runQc = async () => {
-    const cfg = apiConfig();
-    const doc = targetDoc();
-    if (!cfg || !doc) return;
-    if (qcBusy()) return;
-    setQcBusy(true);
-    setQcError(null);
-
-    try {
-      const query = new URLSearchParams();
-      query.set("session", cfg.sessionId);
-      query.set("doc", doc);
-      query.set("mode", qcMode());
-      const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/bid/qc", query);
-      const result = (await fetchJson(url, cfg.token, { method: "POST" })) as { passed?: boolean; report?: { docPath?: string } };
-      const passed = Boolean(result?.passed);
-      const label = qcMode() === "submit" ? tr("docwriter.qc_mode_submit") : tr("docwriter.qc_mode_draft");
-      setToastMessage(
-        passed
-          ? trf("docwriter.qc_pass_saved", { mode: label })
-          : trf("docwriter.qc_fail_saved", { mode: label }),
-      );
-      closeModule();
-      await refetchDocuments();
-      setReportsExpanded(true);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : tr("docwriter.failed_qc");
-      setQcError(message);
-    } finally {
-      setQcBusy(false);
-    }
-  };
-
-  const runPreviewPdf = async () => {
-    const cfg = apiConfig();
-    const doc = targetDoc();
-    if (!cfg || !doc) return;
-    if (previewBusy()) return;
-    setPreviewBusy(true);
-    setPreviewError(null);
-
-    try {
-      if (activeDoc() !== doc) {
-        setActiveDoc(doc);
-      }
-      const query = new URLSearchParams();
-      query.set("session", cfg.sessionId);
-      query.set("doc", doc);
-      const url = buildUrl(cfg.baseUrl, cfg.workspaceId, "/bid/preview-pdf", query);
-      const result = (await fetchJson(url, cfg.token, { method: "POST" })) as {
-        pdf?: { docPath?: string };
-        pdfDoc?: { docPath?: string };
-        report?: { docPath?: string };
-      };
-      const pdfPath = typeof result?.pdf?.docPath === "string" ? result.pdf.docPath : "";
-      const pdfDocPath = typeof result?.pdfDoc?.docPath === "string" ? result.pdfDoc.docPath : "";
-      const pdfDocWorkspacePath = pdfDocPath;
-      setToastMessage(
-        pdfPath || pdfDocPath
-          ? [tr("docwriter.preview_pdf_saved"), pdfDocWorkspacePath ? trf("docwriter.output_suffix", { path: pdfDocWorkspacePath }) : ""]
-            .filter(Boolean)
-            .join(" ")
-          : tr("docwriter.preview_pdf_complete"),
-      );
-      closeModule();
-      await refetchDocuments();
-      if (pdfDocPath) {
-        setActiveDoc(pdfDocPath);
-      }
-      await refetchDocuments();
-      setReportsExpanded(true);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : tr("docwriter.failed_preview_pdf");
-      setPreviewError(message);
-    } finally {
-      setPreviewBusy(false);
+      setDeleteBusyPath(null);
     }
   };
 
@@ -1537,17 +1498,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
     sessionId();
     setTargetDoc(null);
     setActiveDoc(null);
-    setModuleModal(null);
-    setFillError(null);
-    setDedupeSelected(new Set<string>());
-    setDedupeError(null);
-    setDedupeIncludeTitles("");
-    setDedupeExcludeTitles("");
-    setPreviewError(null);
-    setQcError(null);
-    setReportsExpanded(false);
-    setRefsFolderExpanded({});
-    setRefsActionMenuKey(null);
+    setActiveFolder("");
     setResizingPane(null);
   });
 
@@ -1595,9 +1546,9 @@ export default function DocumentWriterView(props: SessionViewProps) {
   });
 
   createEffect(() => {
-    const items = documents() ?? [];
+    const items = documentsList();
     const loading = documents.loading;
-    const latestItems = documents.latest ?? [];
+    const latestItems = documents.latest?.items ?? [];
     const hasFetchError = Boolean(documents.error);
     // Keep current selection during transient refresh gaps/fetch errors to avoid preview flicker/reset while typing.
     if (!items.length && latestItems.length > 0 && (loading || hasFetchError)) {
@@ -1616,16 +1567,19 @@ export default function DocumentWriterView(props: SessionViewProps) {
         ? items.some((doc) => doc.name === currentActive) || latestItems.some((doc) => doc.name === currentActive)
         : false;
     const targetExists =
-      previousTarget && isTemplateDocName(previousTarget)
+      previousTarget && isTargetDocumentCandidate(previousTarget)
         ? items.some((doc) => doc.name === previousTarget) || latestItems.some((doc) => doc.name === previousTarget)
         : false;
 
     let nextTarget: string | null = targetExists ? previousTarget : null;
-    if (!nextTarget && activeExists && currentActive && isTemplateDocName(currentActive)) {
+    if (!nextTarget && activeExists && currentActive && isTargetDocumentCandidate(currentActive)) {
       nextTarget = currentActive;
     }
     if (!nextTarget) {
-      nextTarget = items.find((doc) => isTemplateDocName(doc.name))?.name ?? latestItems.find((doc) => isTemplateDocName(doc.name))?.name ?? null;
+      nextTarget =
+        items.find((doc) => isTargetDocumentCandidate(doc.name))?.name ??
+        latestItems.find((doc) => isTargetDocumentCandidate(doc.name))?.name ??
+        null;
     }
     if (previousTarget !== nextTarget) {
       setTargetDoc(nextTarget);
@@ -1638,6 +1592,19 @@ export default function DocumentWriterView(props: SessionViewProps) {
   });
 
   createEffect(() => {
+    const normalizedDirs = new Set(
+      documentDirs()
+        .map((dir) => normalizeRelativePath(dir, ""))
+        .filter(Boolean),
+    );
+    const current = activeFolder();
+    if (!current) return;
+    if (!normalizedDirs.has(current)) {
+      setActiveFolder("");
+    }
+  });
+
+  createEffect(() => {
     const prev = lastSessionStatus();
     const next = props.sessionStatus ?? "idle";
     setLastSessionStatus(next);
@@ -1646,8 +1613,152 @@ export default function DocumentWriterView(props: SessionViewProps) {
     if (!serverReady()) return;
     setConfigSeq((v) => v + 1);
     void refetchDocuments();
-    void refetchDocuments();
   });
+
+  const toolMonitorActive = createMemo(
+    () => Boolean(props.toolMonitorEnabled) && shouldAnalyzeForAgent(props.selectedSessionAgent),
+  );
+
+  const sanitizeReportToken = (value: string) =>
+    value
+      .trim()
+      .replace(/[^a-zA-Z0-9_-]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 90);
+
+  const toolMonitorReportPath = (
+    assistantMessageId: string,
+    createdAt: number,
+    options?: { trigger?: "auto" | "manual_excellent" },
+  ) => {
+    const iso = new Date(createdAt).toISOString().replace(/[:.]/g, "-");
+    const safeId = sanitizeReportToken(assistantMessageId) || "assistant";
+    const suffix = options?.trigger === "manual_excellent" ? "_excellent" : "";
+    return `reports/tool-monitor/${iso}_${safeId}${suffix}.md`;
+  };
+
+  const upsertToolMonitorReport = (report: ToolMonitorTurnReport, persisted?: ToolMonitorTurnReport["persisted"]) => {
+    setToolMonitorReports((current) => {
+      const existing = current.find((item) => item.assistantMessageId === report.assistantMessageId);
+      const nextPersisted = persisted ?? existing?.persisted ?? report.persisted;
+      const nextReport = nextPersisted ? { ...report, persisted: nextPersisted } : report;
+      const rest = current.filter((item) => item.assistantMessageId !== report.assistantMessageId);
+      return [nextReport, ...rest].slice(0, 24);
+    });
+  };
+
+  const updateReportPersisted = (assistantMessageId: string, persisted: ToolMonitorTurnReport["persisted"]) => {
+    if (!persisted) return;
+    setToolMonitorReports((current) =>
+      current.map((report) =>
+        report.assistantMessageId === assistantMessageId ? { ...report, persisted } : report,
+      ),
+    );
+  };
+
+  const analyzeAndPersistToolMonitorTurn = async (options?: { force?: boolean; trigger?: "auto" | "manual_excellent" }) => {
+    if (!toolMonitorActive()) return;
+
+    const sid = sessionId();
+    if (!sid) return;
+
+    const assistantTurn = selectLatestAssistantTurn(props.messages ?? []);
+    if (!assistantTurn) return;
+
+    const assistantMessageId = (assistantTurn.message.info as any)?.id;
+    if (typeof assistantMessageId !== "string" || !assistantMessageId.trim()) return;
+    if (!options?.force && assistantMessageId === lastToolMonitorAssistantMessageId) return;
+    lastToolMonitorAssistantMessageId = assistantMessageId;
+
+    const completedAtRaw = (assistantTurn.message.info as any)?.time?.completed;
+    const completedAt = typeof completedAtRaw === "number" && Number.isFinite(completedAtRaw) ? completedAtRaw : Date.now();
+    const trigger = options?.trigger === "manual_excellent" ? "manual_excellent" : "auto";
+    const createdAt = trigger === "manual_excellent" ? Date.now() : completedAt;
+
+    const userTurn = selectNearestUserMessage(props.messages ?? [], assistantTurn.index);
+    const userMessageId = (userTurn?.message.info as any)?.id;
+
+    const report = buildToolMonitorTurnReport({
+      sessionId: sid,
+      agent: props.selectedSessionAgent ?? "unknown",
+      messages: props.messages ?? [],
+      assistantMessageId,
+      userMessageId: typeof userMessageId === "string" ? userMessageId : undefined,
+      assistantParts: assistantTurn.message.parts ?? [],
+      userParts: userTurn?.message.parts ?? [],
+      createdAt,
+      developerMode: props.developerMode,
+      trigger,
+    });
+
+    const path = toolMonitorReportPath(assistantMessageId, createdAt, { trigger });
+    const pendingPersisted = { path, status: "pending" as const };
+    upsertToolMonitorReport(report, pendingPersisted);
+
+    const cfg = apiConfig();
+    if (!cfg) {
+      updateReportPersisted(assistantMessageId, { path, status: "error", error: "Server not ready." });
+      return;
+    }
+
+    const reflected = await requestToolMonitorModelRetrospective({
+      baseUrl: cfg.baseUrl,
+      token: cfg.token,
+      workspaceId: cfg.workspaceId,
+      sessionId: sid,
+      assistantMessageId,
+      agent: props.selectedSessionAgent ?? "unknown",
+      messages: props.messages ?? [],
+      tools: report.tools,
+      fallback: report.retrospective,
+    });
+
+    const finalReport: ToolMonitorTurnReport = {
+      ...report,
+      retrospective: reflected.retrospective,
+    };
+    finalReport.markdown = renderToolMonitorMarkdown(finalReport, { includeDebug: Boolean(props.developerMode) });
+    upsertToolMonitorReport(finalReport, pendingPersisted);
+
+    const persisted = await uploadSessionMarkdownReport({
+      baseUrl: cfg.baseUrl,
+      token: cfg.token,
+      workspaceId: cfg.workspaceId,
+      sessionId: cfg.sessionId,
+      path,
+      content: finalReport.markdown,
+    });
+
+    updateReportPersisted(
+      assistantMessageId,
+      persisted.ok
+        ? { path: persisted.path, status: "ok" }
+        : { path: persisted.path, status: "error", error: persisted.error ?? "Upload failed." },
+    );
+  };
+
+  createEffect(
+    on(
+      () => props.sessionStatus ?? "idle",
+      (next, prev) => {
+        if (!toolMonitorActive()) return;
+        if (prev !== "running" || next === "running") return;
+        queueMicrotask(() => void analyzeAndPersistToolMonitorTurn());
+      },
+      { defer: true },
+    ),
+  );
+
+  const triggerExcellentToolMonitorRun = async () => {
+    if (!toolMonitorActive()) return;
+    if (toolMonitorManualTriggerBusy()) return;
+    setToolMonitorManualTriggerBusy(true);
+    try {
+      await analyzeAndPersistToolMonitorTurn({ force: true, trigger: "manual_excellent" });
+    } finally {
+      setToolMonitorManualTriggerBusy(false);
+    }
+  };
 
   onCleanup(() => {
     clearPdfPreviewUrl();
@@ -1672,7 +1783,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
     onCleanup(() => window.clearTimeout(id));
   });
 
-  const agentLabel = createMemo(() => props.selectedSessionAgent ?? tr("docwriter.default_agent"));
+  const agentLabel = createMemo(() => props.selectedSessionAgent ?? tr("session.default_agent"));
   const agentLock = createMemo(() => props.selectedSessionAgentLock);
   const agentLockTooltip = createMemo(() => {
     const lock = agentLock();
@@ -1737,18 +1848,6 @@ export default function DocumentWriterView(props: SessionViewProps) {
       if (!agentPickerRef) return;
       if (agentPickerRef.contains(event.target as Node)) return;
       setAgentPickerOpen(false);
-    };
-    window.addEventListener("mousedown", handler);
-    onCleanup(() => window.removeEventListener("mousedown", handler));
-  });
-
-  createEffect(() => {
-    const menuKey = refsActionMenuKey();
-    if (!menuKey) return;
-    const handler = (event: MouseEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (target?.closest("[data-refs-action-menu]")) return;
-      setRefsActionMenuKey(null);
     };
     window.addEventListener("mousedown", handler);
     onCleanup(() => window.removeEventListener("mousedown", handler));
@@ -1823,6 +1922,40 @@ export default function DocumentWriterView(props: SessionViewProps) {
 
   return (
     <div class="relative isolate flex h-screen w-full bg-dls-surface text-dls-text font-sans overflow-hidden">
+      <input
+        ref={(el) => {
+          uploadInputEl = el;
+        }}
+        type="file"
+        class="hidden"
+        multiple
+        onChange={(event) => {
+          const list = event.currentTarget.files ? Array.from(event.currentTarget.files) : [];
+          if (list.length > 0) {
+            void uploadDocuments(list, { baseDir: activeFolder() });
+          }
+          event.currentTarget.value = "";
+        }}
+      />
+      <input
+        ref={(el) => {
+          const input = el as HTMLInputElement & { webkitdirectory?: boolean; directory?: boolean };
+          input.webkitdirectory = true;
+          input.directory = true;
+          uploadFolderInputEl = input;
+        }}
+        type="file"
+        class="hidden"
+        multiple
+        onChange={(event) => {
+          const list = event.currentTarget.files ? Array.from(event.currentTarget.files) : [];
+          if (list.length > 0) {
+            void uploadDocuments(list, { baseDir: activeFolder(), preserveRelativePath: true });
+          }
+          event.currentTarget.value = "";
+        }}
+      />
+
       {/* Left: Document list */}
       <div
         class={`relative z-20 shrink-0 border-r border-dls-border flex flex-col bg-dls-sidebar ${resizingPane() === "left" ? "" : "transition-[width] duration-150 ease-out"
@@ -1845,36 +1978,65 @@ export default function DocumentWriterView(props: SessionViewProps) {
               <button
                 type="button"
                 class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
-                onClick={() => void refetchDocuments()}
+                onClick={() => uploadInputEl?.click()}
+                disabled={!serverReady() || uploadBusy()}
+                title={tr("docagent.upload_documents")}
+                aria-label={tr("docagent.upload_documents")}
+              >
+                <Plus size={16} />
+              </button>
+              <button
+                type="button"
+                class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
+                onClick={() => uploadFolderInputEl?.click()}
+                disabled={!serverReady() || uploadBusy()}
+                title={tr("docagent.upload_folder")}
+                aria-label={tr("docagent.upload_folder")}
+              >
+                <Folder size={16} />
+              </button>
+              <button
+                type="button"
+                class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
+                onClick={() => void createFolder()}
+                disabled={!serverReady() || uploadBusy()}
+                title={tr("docagent.create_folder")}
+                aria-label={tr("docagent.create_folder")}
+              >
+                <FolderPlus size={16} />
+              </button>
+              <button
+                type="button"
+                class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
+                onClick={() => void refreshDocumentsKeepingScroll()}
                 disabled={!serverReady() || documents.loading}
                 title={tr("docagent.refresh_documents")}
                 aria-label={tr("docagent.refresh_documents")}
               >
                 <RefreshCw size={16} class={documents.loading ? "animate-spin" : ""} />
               </button>
-              <button
-                type="button"
-                class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
-                onClick={() => void archiveOtherDocuments()}
-                disabled={!serverReady() || !targetDoc() || archiveBusy()}
-                title={tr("docagent.archive_other_documents")}
-                aria-label={tr("docagent.archive_other_documents")}
-              >
-                <FolderArchive size={16} />
-              </button>
+              <Show when={uploadProgressLabel()}>
+                <div
+                  class="p-2 rounded bg-dls-hover text-dls-secondary"
+                  title={uploadProgressLabel()}
+                  aria-label={uploadProgressLabel()}
+                >
+                  <RefreshCw size={16} class="animate-spin" />
+                </div>
+              </Show>
             </div>
           }
         >
-          <div class="h-12 px-3 border-b border-dls-border flex justify-between items-center">
-            <div class="min-w-0">
-              <h2 class="text-sm font-semibold text-dls-text leading-none">{tr("docwriter.title")}</h2>
-              {/* <Show when={activeDocPath()}>
-                <div class="mt-1 text-[11px] text-dls-secondary truncate" title={activeDocPath()}>
-                  {activeDocPath()}
+          <div class="px-3 py-2 border-b border-dls-border space-y-2">
+            <div class="flex items-center justify-between gap-2">
+              <div class="min-w-0">
+                <h2 class="text-sm font-semibold text-dls-text leading-none">{tr("docagent.documents")}</h2>
+                <div class="mt-1 text-[10px] text-dls-secondary truncate">
+                  <Show when={activeFolder()} fallback={tr("docagent.folder_root")}>
+                    {tr("docagent.folder_label").replace("{path}", activeFolder())}
+                  </Show>
                 </div>
-              </Show> */}
-            </div>
-            <div class="flex items-center gap-1">
+              </div>
               <button
                 type="button"
                 class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text"
@@ -1884,30 +2046,58 @@ export default function DocumentWriterView(props: SessionViewProps) {
               >
                 <PanelLeftClose size={16} />
               </button>
+            </div>
+            <div class="flex items-center gap-1 flex-wrap">
               <button
                 type="button"
                 class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
-                onClick={() => void refetchDocuments()}
+                onClick={() => uploadInputEl?.click()}
+                disabled={!serverReady() || uploadBusy()}
+                title={tr("docagent.upload_documents")}
+                aria-label={tr("docagent.upload_documents")}
+              >
+                <Plus size={16} />
+              </button>
+              <button
+                type="button"
+                class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
+                onClick={() => uploadFolderInputEl?.click()}
+                disabled={!serverReady() || uploadBusy()}
+                title={tr("docagent.upload_folder")}
+                aria-label={tr("docagent.upload_folder")}
+              >
+                <Folder size={16} />
+              </button>
+              <button
+                type="button"
+                class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
+                onClick={() => void createFolder()}
+                disabled={!serverReady() || uploadBusy()}
+                title={tr("docagent.create_folder")}
+                aria-label={tr("docagent.create_folder")}
+              >
+                <FolderPlus size={16} />
+              </button>
+              <button
+                type="button"
+                class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
+                onClick={() => void refreshDocumentsKeepingScroll()}
                 disabled={!serverReady() || documents.loading}
                 title={tr("docagent.refresh_documents")}
                 aria-label={tr("docagent.refresh_documents")}
               >
                 <RefreshCw size={16} class={documents.loading ? "animate-spin" : ""} />
               </button>
-              <button
-                type="button"
-                class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
-                onClick={() => void archiveOtherDocuments()}
-                disabled={!serverReady() || !targetDoc() || archiveBusy()}
-                title={tr("docagent.archive_other_documents")}
-                aria-label={tr("docagent.archive_other_documents")}
-              >
-                <FolderArchive size={16} />
-              </button>
             </div>
+            <Show when={uploadProgressLabel()}>
+              <div class="flex items-center gap-1.5 text-[11px] text-dls-secondary">
+                <RefreshCw size={12} class="animate-spin" />
+                <span class="truncate">{uploadProgressLabel()}</span>
+              </div>
+            </Show>
           </div>
         </Show>
-        <div class="flex-1 min-h-0 overflow-y-auto p-2">
+        <div class="overflow-y-auto flex-1 py-2" ref={(el) => (documentsScrollEl = el)}>
           <Show
             when={serverReady()}
             fallback={<div class="p-2 text-xs text-dls-secondary">{tr("docagent.server_not_connected")}</div>}
@@ -1920,547 +2110,15 @@ export default function DocumentWriterView(props: SessionViewProps) {
                 </div>
               }
             >
-              <Show when={targetDocName()}>
-                <button
-                  class={`w-full rounded flex items-center mb-1 transition-colors ${documentsCollapsed() ? "justify-center p-2" : "text-left p-2 gap-2"
-                    } ${activeDoc() === targetDocName()
-                      ? "bg-dls-hover text-dls-text"
-                      : "text-dls-secondary hover:bg-dls-surface"
-                    }`}
-                  onClick={() => setActiveDoc(targetDocName())}
-                  title={documentsCollapsed() ? targetDocName() : undefined}
-                >
-                  <FileText size={16} />
-                  <Show when={!documentsCollapsed()}>
-                    <span class="truncate">
-                      {targetDocName()}
-                      <span class="ml-2 text-[10px] text-dls-secondary">({tr("docwriter.target_badge")})</span>
-                    </span>
-                  </Show>
-                </button>
-              </Show>
-
-              <Show when={otherDocsList().length > 0 && !documentsCollapsed()}>
-                <button
-                  type="button"
-                  class="w-full mt-1 rounded flex items-center justify-between px-2 py-2 text-[11px] text-dls-secondary hover:text-dls-text hover:bg-dls-hover"
-                  onClick={() => setOtherDocsExpanded((v) => !v)}
-                  aria-expanded={otherDocsExpanded()}
-                >
-                  <span>{targetDocName() ? tr("docwriter.other_documents") : tr("docwriter.session_documents")}</span>
-                  <span class="flex items-center gap-2">
-                    <span class="text-[10px]">{otherDocsList().length}</span>
-                    <ChevronDown size={14} class={`transition-transform ${otherDocsExpanded() ? "rotate-180" : ""}`} />
-                  </span>
-                </button>
-                <Show when={otherDocsExpanded()}>
-                  <div class="mt-1">
-                    <For each={otherDocsList()}>
-                      {(doc) => (
-                        <button
-                          type="button"
-                          class={`w-full rounded flex items-center mb-1 transition-colors ${documentsCollapsed() ? "justify-center p-2" : "text-left p-2 gap-2"
-                            } ${activeDoc() === doc.name
-                              ? "bg-dls-hover text-dls-text"
-                              : "text-dls-secondary hover:bg-dls-surface"
-                            }`}
-                          onClick={() => setActiveDoc(doc.name)}
-                          title={documentsCollapsed() ? doc.name : undefined}
-                        >
-                          <FileText size={16} />
-                          <Show when={!documentsCollapsed()}>
-                            <span class="truncate">{doc.name}</span>
-                          </Show>
-                        </button>
-                      )}
-                    </For>
-                  </div>
-                </Show>
+              <For each={fileTree()}>
+                {(node) => <TreeNodeView node={node} depth={0} />}
+              </For>
+              <Show when={fileTree().length === 0}>
+                <div class="px-4 py-8 text-center text-xs text-gray-10">
+                  {tr("docagent.no_documents")}
+                </div>
               </Show>
             </Show>
-          </Show>
-
-          <Show when={!documentsCollapsed()}>
-            <div class="mt-3 pt-3 border-t border-dls-border">
-              {/* <div class="px-2">
-                <div class="flex items-center justify-between">
-                  <button
-                    type="button"
-                    class="flex items-center gap-2 min-w-0 text-left flex-1 hover:text-dls-text text-dls-secondary"
-                    onClick={() => setModulesExpanded((v) => !v)}
-                    aria-expanded={modulesExpanded()}
-                  >
-                    <ChevronDown size={14} class={`shrink-0 transition-transform ${modulesExpanded() ? "rotate-180" : ""}`} />
-                    <span class="text-[10px] uppercase tracking-wider text-dls-secondary">Modules</span>
-                  </button>
-                  <button
-                    type="button"
-                    class="p-1.5 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
-                    onClick={() => void refetchDocuments()}
-                    disabled={!serverReady() || documents.loading}
-                    title="Refresh reports"
-                    aria-label="Refresh reports"
-                  >
-                    <RefreshCw size={14} class={documents.loading ? "animate-spin" : ""} />
-                  </button>
-                </div>
-
-                <Show when={modulesExpanded()}>
-                  <div class="mt-2 grid grid-cols-1 gap-2">
-                    <button
-                      type="button"
-                      class="w-full rounded-lg border border-dls-border bg-dls-surface px-2 py-2 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover disabled:opacity-50 flex items-center gap-2"
-                      onClick={() => openModule("facts")}
-                      disabled={!serverReady() || !targetDoc() || isAgentRunning() || factsBusy()}
-                      title="Extract key facts from the tender and fill the project info table"
-                    >
-                      <ArrowRight size={14} />
-                      <span class="truncate">Tender facts (DOCX→DOCX)</span>
-                    </button>
-                    <button
-                      type="button"
-                      class="w-full rounded-lg border border-dls-border bg-dls-surface px-2 py-2 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover disabled:opacity-50 flex items-center gap-2"
-                      onClick={() => openModule("fill")}
-                      disabled={!serverReady() || !targetDoc() || isAgentRunning()}
-                      title="Fill pre-formatted tables from XLSX inputs"
-                    >
-                      <FileText size={14} />
-                      <span class="truncate">Fill tables (XLSX→DOCX)</span>
-                    </button>
-                    <button
-                      type="button"
-                      class="w-full rounded-lg border border-dls-border bg-dls-surface px-2 py-2 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover disabled:opacity-50 flex items-center gap-2"
-                      onClick={() => openModule("qc")}
-                      disabled={!serverReady() || !targetDoc() || qcBusy()}
-                      title="Run deterministic QC gate on the target document"
-                    >
-                      <CheckCircle2 size={14} />
-                      <span class="truncate">QC gate</span>
-                    </button>
-                    <button
-                      type="button"
-                      class="w-full rounded-lg border border-dls-border bg-dls-surface px-2 py-2 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover disabled:opacity-50 flex items-center gap-2"
-                      onClick={() => openModule("dedupe")}
-                      disabled={!serverReady() || !targetDoc() || isAgentRunning() || dedupeBusy()}
-                      title="Compare multiple DOCX files for duplicate text and images"
-                    >
-                      <Search size={14} />
-                      <span class="truncate">Dedupe (DOCX↔DOCX)</span>
-                    </button>
-                    <button
-                      type="button"
-                      class="w-full rounded-lg border border-dls-border bg-dls-surface px-2 py-2 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover disabled:opacity-50 flex items-center gap-2"
-                      onClick={() => openModule("preview")}
-                      disabled={!serverReady() || !targetDoc() || previewBusy()}
-                      title="Export a PDF preview for Word-like review and printing"
-                    >
-                      <Download size={14} />
-                      <span class="truncate">PDF preview (DOCX→PDF)</span>
-                    </button>
-                  </div>
-
-                  <Show when={reportsWorkspaceRoot()}>
-                    <button
-                      type="button"
-                      class="mt-2 w-full rounded-md border border-dls-border bg-dls-surface px-2 py-1 text-[11px] text-dls-secondary hover:text-dls-text hover:bg-dls-hover flex items-center gap-2"
-                      onClick={() => insertRefInPrompt(reportsWorkspaceRoot() + "/")}
-                      title="Insert reports directory into the prompt"
-                    >
-                      <Folder size={14} />
-                      <span class="truncate">{reportsWorkspaceRoot()}/</span>
-                      <span class="ml-auto text-[10px] text-dls-secondary flex items-center gap-1">
-                        <AtSign size={12} />
-                        Use
-                      </span>
-                    </button>
-                  </Show>
-
-                  <Show when={visibleReports().length > 0}>
-                    <div class="mt-2 rounded-lg border border-dls-border bg-dls-surface overflow-hidden">
-                      <div class="flex items-center justify-between px-2 py-1.5">
-                        <button
-                          type="button"
-                          class="flex items-center gap-2 min-w-0 text-left flex-1 hover:text-dls-text text-dls-secondary"
-                          onClick={() => setReportsExpanded((v) => !v)}
-                          aria-expanded={reportsExpanded()}
-                        >
-                          <ChevronDown
-                            size={14}
-                            class={`shrink-0 transition-transform ${reportsExpanded() ? "rotate-180" : ""}`}
-                          />
-                          <span class="truncate text-[12px]">Reports</span>
-                          <span class="ml-auto text-[10px] text-dls-secondary">{reportsList().length}</span>
-                        </button>
-                      </div>
-                      <div class="px-2 pb-2 space-y-1">
-                        <For each={visibleReports()}>
-                          {(item) => {
-                            const workspacePath = () => {
-                              const root = sessionDocumentsRoot();
-                              return root ? `${root}/${item.name}` : item.name;
-                            };
-                            const name = () => item.name.split("/").slice(-2).join("/");
-                            return (
-                              <div class="flex items-center gap-2 rounded-md px-2 py-1 hover:bg-dls-hover">
-                                <FileText size={14} class="text-dls-secondary shrink-0" />
-                                <button
-                                  type="button"
-                                  class="min-w-0 flex-1 text-left"
-                                  onClick={() => insertRefInPrompt(workspacePath())}
-                                  title={workspacePath()}
-                                >
-                                  <div class="text-[12px] text-dls-text truncate">{name()}</div>
-                                  <div class="text-[10px] text-dls-secondary">{formatBytes(item.size)}</div>
-                                </button>
-                                <button
-                                  type="button"
-                                  class="p-1.5 rounded hover:bg-dls-active text-dls-secondary hover:text-dls-text"
-                                  onClick={() => insertRefInPrompt(workspacePath())}
-                                  title="Use in prompt"
-                                  aria-label="Use in prompt"
-                                >
-                                  <AtSign size={14} />
-                                </button>
-                                <button
-                                  type="button"
-                                  class="p-1.5 rounded hover:bg-dls-active text-dls-secondary hover:text-dls-text"
-                                  onClick={() => void downloadDocumentFile(item, (msg) => setToastMessage(msg))}
-                                  title="Download"
-                                  aria-label="Download"
-                                >
-                                  <Download size={14} />
-                                </button>
-                              </div>
-                            );
-                          }}
-                        </For>
-                      </div>
-                    </div>
-                  </Show>
-                </Show>
-              </div> */}
-
-              <div class="flex items-center justify-between px-2">
-                <div class="text-[10px] uppercase tracking-wider text-dls-secondary">{tr("docwriter.reference_materials")}</div>
-                <button
-                  type="button"
-                  class="p-1.5 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
-                  onClick={() => void refetchDocuments()}
-                  disabled={!serverReady() || documents.loading}
-                  title={tr("docwriter.refresh_reference_files")}
-                  aria-label={tr("docwriter.refresh_reference_files")}
-                >
-                  <RefreshCw size={14} class={documents.loading ? "animate-spin" : ""} />
-                </button>
-              </div>
-
-              <Show when={refsError()}>
-                <div class="mt-2 px-2 text-xs text-red-11 whitespace-pre-wrap break-words">{refsError()}</div>
-              </Show>
-
-              <Show when={refsWorkspaceRoot()}>
-                <button
-                  type="button"
-                  class="mt-2 mx-2 w-[calc(100%-16px)] rounded-md border border-dls-border bg-dls-surface px-2 py-1 text-[11px] text-dls-secondary hover:text-dls-text hover:bg-dls-hover flex items-center gap-2"
-                  onClick={() => insertRefInPrompt(refsWorkspaceRoot() + "/")}
-                  title={tr("docwriter.insert_reference_root_in_prompt")}
-                >
-                  <Folder size={14} />
-                  <span class="truncate">{refsWorkspaceRoot()}/</span>
-                  <span class="ml-auto text-[10px] text-dls-secondary flex items-center gap-1">
-                    <AtSign size={12} />
-                    {tr("docwriter.use_short")}
-                  </span>
-                </button>
-              </Show>
-
-              <Show when={refsUploadProgress()}>
-                <div class="mt-2 px-2 text-[11px] text-dls-secondary flex items-center gap-1.5">
-                  <RefreshCw size={12} class="animate-spin" />
-                  <span class="truncate">{refsUploadStatusText()}</span>
-                </div>
-              </Show>
-
-              <div class="mt-2 space-y-2">
-                <For each={REF_CATEGORIES}>
-                  {(category) => {
-                    const expanded = () => Boolean(refsExpanded()[category.id]);
-                    const items = () => refsByCategory()[category.id] ?? [];
-                    const tree = createMemo(() => buildRefsFolderTree(category.id, items()));
-
-                    const fileRow = (item: DocumentItem, depth: number) => {
-                      const workspacePath = () => {
-                        const root = sessionDocumentsRoot();
-                        return root ? `${root}/${item.name}` : item.name;
-                      };
-                      const relativePath = () => refsItemRelativePath(category.id, item.name);
-                      const name = () => relativePath().split("/").pop() ?? item.name.split("/").pop() ?? item.name;
-                      const menuKey = refsFileMenuKey(category.id, item.name);
-                      const menuOpen = () => refsActionMenuKey() === menuKey;
-                      return (
-                        <div class="flex items-center gap-2 rounded-md px-2 py-1 hover:bg-dls-hover" style={{ "padding-left": `${8 + depth * 14}px` }}>
-                          <FileText size={14} class="text-dls-secondary shrink-0" />
-                          <div class="min-w-0 flex-1 text-[12px] text-dls-text truncate" title={workspacePath()}>
-                            {name()}
-                          </div>
-                          <button
-                            type="button"
-                            class="p-1.5 rounded hover:bg-dls-active text-dls-secondary hover:text-dls-text"
-                            onClick={() => void useReferenceInPrompt(item)}
-                            title={tr("docagent.use_in_prompt")}
-                            aria-label={tr("docagent.use_in_prompt")}
-                            disabled={refsOpenBusyId() === item.name}
-                          >
-                            <AtSign size={14} />
-                          </button>
-                          <div class="relative" data-refs-action-menu>
-                            <button
-                              type="button"
-                              class="p-1.5 rounded hover:bg-dls-active text-dls-secondary hover:text-dls-text"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                setRefsActionMenuKey(menuOpen() ? null : menuKey);
-                              }}
-                              title={tr("docwriter.more")}
-                              aria-label={tr("docwriter.more")}
-                            >
-                              <MoreHorizontal size={14} />
-                            </button>
-                            <Show when={menuOpen()}>
-                              <div class="absolute right-0 top-8 z-20 min-w-[140px] rounded-md border border-dls-border bg-dls-surface shadow-lg p-1">
-                                <button
-                                  type="button"
-                                  class="w-full text-left rounded px-2 py-1.5 text-xs text-dls-secondary hover:bg-dls-hover hover:text-dls-text disabled:opacity-50"
-                                  onClick={() => {
-                                    setRefsActionMenuKey(null);
-                                    void openReferenceInEditor(item);
-                                  }}
-                                  disabled={!serverReady() || refsOpenBusyId() === item.name}
-                                  title={tr("docwriter.preview")}
-                                >
-                                  {tr("docwriter.preview")}
-                                </button>
-                                <button
-                                  type="button"
-                                  class="w-full text-left rounded px-2 py-1.5 text-xs text-dls-secondary hover:bg-dls-hover hover:text-dls-text"
-                                  onClick={() => {
-                                    setRefsActionMenuKey(null);
-                                    void downloadReferenceFile(item);
-                                  }}
-                                >
-                                  {tr("docagent.download_file")}
-                                </button>
-                                <button
-                                  type="button"
-                                  class="w-full text-left rounded px-2 py-1.5 text-xs text-red-11 hover:bg-red-3/30 disabled:opacity-50"
-                                  onClick={() => {
-                                    setRefsActionMenuKey(null);
-                                    void deleteReferenceFile(item);
-                                  }}
-                                  disabled={refsDeleteBusyId() === item.name}
-                                >
-                                  {tr("docagent.delete_file")}
-                                </button>
-                              </div>
-                            </Show>
-                          </div>
-                        </div>
-                      );
-                    };
-
-                    const collectFolderItems = (folder: RefFolderNode): DocumentItem[] => [
-                      ...folder.files,
-                      ...folder.folders.flatMap((child) => collectFolderItems(child)),
-                    ];
-
-                    const folderTotalFiles = (folder: RefFolderNode): number =>
-                      collectFolderItems(folder).length;
-
-                    const folderBlock = (folder: RefFolderNode, depth: number) => {
-                      const expandedFolder = () => isRefsFolderExpanded(category.id, folder.path);
-                      const menuKey = refsFolderMenuKey(category.id, folder.path);
-                      const menuOpen = () => refsActionMenuKey() === menuKey;
-                      const folderItems = () => collectFolderItems(folder);
-                      const promptPath = () => folderPromptPath(category.id, folder.path);
-                      return (
-                        <div class="space-y-1">
-                          <div
-                            class="w-full flex items-center gap-1 rounded-md px-1 py-0.5 hover:bg-dls-hover text-dls-secondary"
-                            style={{ "padding-left": `${8 + depth * 14}px` }}
-                          >
-                            <button
-                              type="button"
-                              class="min-w-0 flex-1 flex items-center gap-2 rounded-md px-1 py-1 text-left hover:text-dls-text"
-                              onClick={() => toggleRefsFolder(category.id, folder.path)}
-                              aria-expanded={expandedFolder()}
-                              title={folder.path}
-                            >
-                              <ChevronDown
-                                size={14}
-                                class={`shrink-0 transition-transform ${expandedFolder() ? "rotate-180" : "-rotate-90"}`}
-                              />
-                              <Folder size={14} class="shrink-0" />
-                              <span class="text-[12px] truncate">{folder.name}</span>
-                              <span class="ml-auto text-[10px] text-dls-secondary">{folderTotalFiles(folder)}</span>
-                            </button>
-                            <button
-                              type="button"
-                              class="p-1.5 rounded hover:bg-dls-active text-dls-secondary hover:text-dls-text"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                insertRefInPrompt(promptPath());
-                              }}
-                              title={tr("docagent.use_in_prompt")}
-                              aria-label={tr("docagent.use_in_prompt")}
-                            >
-                              <AtSign size={14} />
-                            </button>
-                            <div class="relative" data-refs-action-menu>
-                              <button
-                                type="button"
-                                class="p-1.5 rounded hover:bg-dls-active text-dls-secondary hover:text-dls-text"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  setRefsActionMenuKey(menuOpen() ? null : menuKey);
-                                }}
-                                title={tr("docwriter.more")}
-                                aria-label={tr("docwriter.more")}
-                              >
-                                <MoreHorizontal size={14} />
-                              </button>
-                              <Show when={menuOpen()}>
-                                <div class="absolute right-0 top-8 z-20 min-w-[140px] rounded-md border border-dls-border bg-dls-surface shadow-lg p-1">
-                                  <button
-                                    type="button"
-                                    class="w-full text-left rounded px-2 py-1.5 text-xs text-dls-secondary hover:bg-dls-hover hover:text-dls-text disabled:opacity-50"
-                                    onClick={() => {
-                                      setRefsActionMenuKey(null);
-                                      void downloadReferenceFolder(category.id, folder.path, folderItems());
-                                    }}
-                                    disabled={refsBusy() || folderItems().length === 0}
-                                  >
-                                    {tr("docagent.download_folder")}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    class="w-full text-left rounded px-2 py-1.5 text-xs text-red-11 hover:bg-red-3/30 disabled:opacity-50"
-                                    onClick={() => {
-                                      setRefsActionMenuKey(null);
-                                      void deleteReferenceFolder(folder.path, folderItems());
-                                    }}
-                                    disabled={refsBusy() || folderItems().length === 0}
-                                  >
-                                    {tr("docagent.delete_folder")}
-                                  </button>
-                                </div>
-                              </Show>
-                            </div>
-                          </div>
-                          <Show when={expandedFolder()}>
-                            <For each={folder.folders}>
-                              {(child) => folderBlock(child, depth + 1)}
-                            </For>
-                            <For each={folder.files}>
-                              {(item) => fileRow(item, depth + 1)}
-                            </For>
-                          </Show>
-                        </div>
-                      );
-                    };
-
-                    return (
-                      <div class="rounded-lg border border-dls-border bg-dls-surface">
-                        <div class="flex items-center justify-between px-2 py-1.5">
-                          <button
-                            type="button"
-                            class="flex items-center gap-2 min-w-0 text-left flex-1 hover:text-dls-text text-dls-secondary"
-                            onClick={() => toggleRefsCategory(category.id)}
-                            aria-expanded={expanded()}
-                          >
-                            <ChevronDown
-                              size={14}
-                              class={`shrink-0 transition-transform ${expanded() ? "rotate-180" : ""}`}
-                            />
-                            <span class="truncate text-[12px]">{tr(category.labelKey)}</span>
-                            <span class="ml-auto text-[10px] text-dls-secondary">{items().length}</span>
-                          </button>
-                          <button
-                            type="button"
-                            class="ml-2 p-1.5 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
-                            onClick={() => {
-                              const path = categoryPromptPath(category.id);
-                              if (!path) return;
-                              insertRefInPrompt(path);
-                            }}
-                            disabled={!serverReady() || refsBusy() || !categoryPromptPath(category.id)}
-                            title={tr("docagent.use_in_prompt")}
-                            aria-label={tr("docagent.use_in_prompt")}
-                          >
-                            <AtSign size={14} />
-                          </button>
-                          <label
-                            class={`ml-2 cursor-pointer p-1.5 rounded hover:bg-dls-hover ${!serverReady() || refsBusy() ? "opacity-50 cursor-not-allowed" : ""
-                              }`}
-                            title={trf("docwriter.upload_to_category", { category: tr(category.labelKey) })}
-                          >
-                            <Plus size={14} class="text-dls-secondary" />
-                            <input
-                              type="file"
-                              multiple
-                              class="hidden"
-                              disabled={!serverReady() || refsBusy()}
-                              onChange={(event: Event) => {
-                                const target = event.currentTarget as HTMLInputElement;
-                                const files = Array.from(target.files ?? []);
-                                if (files.length) void uploadReferenceFiles(category.id, files);
-                                target.value = "";
-                              }}
-                            />
-                          </label>
-                          <label
-                            class={`ml-1 cursor-pointer p-1.5 rounded hover:bg-dls-hover ${!serverReady() || refsBusy() ? "opacity-50 cursor-not-allowed" : ""
-                              }`}
-                            title={trf("docwriter.upload_folder_to_category", { category: tr(category.labelKey) })}
-                          >
-                            <Folder size={14} class="text-dls-secondary" />
-                            <input
-                              ref={(el) => {
-                                const directoryInput = el as HTMLInputElement & { webkitdirectory?: boolean; directory?: boolean };
-                                directoryInput.webkitdirectory = true;
-                                directoryInput.directory = true;
-                              }}
-                              type="file"
-                              multiple
-                              class="hidden"
-                              disabled={!serverReady() || refsBusy()}
-                              onChange={(event: Event) => {
-                                const target = event.currentTarget as HTMLInputElement;
-                                const files = Array.from(target.files ?? []);
-                                if (files.length) void uploadReferenceFiles(category.id, files);
-                                target.value = "";
-                              }}
-                            />
-                          </label>
-                        </div>
-
-                        <Show when={expanded()}>
-                          <div class="px-2 pb-2 space-y-1">
-                            <Show when={items().length > 0} fallback={<div class="py-1 text-[11px] text-dls-secondary">{tr("docwriter.no_files")}</div>}>
-                              <For each={tree().folders}>
-                                {(folder) => folderBlock(folder, 0)}
-                              </For>
-                              <For each={tree().files}>
-                                {(item) => fileRow(item, 0)}
-                              </For>
-                            </Show>
-                          </div>
-                        </Show>
-                      </div>
-                    );
-                  }}
-                </For>
-              </div>
-            </div>
           </Show>
         </div>
       </div>
@@ -2494,7 +2152,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
               </Show>
             </button>
             <div class="text-xs text-dls-secondary truncate">
-              <Show when={targetDoc()} fallback={tr("docwriter.select_target_from_templates")}>
+              <Show when={targetDoc()} fallback={tr("docagent.select_target_document")}>
                 {tr("docagent.target_prefix")} <span class="text-dls-text">{targetDoc()}</span>
                 <Show when={activeDoc() && activeDoc() !== targetDoc()}>
                   <span class="ml-2 text-dls-secondary">· {tr("docagent.viewing_prefix")}</span>{" "}
@@ -2522,9 +2180,9 @@ export default function DocumentWriterView(props: SessionViewProps) {
               onClick={() => {
                 const path = activeDocPath();
                 if (!path) return;
+                const prefix = tr("docagent.target_document_prompt_prefix").replace("{path}", path);
                 const existing = props.prompt.trim();
-                const targetPrompt = trf("docagent.target_document_prompt_prefix", { path });
-                const next = existing ? `${existing}\n\n${targetPrompt}\n` : `${targetPrompt}\n`;
+                const next = existing ? `${existing}\n\n${prefix}\n` : `${prefix}\n`;
                 props.setPrompt(next);
               }}
               disabled={!activeDocPath()}
@@ -2554,7 +2212,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
                 <div class="h-full w-full overflow-auto bg-dls-surface flex items-center justify-center p-4">
                   <img
                     src={activeDocDownloadUrl()}
-                    alt={activeDoc() ?? tr("docwriter.image_alt")}
+                    alt={activeDoc() ?? "image"}
                     class="max-h-full max-w-full object-contain rounded-lg border border-dls-border bg-white"
                   />
                 </div>
@@ -2628,7 +2286,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
                   <div class="max-w-lg rounded-xl border border-dls-border bg-dls-surface/90 px-4 py-2 shadow-lg backdrop-blur">
                     <div class="text-xs text-dls-secondary">
                       <span class="font-medium text-dls-text">{tr("docagent.preview_mode")}</span>{" "}
-                      {trf("docagent.preview_mode_desc", { target: targetDoc() ?? "" })}{" "}
+                      {tr("docagent.preview_mode_desc").replace("{target}", targetDoc() ?? "")}{" "}
                       <button
                         type="button"
                         class="pointer-events-auto ml-2 underline text-dls-secondary hover:text-dls-text"
@@ -2676,7 +2334,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
           <div class="min-w-0">
             <div class="text-sm font-medium text-dls-text truncate">{tr("docagent.chat")}</div>
             <div class="text-[11px] text-dls-secondary truncate">
-              <Show when={props.selectedSessionAgent} fallback={tr("docwriter.default_agent")}>
+              <Show when={props.selectedSessionAgent} fallback={tr("session.default_agent")}>
                 @{props.selectedSessionAgent}
               </Show>
             </div>
@@ -2702,6 +2360,17 @@ export default function DocumentWriterView(props: SessionViewProps) {
             }}
           />
         </div>
+
+        <ToolMonitorPanel
+          enabled={toolMonitorActive()}
+          developerMode={props.developerMode}
+          reports={toolMonitorReports()}
+          expanded={toolMonitorExpanded()}
+          setExpanded={setToolMonitorExpanded}
+          openDocument={(path) => setActiveDoc(path)}
+          triggerBusy={toolMonitorManualTriggerBusy()}
+          onTriggerExcellentRun={triggerExcellentToolMonitorRun}
+        />
 
         <Show when={todoCount() > 0}>
           <div class="px-4">
@@ -2784,6 +2453,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
           agentPickerError={agentPickerError()}
           agentPickerDisabled={Boolean(agentLock())}
           agentPickerDisabledReason={agentLockTooltip()}
+          showAgentPicker={false}
           agentOptions={agentOptions()}
           onToggleAgentPicker={openAgentPicker}
           onSelectAgent={(agent) => {
@@ -2813,658 +2483,6 @@ export default function DocumentWriterView(props: SessionViewProps) {
           onMouseMove={(event) => event.preventDefault()}
           onMouseUp={() => paneResizeCleanup?.()}
         />
-      </Show>
-
-      <Show when={moduleModal() === "facts"}>
-        <div
-          class="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) closeModule();
-          }}
-        >
-          <div
-            class="w-full max-w-3xl rounded-2xl border border-dls-border bg-dls-surface shadow-2xl overflow-hidden"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <div class="flex items-center justify-between px-4 py-3 border-b border-dls-border">
-              <div class="min-w-0">
-                <div class="text-sm font-semibold text-dls-text truncate">{tr("docwriter.facts_title")}</div>
-                <div class="mt-1 text-[11px] text-dls-secondary truncate">
-                  {tr("docagent.target_prefix")} {targetDoc() ?? "—"}
-                </div>
-              </div>
-              <button
-                type="button"
-                class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text"
-                onClick={closeModule}
-                aria-label={tr("docwriter.close")}
-                title={tr("docwriter.close")}
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            <div class="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div class="min-w-0">
-                <div class="text-xs font-medium text-dls-text">{tr("docwriter.facts_tender_source_label")}</div>
-                <div class="mt-2 rounded-lg border border-dls-border overflow-hidden max-h-[360px] overflow-y-auto">
-                  <Show when={!documents.loading} fallback={<div class="p-3 text-xs text-dls-secondary">{tr("docwriter.loading")}</div>}>
-                    <Show
-                      when={tenderSources().length > 0}
-                      fallback={<div class="p-3 text-xs text-dls-secondary">{tr("docwriter.facts_upload_tender_hint")}</div>}
-                    >
-                      <For each={tenderSources()}>
-                        {(item) => {
-                          const selected = createMemo(() => factsTenderSource()?.name === item.name);
-                          const name = () => item.name.split("/").pop() ?? item.name;
-                          return (
-                            <button
-                              type="button"
-                              class={`w-full text-left px-3 py-2 border-b border-dls-border/50 last:border-b-0 hover:bg-dls-hover ${selected() ? "bg-dls-active" : ""
-                                }`}
-                              onClick={() => setFactsTenderSource(item)}
-                              title={item.name}
-                            >
-                              <div class="flex items-start gap-2">
-                                <FileText size={14} class="shrink-0 text-dls-secondary mt-0.5" />
-                                <div class="min-w-0 flex-1">
-                                  <div class="text-xs text-dls-text truncate">{name()}</div>
-                                  <div class="mt-1 text-[10px] text-dls-secondary">{formatBytes(item.size)}</div>
-                                </div>
-                              </div>
-                            </button>
-                          );
-                        }}
-                      </For>
-                    </Show>
-                  </Show>
-                </div>
-              </div>
-
-              <div class="min-w-0 space-y-4">
-                <div>
-                  <div class="text-xs font-medium text-dls-text">{tr("docwriter.what_it_does")}</div>
-                  <div class="mt-2 text-[11px] text-dls-secondary">
-                    {tr("docwriter.facts_description")}
-                  </div>
-                </div>
-
-                <label class="flex items-center gap-2 text-xs text-dls-secondary">
-                  <input
-                    type="checkbox"
-                    checked={factsApplyToTarget()}
-                    onChange={(event) => setFactsApplyToTarget(event.currentTarget.checked)}
-                  />
-                  {tr("docwriter.facts_apply_target")}
-                </label>
-
-                <label class="flex items-center gap-2 text-xs text-dls-secondary">
-                  <input
-                    type="checkbox"
-                    checked={factsForce()}
-                    onChange={(event) => setFactsForce(event.currentTarget.checked)}
-                    disabled={!factsApplyToTarget()}
-                  />
-                  {tr("docwriter.facts_force_overwrite")}
-                </label>
-
-                <label class="flex items-center gap-2 text-xs text-dls-secondary">
-                  <input
-                    type="checkbox"
-                    checked={factsInsertBlock()}
-                    onChange={(event) => setFactsInsertBlock(event.currentTarget.checked)}
-                    disabled={!factsApplyToTarget()}
-                  />
-                  {tr("docwriter.facts_insert_block")}
-                </label>
-
-                <Show when={factsError()}>
-                  <div class="rounded-lg border border-red-11/30 bg-red-3/20 px-3 py-2 text-xs text-red-11 whitespace-pre-wrap break-words">
-                    {factsError()}
-                  </div>
-                </Show>
-              </div>
-            </div>
-
-            <div class="px-4 py-3 border-t border-dls-border flex items-center justify-end gap-2">
-              <button
-                type="button"
-                class="rounded-lg border border-dls-border bg-dls-surface px-3 py-1.5 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover"
-                onClick={closeModule}
-              >
-                {tr("docwriter.cancel")}
-              </button>
-              <button
-                type="button"
-                class="rounded-lg border border-dls-border bg-dls-surface px-3 py-1.5 text-xs text-dls-text hover:bg-dls-hover disabled:opacity-50"
-                onClick={() => void runFacts()}
-                disabled={factsBusy() || !factsTenderSource()}
-                title={!factsTenderSource() ? tr("docwriter.select_tender_document") : tr("docwriter.run_facts")}
-              >
-                <Show when={!factsBusy()} fallback={tr("docwriter.working")}>
-                  {tr("docwriter.run_facts")}
-                </Show>
-              </button>
-            </div>
-          </div>
-        </div>
-      </Show>
-
-      <Show when={moduleModal() === "fill"}>
-        <div
-          class="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) closeModule();
-          }}
-        >
-          <div
-            class="w-full max-w-3xl rounded-2xl border border-dls-border bg-dls-surface shadow-2xl overflow-hidden"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <div class="flex items-center justify-between px-4 py-3 border-b border-dls-border">
-              <div class="min-w-0">
-                <div class="text-sm font-semibold text-dls-text truncate">{tr("docwriter.fill_title")}</div>
-                <div class="mt-1 text-[11px] text-dls-secondary truncate">
-                  {tr("docagent.target_prefix")} {targetDoc() ?? "—"}
-                </div>
-              </div>
-              <button
-                type="button"
-                class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text"
-                onClick={closeModule}
-                aria-label={tr("docwriter.close")}
-                title={tr("docwriter.close")}
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            <div class="p-4 space-y-4">
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <div class="text-xs font-medium text-dls-text">{tr("docwriter.fill_tech_xlsx")}</div>
-                  <select
-                    class="mt-2 w-full rounded-lg border border-dls-border bg-dls-surface px-3 py-2 text-xs text-dls-text focus:outline-none focus:ring-2 focus:ring-dls-accent/40"
-                    value={fillTechXlsx()}
-                    onChange={(event) => setFillTechXlsx(event.currentTarget.value)}
-                  >
-                    <option value="">—</option>
-                    <For each={xlsxRefs()}>
-                      {(item) => (
-                        <option value={item.name}>
-                          {item.name.split("/").pop() ?? item.name}
-                        </option>
-                      )}
-                    </For>
-                  </select>
-                </div>
-                <div>
-                  <div class="text-xs font-medium text-dls-text">{tr("docwriter.fill_equip_xlsx")}</div>
-                  <select
-                    class="mt-2 w-full rounded-lg border border-dls-border bg-dls-surface px-3 py-2 text-xs text-dls-text focus:outline-none focus:ring-2 focus:ring-dls-accent/40"
-                    value={fillEquipXlsx()}
-                    onChange={(event) => setFillEquipXlsx(event.currentTarget.value)}
-                  >
-                    <option value="">—</option>
-                    <For each={xlsxRefs()}>
-                      {(item) => (
-                        <option value={item.name}>
-                          {item.name.split("/").pop() ?? item.name}
-                        </option>
-                      )}
-                    </For>
-                  </select>
-                </div>
-              </div>
-
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <div class="text-xs font-medium text-dls-text">{tr("docwriter.fill_brand")}</div>
-                  <input
-                    type="text"
-                    value={fillBrand()}
-                    onInput={(event) => setFillBrand(event.currentTarget.value)}
-                    class="mt-2 w-full rounded-lg border border-dls-border bg-dls-surface px-3 py-2 text-xs text-dls-text focus:outline-none focus:ring-2 focus:ring-dls-accent/40"
-                  />
-                </div>
-                <div>
-                  <div class="text-xs font-medium text-dls-text">{tr("docwriter.fill_manufacturer")}</div>
-                  <input
-                    type="text"
-                    value={fillManufacturer()}
-                    onInput={(event) => setFillManufacturer(event.currentTarget.value)}
-                    class="mt-2 w-full rounded-lg border border-dls-border bg-dls-surface px-3 py-2 text-xs text-dls-text focus:outline-none focus:ring-2 focus:ring-dls-accent/40"
-                  />
-                </div>
-                <div>
-                  <div class="text-xs font-medium text-dls-text">{tr("docwriter.fill_origin")}</div>
-                  <input
-                    type="text"
-                    value={fillOrigin()}
-                    onInput={(event) => setFillOrigin(event.currentTarget.value)}
-                    class="mt-2 w-full rounded-lg border border-dls-border bg-dls-surface px-3 py-2 text-xs text-dls-text focus:outline-none focus:ring-2 focus:ring-dls-accent/40"
-                  />
-                </div>
-                <div>
-                  <div class="text-xs font-medium text-dls-text">{tr("docwriter.fill_unit")}</div>
-                  <input
-                    type="text"
-                    value={fillUnit()}
-                    onInput={(event) => setFillUnit(event.currentTarget.value)}
-                    class="mt-2 w-full rounded-lg border border-dls-border bg-dls-surface px-3 py-2 text-xs text-dls-text focus:outline-none focus:ring-2 focus:ring-dls-accent/40"
-                  />
-                </div>
-              </div>
-
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <div class="text-xs font-medium text-dls-text">{tr("docwriter.fill_price_placeholder")}</div>
-                  <input
-                    type="text"
-                    value={fillPricePlaceholder()}
-                    onInput={(event) => setFillPricePlaceholder(event.currentTarget.value)}
-                    class="mt-2 w-full rounded-lg border border-dls-border bg-dls-surface px-3 py-2 text-xs text-dls-text focus:outline-none focus:ring-2 focus:ring-dls-accent/40"
-                  />
-                </div>
-                <div>
-                  <div class="text-xs font-medium text-dls-text">{tr("docwriter.fill_spec_placeholder")}</div>
-                  <input
-                    type="text"
-                    value={fillSpecPlaceholder()}
-                    onInput={(event) => setFillSpecPlaceholder(event.currentTarget.value)}
-                    class="mt-2 w-full rounded-lg border border-dls-border bg-dls-surface px-3 py-2 text-xs text-dls-text focus:outline-none focus:ring-2 focus:ring-dls-accent/40"
-                  />
-                </div>
-              </div>
-
-              <Show when={fillError()}>
-                <div class="rounded-lg border border-red-11/30 bg-red-3/20 px-3 py-2 text-xs text-red-11 whitespace-pre-wrap break-words">
-                  {fillError()}
-                </div>
-              </Show>
-            </div>
-
-            <div class="px-4 py-3 border-t border-dls-border flex items-center justify-end gap-2">
-              <button
-                type="button"
-                class="rounded-lg border border-dls-border bg-dls-surface px-3 py-1.5 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover"
-                onClick={closeModule}
-              >
-                {tr("docwriter.cancel")}
-              </button>
-              <button
-                type="button"
-                class="rounded-lg border border-dls-border bg-dls-surface px-3 py-1.5 text-xs text-dls-text hover:bg-dls-hover disabled:opacity-50"
-                onClick={() => void runFill()}
-                disabled={fillBusy()}
-              >
-                <Show when={!fillBusy()} fallback={tr("docwriter.working")}>
-                  {tr("docwriter.fill_action")}
-                </Show>
-              </button>
-            </div>
-          </div>
-        </div>
-      </Show>
-
-      <Show when={moduleModal() === "dedupe"}>
-        <div
-          class="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) closeModule();
-          }}
-        >
-          <div
-            class="w-full max-w-4xl rounded-2xl border border-dls-border bg-dls-surface shadow-2xl overflow-hidden"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <div class="flex items-center justify-between px-4 py-3 border-b border-dls-border">
-              <div class="min-w-0">
-                <div class="text-sm font-semibold text-dls-text truncate">{tr("docwriter.dedupe_title")}</div>
-                <div class="mt-1 text-[11px] text-dls-secondary truncate">
-                  {trf("docwriter.dedupe_target_always_included", { target: targetDoc() ?? "—" })}
-                </div>
-              </div>
-              <button
-                type="button"
-                class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text"
-                onClick={closeModule}
-                aria-label={tr("docwriter.close")}
-                title={tr("docwriter.close")}
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            <div class="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div class="min-w-0">
-                <div class="flex items-center justify-between">
-                  <div class="text-xs font-medium text-dls-text">{tr("docwriter.dedupe_compare_with")}</div>
-                  <div class="text-[11px] text-dls-secondary">{trf("docwriter.dedupe_selected_count", { count: dedupeSelected().size })}</div>
-                </div>
-                <div class="mt-2">
-                  <input
-                    type="text"
-                    value={dedupeQuery()}
-                    onInput={(event) => setDedupeQuery(event.currentTarget.value)}
-                    placeholder={tr("docwriter.search_documents")}
-                    class="w-full rounded-lg border border-dls-border bg-dls-surface px-3 py-2 text-xs text-dls-text placeholder:text-dls-secondary focus:outline-none focus:ring-2 focus:ring-dls-accent/40"
-                  />
-                </div>
-                <div class="mt-2 rounded-lg border border-dls-border overflow-hidden max-h-[420px] overflow-y-auto">
-                  <Show when={!documents.loading && !documents.loading} fallback={<div class="p-3 text-xs text-dls-secondary">{tr("docwriter.loading")}</div>}>
-                    <Show
-                      when={filteredDedupeCandidates().length > 0}
-                      fallback={<div class="p-3 text-xs text-dls-secondary">{tr("docwriter.no_docx_sources")}</div>}
-                    >
-                      <For each={filteredDedupeCandidates()}>
-                        {(item) => {
-                          const displayName = () =>
-                            item.kind === "doc"
-                              ? item.name.split("/").pop() ?? item.name
-                              : item.name.split("/").pop() ?? item.name;
-                          const selected = createMemo(() => dedupeSelected().has(item.key));
-                          return (
-                            <label
-                              class={`flex items-start gap-2 px-3 py-2 border-b border-dls-border/50 last:border-b-0 hover:bg-dls-hover cursor-pointer ${selected() ? "bg-dls-active" : ""
-                                }`}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={selected()}
-                                onChange={() => toggleDedupeSelection(item.key)}
-                                class="mt-0.5"
-                              />
-                              <div class="min-w-0 flex-1">
-                                <div class="text-xs text-dls-text truncate">{displayName()}</div>
-                                <div class="mt-1 text-[10px] text-dls-secondary truncate">{item.sourceLabel}</div>
-                              </div>
-                            </label>
-                          );
-                        }}
-                      </For>
-                    </Show>
-                  </Show>
-                </div>
-              </div>
-
-              <div class="min-w-0 space-y-4">
-                <div>
-                  <div class="text-xs font-medium text-dls-text">{tr("docwriter.settings")}</div>
-                  <div class="mt-2 text-[11px] text-dls-secondary">
-                    {tr("docwriter.dedupe_description")}
-                  </div>
-                </div>
-
-                <label class="flex items-center gap-2 text-xs text-dls-secondary">
-                  <input
-                    type="checkbox"
-                    checked={dedupeExcludeTables()}
-                    onChange={(event) => setDedupeExcludeTables(event.currentTarget.checked)}
-                  />
-                  {tr("docwriter.dedupe_exclude_tables")}
-                </label>
-
-                <div>
-                  <div class="text-xs font-medium text-dls-text">{tr("docwriter.dedupe_similarity_threshold")}</div>
-                  <div class="mt-2 flex items-center gap-2">
-                    <input
-                      type="number"
-                      min="0"
-                      max="1"
-                      step="0.01"
-                      value={dedupeSimThreshold()}
-                      onInput={(event) => setDedupeSimThreshold(Number(event.currentTarget.value))}
-                      class="w-28 rounded-lg border border-dls-border bg-dls-surface px-3 py-2 text-xs text-dls-text focus:outline-none focus:ring-2 focus:ring-dls-accent/40"
-                    />
-                    <div class="text-[11px] text-dls-secondary">{tr("docwriter.dedupe_similarity_help")}</div>
-                  </div>
-                </div>
-
-                <label class="flex items-center gap-2 text-xs text-dls-secondary">
-                  <input
-                    type="checkbox"
-                    checked={dedupeExportMedia()}
-                    onChange={(event) => setDedupeExportMedia(event.currentTarget.checked)}
-                  />
-                  {tr("docwriter.dedupe_export_media")}
-                </label>
-
-                <div class="rounded-lg border border-dls-border bg-dls-surface px-3 py-2">
-                  <div class="flex items-center justify-between gap-2">
-                    <div class="text-xs font-medium text-dls-text">{tr("docwriter.dedupe_title_filters")}</div>
-                    <div class="flex items-center gap-2">
-                      <button
-                        type="button"
-                        class="text-[11px] underline text-dls-secondary hover:text-dls-text"
-                        onClick={() => setDedupeIncludeTitles("技术|方案|实施|架构|服务|运维|安全|偏离")}
-                      >
-                        {tr("docwriter.dedupe_tech_preset")}
-                      </button>
-                      <button
-                        type="button"
-                        class="text-[11px] underline text-dls-secondary hover:text-dls-text"
-                        onClick={() =>
-                          setDedupeExcludeTitles("开标|一览表|分项|清单|点对点|授权|资质|证明|商务|报价|保证金|合同")
-                        }
-                      >
-                        {tr("docwriter.dedupe_form_preset")}
-                      </button>
-                      <button
-                        type="button"
-                        class="text-[11px] underline text-dls-secondary hover:text-dls-text"
-                        onClick={() => {
-                          setDedupeIncludeTitles("");
-                          setDedupeExcludeTitles("");
-                        }}
-                      >
-                        {tr("docwriter.clear")}
-                      </button>
-                    </div>
-                  </div>
-                  <div class="mt-1 text-[11px] text-dls-secondary">
-                    {tr("docwriter.dedupe_title_filters_help")}
-                  </div>
-                  <div class="mt-2 grid grid-cols-1 gap-2">
-                    <div>
-                      <div class="text-[11px] text-dls-secondary">{tr("docwriter.include")}</div>
-                      <textarea
-                        rows={2}
-                        value={dedupeIncludeTitles()}
-                        onInput={(event) => setDedupeIncludeTitles(event.currentTarget.value)}
-                        placeholder={tr("docwriter.dedupe_include_placeholder")}
-                        class="mt-1 w-full rounded-lg border border-dls-border bg-dls-surface px-3 py-2 text-xs text-dls-text placeholder:text-dls-secondary focus:outline-none focus:ring-2 focus:ring-dls-accent/40"
-                      />
-                    </div>
-                    <div>
-                      <div class="text-[11px] text-dls-secondary">{tr("docwriter.exclude")}</div>
-                      <textarea
-                        rows={2}
-                        value={dedupeExcludeTitles()}
-                        onInput={(event) => setDedupeExcludeTitles(event.currentTarget.value)}
-                        placeholder={tr("docwriter.dedupe_exclude_placeholder")}
-                        class="mt-1 w-full rounded-lg border border-dls-border bg-dls-surface px-3 py-2 text-xs text-dls-text placeholder:text-dls-secondary focus:outline-none focus:ring-2 focus:ring-dls-accent/40"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <Show when={dedupeError()}>
-                  <div class="rounded-lg border border-red-11/30 bg-red-3/20 px-3 py-2 text-xs text-red-11 whitespace-pre-wrap break-words">
-                    {dedupeError()}
-                  </div>
-                </Show>
-              </div>
-            </div>
-
-            <div class="px-4 py-3 border-t border-dls-border flex items-center justify-end gap-2">
-              <button
-                type="button"
-                class="rounded-lg border border-dls-border bg-dls-surface px-3 py-1.5 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover"
-                onClick={closeModule}
-              >
-                {tr("docwriter.cancel")}
-              </button>
-              <button
-                type="button"
-                class="rounded-lg border border-dls-border bg-dls-surface px-3 py-1.5 text-xs text-dls-text hover:bg-dls-hover disabled:opacity-50"
-                onClick={() => void runDedupe()}
-                disabled={dedupeBusy() || dedupeSelected().size < 1}
-                title={dedupeSelected().size < 1 ? tr("docwriter.dedupe_select_at_least_one_short") : tr("docwriter.run_dedupe")}
-              >
-                <Show when={!dedupeBusy()} fallback={tr("docwriter.working")}>
-                  {tr("docwriter.run_dedupe")}
-                </Show>
-              </button>
-            </div>
-          </div>
-        </div>
-      </Show>
-
-      <Show when={moduleModal() === "preview"}>
-        <div
-          class="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) closeModule();
-          }}
-        >
-          <div
-            class="w-full max-w-xl rounded-2xl border border-dls-border bg-dls-surface shadow-2xl overflow-hidden"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <div class="flex items-center justify-between px-4 py-3 border-b border-dls-border">
-              <div class="min-w-0">
-                <div class="text-sm font-semibold text-dls-text truncate">{tr("docwriter.preview_pdf_title")}</div>
-                <div class="mt-1 text-[11px] text-dls-secondary truncate">
-                  {tr("docagent.target_prefix")} {targetDoc() ?? "—"}
-                </div>
-              </div>
-              <button
-                type="button"
-                class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text"
-                onClick={closeModule}
-                aria-label={tr("docwriter.close")}
-                title={tr("docwriter.close")}
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            <div class="p-4 space-y-3">
-              <div class="text-xs text-dls-secondary">
-                {tr("docwriter.preview_pdf_description")}
-              </div>
-              <Show when={previewError()}>
-                <div class="rounded-lg border border-red-11/30 bg-red-3/20 px-3 py-2 text-xs text-red-11 whitespace-pre-wrap break-words">
-                  {previewError()}
-                </div>
-              </Show>
-            </div>
-
-            <div class="px-4 py-3 border-t border-dls-border flex items-center justify-end gap-2">
-              <button
-                type="button"
-                class="rounded-lg border border-dls-border bg-dls-surface px-3 py-1.5 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover"
-                onClick={closeModule}
-              >
-                {tr("docwriter.cancel")}
-              </button>
-              <button
-                type="button"
-                class="rounded-lg border border-dls-border bg-dls-surface px-3 py-1.5 text-xs text-dls-text hover:bg-dls-hover disabled:opacity-50"
-                onClick={() => void runPreviewPdf()}
-                disabled={previewBusy()}
-              >
-                <Show when={!previewBusy()} fallback={tr("docwriter.working")}>
-                  {tr("docwriter.export_pdf")}
-                </Show>
-              </button>
-            </div>
-          </div>
-        </div>
-      </Show>
-
-      <Show when={moduleModal() === "qc"}>
-        <div
-          class="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) closeModule();
-          }}
-        >
-          <div
-            class="w-full max-w-xl rounded-2xl border border-dls-border bg-dls-surface shadow-2xl overflow-hidden"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <div class="flex items-center justify-between px-4 py-3 border-b border-dls-border">
-              <div class="min-w-0">
-                <div class="text-sm font-semibold text-dls-text truncate">{tr("docwriter.qc_title")}</div>
-                <div class="mt-1 text-[11px] text-dls-secondary truncate">
-                  {tr("docagent.target_prefix")} {targetDoc() ?? "—"}
-                </div>
-              </div>
-              <button
-                type="button"
-                class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text"
-                onClick={closeModule}
-                aria-label={tr("docwriter.close")}
-                title={tr("docwriter.close")}
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            <div class="p-4 space-y-3">
-              <div class="text-xs text-dls-secondary">
-                {tr("docwriter.qc_description")}
-              </div>
-              <div class="grid grid-cols-1 gap-2 rounded-xl border border-dls-border bg-dls-surface p-3">
-                <div class="flex items-center justify-between gap-3">
-                  <div class="min-w-0">
-                    <div class="text-xs font-semibold text-dls-text truncate">{tr("docwriter.mode")}</div>
-                    <div class="mt-1 text-[11px] text-dls-secondary">
-                      {tr("docwriter.qc_mode_description")}
-                    </div>
-                  </div>
-                  <select
-                    value={qcMode()}
-                    onChange={(event) => setQcMode(event.currentTarget.value === "submit" ? "submit" : "draft")}
-                    class="shrink-0 rounded-lg border border-dls-border bg-dls-surface px-3 py-1.5 text-xs text-dls-text focus:outline-none focus:ring-2 focus:ring-dls-accent/40"
-                    aria-label={tr("docwriter.qc_mode_label")}
-                    title={tr("docwriter.qc_mode_strictness")}
-                  >
-                    <option value="draft">{tr("docwriter.qc_mode_draft")}</option>
-                    <option value="submit">{tr("docwriter.qc_mode_submit")}</option>
-                  </select>
-                </div>
-              </div>
-              <Show when={qcError()}>
-                <div class="rounded-lg border border-red-11/30 bg-red-3/20 px-3 py-2 text-xs text-red-11 whitespace-pre-wrap break-words">
-                  {qcError()}
-                </div>
-              </Show>
-            </div>
-
-            <div class="px-4 py-3 border-t border-dls-border flex items-center justify-end gap-2">
-              <button
-                type="button"
-                class="rounded-lg border border-dls-border bg-dls-surface px-3 py-1.5 text-xs text-dls-secondary hover:text-dls-text hover:bg-dls-hover"
-                onClick={closeModule}
-              >
-                {tr("docwriter.cancel")}
-              </button>
-              <button
-                type="button"
-                class="rounded-lg border border-dls-border bg-dls-surface px-3 py-1.5 text-xs text-dls-text hover:bg-dls-hover disabled:opacity-50"
-                onClick={() => void runQc()}
-                disabled={qcBusy()}
-              >
-                <Show when={!qcBusy()} fallback={tr("docwriter.working")}>
-                  {tr("docwriter.run_qc")}
-                </Show>
-              </button>
-            </div>
-          </div>
-        </div>
       </Show>
     </div>
   );

@@ -7,7 +7,7 @@ export type OpenworkSessionPrefs = {
   [key: string]: unknown;
 };
 
-export type ResolvedSessionView = "session" | "document-agent";
+export type ResolvedSessionView = "session" | "document-agent" | "document-writer";
 export type ResolvedValueSource = "stored" | "legacy" | "default" | "none";
 
 export type ResolvedSessionPreference<T> = {
@@ -44,7 +44,8 @@ export const normalizeStoredAgent = (value: unknown): string | null => {
 
 const resolveStoredSessionView = (value: unknown): ResolvedSessionView | null => {
   const view = normalizeStoredView(value);
-  if (view === "document-writer" || view === "document-agent") return "document-agent";
+  if (view === "document-writer") return "document-writer";
+  if (view === "document-agent") return "document-agent";
   if (view === "session") return "session";
   return null;
 };
@@ -60,11 +61,11 @@ const inferLegacySessionPreferences = (title?: string | null): {
   }
 
   if (normalized.includes("document writer")) {
-    return { view: "document-agent", agent: "document-writer", agentLock: "document-writer" };
+    return { view: "document-writer", agent: "document-writer", agentLock: "document-writer" };
   }
 
   if (normalized.includes("bid writer")) {
-    return { view: "document-agent", agent: "bid-writer", agentLock: "document-writer" };
+    return { view: "document-writer", agent: "document-writer", agentLock: "document-writer" };
   }
 
   if (normalized.includes("bid dedupe")) {
@@ -76,7 +77,7 @@ const inferLegacySessionPreferences = (title?: string | null): {
   }
 
   if (normalized.includes("标书写作助手")) {
-    return { view: "document-agent", agent: "document-writer", agentLock: "document-writer" };
+    return { view: "document-writer", agent: "document-writer", agentLock: "document-writer" };
   }
 
   return { view: null, agent: null, agentLock: null };
@@ -104,6 +105,8 @@ export const resolveSessionPreferences = (input: {
   const agentLock =
     storedAgentLock !== null
       ? { value: storedAgentLock, source: "stored" as const }
+      : storedView === "document-writer"
+        ? { value: "document-writer", source: "default" as const }
       : !disableLegacyAgentHints && legacy.agentLock !== null
         ? { value: legacy.agentLock, source: "legacy" as const }
         : { value: null, source: "none" as const };
@@ -111,6 +114,8 @@ export const resolveSessionPreferences = (input: {
   const agent =
     storedAgent !== null
       ? { value: storedAgent, source: "stored" as const }
+      : storedView === "document-writer"
+        ? { value: "document-writer", source: "default" as const }
       : !disableLegacyAgentHints && legacy.agent !== null
         ? { value: legacy.agent, source: "legacy" as const }
         : { value: null, source: "none" as const };

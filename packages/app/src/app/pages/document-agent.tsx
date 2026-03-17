@@ -514,7 +514,7 @@ export default function DocumentAgentView(props: SessionViewProps) {
     const w = workspaceId();
     const s = sessionId();
     if (!w || !s) return "";
-    return `openwork.document-writer.ui.v1:${w}:${s}`;
+    return `openwork.document-agent.ui.v1:${w}:${s}`;
   });
 
   const readDocWriterState = (key: string): DocumentWriterUiState | null => {

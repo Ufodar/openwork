@@ -1701,6 +1701,7 @@ export function createWorkspaceStore(options: {
     openworkWorkspaceId?: string | null;
     directory?: string | null;
     displayName?: string | null;
+    navigate?: boolean;
     manageBusy?: boolean;
     closeModal?: boolean;
 
@@ -1811,6 +1812,7 @@ export function createWorkspaceStore(options: {
         reason: "workspace-create-remote",
       },
       resolvedAuth,
+      { navigate: input.navigate ?? true },
     );
 
     if (!ok) {
@@ -1920,6 +1922,7 @@ export function createWorkspaceStore(options: {
       openworkWorkspaceId?: string | null;
       directory?: string | null;
       displayName?: string | null;
+      navigate?: boolean;
     },
   ) {
     const id = workspaceId.trim();
@@ -2007,6 +2010,7 @@ export function createWorkspaceStore(options: {
           reason: "workspace-edit-remote",
         },
         resolvedAuth,
+        { navigate: input.navigate ?? true },
       );
       if (!ok) {
         updateWorkspaceConnectionState(id, {

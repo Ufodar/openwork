@@ -37,4 +37,17 @@ describe("resolveSessionPreferences", () => {
     expect(resolved.agent).toEqual({ value: "common-work", source: "legacy" });
     expect(resolved.agentLock).toEqual({ value: "common-work", source: "legacy" });
   });
+
+  test("defaults stored document-agent sessions without explicit agent back to common-work", () => {
+    const resolved = resolveSessionPreferences({
+      stored: {
+        view: "document-agent",
+      },
+      title: "New session - 2026-03-18T00:00:00.000Z",
+    });
+
+    expect(resolved.view).toEqual({ value: "document-agent", source: "stored" });
+    expect(resolved.agent).toEqual({ value: "common-work", source: "default" });
+    expect(resolved.agentLock).toEqual({ value: "common-work", source: "default" });
+  });
 });

@@ -2954,6 +2954,20 @@ export default function App() {
       title: options?.title,
     });
 
+  const mergeSessionPrefsForRemotePatch = (
+    remotePrefs: Record<string, OpenworkSessionPrefs> | null | undefined,
+    sessionId: string,
+  ): Record<string, OpenworkSessionPrefs> => {
+    const merged: Record<string, OpenworkSessionPrefs> = { ...(remotePrefs ?? {}) };
+    const localPrefs = openworkSessionPrefsById()[sessionId] ?? null;
+    if (!localPrefs) return merged;
+    merged[sessionId] = {
+      ...(merged[sessionId] ?? {}),
+      ...localPrefs,
+    };
+    return merged;
+  };
+
   const getStoredSessionPreferredAgent = (sessionId: string): string | null => {
     const id = sessionId.trim();
     if (!id) return null;
@@ -3059,11 +3073,12 @@ export default function App() {
       }
     }
 
-    const existing = basePrefs[id] ?? null;
+    const mergedBasePrefs = mergeSessionPrefsForRemotePatch(basePrefs, id);
+    const existing = mergedBasePrefs[id] ?? null;
     if (existing?.view === view) return;
 
     const nextPrefs = {
-      ...(basePrefs ?? {}),
+      ...mergedBasePrefs,
       [id]: {
         ...(existing ?? {}),
         view,
@@ -3143,12 +3158,13 @@ export default function App() {
       }
     }
 
-    const existing = basePrefs[id] ?? null;
+    const mergedBasePrefs = mergeSessionPrefsForRemotePatch(basePrefs, id);
+    const existing = mergedBasePrefs[id] ?? null;
     const existingAgent = normalizeStoredAgent(existing?.agent) ?? null;
     if (existingAgent === nextAgent) return;
 
     const nextPrefs: Record<string, OpenworkSessionPrefs> = {
-      ...(basePrefs ?? {}),
+      ...mergedBasePrefs,
       [id]: {
         ...(existing ?? {}),
       },
@@ -3241,13 +3257,14 @@ export default function App() {
       }
     }
 
-    const existing = basePrefs[id] ?? null;
+    const mergedBasePrefs = mergeSessionPrefsForRemotePatch(basePrefs, id);
+    const existing = mergedBasePrefs[id] ?? null;
     const existingLock = normalizeStoredAgent(existing?.agentLock) ?? null;
     const existingAgent = normalizeStoredAgent(existing?.agent) ?? null;
     if (existingLock === nextLock && (nextLock === null || existingAgent === nextLock)) return;
 
     const nextPrefs: Record<string, OpenworkSessionPrefs> = {
-      ...(basePrefs ?? {}),
+      ...mergedBasePrefs,
       [id]: {
         ...(existing ?? {}),
       },
@@ -3652,10 +3669,11 @@ export default function App() {
           openworkToken: token,
           displayName:
             activeWorkspace.displayName ??
-            activeWorkspace.openworkWorkspaceName ??
-            activeWorkspace.name ??
-            session.workspaceName,
+              activeWorkspace.openworkWorkspaceName ??
+              activeWorkspace.name ??
+              session.workspaceName,
           openworkWorkspaceId: targetWorkspaceId,
+          navigate: false,
         });
         if (!ok) {
           throw new Error("切换到目标工作区失败。");
@@ -3666,6 +3684,7 @@ export default function App() {
           openworkToken: token,
           displayName: session.workspaceName,
           openworkWorkspaceId: targetWorkspaceId,
+          navigate: false,
         });
         if (!ok) {
           throw new Error("创建目标工作区连接失败。");

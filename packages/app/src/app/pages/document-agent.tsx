@@ -424,13 +424,18 @@ export default function DocumentAgentView(props: SessionViewProps) {
     return url.toString();
   };
 
-  const fetchJson = async (url: string, token: string, init?: RequestInit) => {
+  const fetchJson = async (url: string, token: string, init?: RequestInit & { timeoutMs?: number }) => {
     const headers = new Headers(init?.headers);
     if (token && !headers.has("Authorization")) {
       headers.set("Authorization", `Bearer ${token}`);
     }
     const controller = typeof AbortController !== "undefined" && !init?.signal ? new AbortController() : null;
-    const timeoutMs = 12_000;
+    const timeoutMs =
+      typeof init?.timeoutMs === "number"
+        ? init.timeoutMs
+        : init?.body instanceof FormData
+          ? 300_000
+          : 12_000;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     if (controller && Number.isFinite(timeoutMs) && timeoutMs > 0) {
       timeoutId = setTimeout(() => {
@@ -952,6 +957,8 @@ export default function DocumentAgentView(props: SessionViewProps) {
     setUploadProgress({ phase: "preparing", done: 0, total: files.length, preserveRelativePath });
     setToastMessage(null);
     let skippedHiddenCount = 0;
+    let completedUploads = 0;
+    let refreshedDocuments = false;
     try {
       const query = new URLSearchParams();
       query.set("session", cfg.sessionId);
@@ -996,6 +1003,7 @@ export default function DocumentAgentView(props: SessionViewProps) {
           body: form,
         });
         done += 1;
+        completedUploads = done;
         setUploadProgress({
           phase: "uploading",
           done,
@@ -1010,6 +1018,7 @@ export default function DocumentAgentView(props: SessionViewProps) {
         preserveRelativePath,
       });
       await refetchDocuments();
+      refreshedDocuments = true;
       const uploadedMessage =
         uploadEntries.length === 1
           ? tr("docagent.uploaded_one_document")
@@ -1021,6 +1030,9 @@ export default function DocumentAgentView(props: SessionViewProps) {
       const message = error instanceof Error ? error.message : tr("docagent.failed_upload_documents");
       setToastMessage(skippedHiddenCount > 0 ? `${message}\n${hiddenSkipMessage(skippedHiddenCount)}` : message);
     } finally {
+      if (completedUploads > 0 && !refreshedDocuments) {
+        await refetchDocuments().catch(() => undefined);
+      }
       setUploadProgress(null);
       setUploadBusy(false);
     }

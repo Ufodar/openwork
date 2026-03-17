@@ -92,6 +92,7 @@ export const resolveSessionPreferences = (input: {
   const storedAgent = normalizeStoredAgent(stored?.agent);
   const storedAgentLock = normalizeStoredAgent(stored?.agentLock);
   const legacy = inferLegacySessionPreferences(input.title);
+  const storedDocumentAgentDefault = storedView === "document-agent" && storedAgent === null && storedAgentLock === null;
 
   const disableLegacyAgentHints = storedView === "session";
 
@@ -107,6 +108,8 @@ export const resolveSessionPreferences = (input: {
       ? { value: storedAgentLock, source: "stored" as const }
       : storedView === "document-writer"
         ? { value: "document-writer", source: "default" as const }
+      : storedDocumentAgentDefault
+        ? { value: "common-work", source: "default" as const }
       : !disableLegacyAgentHints && legacy.agentLock !== null
         ? { value: legacy.agentLock, source: "legacy" as const }
         : { value: null, source: "none" as const };
@@ -116,6 +119,8 @@ export const resolveSessionPreferences = (input: {
       ? { value: storedAgent, source: "stored" as const }
       : storedView === "document-writer"
         ? { value: "document-writer", source: "default" as const }
+      : storedDocumentAgentDefault
+        ? { value: "common-work", source: "default" as const }
       : !disableLegacyAgentHints && legacy.agent !== null
         ? { value: legacy.agent, source: "legacy" as const }
         : { value: null, source: "none" as const };

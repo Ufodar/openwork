@@ -1608,9 +1608,7 @@ export default function DocumentAgentView(props: SessionViewProps) {
     void refetchDocuments();
   });
 
-  const toolMonitorActive = createMemo(
-    () => Boolean(props.toolMonitorEnabled) && shouldAnalyzeForAgent(props.selectedSessionAgent),
-  );
+  const toolMonitorActive = createMemo(() => false);
 
   const sanitizeReportToken = (value: string) =>
     value
@@ -1730,6 +1728,8 @@ export default function DocumentAgentView(props: SessionViewProps) {
     );
   };
 
+  // Tool Monitor auto-trigger is temporarily disabled.
+  /*
   createEffect(
     on(
       () => props.sessionStatus ?? "idle",
@@ -1741,16 +1741,10 @@ export default function DocumentAgentView(props: SessionViewProps) {
       { defer: true },
     ),
   );
+  */
 
   const triggerExcellentToolMonitorRun = async () => {
-    if (!toolMonitorActive()) return;
-    if (toolMonitorManualTriggerBusy()) return;
-    setToolMonitorManualTriggerBusy(true);
-    try {
-      await analyzeAndPersistToolMonitorTurn({ force: true, trigger: "manual_excellent" });
-    } finally {
-      setToolMonitorManualTriggerBusy(false);
-    }
+    // Tool Monitor manual trigger is temporarily disabled.
   };
 
   onCleanup(() => {
@@ -2361,8 +2355,6 @@ export default function DocumentAgentView(props: SessionViewProps) {
           expanded={toolMonitorExpanded()}
           setExpanded={setToolMonitorExpanded}
           openDocument={(path) => setActiveDoc(path)}
-          triggerBusy={toolMonitorManualTriggerBusy()}
-          onTriggerExcellentRun={triggerExcellentToolMonitorRun}
         />
 
         <Show when={todoCount() > 0}>

@@ -2759,7 +2759,7 @@ export default function SessionView(props: SessionViewProps) {
                                       </Show>
                                       <button
                                         type="button"
-                                        class="h-6 w-6 rounded-md flex items-center justify-center text-dls-secondary hover:text-red-11 hover:bg-red-3/40 transition-colors opacity-0 group-hover:opacity-100"
+                                        class="h-6 w-6 rounded-md flex items-center justify-center text-dls-secondary hover:text-red-11 hover:bg-red-3/40 transition-colors opacity-100"
                                         title={tr("session.delete_session")}
                                         aria-label={tr("session.delete_session")}
                                         disabled={Boolean(deletingSessionId()) || deleteSessionBusy()}
@@ -2832,7 +2832,7 @@ export default function SessionView(props: SessionViewProps) {
                                         </Show>
                                         <button
                                           type="button"
-                                          class="h-6 w-6 rounded-md flex items-center justify-center text-dls-secondary hover:text-red-11 hover:bg-red-3/40 transition-colors opacity-0 group-hover:opacity-100"
+                                          class="h-6 w-6 rounded-md flex items-center justify-center text-dls-secondary hover:text-red-11 hover:bg-red-3/40 transition-colors opacity-100"
                                           title={tr("session.delete_session")}
                                           aria-label={tr("session.delete_session")}
                                           disabled={Boolean(deletingSessionId()) || deleteSessionBusy()}

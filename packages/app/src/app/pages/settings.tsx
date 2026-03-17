@@ -860,22 +860,14 @@ export default function SettingsView(props: SettingsViewProps) {
             <div class="bg-gray-2/30 border border-gray-7/60 rounded-2xl p-5 space-y-3">
               <div class="text-sm font-medium text-gray-12">Tool Monitor</div>
               <div class="text-xs text-gray-9">
-                Analyzes tool calls after each completed turn and saves a report in the session folder.
+                Temporarily disabled. No monitoring runs and no report writes are triggered.
               </div>
               <div class="pt-1 flex flex-wrap items-center gap-3">
-                <button
-                  type="button"
-                  class={`${compactOutlineActionClass} ${
-                    props.toolMonitorEnabled
-                      ? "border-green-7/35 bg-green-3/20 text-green-11 hover:bg-green-3/35 hover:text-green-11"
-                      : ""
-                  }`}
-                  onClick={props.toggleToolMonitorEnabled}
-                >
-                  {props.toolMonitorEnabled ? "Enabled" : "Disabled"}
-                </button>
+                <div class="inline-flex items-center rounded-full border border-amber-7/35 bg-amber-3/20 px-3 py-1 text-xs font-medium text-amber-11">
+                  Disabled
+                </div>
                 <div class="text-xs text-gray-10">
-                  {props.toolMonitorEnabled ? "Reports are generated after each run." : "No monitoring and no report writes."}
+                  The toggle is intentionally unavailable until this module is brought back.
                 </div>
               </div>
             </div>

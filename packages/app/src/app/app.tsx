@@ -2104,7 +2104,7 @@ export default function App() {
   const [modelPickerQuery, setModelPickerQuery] = createSignal("");
 
   const [showThinking, setShowThinking] = createSignal(true);
-  const [toolMonitorEnabled, setToolMonitorEnabled] = createSignal(true);
+  const [toolMonitorEnabled, setToolMonitorEnabled] = createSignal(false);
   const [hideTitlebar, setHideTitlebar] = createSignal(false);
 
   const workspaceStore = createWorkspaceStore({
@@ -5299,17 +5299,7 @@ export default function App() {
           }
         }
 
-        const storedToolMonitor = window.localStorage.getItem(TOOL_MONITOR_PREF_KEY);
-        if (storedToolMonitor != null) {
-          try {
-            const parsed = JSON.parse(storedToolMonitor);
-            if (typeof parsed === "boolean") {
-              setToolMonitorEnabled(parsed);
-            }
-          } catch {
-            // ignore
-          }
-        }
+        // Tool Monitor is temporarily disabled; ignore any previously stored local preference.
 
         const storedHideTitlebar = window.localStorage.getItem(HIDE_TITLEBAR_PREF_KEY);
         if (storedHideTitlebar != null) {
@@ -5733,10 +5723,7 @@ export default function App() {
   createEffect(() => {
     if (typeof window === "undefined") return;
     try {
-      window.localStorage.setItem(
-        TOOL_MONITOR_PREF_KEY,
-        JSON.stringify(toolMonitorEnabled())
-      );
+      window.localStorage.setItem(TOOL_MONITOR_PREF_KEY, JSON.stringify(false));
     } catch {
       // ignore
     }

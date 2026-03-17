@@ -6,12 +6,14 @@ import type { OpenCodeRouterStatus } from "../lib/tauri";
 import type { McpStatusMap } from "../types";
 import { getOpenCodeRouterStatus } from "../lib/tauri";
 import { currentLocale, t } from "../../i18n";
+import { filterStatusBarTipIds, shouldShowStatusBarSettings } from "./status-bar-visibility";
 
 import Button from "./button";
 
 type StatusBarProps = {
   clientConnected: boolean;
   openworkServerStatus: OpenworkServerStatus;
+  isAdminUser: boolean;
   developerMode: boolean;
   onOpenSettings: () => void;
   onOpenMessaging: () => void;
@@ -78,38 +80,43 @@ export default function StatusBar(props: StatusBarProps) {
     }
   };
 
-  const proTips = createMemo<ProTip[]>(() => [
-    {
-      id: "slack",
-      label: tr("status.connect_slack"),
-      enabled: () => {
-        const status = opencodeRouterStatus();
-        return Boolean(status && (status.slack.items?.length ?? 0) === 0);
+  const proTips = createMemo<ProTip[]>(() => {
+    const allTips: ProTip[] = [
+      {
+        id: "slack",
+        label: tr("status.connect_slack"),
+        enabled: () => {
+          const status = opencodeRouterStatus();
+          return Boolean(status && (status.slack.items?.length ?? 0) === 0);
+        },
+        action: () => runAction(props.onOpenMessaging),
       },
-      action: () => runAction(props.onOpenMessaging),
-    },
-    {
-      id: "telegram",
-      label: tr("status.connect_telegram"),
-      enabled: () => {
-        const status = opencodeRouterStatus();
-        return Boolean(status && (status.telegram.items?.length ?? 0) === 0);
+      {
+        id: "telegram",
+        label: tr("status.connect_telegram"),
+        enabled: () => {
+          const status = opencodeRouterStatus();
+          return Boolean(status && (status.telegram.items?.length ?? 0) === 0);
+        },
+        action: () => runAction(props.onOpenMessaging),
       },
-      action: () => runAction(props.onOpenMessaging),
-    },
-    {
-      id: "notion",
-      label: tr("status.connect_notion_mcp"),
-      enabled: () => notionStatus() !== "connected",
-      action: () => runAction(props.onOpenMcp),
-    },
-    {
-      id: "providers",
-      label: tr("status.use_own_models"),
-      enabled: () => props.clientConnected && providerConnectedCount() === 0,
-      action: () => runAction(props.onOpenProviders),
-    },
-  ]);
+      {
+        id: "notion",
+        label: tr("status.connect_notion_mcp"),
+        enabled: () => notionStatus() !== "connected",
+        action: () => runAction(props.onOpenMcp),
+      },
+      {
+        id: "providers",
+        label: tr("status.use_own_models"),
+        enabled: () => props.clientConnected && providerConnectedCount() === 0,
+        action: () => runAction(props.onOpenProviders),
+      },
+    ];
+
+    const visibleIds = new Set(filterStatusBarTipIds(allTips.map((tip) => tip.id), props.isAdminUser));
+    return allTips.filter((tip) => visibleIds.has(tip.id));
+  });
 
   const availableTips = createMemo<ProTip[]>(() => proTips().filter((tip: ProTip) => tip.enabled()));
   const [activeTip, setActiveTip] = createSignal<ProTip | null>(null);
@@ -228,17 +235,19 @@ export default function StatusBar(props: StatusBarProps) {
               <span class="text-gray-11 font-medium">{activeTip()?.label}</span>
             </button>
           </Show>
-          <Button
-            variant="ghost"
-            class="h-7 px-2.5 py-0 text-xs"
-            onClick={props.onOpenSettings}
-            title={tr("dashboard.settings")}
-          >
-            <Settings class="w-4 h-4" />
-            <Show when={props.developerMode}>
-              <span class="text-gray-11 font-medium">{tr("dashboard.settings")}</span>
-            </Show>
-          </Button>
+          <Show when={shouldShowStatusBarSettings(props.isAdminUser)}>
+            <Button
+              variant="ghost"
+              class="h-7 px-2.5 py-0 text-xs"
+              onClick={props.onOpenSettings}
+              title={tr("dashboard.settings")}
+            >
+              <Settings class="w-4 h-4" />
+              <Show when={props.developerMode}>
+                <span class="text-gray-11 font-medium">{tr("dashboard.settings")}</span>
+              </Show>
+            </Button>
+          </Show>
         </div>
       </div>
     </div>

@@ -119,6 +119,7 @@ export type SessionViewProps = {
   clientConnected: boolean;
   openworkServerStatus: OpenworkServerStatus;
   openworkServerClient: OpenworkServerClient | null;
+  isAdminUser: boolean;
   openworkServerSettings: OpenworkServerSettings;
   openworkServerHostInfo: OpenworkServerInfo | null;
   openworkServerWorkspaceId: string | null;
@@ -3421,6 +3422,7 @@ export default function SessionView(props: SessionViewProps) {
         <StatusBar
           clientConnected={props.clientConnected}
           openworkServerStatus={props.openworkServerStatus}
+          isAdminUser={props.isAdminUser}
           developerMode={props.developerMode}
           onOpenSettings={() => openSettings("general")}
           onOpenMessaging={openConfig}

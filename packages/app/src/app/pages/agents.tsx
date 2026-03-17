@@ -5,6 +5,7 @@ import { AlertTriangle, Bot, Code2, FileText, Folder, Loader2, MessageSquare, Re
 import Button from "../components/button";
 import type { CreateSessionOptions, View } from "../types";
 import { currentLocale, t } from "../../i18n";
+import { filterVisibleFeaturedAgents, SHOW_STANDALONE_NEW_SESSION_BUTTON } from "./agents-visibility";
 
 interface AgentType {
   id: string;
@@ -98,6 +99,8 @@ export default function AgentsView(props: AgentsViewProps) {
     });
   });
 
+  const visibleAgentTypes = createMemo(() => filterVisibleFeaturedAgents(agentTypes));
+
   const refreshAgents = async (options?: { force?: boolean }) => {
     if (agentsBusy() && !options?.force) return;
     setAgentsBusy(true);
@@ -161,7 +164,9 @@ export default function AgentsView(props: AgentsViewProps) {
             </Show>
             {tr("common.refresh")}
           </Button>
-          <Button onClick={() => props.createSessionAndOpen()}>{tr("agents.new_session")}</Button>
+          <Show when={SHOW_STANDALONE_NEW_SESSION_BUTTON}>
+            <Button onClick={() => props.createSessionAndOpen()}>{tr("agents.new_session")}</Button>
+          </Show>
         </div>
       </div>
 
@@ -183,7 +188,7 @@ export default function AgentsView(props: AgentsViewProps) {
         </div>
 
         <div class="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          <For each={agentTypes}>
+          <For each={visibleAgentTypes()}>
             {(featured) => {
               const Icon = featured.icon;
               const available = () => isFeaturedAgentAvailable(featured);

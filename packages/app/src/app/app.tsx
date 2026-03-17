@@ -52,6 +52,12 @@ import {
   resolveSessionPreferences,
 } from "./lib/session-preferences";
 import {
+  isDocumentSessionView,
+  resolveAppRouteView,
+  routeForSessionView,
+  type AppRouteView,
+} from "./lib/session-view-routing";
+import {
   DEFAULT_MODEL,
   HIDE_TITLEBAR_PREF_KEY,
   MCP_QUICK_CONNECT,
@@ -173,6 +179,7 @@ import SessionView from "./pages/session";
 import ProtoWorkspacesView from "./pages/proto-workspaces";
 import ProtoV1UxView from "./pages/proto-v1-ux";
 import DocumentAgentView from "./pages/document-agent";
+import DocumentWriterView from "./pages/document-writer";
 import LoginView from "./pages/login";
 
 type RemoteWorkspaceDefaults = {
@@ -291,6 +298,7 @@ export default function App() {
   let queuedDocumentAgentRedirect:
     | {
       sessionId: string;
+      view: "document-agent" | "document-writer";
       timer: number;
     }
     | null = null;
@@ -303,17 +311,7 @@ export default function App() {
 
   const [creatingSession, setCreatingSession] = createSignal(false);
   const [sessionViewLockUntil, setSessionViewLockUntil] = createSignal(0);
-  type AppRouteView = "onboarding" | "dashboard" | "session" | "proto" | "document-agent" | "login";
-  const currentView = createMemo<AppRouteView>(() => {
-    const path = location.pathname.toLowerCase();
-    if (path.startsWith("/login")) return "login";
-    if (path.startsWith("/onboarding")) return "onboarding";
-    if (path.startsWith("/session")) return "session";
-    if (path.startsWith("/proto")) return "proto";
-    if (path.startsWith("/document-writer")) return "document-agent";
-    if (path.startsWith("/document-agent")) return "document-agent";
-    return "dashboard";
-  });
+  const currentView = createMemo<AppRouteView>(() => resolveAppRouteView(location.pathname));
   const OPENWORK_WEB_AUTH_USER_KEY = "openwork.web.auth.user";
   const readWebAuthUser = () => {
     if (typeof window === "undefined") return null;
@@ -393,14 +391,14 @@ export default function App() {
       navigate("/session");
       return;
     }
-    if (next === "document-writer" || next === "document-agent") {
+    if (isDocumentSessionView(next)) {
       if (sessionId) {
-        goToDocumentAgent(sessionId);
+        goToSessionView(next, sessionId);
         return;
       }
       const fallback = activeSessionId();
       if (fallback) {
-        goToDocumentAgent(fallback);
+        goToSessionView(next, fallback);
         return;
       }
       navigate("/session");
@@ -419,34 +417,50 @@ export default function App() {
   };
 
   const goToDocumentAgent = (sessionId: string, options?: { replace?: boolean }) => {
+    goToSessionView("document-agent", sessionId, options);
+  };
+
+  const goToDocumentWriter = (sessionId: string, options?: { replace?: boolean }) => {
+    goToSessionView("document-writer", sessionId, options);
+  };
+
+  const goToSessionView = (
+    view: "document-agent" | "document-writer",
+    sessionId: string,
+    options?: { replace?: boolean },
+  ) => {
     const trimmed = sessionId.trim();
     if (!trimmed) {
       navigate("/session", options);
       return;
     }
-    navigate(`/document-agent/${trimmed}`, options);
+    navigate(routeForSessionView(view, trimmed), options);
   };
 
-  const queueDocumentAgentRedirect = (sessionId: string, options?: { title?: string | null }) => {
+  const queueDocumentAgentRedirect = (
+    sessionId: string,
+    view: "document-agent" | "document-writer",
+    options?: { title?: string | null },
+  ) => {
     const trimmed = sessionId.trim();
     if (!trimmed || typeof window === "undefined") return;
-    if (queuedDocumentAgentRedirect?.sessionId === trimmed) return;
+    if (queuedDocumentAgentRedirect?.sessionId === trimmed && queuedDocumentAgentRedirect.view === view) return;
 
     clearQueuedDocumentAgentRedirect();
 
     const timer = window.setTimeout(() => {
       const queued = queuedDocumentAgentRedirect;
       queuedDocumentAgentRedirect = null;
-      if (!queued || queued.sessionId !== trimmed) return;
+      if (!queued || queued.sessionId !== trimmed || queued.view !== view) return;
       const expectedSessionPath = `/session/${trimmed.toLowerCase()}`;
       if (location.pathname.trim().toLowerCase() !== expectedSessionPath) return;
       if (new URLSearchParams(location.search).get("view") === "session") return;
       const preferred = resolveSessionPreferenceState(trimmed, { title: options?.title }).view.value;
-      if (preferred !== "document-agent") return;
-      goToDocumentAgent(trimmed, { replace: true });
+      if (preferred !== view) return;
+      goToSessionView(view, trimmed, { replace: true });
     }, 0);
 
-    queuedDocumentAgentRedirect = { sessionId: trimmed, timer };
+    queuedDocumentAgentRedirect = { sessionId: trimmed, view, timer };
   };
 
   onCleanup(() => {
@@ -3284,6 +3298,13 @@ export default function App() {
     persistSessionPreferredView(sessionId, "document-agent").catch(() => undefined);
   });
 
+  createEffect(() => {
+    if (currentView() !== "document-writer") return;
+    const sessionId = activeSessionId();
+    if (!sessionId) return;
+    persistSessionPreferredView(sessionId, "document-writer").catch(() => undefined);
+  });
+
   const openSessionInPreferredView = async (sessionId: string, options?: { title?: string | null }): Promise<void> => {
     const id = sessionId.trim();
     if (!id) return;
@@ -3314,8 +3335,8 @@ export default function App() {
     }
 
     setView(resolved, id);
-    if (resolved === "document-agent" && resolvedPrefs.view.source === "legacy") {
-      persistSessionPreferredView(id, "document-agent").catch(() => undefined);
+    if (isDocumentSessionView(resolved) && resolvedPrefs.view.source === "legacy") {
+      persistSessionPreferredView(id, resolved).catch(() => undefined);
     }
   };
 
@@ -3330,8 +3351,8 @@ export default function App() {
           null;
         const resolvedPrefs = resolveSessionPreferenceState(sessionId, { title });
         const resolvedLock = resolvedPrefs.agentLock.value;
-        if (resolvedPrefs.view.value === "document-agent" && resolvedPrefs.view.source === "legacy") {
-          persistSessionPreferredView(sessionId, "document-agent").catch(() => undefined);
+        if (isDocumentSessionView(resolvedPrefs.view.value) && resolvedPrefs.view.source === "legacy") {
+          persistSessionPreferredView(sessionId, resolvedPrefs.view.value).catch(() => undefined);
         }
         if (resolvedLock) {
           if (resolvedPrefs.agentLock.source === "legacy") {
@@ -5127,13 +5148,13 @@ export default function App() {
         persistSessionPreferredAgent(session.id, requestedAgent).catch(() => undefined);
       }
 
-      if (nextView === "document-writer" || nextView === "document-agent") {
-        persistSessionPreferredView(session.id, "document-agent").catch(() => undefined);
+      if (isDocumentSessionView(nextView)) {
+        persistSessionPreferredView(session.id, nextView).catch(() => undefined);
       }
 
       // setSessionViewLockUntil(Date.now() + 1200);
-      if (nextView === "document-writer" || nextView === "document-agent") {
-        goToDocumentAgent(session.id);
+      if (isDocumentSessionView(nextView)) {
+        goToSessionView(nextView, session.id);
       } else {
         goToSession(session.id);
       }
@@ -6492,8 +6513,8 @@ export default function App() {
       if (!forcedView) {
         const title = sessions().find((session) => session.id === id)?.title ?? null;
         const resolved = resolveSessionPreferenceState(id, { title }).view.value;
-        if (resolved === "document-agent") {
-          queueDocumentAgentRedirect(id, { title });
+        if (isDocumentSessionView(resolved)) {
+          queueDocumentAgentRedirect(id, resolved, { title });
         }
 
         void (async () => {
@@ -6506,8 +6527,8 @@ export default function App() {
           if (new URLSearchParams(location.search).get("view") === "session") return;
           const nextTitle = sessions().find((session) => session.id === id)?.title ?? null;
           const preferred = resolveSessionPreferenceState(id, { title: nextTitle }).view.value;
-          if (preferred === "document-agent") {
-            queueDocumentAgentRedirect(id, { title: nextTitle });
+          if (isDocumentSessionView(preferred)) {
+            queueDocumentAgentRedirect(id, preferred, { title: nextTitle });
             return;
           }
         })();
@@ -6522,7 +6543,7 @@ export default function App() {
       if (!id) {
         const fallback = activeSessionId();
         if (fallback) {
-          goToDocumentAgent(fallback, { replace: true });
+          goToDocumentWriter(fallback, { replace: true });
         } else {
           navigate("/session", { replace: true });
         }
@@ -6537,8 +6558,7 @@ export default function App() {
         return;
       }
 
-      // Redirect old /document-writer/<sid> URLs to /document-agent/<sid>
-      goToDocumentAgent(id, { replace: true });
+      ensureRouteSessionHydrated(id);
       return;
     }
 
@@ -6631,6 +6651,9 @@ export default function App() {
         </Match>
         <Match when={currentView() === "document-agent"}>
           <DocumentAgentView {...sessionProps()} />
+        </Match>
+        <Match when={currentView() === "document-writer"}>
+          <DocumentWriterView {...sessionProps()} />
         </Match>
         <Match when={true}>
           <DashboardView {...dashboardProps()} />

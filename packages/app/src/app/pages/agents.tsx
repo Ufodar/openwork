@@ -5,7 +5,11 @@ import { AlertTriangle, Bot, Code2, FileText, Folder, Loader2, MessageSquare, Re
 import Button from "../components/button";
 import type { CreateSessionOptions, View } from "../types";
 import { currentLocale, t } from "../../i18n";
-import { filterVisibleFeaturedAgents, SHOW_STANDALONE_NEW_SESSION_BUTTON } from "./agents-visibility";
+import {
+  filterVisibleFeaturedAgents,
+  resolveFeaturedAgentLaunch,
+  SHOW_STANDALONE_NEW_SESSION_BUTTON,
+} from "./agents-visibility";
 
 interface AgentType {
   id: string;
@@ -51,7 +55,7 @@ export default function AgentsView(props: AgentsViewProps) {
   const [agentsBusy, setAgentsBusy] = createSignal(false);
   const [agentsError, setAgentsError] = createSignal<string | null>(null);
   const [searchQuery, setSearchQuery] = createSignal("");
-  const docWriterAgents = new Set(["document-writer", "bid-writer", "bid-dedupe"]);
+  const docWriterAgents = new Set(["document-writer"]);
 
   const normalizeAgentKey = (value: string) =>
     value
@@ -122,22 +126,10 @@ export default function AgentsView(props: AgentsViewProps) {
 
   function handleFeaturedClick(featured: AgentType) {
     if (featured.status === "coming-soon") return;
-
-    if (featured.id === "general-assistant") {
-      props.createSessionAndOpen({ view: "session" });
-      return;
-    }
-
-    if (featured.id === "document-agent" || featured.id === "document-writer") {
-      const fallback = featured.id === "document-agent" ? "common-work" : "document-writer";
-      const agent = resolveFeaturedAgentName(featured) ?? fallback;
-      props.createSessionAndOpen({ agent, agentLock: agent, view: "document-agent" });
-      return;
-    }
-
     if (!isFeaturedAgentAvailable(featured)) return;
     const agent = resolveFeaturedAgentName(featured);
-    props.createSessionAndOpen({ agent });
+    const launch = resolveFeaturedAgentLaunch(featured.id, agent);
+    props.createSessionAndOpen(launch ?? undefined);
   }
 
   return (
@@ -281,7 +273,8 @@ export default function AgentsView(props: AgentsViewProps) {
                     props.createSessionAndOpen({
                       title: agent.name,
                       agent: agent.name,
-                      view: docWriterAgents.has(normalizeAgentKey(agent.name)) ? "document-agent" : "session",
+                      agentLock: docWriterAgents.has(normalizeAgentKey(agent.name)) ? "document-writer" : null,
+                      view: docWriterAgents.has(normalizeAgentKey(agent.name)) ? "document-writer" : "session",
                     })
                   }
                 >

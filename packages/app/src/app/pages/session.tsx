@@ -3235,6 +3235,7 @@ export default function SessionView(props: SessionViewProps) {
           <MessageList
             messages={batchedRenderedMessages()}
             isStreaming={showRunIndicator()}
+            sessionStatus={props.sessionStatus}
             developerMode={props.developerMode}
             showThinking={props.showThinking}
             workspaceRoot={props.activeWorkspaceRoot}
@@ -3255,8 +3256,8 @@ export default function SessionView(props: SessionViewProps) {
                     >
                       <div class="flex items-center gap-2">
                         <span
-                          class={`h-1.5 w-1.5 rounded-full shrink-0 ${
-                            runPhase() === "error" ? "bg-red-9" : "bg-gray-8 animate-pulse"
+                          class={`h-2 w-2 rounded-full shrink-0 ${
+                            runPhase() === "error" ? "bg-red-9" : "session-running-dot"
                           }`}
                         />
                         <span class="truncate">{thinkingStatus() || runLabel()}</span>

@@ -23,6 +23,8 @@ import { TokenService } from "./tokens.js";
 import { AuthService, type AuthIdentity } from "./auth.js";
 import { SessionOwnershipService } from "./session-ownership.js";
 import { buildSessionPermissionRules, provisionSessionWorkspace, SessionWorkspaceService, sessionDirectoryBelongsToWorkspace } from "./session-workspaces.js";
+import { RuntimeMaintenanceService, isRuntimeMaintenanceBlockingNewWork, type RuntimeMaintenanceState } from "./runtime-maintenance.js";
+import { SessionActivityService } from "./session-activity.js";
 import { TOY_UI_CSS, TOY_UI_HTML, TOY_UI_JS, cssResponse, htmlResponse, jsResponse } from "./toy-ui.js";
 import pkg from "../package.json" with { type: "json" };
 import { createDocumentRoutes } from "./document.js";
@@ -271,8 +273,20 @@ export function startServer(config: ServerConfig) {
   const sessionOwnership = new SessionOwnershipService();
   const sessionWorkspaces = new SessionWorkspaceService();
   const logger = createServerLogger(config);
+  const runtimeMaintenance = new RuntimeMaintenanceService();
+  const sessionActivity = new SessionActivityService(logger);
   const workspaceCatalogReady = preloadPersistedUserWorkspaces(config, auth, logger);
-  const routes = createRoutes(config, approvals, tokens, auth, sessionOwnership, sessionWorkspaces, logger);
+  const routes = createRoutes(
+    config,
+    approvals,
+    tokens,
+    auth,
+    sessionOwnership,
+    sessionWorkspaces,
+    runtimeMaintenance,
+    sessionActivity,
+    logger,
+  );
 
   void workspaceCatalogReady.finally(() => {
     runStartupInboxGuard(config, logger);
@@ -337,6 +351,8 @@ export function startServer(config: ServerConfig) {
             actor,
             sessionOwnership,
             sessionWorkspaces,
+            runtimeMaintenance,
+            sessionActivity,
           });
           return finalize(response);
         } catch (error) {
@@ -407,6 +423,8 @@ export function startServer(config: ServerConfig) {
             actor,
             sessionOwnership,
             sessionWorkspaces,
+            runtimeMaintenance,
+            sessionActivity,
           });
           return finalize(response);
         } catch (error) {
@@ -810,6 +828,82 @@ export async function countAdminSessionsByOwner(
   return counts;
 }
 
+async function listRuntimeActiveSessions(
+  config: ServerConfig,
+  sessionWorkspaces: SessionWorkspaceService,
+  sessionActivity: SessionActivityService,
+) {
+  const tracked = sessionActivity.listActiveSessions();
+  const items = await Promise.all(tracked.map(async (entry) => {
+    const workspace = config.workspaces.find((candidate) => candidate.id === entry.workspaceId);
+    const runtime = workspace
+      ? await sessionWorkspaces.getWorkspace(workspace.id, entry.sessionId)
+      : null;
+    return {
+      workspaceId: entry.workspaceId,
+      workspaceName: workspace ? workspaceLabel(workspace) : entry.workspaceId,
+      sessionId: entry.sessionId,
+      startedAt: entry.startedAt,
+      lastEventAt: entry.lastEventAt,
+      runtimeDir: runtime?.runtimeDir ?? null,
+    };
+  }));
+  return items.sort((left, right) => left.startedAt - right.startedAt);
+}
+
+async function buildRuntimeMaintenanceStatus(input: {
+  config: ServerConfig;
+  sessionWorkspaces: SessionWorkspaceService;
+  runtimeMaintenance: RuntimeMaintenanceService;
+  sessionActivity: SessionActivityService;
+}) {
+  for (const workspace of input.config.workspaces) {
+    if (!workspace.baseUrl?.trim()) continue;
+    await input.sessionActivity.ensureWorkspace(workspace);
+  }
+  const activeSessions = await listRuntimeActiveSessions(input.config, input.sessionWorkspaces, input.sessionActivity);
+  return {
+    ...input.runtimeMaintenance.getState(),
+    activeSessionCount: activeSessions.length,
+    activeSessions,
+  };
+}
+
+async function abortRuntimeActiveSessions(input: {
+  config: ServerConfig;
+  sessionWorkspaces: SessionWorkspaceService;
+  sessionActivity: SessionActivityService;
+}) {
+  const activeSessions = await listRuntimeActiveSessions(input.config, input.sessionWorkspaces, input.sessionActivity);
+  const results = await Promise.all(activeSessions.map(async (entry) => {
+    const workspace = input.config.workspaces.find((candidate) => candidate.id === entry.workspaceId);
+    if (!workspace) {
+      return { ...entry, status: "workspace_missing" as const };
+    }
+    const runtimeWorkspace = entry.runtimeDir
+      ? workspaceWithDirectory(workspace, entry.runtimeDir)
+      : workspace;
+    try {
+      await fetchOpencodeJson(runtimeWorkspace, `/session/${encodeURIComponent(entry.sessionId)}/abort`, {
+        method: "POST",
+      });
+      return { ...entry, status: "requested" as const };
+    } catch (error) {
+      return {
+        ...entry,
+        status: "error" as const,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }));
+
+  return {
+    activeSessionCount: activeSessions.length,
+    abortsRequested: results.filter((item) => item.status === "requested").length,
+    items: results,
+  };
+}
+
 function buildOpenCodeRouterProxyUrl(baseUrl: string, path: string, search: string) {
   const target = new URL(baseUrl);
   const trimmedPath = path.replace(/^\/opencode-router/, "");
@@ -827,6 +921,8 @@ export async function proxyOpencodeRequest(input: {
   actor?: Actor;
   sessionOwnership: SessionOwnershipService;
   sessionWorkspaces: SessionWorkspaceService;
+  runtimeMaintenance?: RuntimeMaintenanceService;
+  sessionActivity?: SessionActivityService;
 }) {
   const workspace = input.workspace;
   const baseUrl = workspace?.baseUrl?.trim() ?? "";
@@ -888,6 +984,13 @@ export async function proxyOpencodeRequest(input: {
   }
 
   const method = input.request.method.toUpperCase();
+  if (workspace && input.sessionActivity) {
+    await input.sessionActivity.ensureWorkspace(workspace);
+  }
+  const maintenanceState = input.runtimeMaintenance?.getState() ?? { mode: "idle", requestedAt: null, reason: null, force: false } satisfies RuntimeMaintenanceState;
+  if (isRuntimeMaintenanceBlockingNewWork(maintenanceState, method, normalizedProxyPath)) {
+    throw buildRuntimeMaintenanceProxyError(maintenanceState);
+  }
   const requestDirectory = input.url.searchParams.get("directory")?.trim() ?? "";
   const shouldScopeSessionList = Boolean(
     workspace &&
@@ -919,6 +1022,10 @@ export async function proxyOpencodeRequest(input: {
 
   let provisionedRuntime: { runtimeId: string; runtimeDir: string } | null = null;
   let body: BodyInit | undefined = method === "GET" || method === "HEAD" ? undefined : (input.request.body ?? undefined);
+  const startsSessionRun = method === "POST" && /^\/session\/[^/]+\/(prompt|prompt_async|command|shell)$/.test(normalizedProxyPath);
+  if (workspace && workspaceId && pathSessionId && startsSessionRun) {
+    input.sessionActivity?.notePromptStart(workspaceId, pathSessionId);
+  }
   if (workspace && workspaceId && requesterKey && method === "POST" && normalizedProxyPath === "/session") {
     provisionedRuntime = await provisionSessionWorkspace(workspace.path);
     targetUrl.searchParams.set("directory", provisionedRuntime.runtimeDir);
@@ -1013,6 +1120,7 @@ export async function proxyOpencodeRequest(input: {
     if (workspaceId && method === "DELETE" && pathSessionId && response.ok) {
       await input.sessionOwnership.removeOwner(workspaceId, pathSessionId);
       await input.sessionWorkspaces.removeWorkspace(workspaceId, pathSessionId);
+      input.sessionActivity?.removeSession(workspaceId, pathSessionId);
       if (runtimeDirectory) {
         await rm(runtimeDirectory, { recursive: true, force: true }).catch(() => undefined);
       }
@@ -1022,8 +1130,15 @@ export async function proxyOpencodeRequest(input: {
       await rm(provisionedRuntime.runtimeDir, { recursive: true, force: true }).catch(() => undefined);
     }
 
+    if (!response.ok && workspaceId && pathSessionId && startsSessionRun) {
+      input.sessionActivity?.removeSession(workspaceId, pathSessionId);
+    }
+
     return response;
   } catch (error) {
+    if (workspaceId && pathSessionId && startsSessionRun) {
+      input.sessionActivity?.removeSession(workspaceId, pathSessionId);
+    }
     if (provisionedRuntime) {
       await rm(provisionedRuntime.runtimeDir, { recursive: true, force: true }).catch(() => undefined);
     }
@@ -1096,6 +1211,24 @@ async function proxyOpenCodeRouterRequest(input: {
       error: error instanceof Error ? error.message : String(error),
     });
   }
+}
+
+function buildRuntimeMaintenanceProxyError(state: RuntimeMaintenanceState): ApiError {
+  const mode = state.mode === "restarting" ? "restarting" : "draining";
+  const reason = state.reason?.trim() ?? "";
+  return new ApiError(
+    503,
+    `server_${mode}`,
+    mode === "restarting"
+      ? "Server is restarting. Please retry after maintenance completes."
+      : "Server is draining for restart. New tasks are temporarily blocked.",
+    {
+      mode: state.mode,
+      requestedAt: state.requestedAt,
+      reason: reason || undefined,
+      force: state.force,
+    },
+  );
 }
 
 function jsonResponse(data: unknown, status = 200) {
@@ -1719,6 +1852,8 @@ function createRoutes(
   auth: AuthService,
   sessionOwnership: SessionOwnershipService,
   sessionWorkspaces: SessionWorkspaceService,
+  runtimeMaintenance: RuntimeMaintenanceService,
+  sessionActivity: SessionActivityService,
   logger: ServerLogger,
 ): Route[] {
   const routes: Route[] = [];
@@ -1931,6 +2066,62 @@ function createRoutes(
       items,
       warnings: scanned.warnings,
     });
+  });
+
+  addRoute(routes, "GET", "/admin/runtime/restart", "host", async () => {
+    const status = await buildRuntimeMaintenanceStatus({
+      config,
+      sessionWorkspaces,
+      runtimeMaintenance,
+      sessionActivity,
+    });
+    return jsonResponse(status);
+  });
+
+  addRoute(routes, "POST", "/admin/runtime/restart", "host", async (ctx) => {
+    const body = await readJsonBody(ctx.request);
+    const mode = typeof body.mode === "string" ? body.mode.trim() : "";
+    const reason = typeof body.reason === "string" ? body.reason : null;
+
+    if (mode === "clear") {
+      const state = runtimeMaintenance.clear();
+      const status = await buildRuntimeMaintenanceStatus({
+        config,
+        sessionWorkspaces,
+        runtimeMaintenance,
+        sessionActivity,
+      });
+      return jsonResponse({ ok: true, state, ...status });
+    }
+
+    if (mode === "drain") {
+      const state = runtimeMaintenance.enterDraining(reason);
+      const status = await buildRuntimeMaintenanceStatus({
+        config,
+        sessionWorkspaces,
+        runtimeMaintenance,
+        sessionActivity,
+      });
+      return jsonResponse({ ok: true, state, ...status });
+    }
+
+    if (mode === "force") {
+      const state = runtimeMaintenance.enterRestarting(reason, true);
+      const aborts = await abortRuntimeActiveSessions({
+        config,
+        sessionWorkspaces,
+        sessionActivity,
+      });
+      const status = await buildRuntimeMaintenanceStatus({
+        config,
+        sessionWorkspaces,
+        runtimeMaintenance,
+        sessionActivity,
+      });
+      return jsonResponse({ ok: true, state, aborts, ...status });
+    }
+
+    throw new ApiError(400, "invalid_payload", "mode must be one of: drain, force, clear");
   });
 
   addRoute(routes, "POST", "/tokens", "host", async (ctx) => {

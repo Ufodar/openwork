@@ -2,13 +2,17 @@ import { For, Match, Show, Switch, createEffect, createMemo, createSignal, onCle
 import { marked } from "marked";
 import type { Part } from "@opencode-ai/sdk/v2/client";
 import { File, Loader2 } from "lucide-solid";
+import type { MessageInfo } from "../types";
 import { isTauriRuntime, safeStringify, summarizeStep } from "../utils";
 import { usePlatform } from "../context/platform";
 import { perfNow, recordPerfLog } from "../lib/perf-log";
+import { resolveToolPartDisplayStatus } from "../lib/tool-part-status";
 import { currentLocale, t } from "../../i18n";
 
 type Props = {
   part: Part;
+  messageInfo?: MessageInfo | null;
+  sessionStatus?: string;
   developerMode?: boolean;
   showThinking?: boolean;
   tone?: "light" | "dark";
@@ -688,11 +692,15 @@ export default function PartView(props: Props) {
     if (title) return localizeToolText(title);
     return localizeToolText(toolState()?.title ? String(toolState().title) : toolName());
   };
-  const toolStatus = () => (toolState()?.status ? String(toolState().status) : "unknown");
+  const toolStatus = () => resolveToolPartDisplayStatus(p(), {
+    sessionStatus: props.sessionStatus,
+    messageInfo: props.messageInfo ?? null,
+  });
   const toolStatusLabel = () => {
     const status = toolStatus().toLowerCase();
     if (status === "completed" || status === "done") return tr("session.tool_status_completed");
     if (status === "running" || status === "pending") return tr("session.tool_status_running");
+    if (status === "stale") return tr("session.tool_status_interrupted");
     if (status === "error" || status === "failed") return tr("session.tool_status_error");
     return tr("session.tool_status_unknown");
   };
@@ -937,8 +945,10 @@ export default function PartView(props: Props) {
                 class={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
                   toolStatus() === "completed"
                     ? "bg-green-3/15 text-green-12"
-                    : toolStatus() === "running"
+                    : toolStatus() === "running" || toolStatus() === "pending"
                       ? "bg-blue-3/15 text-blue-12"
+                      : toolStatus() === "stale"
+                        ? "bg-amber-3/20 text-amber-12"
                       : toolStatus() === "error"
                         ? "bg-red-3/15 text-red-12"
                         : "bg-gray-2/10 text-gray-12"

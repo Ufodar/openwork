@@ -2419,6 +2419,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
           >
             <MessageList
               messages={props.messages}
+              sessionStatus={props.sessionStatus}
               developerMode={props.developerMode}
               showThinking={props.showThinking}
               expandedStepIds={props.expandedStepIds}

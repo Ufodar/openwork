@@ -11,6 +11,11 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 RUNTIME_ENV_DIR_DEFAULT="$HOME/.config/openwork"
 RUNTIME_GENERATED_ENV_FILE_NAME="generated-secrets.env"
 PULL_REQUESTED=""
+FORCE_RESTART=""
+RUNTIME_CONTROL_SUPPORTED="0"
+RUNTIME_CONTROL_CLEANUP_REQUIRED="0"
+RUNTIME_KILL_PHASE_STARTED="0"
+OPENWORK_DRAIN_TIMEOUT_SECONDS_DEFAULT=900
 
 # ---- Bun path ----
 export PATH="$HOME/.bun/bin:$HOME/.opencode/bin:$HOME/.local/bin:$PATH"
@@ -43,9 +48,10 @@ PY
 
 usage() {
     cat <<'EOF'
-Usage: bash scripts/restart-pod.sh [--pull]
+Usage: bash scripts/restart-pod.sh [--pull] [--force]
 
   --pull    Run git pull + dependency sync before restarting
+  --force   Interrupt active sessions and restart immediately
   --help    Show this help
 EOF
 }
@@ -54,6 +60,9 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --pull)
             PULL_REQUESTED="1"
+            ;;
+        --force)
+            FORCE_RESTART="1"
             ;;
         --help|-h)
             usage
@@ -578,9 +587,188 @@ wait_for_http_ok() {
     return 1
 }
 
+runtime_restart_api_url() {
+    printf 'http://127.0.0.1:%s/admin/runtime/restart\n' "$OPENWORK_PORT"
+}
+
+read_json_field() {
+    local field="$1"
+    python3 - "$field" <<'PY'
+import json
+import sys
+
+field = sys.argv[1]
+try:
+    payload = json.load(sys.stdin)
+except Exception:
+    print("")
+    raise SystemExit(0)
+
+value = payload.get(field)
+if value is None:
+    print("")
+elif isinstance(value, (dict, list)):
+    print(json.dumps(value, ensure_ascii=False))
+else:
+    print(value)
+PY
+}
+
+runtime_restart_request() {
+    local method="$1"
+    local body="${2:-}"
+    local response_file
+    response_file="$(mktemp)"
+    local status="000"
+    if [ "$method" = "GET" ]; then
+        status="$(curl -sS -o "$response_file" -w '%{http_code}' \
+            -H "X-OpenWork-Host-Token: $OPENWORK_HOST_TOKEN" \
+            "$(runtime_restart_api_url)" || printf '000')"
+    else
+        status="$(curl -sS -o "$response_file" -w '%{http_code}' \
+            -X "$method" \
+            -H "Content-Type: application/json" \
+            -H "X-OpenWork-Host-Token: $OPENWORK_HOST_TOKEN" \
+            --data "$body" \
+            "$(runtime_restart_api_url)" || printf '000')"
+    fi
+
+    RUNTIME_RESTART_LAST_STATUS="$status"
+    if [ -f "$response_file" ]; then
+        RUNTIME_RESTART_LAST_BODY="$(cat "$response_file")"
+        rm -f "$response_file"
+    else
+        RUNTIME_RESTART_LAST_BODY=""
+    fi
+}
+
+prepare_runtime_restart() {
+    local mode="drain"
+    local reason="restart-pod.sh safe restart"
+    if [ -n "$FORCE_RESTART" ]; then
+        mode="force"
+        reason="restart-pod.sh force restart"
+    fi
+
+    if ! wait_for_http_ok "http://127.0.0.1:${OPENWORK_PORT}/health" 2; then
+        echo "[restart-pod] No running OpenWork server detected; skipping drain negotiation."
+        RUNTIME_CONTROL_SUPPORTED="0"
+        return 0
+    fi
+
+    local payload
+    payload="$(python3 - "$mode" "$reason" <<'PY'
+import json
+import sys
+print(json.dumps({"mode": sys.argv[1], "reason": sys.argv[2]}))
+PY
+)"
+    runtime_restart_request POST "$payload"
+
+    case "$RUNTIME_RESTART_LAST_STATUS" in
+        200)
+            RUNTIME_CONTROL_SUPPORTED="1"
+            RUNTIME_CONTROL_CLEANUP_REQUIRED="1"
+            local active_count
+            active_count="$(printf '%s' "$RUNTIME_RESTART_LAST_BODY" | read_json_field activeSessionCount)"
+            echo "[restart-pod] Runtime control accepted mode=${mode} active=${active_count:-unknown}."
+            ;;
+        404|405|501|000)
+            echo "[restart-pod] Running server does not support restart drain control yet; falling back to legacy restart behavior."
+            RUNTIME_CONTROL_SUPPORTED="0"
+            ;;
+        *)
+            echo "[restart-pod] Runtime control request failed with status ${RUNTIME_RESTART_LAST_STATUS}." >&2
+            if [ -n "${RUNTIME_RESTART_LAST_BODY:-}" ]; then
+                echo "$RUNTIME_RESTART_LAST_BODY" >&2
+            fi
+            exit 1
+            ;;
+    esac
+}
+
+wait_for_runtime_drain() {
+    if [ "${RUNTIME_CONTROL_SUPPORTED:-0}" != "1" ] || [ -n "$FORCE_RESTART" ]; then
+        return 0
+    fi
+
+    local timeout="${OPENWORK_DRAIN_TIMEOUT_SECONDS:-$OPENWORK_DRAIN_TIMEOUT_SECONDS_DEFAULT}"
+    local deadline=$((SECONDS + timeout))
+    while [ "$SECONDS" -lt "$deadline" ]; do
+        runtime_restart_request GET
+        if [ "$RUNTIME_RESTART_LAST_STATUS" != "200" ]; then
+            echo "[restart-pod] Failed to read runtime drain status (status ${RUNTIME_RESTART_LAST_STATUS})." >&2
+            if [ -n "${RUNTIME_RESTART_LAST_BODY:-}" ]; then
+                echo "$RUNTIME_RESTART_LAST_BODY" >&2
+            fi
+            exit 1
+        fi
+
+        local mode active_count
+        mode="$(printf '%s' "$RUNTIME_RESTART_LAST_BODY" | read_json_field mode)"
+        active_count="$(printf '%s' "$RUNTIME_RESTART_LAST_BODY" | read_json_field activeSessionCount)"
+        active_count="${active_count:-0}"
+        echo "[restart-pod] Drain status: mode=${mode:-unknown} active=${active_count}"
+        if [ "$active_count" = "0" ]; then
+            return 0
+        fi
+        sleep 2
+    done
+
+    echo "[restart-pod] Timed out waiting for active sessions to drain." >&2
+    echo "[restart-pod] Re-run with --force to interrupt active sessions." >&2
+    exit 1
+}
+
+resolve_managed_opencode_source() {
+    local requested="${OPENWORK_POD_OPENCODE_SOURCE:-${OPENWORK_OPENCODE_SOURCE:-downloaded}}"
+    case "$requested" in
+        auto|bundled|downloaded|external) ;;
+        *)
+            echo "[restart-pod] Invalid OpenCode source '$requested'. Expected auto, bundled, downloaded, or external." >&2
+            exit 1
+            ;;
+    esac
+
+    if [ -z "${OPENWORK_POD_OPENCODE_SOURCE:-}" ] && [ "$requested" = "external" ] && ! is_truthy "${OPENWORK_ALLOW_LEGACY_EXTERNAL_OPENCODE:-0}"; then
+        echo "[restart-pod] Ignoring legacy OPENWORK_OPENCODE_SOURCE=external; using managed downloaded OpenCode instead."
+        requested="downloaded"
+    fi
+
+    printf '%s\n' "$requested"
+}
+
+cleanup_runtime_control_on_exit() {
+    local status="${1:-0}"
+    if [ "${RUNTIME_CONTROL_CLEANUP_REQUIRED:-0}" != "1" ]; then
+        return
+    fi
+    if [ "${RUNTIME_KILL_PHASE_STARTED:-0}" = "1" ]; then
+        return
+    fi
+    if [ "${RUNTIME_CONTROL_SUPPORTED:-0}" != "1" ]; then
+        return
+    fi
+
+    local payload
+    payload="$(python3 - <<'PY'
+import json
+print(json.dumps({"mode": "clear", "reason": "restart-pod.sh aborted before shutdown"}))
+PY
+)"
+    runtime_restart_request POST "$payload" || true
+    if [ "$status" -ne 0 ]; then
+        echo "[restart-pod] Cleared runtime maintenance after aborting restart." >&2
+    fi
+}
+
+trap 'cleanup_runtime_control_on_exit $?' EXIT
+
 if [ -z "$PULL_REQUESTED" ]; then
     PULL_REQUESTED="${OPENWORK_PULL_BEFORE_RESTART:-0}"
 fi
+
+prepare_runtime_restart
 
 if [ "$PULL_REQUESTED" = "1" ]; then
     maybe_pull_latest
@@ -591,10 +779,12 @@ sync_opencode_config_files
 build_frontend
 build_backend_binaries
 ensure_build_outputs
+wait_for_runtime_drain
 
 # ============================================
 # Kill old processes
 # ============================================
+RUNTIME_KILL_PHASE_STARTED="1"
 echo "[restart-pod] Killing old processes..."
 
 # Kill known process signatures first (more reliable than port-only cleanup).
@@ -661,14 +851,16 @@ if ! wait_for_http_ok "http://127.0.0.1:${OPENWORK_WEB_PORT}/healthz" 10; then
     exit 1
 fi
 
+OPENCODE_SOURCE_MODE="$(resolve_managed_opencode_source)"
+
 orchestrator_args=(
     serve
     --workspace "$PROJECT_DIR"
     --approval auto
     --allow-external
     --no-opencode-auth
-    --sidecar-source external
-    --opencode-source external
+    --sidecar-source auto
+    --opencode-source "$OPENCODE_SOURCE_MODE"
     --openwork-host "$OPENWORK_HOST"
     --openwork-port "$OPENWORK_PORT"
     --openwork-token "$OPENWORK_TOKEN"
@@ -676,8 +868,10 @@ orchestrator_args=(
     --openwork-server-bin "$OPENWORK_SERVER_BIN"
 )
 
-if [ -n "${OPENWORK_OPENCODE_BIN:-}" ]; then
+if [ "$OPENCODE_SOURCE_MODE" = "external" ] && [ -n "${OPENWORK_OPENCODE_BIN:-}" ]; then
     orchestrator_args+=(--opencode-bin "$OPENWORK_OPENCODE_BIN")
+elif [ "$OPENCODE_SOURCE_MODE" != "external" ] && [ -n "${OPENWORK_OPENCODE_BIN:-}" ]; then
+    echo "[restart-pod] Ignoring OPENWORK_OPENCODE_BIN because managed OpenCode source is $OPENCODE_SOURCE_MODE."
 fi
 
 if is_truthy "$OPENWORK_OPENCODE_ROUTER"; then

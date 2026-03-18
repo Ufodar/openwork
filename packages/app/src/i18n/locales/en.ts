@@ -542,6 +542,7 @@ export default {
   "session.tool_agent_suffix": "{agent} agent",
   "session.tool_status_completed": "Completed",
   "session.tool_status_running": "Running",
+  "session.tool_status_interrupted": "Interrupted",
   "session.tool_status_error": "Error",
   "session.tool_status_unknown": "Unknown",
   "session.tool_diagnostics": "Diagnostics",

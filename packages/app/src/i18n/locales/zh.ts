@@ -543,6 +543,7 @@ export default {
   "session.tool_agent_suffix": "{agent} 智能体",
   "session.tool_status_completed": "完成",
   "session.tool_status_running": "进行中",
+  "session.tool_status_interrupted": "已中断",
   "session.tool_status_error": "错误",
   "session.tool_status_unknown": "未知",
   "session.tool_diagnostics": "诊断",

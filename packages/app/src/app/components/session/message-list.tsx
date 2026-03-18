@@ -3,15 +3,17 @@ import type { JSX } from "solid-js";
 import type { Part } from "@opencode-ai/sdk/v2/client";
 import { Check, ChevronDown, ChevronRight, Copy, Eye, File, FileEdit, FolderSearch, Pencil, Search, Sparkles, Terminal } from "lucide-solid";
 
-import type { MessageGroup, MessageWithParts } from "../../types";
+import type { MessageGroup, MessageInfo, MessageWithParts } from "../../types";
 import { groupMessageParts, summarizeStep } from "../../utils";
 import PartView from "../part-view";
 import { perfNow, recordPerfLog } from "../../lib/perf-log";
+import { isToolPartActive, resolveToolPartDisplayStatus } from "../../lib/tool-part-status";
 import { currentLocale, t } from "../../../i18n";
 
 export type MessageListProps = {
   messages: MessageWithParts[];
   isStreaming?: boolean;
+  sessionStatus?: string;
   developerMode: boolean;
   showThinking: boolean;
   expandedStepIds: Set<string>;
@@ -78,7 +80,9 @@ function statusDotClass(status?: string): string {
       return "bg-green-9";
     case "running":
     case "pending":
-      return "bg-blue-9 animate-pulse";
+      return "session-running-dot";
+    case "stale":
+      return "bg-amber-8 shadow-[0_0_0_1px_rgba(245,158,11,0.16)]";
     case "error":
       return "bg-red-9";
     default:
@@ -226,6 +230,15 @@ export default function MessageList(props: MessageListProps) {
     ]);
     return lowerExact.get(normalizedLower) ?? text;
   };
+  const messageInfoById = createMemo(() => {
+    const map = new Map<string, MessageInfo>();
+    for (const message of props.messages) {
+      const id = String((message.info as any)?.id ?? "");
+      if (!id) continue;
+      map.set(id, message.info);
+    }
+    return map;
+  });
   const [copyingId, setCopyingId] = createSignal<string | null>(null);
   let previousMessagePartCountById = new Map<string, number>();
   let autoExpandedStepIds = new Set<string>();
@@ -468,9 +481,26 @@ export default function MessageList(props: MessageListProps) {
   const StepRow = (rowProps: { part: Part; isUser: boolean }) => {
     const summary = createMemo(() => summarizeStep(rowProps.part));
     const category = createMemo(() => summary().toolCategory ?? "tool");
-    const status = createMemo(() => summary().status);
+    const messageInfo = createMemo(() => {
+      const messageId = typeof (rowProps.part as any)?.messageID === "string" ? String((rowProps.part as any).messageID) : "";
+      return messageInfoById().get(messageId) ?? null;
+    });
+    const status = createMemo(() =>
+      rowProps.part.type === "tool"
+        ? resolveToolPartDisplayStatus(rowProps.part, {
+            sessionStatus: props.sessionStatus,
+            messageInfo: messageInfo(),
+          })
+        : summary().status,
+    );
     const task = createMemo(() => getTaskStepInfo(rowProps.part));
-    const localizedTitle = createMemo(() => localizeStepText(summary().title));
+    const localizedTitle = createMemo(() => {
+      const base = localizeStepText(summary().title);
+      if (rowProps.part.type === "tool" && status() === "stale") {
+        return `${base} · ${tr("session.tool_status_interrupted")}`;
+      }
+      return base;
+    });
     const localizedDetail = createMemo(() => localizeStepText(summary().detail ?? ""));
 
     if (rowProps.part.type === "reasoning") {
@@ -543,7 +573,7 @@ export default function MessageList(props: MessageListProps) {
     return (
       <div class={`flex items-center ${props.compact ? "gap-1.5 py-1 min-h-[24px]" : "gap-2.5 py-1.5 min-h-[28px]"} group/step`}>
         {/* Status dot */}
-        <div class={`w-1.5 h-1.5 rounded-full shrink-0 ${statusDotClass(status())}`} />
+        <div class={`w-2 h-2 rounded-full shrink-0 ${statusDotClass(status())}`} />
         {/* Tool icon */}
         <div class={`shrink-0 ${summary().isSkill
             ? "text-purple-10"
@@ -627,6 +657,8 @@ export default function MessageList(props: MessageListProps) {
             <div class="pl-6 pb-2 text-xs text-gray-10">
               <PartView
                 part={itemProps.part}
+                messageInfo={messageInfoById().get(String((itemProps.part as any)?.messageID ?? "")) ?? null}
+                sessionStatus={props.sessionStatus}
                 developerMode={props.developerMode}
                 showThinking={props.showThinking}
                 workspaceRoot={props.workspaceRoot}
@@ -864,15 +896,27 @@ export default function MessageList(props: MessageListProps) {
     const latestStepLabel = () => {
       const step = latestStep();
       if (!step) return tr("session.last_step");
+      const messageInfo =
+        step.type === "tool" || step.type === "reasoning"
+          ? messageInfoById().get(String((step as any)?.messageID ?? "")) ?? null
+          : null;
+      const effectiveStatus =
+        step.type === "tool"
+          ? resolveToolPartDisplayStatus(step, {
+              sessionStatus: props.sessionStatus,
+              messageInfo,
+            })
+          : null;
+      const interruptedSuffix = effectiveStatus === "stale" ? ` · ${tr("session.tool_status_interrupted")}` : "";
 
       const fromTool = toolHeadline(step);
-      if (fromTool) return compactText(fromTool);
+      if (fromTool) return compactText(`${fromTool}${interruptedSuffix}`);
 
       if (step.type === "tool") {
         const toolName = String((step as any).tool ?? "").trim();
         if (toolName) {
           const friendlyTool = toolName.replace(/[_-]+/g, " ");
-          return compactText(localizeStepText(friendlyTool));
+          return compactText(`${localizeStepText(friendlyTool)}${interruptedSuffix}`);
         }
       }
 
@@ -881,17 +925,20 @@ export default function MessageList(props: MessageListProps) {
       const detail = compactText(localizeStepText(summary.detail ?? ""));
       const generic = /^(application|tool|step|working|done|completed|success)$/i.test(title);
 
-      if (title && !generic) return title;
+      if (title && !generic) return `${title}${interruptedSuffix}`;
       if (detail) return isPathLike(detail) ? compactPathToken(detail) : detail;
-      if (title) return title;
+      if (title) return `${title}${interruptedSuffix}`;
       return tr("session.last_step");
     };
     const hasRunning = () =>
       containerProps.partsGroups.some((parts) =>
         parts.some((part) => {
           if (part.type !== "tool") return false;
-          const state = (part as any).state ?? {};
-          return state.status === "running" || state.status === "pending";
+          const messageInfo = messageInfoById().get(String((part as any)?.messageID ?? "")) ?? null;
+          return isToolPartActive(part, {
+            sessionStatus: props.sessionStatus,
+            messageInfo,
+          });
         }),
       );
 
@@ -911,7 +958,7 @@ export default function MessageList(props: MessageListProps) {
           />
           <span class={`font-medium inline-flex items-center gap-1.5 text-xs ${props.compact ? "" : "sm:text-[13px]"} text-gray-11`}>
             <Show when={hasRunning()}>
-              <span class="inline-flex h-1 w-1 rounded-full bg-blue-10/70 animate-pulse" />
+              <span class="inline-flex h-2 w-2 rounded-full session-running-dot" />
             </Show>
             <span class={`truncate ${props.compact ? "max-w-[90%]" : "max-w-[58ch]"}`}>
               {expanded() ? tr("session.hide_timeline") : tr("session.execution_timeline")}

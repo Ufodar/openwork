@@ -745,17 +745,34 @@ resolve_managed_opencode_source() {
 
 resolve_external_opencode_bin() {
     local candidate="${OPENWORK_OPENCODE_BIN:-}"
+    local fallback=""
+
+    if command -v opencode >/dev/null 2>&1; then
+        fallback="$(command -v opencode 2>/dev/null || true)"
+    fi
+
     if [ -n "$candidate" ]; then
         if [ ! -x "$candidate" ]; then
             echo "[restart-pod] OPENWORK_OPENCODE_BIN points to a non-executable path: $candidate" >&2
-            exit 1
+        elif "$candidate" --version >/dev/null 2>&1; then
+            printf '%s\n' "$candidate"
+            return 0
+        else
+            echo "[restart-pod] OPENWORK_OPENCODE_BIN is not healthy: $candidate" >&2
         fi
-        printf '%s\n' "$candidate"
-        return 0
+
+        if [ -n "$fallback" ] && [ "$fallback" != "$candidate" ] && "$fallback" --version >/dev/null 2>&1; then
+            echo "[restart-pod] Falling back to opencode from PATH: $fallback" >&2
+            printf '%s\n' "$fallback"
+            return 0
+        fi
+
+        echo "[restart-pod] No healthy fallback opencode binary found after rejecting OPENWORK_OPENCODE_BIN." >&2
+        exit 1
     fi
 
-    candidate="$(command -v opencode 2>/dev/null || true)"
-    if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+    candidate="$fallback"
+    if [ -n "$candidate" ] && [ -x "$candidate" ] && "$candidate" --version >/dev/null 2>&1; then
         printf '%s\n' "$candidate"
         return 0
     fi

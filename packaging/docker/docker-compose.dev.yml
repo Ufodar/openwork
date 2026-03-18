@@ -62,6 +62,9 @@ services:
         echo "[orchestrator] Installing dependencies..."
         pnpm install --no-frozen-lockfile --network-concurrency 1 --child-concurrency 1
 
+        # --- Configure OpenCode providers/models for this container ---
+        python3 /app/scripts/sync-global-opencode-config.py
+
         # --- Stage sidecar executables into container-local path ---
         # Avoids overwriting macOS-native binaries on the host mount.
         #
@@ -140,6 +143,17 @@ services:
       OPENWORK_HOST_TOKEN: ${OPENWORK_HOST_TOKEN:-}
       OPENWORK_DEV_ID: ${OPENWORK_DEV_ID:-default}
       OPENWORK_SIDECAR_SOURCE: external
+      OPENWORK_USER_WORKSPACE_TEMPLATE_DIR: /app
+      OPENWORK_PROVIDER_ID: ${OPENWORK_PROVIDER_ID:-my-company}
+      OPENWORK_MODEL_BASE_URL: ${OPENWORK_MODEL_BASE_URL:-http://192.168.5.10:3002/v1}
+      OPENWORK_DEFAULT_MODEL: ${OPENWORK_DEFAULT_MODEL:-Qwen3.5-397B-A17B}
+      OPENWORK_SMALL_MODEL: ${OPENWORK_SMALL_MODEL:-Qwen3.5-397B-A17B}
+      MY_COMPANY_API_KEY: ${MY_COMPANY_API_KEY:-}
+      RAGFLOW_BASE_URL: ${RAGFLOW_BASE_URL:-}
+      RAGFLOW_API_KEY: ${RAGFLOW_API_KEY:-}
+      RAGFLOW_MCP_URL: ${RAGFLOW_MCP_URL:-}
+      RAGFLOW_URL: ${RAGFLOW_URL:-}
+      RAGFLOW_APP_URL: ${RAGFLOW_APP_URL:-}
  
   web:
     <<: *shared

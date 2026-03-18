@@ -10,6 +10,7 @@ import { deleteSkill, listSkills, upsertSkill } from "./skills.js";
 import { installHubSkill, listHubSkills } from "./skill-hub.js";
 import { deleteCommand, listCommands, upsertCommand } from "./commands.js";
 import { deleteScheduledJob, listScheduledJobs, resolveScheduledJob } from "./scheduler.js";
+import { getRagflowStatus, listRagflowDatasets, retrieveFromRagflow } from "./ragflow.js";
 import { ApiError, formatError } from "./errors.js";
 import { readJsoncFile, updateJsoncTopLevel, writeJsoncFile } from "./jsonc.js";
 import { recordAudit, readAuditEntries, readLastAudit } from "./audit.js";
@@ -3847,6 +3848,38 @@ function createRoutes(
     });
 
     return jsonResponse({ ok: true });
+  });
+
+  addRoute(routes, "GET", "/workspace/:id/ragflow", "client", async (ctx) => {
+    await resolveWorkspace(config, ctx.params.id);
+    return jsonResponse(getRagflowStatus());
+  });
+
+  addRoute(routes, "GET", "/workspace/:id/ragflow/datasets", "client", async (ctx) => {
+    await resolveWorkspace(config, ctx.params.id);
+    const query = ctx.url.searchParams.get("query");
+    const limitRaw = ctx.url.searchParams.get("limit");
+    const limit = limitRaw ? Number.parseInt(limitRaw, 10) : undefined;
+    const items = await listRagflowDatasets({ query, limit: Number.isFinite(limit) ? limit : undefined });
+    return jsonResponse({ items });
+  });
+
+  addRoute(routes, "POST", "/workspace/:id/ragflow/retrieve", "client", async (ctx) => {
+    await resolveWorkspace(config, ctx.params.id);
+    const body = await readJsonBody(ctx.request);
+    const question = typeof body.question === "string" ? body.question : "";
+    const datasetIds = Array.isArray(body.datasetIds) ? body.datasetIds.filter((value): value is string => typeof value === "string") : [];
+    const result = await retrieveFromRagflow({
+      question,
+      datasetIds,
+      page: typeof body.page === "number" ? body.page : null,
+      pageSize: typeof body.pageSize === "number" ? body.pageSize : null,
+      topK: typeof body.topK === "number" ? body.topK : null,
+      similarityThreshold: typeof body.similarityThreshold === "number" ? body.similarityThreshold : null,
+      vectorSimilarityWeight: typeof body.vectorSimilarityWeight === "number" ? body.vectorSimilarityWeight : null,
+      keyword: body.keyword === true,
+    });
+    return jsonResponse(result);
   });
 
   addRoute(routes, "GET", "/workspace/:id/commands", "client", async (ctx) => {

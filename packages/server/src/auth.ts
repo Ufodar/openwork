@@ -7,6 +7,7 @@ import type { ServerConfig } from "./types.js";
 import { ensureDir, exists, hashToken, shortId } from "./utils.js";
 import type { TokenService } from "./tokens.js";
 import { provisionUserWorkspace } from "./user-workspaces.js";
+import { workspaceTemplateHasOpencodeDir, workspaceTemplateLooksUsable } from "./workspace-template.js";
 
 type AuthUserRecord = {
   id: string;
@@ -83,12 +84,29 @@ function validatePassword(value: string): string {
   return password;
 }
 
-function resolveUserWorkspaceTemplateDir(config: ServerConfig): string {
+async function resolveUserWorkspaceTemplateDir(config: ServerConfig): Promise<string> {
   const override = process.env.OPENWORK_USER_WORKSPACE_TEMPLATE_DIR?.trim();
   if (override) return resolve(override);
   const firstWorkspace = config.workspaces[0]?.path?.trim();
+  const cwd = process.cwd();
+  const candidates = [firstWorkspace, cwd]
+    .filter((value): value is string => Boolean(value?.trim()))
+    .map((value) => resolve(value));
+
+  for (const candidate of candidates) {
+    if (await workspaceTemplateHasOpencodeDir(candidate)) {
+      return candidate;
+    }
+  }
+
+  for (const candidate of candidates) {
+    if (await workspaceTemplateLooksUsable(candidate)) {
+      return candidate;
+    }
+  }
+
   if (firstWorkspace) return resolve(firstWorkspace);
-  return process.cwd();
+  return cwd;
 }
 
 function hashPassword(password: string, saltHex: string): string {
@@ -207,22 +225,21 @@ export class AuthService {
   }
 
   private async ensureUserWorkspace(user: AuthUserRecord) {
-    if (user.workspaceId?.trim() && user.workspacePath?.trim()) {
-      return {
-        id: user.workspaceId.trim(),
-        name: user.username,
-        path: user.workspacePath.trim(),
-      };
-    }
-
+    const templateDir = await resolveUserWorkspaceTemplateDir(this.config);
     const provisioned = await provisionUserWorkspace({
       userId: user.id,
-      templateDir: resolveUserWorkspaceTemplateDir(this.config),
+      templateDir,
     });
-    user.workspaceId = provisioned.workspaceId;
-    user.workspacePath = provisioned.workspacePath;
-    user.updatedAt = Date.now();
-    await writeStore(this.path, this.users);
+
+    if (
+      user.workspaceId?.trim() !== provisioned.workspaceId ||
+      user.workspacePath?.trim() !== provisioned.workspacePath
+    ) {
+      user.workspaceId = provisioned.workspaceId;
+      user.workspacePath = provisioned.workspacePath;
+      user.updatedAt = Date.now();
+      await writeStore(this.path, this.users);
+    }
     return {
       id: provisioned.workspaceId,
       name: user.username,
@@ -287,7 +304,7 @@ export class AuthService {
     const userId = shortId();
     const provisionedWorkspace = await provisionUserWorkspace({
       userId,
-      templateDir: resolveUserWorkspaceTemplateDir(this.config),
+      templateDir: await resolveUserWorkspaceTemplateDir(this.config),
     });
 
     const user: AuthUserRecord = {

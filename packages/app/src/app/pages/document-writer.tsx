@@ -8,6 +8,7 @@ import type { SessionViewProps } from "./session";
 import OnlyOfficeEditor from "../components/onlyoffice-editor";
 import MessageList from "../components/session/message-list";
 import Composer from "../components/session/composer";
+import SessionKnowledgeStrip from "../components/session-knowledge-strip";
 import ToolMonitorPanel from "../components/tool-monitor/tool-monitor-panel";
 import { DOCUMENT_UPLOAD_ACCEPT } from "../lib/documents";
 import { currentLocale, t as i18n } from "../../i18n";
@@ -2507,6 +2508,16 @@ export default function DocumentWriterView(props: SessionViewProps) {
             </div>
           </div>
         </Show>
+
+        <SessionKnowledgeStrip
+          sessionId={props.selectedSessionId}
+          status={props.ragflowStatus}
+          busy={props.ragflowStatusBusy}
+          selectedDatasets={props.selectedSessionKnowledgeDatasets}
+          retrievalError={props.ragflowRetrievalError}
+          onOpen={props.openKnowledgePicker}
+          onClear={props.clearSessionKnowledgeSelection}
+        />
 
         <Composer
           prompt={props.prompt}

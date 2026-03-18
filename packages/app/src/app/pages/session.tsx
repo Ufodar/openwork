@@ -58,12 +58,14 @@ import RenameSessionModal from "../components/rename-session-modal";
 import ProviderAuthModal, { type ProviderOAuthStartResult } from "../components/provider-auth-modal";
 import ShareWorkspaceModal from "../components/share-workspace-modal";
 import StatusBar from "../components/status-bar";
+import SessionKnowledgeStrip from "../components/session-knowledge-strip";
 import {
   buildOpenworkConnectInviteUrl,
   buildOpenworkWorkspaceBaseUrl,
   createOpenworkServerClient,
 } from "../lib/openwork-server";
 import type {
+  OpenworkRagflowStatus,
   OpenworkServerClient,
   OpenworkServerSettings,
   OpenworkServerStatus,
@@ -178,6 +180,12 @@ export type SessionViewProps = {
   mcpServers: McpServerEntry[];
   mcpStatuses: McpStatusMap;
   mcpStatus: string | null;
+  ragflowStatus: OpenworkRagflowStatus | null;
+  ragflowStatusBusy: boolean;
+  selectedSessionKnowledgeDatasets: { id: string; name: string }[];
+  ragflowRetrievalError: string | null;
+  openKnowledgePicker: () => void;
+  clearSessionKnowledgeSelection: () => void;
   skills: SkillCard[];
   skillsStatus: string | null;
   busy: boolean;
@@ -3384,6 +3392,16 @@ export default function SessionView(props: SessionViewProps) {
           </div>
         </div>
       </Show>
+
+        <SessionKnowledgeStrip
+          sessionId={props.selectedSessionId}
+          status={props.ragflowStatus}
+          busy={props.ragflowStatusBusy}
+          selectedDatasets={props.selectedSessionKnowledgeDatasets}
+          retrievalError={props.ragflowRetrievalError}
+          onOpen={props.openKnowledgePicker}
+          onClear={props.clearSessionKnowledgeSelection}
+        />
 
       <Composer
         prompt={props.prompt}

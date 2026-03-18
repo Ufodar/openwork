@@ -57,6 +57,7 @@ import {
   routeForSessionView,
   type AppRouteView,
 } from "./lib/session-view-routing";
+import { clearOpenworkWebSession, readWebAuthUser, writeWebAuthUser } from "./lib/web-auth";
 import {
   DEFAULT_MODEL,
   HIDE_TITLEBAR_PREF_KEY,
@@ -68,6 +69,7 @@ import {
   TOOL_MONITOR_PREF_KEY,
 } from "./constants";
 import { parseMcpServersFromContent, removeMcpFromConfig, validateMcpServerName } from "./mcp";
+import { shouldShowStatusBarLogout } from "./components/status-bar-visibility";
 import type {
   Client,
   CreateSessionOptions,
@@ -312,36 +314,14 @@ export default function App() {
   const [creatingSession, setCreatingSession] = createSignal(false);
   const [sessionViewLockUntil, setSessionViewLockUntil] = createSignal(0);
   const currentView = createMemo<AppRouteView>(() => resolveAppRouteView(location.pathname));
-  const OPENWORK_WEB_AUTH_USER_KEY = "openwork.web.auth.user";
-  const readWebAuthUser = () => {
-    if (typeof window === "undefined") return null;
-    try {
-      const raw = window.localStorage.getItem(OPENWORK_WEB_AUTH_USER_KEY);
-      const value = raw?.trim() ?? "";
-      return value || null;
-    } catch {
-      return null;
-    }
-  };
-  const writeWebAuthUser = (username: string | null) => {
-    if (typeof window === "undefined") return;
-    try {
-      const value = username?.trim() ?? "";
-      if (value) {
-        window.localStorage.setItem(OPENWORK_WEB_AUTH_USER_KEY, value);
-      } else {
-        window.localStorage.removeItem(OPENWORK_WEB_AUTH_USER_KEY);
-      }
-    } catch {
-      // ignore
-    }
-  };
-  const [webAuthUser, setWebAuthUser] = createSignal<string | null>(readWebAuthUser());
+  const [webAuthUser, setWebAuthUser] = createSignal<string | null>(
+    readWebAuthUser(typeof window === "undefined" ? null : window.localStorage),
+  );
   const setWebAuthSessionUser = (username: string | null) => {
     const value = username?.trim() ?? "";
     const next = value || null;
     setWebAuthUser(next);
-    writeWebAuthUser(next);
+    writeWebAuthUser(next, typeof window === "undefined" ? null : window.localStorage);
   };
   const isProtoV1Ux = createMemo(() =>
     location.pathname.toLowerCase().startsWith("/proto-v1-ux")
@@ -2736,6 +2716,12 @@ export default function App() {
   );
   const requiresWebServerAuth = createMemo(() => !isTauriRuntime());
   const hasWebAuthSession = createMemo(() => Boolean((webAuthUser() ?? "").trim()));
+  const showWebLogout = createMemo(() =>
+    shouldShowStatusBarLogout({
+      requiresWebServerAuth: requiresWebServerAuth(),
+      hasWebAuthSession: hasWebAuthSession(),
+    })
+  );
   const isAdminWebUser = createMemo(() => (webAuthUser()?.trim().toLowerCase() ?? "") === "admin");
   const openworkAccessTokenPresent = createMemo(() => Boolean((openworkServerAuth().token ?? "").trim()));
   const openworkSessionAuthenticated = createMemo(() => {
@@ -2744,12 +2730,18 @@ export default function App() {
     return openworkAccessTokenPresent();
   });
   const clearInvalidWebAuthSession = () => {
-    const current = openworkServerSettings();
     setWebAuthSessionUser(null);
-    updateOpenworkServerSettings({
-      ...current,
-      token: undefined,
+    updateOpenworkServerSettings(clearOpenworkWebSession(openworkServerSettings()));
+  };
+  const logoutWebSession = () => {
+    if (!requiresWebServerAuth()) return;
+    batch(() => {
+      setWebAuthSessionUser(null);
+      updateOpenworkServerSettings(clearOpenworkWebSession(openworkServerSettings()));
     });
+    if (currentView() !== "login") {
+      navigate("/login", { replace: true });
+    }
   };
   createEffect(() => {
     if (!requiresWebServerAuth()) return;
@@ -6056,6 +6048,8 @@ export default function App() {
       openworkServerUrl: openworkServerUrl(),
       openworkServerClient: openworkServerClient(),
       isAdminUser: isAdminWebUser(),
+      showLogout: showWebLogout(),
+      onLogout: logoutWebSession,
       openAdminSession,
       openworkReconnectBusy: openworkReconnectBusy(),
       reconnectOpenworkServer,
@@ -6296,6 +6290,9 @@ export default function App() {
     clientConnected: Boolean(client()),
     openworkServerStatus: openworkServerStatus(),
     openworkServerClient: openworkServerClient(),
+    isAdminUser: isAdminWebUser(),
+    showLogout: showWebLogout(),
+    onLogout: logoutWebSession,
     openworkServerSettings: openworkServerSettings(),
     openworkServerHostInfo: openworkServerHostInfo(),
     openworkServerWorkspaceId: openworkServerWorkspaceId(),

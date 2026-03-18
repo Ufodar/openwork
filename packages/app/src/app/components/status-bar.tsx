@@ -1,5 +1,5 @@
 import { Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
-import { Cpu, MessageCircle, Server, Settings } from "lucide-solid";
+import { Cpu, LogOut, MessageCircle, Server, Settings } from "lucide-solid";
 
 import type { OpenworkServerStatus } from "../lib/openwork-server";
 import type { OpenCodeRouterStatus } from "../lib/tauri";
@@ -15,6 +15,8 @@ type StatusBarProps = {
   openworkServerStatus: OpenworkServerStatus;
   isAdminUser: boolean;
   developerMode: boolean;
+  showLogout: boolean;
+  onLogout: () => void;
   onOpenSettings: () => void;
   onOpenMessaging: () => void;
   onOpenProviders: () => Promise<void> | void;
@@ -234,6 +236,17 @@ export default function StatusBar(props: StatusBarProps) {
               <span class="uppercase tracking-[0.2em] text-[10px] text-gray-8">Tip</span>
               <span class="text-gray-11 font-medium">{activeTip()?.label}</span>
             </button>
+          </Show>
+          <Show when={props.showLogout}>
+            <Button
+              variant="outline"
+              class="h-7 px-3 py-0 text-xs font-semibold"
+              onClick={props.onLogout}
+              title={tr("status.logout")}
+            >
+              <LogOut class="w-4 h-4" />
+              <span>{tr("status.logout")}</span>
+            </Button>
           </Show>
           <Show when={shouldShowStatusBarSettings(props.isAdminUser)}>
             <Button

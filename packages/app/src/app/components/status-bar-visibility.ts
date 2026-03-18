@@ -8,3 +8,10 @@ export function filterStatusBarTipIds(tipIds: readonly string[], isAdminUser: bo
 export function shouldShowStatusBarSettings(isAdminUser: boolean): boolean {
   return isAdminUser;
 }
+
+export function shouldShowStatusBarLogout(options: {
+  requiresWebServerAuth: boolean;
+  hasWebAuthSession: boolean;
+}): boolean {
+  return options.requiresWebServerAuth && options.hasWebAuthSession;
+}

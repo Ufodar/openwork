@@ -105,6 +105,8 @@ export type DashboardViewProps = {
   openworkServerUrl: string;
   openworkServerClient: OpenworkServerClient | null;
   isAdminUser: boolean;
+  showLogout: boolean;
+  onLogout: () => void;
   openAdminSession: (session: OpenworkAdminSession) => Promise<void>;
   openworkReconnectBusy: boolean;
   reconnectOpenworkServer: () => Promise<boolean>;
@@ -1667,6 +1669,8 @@ export default function DashboardView(props: DashboardViewProps) {
           openworkServerStatus={props.openworkServerStatus}
           isAdminUser={props.isAdminUser}
           developerMode={props.developerMode}
+          showLogout={props.showLogout}
+          onLogout={props.onLogout}
           onOpenSettings={() => openSettings("general")}
           onOpenMessaging={openConfig}
           onOpenProviders={() => props.openProviderAuthModal()}

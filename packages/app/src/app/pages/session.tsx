@@ -120,6 +120,8 @@ export type SessionViewProps = {
   openworkServerStatus: OpenworkServerStatus;
   openworkServerClient: OpenworkServerClient | null;
   isAdminUser: boolean;
+  showLogout: boolean;
+  onLogout: () => void;
   openworkServerSettings: OpenworkServerSettings;
   openworkServerHostInfo: OpenworkServerInfo | null;
   openworkServerWorkspaceId: string | null;
@@ -3424,6 +3426,8 @@ export default function SessionView(props: SessionViewProps) {
           openworkServerStatus={props.openworkServerStatus}
           isAdminUser={props.isAdminUser}
           developerMode={props.developerMode}
+          showLogout={props.showLogout}
+          onLogout={props.onLogout}
           onOpenSettings={() => openSettings("general")}
           onOpenMessaging={openConfig}
           onOpenProviders={openProviderAuth}

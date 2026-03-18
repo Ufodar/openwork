@@ -1184,6 +1184,7 @@ export default {
   "status.connect_telegram": "Connect Telegram",
   "status.connect_notion_mcp": "Connect Notion MCP",
   "status.use_own_models": "Use your own models (OpenRouter, Anthropic, OpenAI)",
+  "status.logout": "Log out",
 
   // ==================== Workspace Switching ====================
   "workspace.switching_title": "Opening {name}",

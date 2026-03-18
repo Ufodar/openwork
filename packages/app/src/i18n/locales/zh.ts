@@ -122,7 +122,8 @@ export default {
   "agents.soon": "即将推出",
   "agents.not_installed": "未安装",
   "agents.use_with_caution": "谨慎使用，现在大家共用一个系统",
-  "agents.no_agents_found": "未找到智能体。请先连接 OpenCode，或在此目录下添加智能体",
+  // "agents.no_agents_found": "未找到智能体。请先连接 OpenCode，或在此目录下添加智能体",
+  "agents.no_agents_found": "",
   "agents.failed_load_agents": "加载智能体失败",
   "agents.general_assistant_name": "通用助手",
   "agents.general_assistant_desc": "可执行任务命令的通用 AI 助手，不能预览",
@@ -1143,6 +1144,7 @@ export default {
   "status.connect_telegram": "连接 Telegram",
   "status.connect_notion_mcp": "连接 Notion MCP",
   "status.use_own_models": "使用你的模型（OpenRouter、Anthropic、OpenAI）",
+  "status.logout": "退出登录",
 
   // ==================== Workspace Switching ====================
   "workspace.switching_title": "正在打开 {name}",

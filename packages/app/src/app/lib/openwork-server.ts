@@ -252,6 +252,47 @@ export type OpenworkMcpItem = {
   disabledByTools?: boolean;
 };
 
+export type OpenworkRagflowStatus = {
+  configured: boolean;
+  available: boolean;
+  baseUrl: string | null;
+  mcpUrl: string | null;
+  reason: string | null;
+};
+
+export type OpenworkRagflowDataset = {
+  id: string;
+  name: string;
+  description: string;
+  documentCount: number | null;
+  chunkCount: number | null;
+  embeddingModel: string | null;
+  permission: string | null;
+};
+
+export type OpenworkRagflowChunk = {
+  id: string | null;
+  content: string;
+  datasetId: string | null;
+  datasetName: string | null;
+  documentId: string | null;
+  documentName: string | null;
+  similarity: number | null;
+  vectorSimilarity: number | null;
+  termSimilarity: number | null;
+  positions: number[] | null;
+  imageId: string | null;
+};
+
+export type OpenworkRagflowRetrieveResult = {
+  chunks: OpenworkRagflowChunk[];
+  total: number;
+  page: number;
+  pageSize: number;
+  question: string;
+  datasetIds: string[];
+};
+
 export type OpenworkOpenCodeRouterTelegramResult = {
   ok: boolean;
   persisted?: boolean;
@@ -1724,6 +1765,45 @@ export function createOpenworkServerClient(options: { baseUrl: string; token?: s
         hostToken,
         method: "DELETE",
       }),
+    getRagflowStatus: (workspaceId: string) =>
+      requestJson<OpenworkRagflowStatus>(baseUrl, `/workspace/${workspaceId}/ragflow`, {
+        token,
+        hostToken,
+      }),
+    listRagflowDatasets: (workspaceId: string, options?: { query?: string; limit?: number }) => {
+      const search = new URLSearchParams();
+      if (options?.query?.trim()) search.set("query", options.query.trim());
+      if (typeof options?.limit === "number" && Number.isFinite(options.limit)) search.set("limit", String(options.limit));
+      const suffix = search.toString();
+      return requestJson<{ items: OpenworkRagflowDataset[] }>(
+        baseUrl,
+        `/workspace/${workspaceId}/ragflow/datasets${suffix ? `?${suffix}` : ""}`,
+        { token, hostToken },
+      );
+    },
+    retrieveRagflow: (
+      workspaceId: string,
+      payload: {
+        question: string;
+        datasetIds: string[];
+        page?: number;
+        pageSize?: number;
+        topK?: number;
+        similarityThreshold?: number;
+        vectorSimilarityWeight?: number;
+        keyword?: boolean;
+      },
+    ) =>
+      requestJson<OpenworkRagflowRetrieveResult>(
+        baseUrl,
+        `/workspace/${workspaceId}/ragflow/retrieve`,
+        {
+          token,
+          hostToken,
+          method: "POST",
+          body: payload,
+        },
+      ),
 
     listCommands: (workspaceId: string, scope: "workspace" | "global" = "workspace") =>
       requestJson<{ items: OpenworkCommandItem[] }>(

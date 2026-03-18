@@ -4,7 +4,16 @@ export type OpenworkSessionPrefs = {
   view?: View | null;
   agent?: string | null;
   agentLock?: string | null;
+  ragflowDatasetIds?: string[];
+  ragflowDatasetNames?: string[];
+  ragflowTopK?: number | null;
   [key: string]: unknown;
+};
+
+export type OpenworkSessionRagflowSelection = {
+  datasetIds: string[];
+  datasetNames: string[];
+  topK: number | null;
 };
 
 export type ResolvedSessionView = "session" | "document-agent" | "document-writer";
@@ -40,6 +49,39 @@ export const normalizeStoredAgent = (value: unknown): string | null => {
   const trimmed = value.trim();
   if (!trimmed) return null;
   return trimmed;
+};
+
+export const normalizeStoredStringList = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return [];
+  const next: string[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (typeof item !== "string") continue;
+    const trimmed = item.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    next.push(trimmed);
+  }
+  return next;
+};
+
+export const normalizeStoredRagflowTopK = (value: unknown): number | null => {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  const next = Math.round(value);
+  if (next < 1 || next > 64) return null;
+  return next;
+};
+
+export const resolveStoredRagflowSelection = (
+  stored?: OpenworkSessionPrefs | null,
+): OpenworkSessionRagflowSelection | null => {
+  const datasetIds = normalizeStoredStringList(stored?.ragflowDatasetIds);
+  if (!datasetIds.length) return null;
+  return {
+    datasetIds,
+    datasetNames: normalizeStoredStringList(stored?.ragflowDatasetNames),
+    topK: normalizeStoredRagflowTopK(stored?.ragflowTopK),
+  };
 };
 
 const resolveStoredSessionView = (value: unknown): ResolvedSessionView | null => {

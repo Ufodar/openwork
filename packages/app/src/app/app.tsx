@@ -49,9 +49,13 @@ import { clearBusyState } from "./lib/busy-state";
 import {
   type OpenworkSessionPrefs,
   normalizeStoredAgent,
+  normalizeStoredRagflowTopK,
+  normalizeStoredStringList,
   normalizeStoredView,
+  resolveStoredRagflowSelection,
   resolveSessionPreferences,
 } from "./lib/session-preferences";
+import { buildRagflowContextText } from "./lib/ragflow-context";
 import {
   isDocumentSessionView,
   resolveAppRouteView,
@@ -174,6 +178,8 @@ import {
   clearOpenworkServerSettings,
   type OpenworkAdminSession,
   type OpenworkAuditEntry,
+  type OpenworkRagflowDataset,
+  type OpenworkRagflowStatus,
   type OpenworkSoulHeartbeatEntry,
   type OpenworkSoulStatus,
   type OpenworkServerCapabilities,
@@ -191,6 +197,7 @@ import ProtoV1UxView from "./pages/proto-v1-ux";
 import DocumentAgentView from "./pages/document-agent";
 import DocumentWriterView from "./pages/document-writer";
 import LoginView from "./pages/login";
+import SessionKnowledgeModal from "./components/session-knowledge-modal";
 
 type RemoteWorkspaceDefaults = {
   openworkHostUrl?: string | null;
@@ -1062,9 +1069,17 @@ export default function App() {
     }
   };
 
-  const buildPromptParts = (draft: ComposerDraft): PartInput[] => {
+  const buildPromptParts = (
+    draft: ComposerDraft,
+    options?: { knowledgeContextText?: string | null },
+  ): PartInput[] => {
     const parts: PartInput[] = [];
     let text = draft.resolvedText ?? draft.text;
+
+    const knowledgeContextText = options?.knowledgeContextText?.trim();
+    if (knowledgeContextText) {
+      parts.push({ type: "text", text: knowledgeContextText } as TextPartInput);
+    }
 
     parts.push({ type: "text", text } as TextPartInput);
 
@@ -1297,7 +1312,11 @@ export default function App() {
 
       const model = selectedSessionModel();
       const agent = selectedSessionAgent();
-      const parts = buildPromptParts(resolvedDraft);
+      const knowledgeContextText =
+        resolvedDraft.mode === "prompt" && !resolvedDraft.command && !compactCommand
+          ? await buildSessionRagflowContextText(sessionID, content)
+          : null;
+      const parts = buildPromptParts(resolvedDraft, { knowledgeContextText });
 
       if (resolvedDraft.mode === "shell") {
         await shellInSession(c, sessionID, content);
@@ -1917,6 +1936,14 @@ export default function App() {
   const [mcpStatuses, setMcpStatuses] = createSignal<McpStatusMap>({});
   const [mcpConnectingName, setMcpConnectingName] = createSignal<string | null>(null);
   const [selectedMcp, setSelectedMcp] = createSignal<string | null>(null);
+  const [ragflowStatusInfo, setRagflowStatusInfo] = createSignal<OpenworkRagflowStatus | null>(null);
+  const [ragflowStatusBusy, setRagflowStatusBusy] = createSignal(false);
+  const [ragflowDatasets, setRagflowDatasets] = createSignal<OpenworkRagflowDataset[]>([]);
+  const [ragflowDatasetsBusy, setRagflowDatasetsBusy] = createSignal(false);
+  const [ragflowDatasetsError, setRagflowDatasetsError] = createSignal<string | null>(null);
+  const [ragflowRetrievalErrorBySessionId, setRagflowRetrievalErrorBySessionId] = createSignal<Record<string, string>>({});
+  const [ragflowPickerOpen, setRagflowPickerOpen] = createSignal(false);
+  const [ragflowPickerQuery, setRagflowPickerQuery] = createSignal("");
   const [scheduledJobs, setScheduledJobs] = createSignal<ScheduledJob[]>([]);
   const [scheduledJobsStatus, setScheduledJobsStatus] = createSignal<string | null>(null);
   const [scheduledJobsBusy, setScheduledJobsBusy] = createSignal(false);
@@ -2834,6 +2861,27 @@ export default function App() {
       } else {
         delete prefs.agentLock;
       }
+
+      const ragflowDatasetIds = normalizeStoredStringList(prefs.ragflowDatasetIds);
+      if (ragflowDatasetIds.length) {
+        prefs.ragflowDatasetIds = ragflowDatasetIds;
+      } else {
+        delete prefs.ragflowDatasetIds;
+      }
+
+      const ragflowDatasetNames = normalizeStoredStringList(prefs.ragflowDatasetNames);
+      if (ragflowDatasetNames.length) {
+        prefs.ragflowDatasetNames = ragflowDatasetNames;
+      } else {
+        delete prefs.ragflowDatasetNames;
+      }
+
+      const ragflowTopK = normalizeStoredRagflowTopK(prefs.ragflowTopK);
+      if (typeof ragflowTopK === "number") {
+        prefs.ragflowTopK = ragflowTopK;
+      } else {
+        delete prefs.ragflowTopK;
+      }
       next[trimmedId] = prefs;
     }
 
@@ -2880,6 +2928,11 @@ export default function App() {
   const [openworkSessionPrefsWorkspaceId, setOpenworkSessionPrefsWorkspaceId] = createSignal<string | null>(null);
   let openworkSessionPrefsLoadPromise: Promise<void> | null = null;
   let openworkWorkspaceIdResolvePromise: Promise<string | null> | null = null;
+  let openworkSessionPrefsMutationVersion = 0;
+
+  const markOpenworkSessionPrefsMutation = () => {
+    openworkSessionPrefsMutationVersion += 1;
+  };
 
   const ensureOpenworkServerWorkspaceIdResolved = async (): Promise<string | null> => {
     const existing = (openworkServerWorkspaceId() ?? "").trim();
@@ -2976,6 +3029,12 @@ export default function App() {
     return openworkSessionPrefsById()[id] ?? null;
   };
 
+  const getStoredSessionRagflowSelection = (sessionId: string) => {
+    const id = sessionId.trim();
+    if (!id) return null;
+    return resolveStoredRagflowSelection(openworkSessionPrefsById()[id] ?? null);
+  };
+
   const resolveSessionPreferenceState = (sessionId: string, options?: { title?: string | null }) =>
     resolveSessionPreferences({
       stored: getStoredSessionPrefs(sessionId),
@@ -3028,9 +3087,15 @@ export default function App() {
     }
 
     const task = (async () => {
+      const loadMutationVersion = openworkSessionPrefsMutationVersion;
       try {
         const config = await openworkClient.getConfig(workspaceId);
         if ((openworkServerWorkspaceId() ?? "").trim() !== workspaceId) return;
+        if (openworkSessionPrefsMutationVersion !== loadMutationVersion) {
+          setOpenworkSessionPrefsWorkspaceId(workspaceId);
+          setOpenworkSessionPrefsLoaded(true);
+          return;
+        }
         const openwork = config.openwork && typeof config.openwork === "object" ? (config.openwork as Record<string, unknown>) : {};
         const prefs = parseOpenworkSessionPrefs(openwork);
         setOpenworkSessionPrefsById(prefs);
@@ -3068,24 +3133,14 @@ export default function App() {
           view,
         },
       } satisfies Record<string, OpenworkSessionPrefs>;
+      markOpenworkSessionPrefsMutation();
       setOpenworkSessionPrefsById(localNext);
       writeLocalOpenworkSessionPrefs(localNext);
     }
 
-    const openworkClient = openworkServerClient();
-    const caps = resolvedOpenworkCapabilities();
-    const canReadWrite =
-      openworkServerStatus() === "connected" &&
-      openworkClient &&
-      (caps?.config?.read ?? false) &&
-      (caps?.config?.write ?? false);
-    if (!canReadWrite) return;
-
-    let workspaceId = (openworkServerWorkspaceId() ?? "").trim();
-    if (!workspaceId) {
-      workspaceId = (await ensureOpenworkServerWorkspaceIdResolved())?.trim() ?? "";
-    }
-    if (!workspaceId) return;
+    const configContext = await ensureOpenworkConfigContext();
+    if (!configContext) return;
+    const { client: openworkClient, workspaceId } = configContext;
 
     let basePrefs: Record<string, OpenworkSessionPrefs> | null = null;
     if (openworkSessionPrefsLoaded() && openworkSessionPrefsWorkspaceId() === workspaceId) {
@@ -3101,9 +3156,11 @@ export default function App() {
       }
     }
 
+    const remoteExisting = basePrefs?.[id] ?? null;
+    if (remoteExisting?.view === view) return;
+
     const mergedBasePrefs = mergeSessionPrefsForRemotePatch(basePrefs, id);
     const existing = mergedBasePrefs[id] ?? null;
-    if (existing?.view === view) return;
 
     const nextPrefs = {
       ...mergedBasePrefs,
@@ -3116,6 +3173,7 @@ export default function App() {
     setOpenworkSessionPrefsById(nextPrefs);
     setOpenworkSessionPrefsWorkspaceId(workspaceId);
     setOpenworkSessionPrefsLoaded(true);
+    markOpenworkSessionPrefsMutation();
     writeLocalOpenworkSessionPrefs(nextPrefs);
 
     await openworkClient.patchConfig(workspaceId, {
@@ -3153,24 +3211,14 @@ export default function App() {
         delete localNext[id];
       }
 
+      markOpenworkSessionPrefsMutation();
       setOpenworkSessionPrefsById(localNext);
       writeLocalOpenworkSessionPrefs(localNext);
     }
 
-    const openworkClient = openworkServerClient();
-    const caps = resolvedOpenworkCapabilities();
-    const canReadWrite =
-      openworkServerStatus() === "connected" &&
-      openworkClient &&
-      (caps?.config?.read ?? false) &&
-      (caps?.config?.write ?? false);
-    if (!canReadWrite) return;
-
-    let workspaceId = (openworkServerWorkspaceId() ?? "").trim();
-    if (!workspaceId) {
-      workspaceId = (await ensureOpenworkServerWorkspaceIdResolved())?.trim() ?? "";
-    }
-    if (!workspaceId) return;
+    const configContext = await ensureOpenworkConfigContext();
+    if (!configContext) return;
+    const { client: openworkClient, workspaceId } = configContext;
 
     let basePrefs: Record<string, OpenworkSessionPrefs> | null = null;
     if (openworkSessionPrefsLoaded() && openworkSessionPrefsWorkspaceId() === workspaceId) {
@@ -3186,10 +3234,12 @@ export default function App() {
       }
     }
 
+    const remoteExisting = basePrefs?.[id] ?? null;
+    const existingRemoteAgent = normalizeStoredAgent(remoteExisting?.agent) ?? null;
+    if (existingRemoteAgent === nextAgent) return;
+
     const mergedBasePrefs = mergeSessionPrefsForRemotePatch(basePrefs, id);
     const existing = mergedBasePrefs[id] ?? null;
-    const existingAgent = normalizeStoredAgent(existing?.agent) ?? null;
-    if (existingAgent === nextAgent) return;
 
     const nextPrefs: Record<string, OpenworkSessionPrefs> = {
       ...mergedBasePrefs,
@@ -3211,6 +3261,7 @@ export default function App() {
     setOpenworkSessionPrefsById(nextPrefs);
     setOpenworkSessionPrefsWorkspaceId(workspaceId);
     setOpenworkSessionPrefsLoaded(true);
+    markOpenworkSessionPrefsMutation();
     writeLocalOpenworkSessionPrefs(nextPrefs);
 
     await openworkClient.patchConfig(workspaceId, {
@@ -3252,24 +3303,14 @@ export default function App() {
         delete localNext[id];
       }
 
+      markOpenworkSessionPrefsMutation();
       setOpenworkSessionPrefsById(localNext);
       writeLocalOpenworkSessionPrefs(localNext);
     }
 
-    const openworkClient = openworkServerClient();
-    const caps = resolvedOpenworkCapabilities();
-    const canReadWrite =
-      openworkServerStatus() === "connected" &&
-      openworkClient &&
-      (caps?.config?.read ?? false) &&
-      (caps?.config?.write ?? false);
-    if (!canReadWrite) return;
-
-    let workspaceId = (openworkServerWorkspaceId() ?? "").trim();
-    if (!workspaceId) {
-      workspaceId = (await ensureOpenworkServerWorkspaceIdResolved())?.trim() ?? "";
-    }
-    if (!workspaceId) return;
+    const configContext = await ensureOpenworkConfigContext();
+    if (!configContext) return;
+    const { client: openworkClient, workspaceId } = configContext;
 
     let basePrefs: Record<string, OpenworkSessionPrefs> | null = null;
     if (openworkSessionPrefsLoaded() && openworkSessionPrefsWorkspaceId() === workspaceId) {
@@ -3285,11 +3326,13 @@ export default function App() {
       }
     }
 
+    const remoteExisting = basePrefs?.[id] ?? null;
+    const existingRemoteLock = normalizeStoredAgent(remoteExisting?.agentLock) ?? null;
+    const existingRemoteAgent = normalizeStoredAgent(remoteExisting?.agent) ?? null;
+    if (existingRemoteLock === nextLock && (nextLock === null || existingRemoteAgent === nextLock)) return;
+
     const mergedBasePrefs = mergeSessionPrefsForRemotePatch(basePrefs, id);
     const existing = mergedBasePrefs[id] ?? null;
-    const existingLock = normalizeStoredAgent(existing?.agentLock) ?? null;
-    const existingAgent = normalizeStoredAgent(existing?.agent) ?? null;
-    if (existingLock === nextLock && (nextLock === null || existingAgent === nextLock)) return;
 
     const nextPrefs: Record<string, OpenworkSessionPrefs> = {
       ...mergedBasePrefs,
@@ -3313,6 +3356,7 @@ export default function App() {
     setOpenworkSessionPrefsById(nextPrefs);
     setOpenworkSessionPrefsWorkspaceId(workspaceId);
     setOpenworkSessionPrefsLoaded(true);
+    markOpenworkSessionPrefsMutation();
     writeLocalOpenworkSessionPrefs(nextPrefs);
 
     await openworkClient.patchConfig(workspaceId, {
@@ -3320,6 +3364,293 @@ export default function App() {
         sessions: nextPrefs as unknown as Record<string, unknown>,
       },
     });
+  };
+
+  const selectedSessionRagflowSelection = createMemo(() => {
+    const sessionId = activeSessionId();
+    if (!sessionId) return null;
+    return getStoredSessionRagflowSelection(sessionId);
+  });
+
+  const ensureRagflowWorkspaceContext = async (): Promise<{
+    client: NonNullable<ReturnType<typeof openworkServerClient>>;
+    workspaceId: string;
+  } | null> => {
+    const activeClient = openworkServerClient();
+    if (!activeClient || openworkServerStatus() !== "connected") return null;
+    let workspaceId = (openworkServerWorkspaceId() ?? "").trim();
+    if (!workspaceId) {
+      workspaceId = (await ensureOpenworkServerWorkspaceIdResolved())?.trim() ?? "";
+    }
+    if (!workspaceId) return null;
+    return { client: activeClient, workspaceId };
+  };
+
+  const ensureOpenworkConfigContext = async (): Promise<{
+    client: NonNullable<ReturnType<typeof openworkServerClient>>;
+    workspaceId: string;
+    capabilities: OpenworkServerCapabilities;
+  } | null> => {
+    const activeClient = openworkServerClient();
+    if (!activeClient || openworkServerStatus() !== "connected") return null;
+
+    let capabilities = resolvedOpenworkCapabilities();
+    if (!capabilities) {
+      try {
+        capabilities = await activeClient.capabilities();
+        setOpenworkServerCapabilities(capabilities);
+      } catch {
+        return null;
+      }
+    }
+
+    if (!(capabilities.config?.read ?? false) || !(capabilities.config?.write ?? false)) {
+      return null;
+    }
+
+    let workspaceId = (openworkServerWorkspaceId() ?? "").trim();
+    if (!workspaceId) {
+      workspaceId = (await ensureOpenworkServerWorkspaceIdResolved())?.trim() ?? "";
+    }
+    if (!workspaceId) return null;
+
+    return {
+      client: activeClient,
+      workspaceId,
+      capabilities,
+    };
+  };
+
+  const refreshRagflowStatus = async () => {
+    const context = await ensureRagflowWorkspaceContext();
+    if (!context) {
+      setRagflowStatusInfo({
+        configured: false,
+        available: false,
+        baseUrl: null,
+        mcpUrl: null,
+        reason: "Connect to an OpenWork server to use session knowledge bases.",
+      });
+      return;
+    }
+    setRagflowStatusBusy(true);
+    try {
+      const status = await context.client.getRagflowStatus(context.workspaceId);
+      setRagflowStatusInfo(status);
+    } catch (error) {
+      setRagflowStatusInfo({
+        configured: false,
+        available: false,
+        baseUrl: null,
+        mcpUrl: null,
+        reason: error instanceof Error ? error.message : safeStringify(error),
+      });
+    } finally {
+      setRagflowStatusBusy(false);
+    }
+  };
+
+  const refreshRagflowDatasets = async () => {
+    const context = await ensureRagflowWorkspaceContext();
+    if (!context) {
+      setRagflowDatasets([]);
+      setRagflowDatasetsError("Connect to an OpenWork server to load knowledge bases.");
+      return;
+    }
+    setRagflowDatasetsBusy(true);
+    setRagflowDatasetsError(null);
+    try {
+      const response = await context.client.listRagflowDatasets(context.workspaceId, { limit: 300 });
+      setRagflowDatasets(response.items);
+    } catch (error) {
+      setRagflowDatasets([]);
+      setRagflowDatasetsError(error instanceof Error ? error.message : safeStringify(error));
+    } finally {
+      setRagflowDatasetsBusy(false);
+    }
+  };
+
+  const setSessionRagflowRetrievalError = (sessionId: string, message: string | null) => {
+    const id = sessionId.trim();
+    if (!id) return;
+    const nextMessage = message?.trim() ?? "";
+    setRagflowRetrievalErrorBySessionId((current) => {
+      if (!nextMessage) {
+        if (!current[id]) return current;
+        const copy = { ...current };
+        delete copy[id];
+        return copy;
+      }
+      if (current[id] === nextMessage) return current;
+      return {
+        ...current,
+        [id]: nextMessage,
+      };
+    });
+  };
+
+  const persistSessionRagflowSelection = async (
+    sessionId: string,
+    input: {
+      datasetIds: string[];
+      datasetNames?: string[];
+      topK?: number | null;
+    },
+  ): Promise<void> => {
+    const id = sessionId.trim();
+    if (!id) return;
+    setSessionRagflowRetrievalError(id, null);
+
+    const datasetIds = normalizeStoredStringList(input.datasetIds);
+    const datasetNames = normalizeStoredStringList(input.datasetNames);
+    const topK = normalizeStoredRagflowTopK(input.topK);
+
+    const localBase = openworkSessionPrefsById();
+    const localExisting = localBase[id] ?? null;
+    const existingSelection = resolveStoredRagflowSelection(localExisting);
+    const nextSelection = datasetIds.length ? { datasetIds, datasetNames, topK } : null;
+    const sameSelection = JSON.stringify(existingSelection) === JSON.stringify(nextSelection);
+
+    if (!sameSelection) {
+      const localNext: Record<string, OpenworkSessionPrefs> = {
+        ...(localBase ?? {}),
+        [id]: {
+          ...(localExisting ?? {}),
+        },
+      };
+
+      if (nextSelection) {
+        localNext[id].ragflowDatasetIds = nextSelection.datasetIds;
+        if (nextSelection.datasetNames.length) {
+          localNext[id].ragflowDatasetNames = nextSelection.datasetNames;
+        } else {
+          delete localNext[id].ragflowDatasetNames;
+        }
+        if (typeof nextSelection.topK === "number") {
+          localNext[id].ragflowTopK = nextSelection.topK;
+        } else {
+          delete localNext[id].ragflowTopK;
+        }
+      } else {
+        delete localNext[id].ragflowDatasetIds;
+        delete localNext[id].ragflowDatasetNames;
+        delete localNext[id].ragflowTopK;
+      }
+
+      if (!Object.keys(localNext[id]).length) {
+        delete localNext[id];
+      }
+
+      markOpenworkSessionPrefsMutation();
+      setOpenworkSessionPrefsById(localNext);
+      writeLocalOpenworkSessionPrefs(localNext);
+    }
+
+    const configContext = await ensureOpenworkConfigContext();
+    if (!configContext) return;
+    const { client: openworkClient, workspaceId } = configContext;
+
+    let basePrefs: Record<string, OpenworkSessionPrefs> | null = null;
+    if (openworkSessionPrefsLoaded() && openworkSessionPrefsWorkspaceId() === workspaceId) {
+      basePrefs = openworkSessionPrefsById();
+    } else {
+      try {
+        const config = await openworkClient.getConfig(workspaceId);
+        const openwork =
+          config.openwork && typeof config.openwork === "object" ? (config.openwork as Record<string, unknown>) : {};
+        basePrefs = parseOpenworkSessionPrefs(openwork);
+      } catch {
+        return;
+      }
+    }
+
+    const remoteExisting = basePrefs?.[id] ?? null;
+    const existingRemoteSelection = resolveStoredRagflowSelection(remoteExisting);
+    if (JSON.stringify(existingRemoteSelection) === JSON.stringify(nextSelection)) return;
+
+    const mergedBasePrefs = mergeSessionPrefsForRemotePatch(basePrefs, id);
+    const existing = mergedBasePrefs[id] ?? null;
+
+    const nextPrefs: Record<string, OpenworkSessionPrefs> = {
+      ...mergedBasePrefs,
+      [id]: {
+        ...(existing ?? {}),
+      },
+    };
+
+    if (nextSelection) {
+      nextPrefs[id].ragflowDatasetIds = nextSelection.datasetIds;
+      if (nextSelection.datasetNames.length) {
+        nextPrefs[id].ragflowDatasetNames = nextSelection.datasetNames;
+      } else {
+        delete nextPrefs[id].ragflowDatasetNames;
+      }
+      if (typeof nextSelection.topK === "number") {
+        nextPrefs[id].ragflowTopK = nextSelection.topK;
+      } else {
+        delete nextPrefs[id].ragflowTopK;
+      }
+    } else {
+      delete nextPrefs[id].ragflowDatasetIds;
+      delete nextPrefs[id].ragflowDatasetNames;
+      delete nextPrefs[id].ragflowTopK;
+    }
+
+    if (!Object.keys(nextPrefs[id]).length) {
+      delete nextPrefs[id];
+    }
+
+    setOpenworkSessionPrefsById(nextPrefs);
+    setOpenworkSessionPrefsWorkspaceId(workspaceId);
+    setOpenworkSessionPrefsLoaded(true);
+    markOpenworkSessionPrefsMutation();
+    writeLocalOpenworkSessionPrefs(nextPrefs);
+
+    await openworkClient.patchConfig(workspaceId, {
+      openwork: {
+        sessions: nextPrefs as unknown as Record<string, unknown>,
+      },
+    });
+  };
+
+  const buildSessionRagflowContextText = async (sessionId: string, question: string): Promise<string | null> => {
+    const query = question.trim();
+    if (!query) return null;
+    try {
+      await ensureOpenworkSessionPrefsLoaded();
+    } catch {
+      // ignore
+    }
+    const selection = getStoredSessionRagflowSelection(sessionId);
+    if (!selection?.datasetIds.length) {
+      setSessionRagflowRetrievalError(sessionId, null);
+      return null;
+    }
+    const context = await ensureRagflowWorkspaceContext();
+    if (!context) {
+      setSessionRagflowRetrievalError(sessionId, null);
+      return null;
+    }
+    try {
+      const result = await context.client.retrieveRagflow(context.workspaceId, {
+        question: query,
+        datasetIds: selection.datasetIds,
+        topK: selection.topK ?? 8,
+        pageSize: Math.min(selection.topK ?? 8, 8),
+      });
+      setSessionRagflowRetrievalError(sessionId, null);
+      return buildRagflowContextText({
+        selection,
+        chunks: result.chunks,
+        question: result.question,
+      });
+    } catch (error) {
+      setSessionRagflowRetrievalError(
+        sessionId,
+        error instanceof Error ? error.message : "Knowledge search failed.",
+      );
+      return null;
+    }
   };
 
   createEffect(() => {
@@ -3432,6 +3763,18 @@ export default function App() {
 
     if (!workspaceId) return;
     void ensureOpenworkSessionPrefsLoaded().catch(() => undefined);
+  });
+
+  createEffect(() => {
+    void openworkServerStatus();
+    void openworkServerWorkspaceId();
+    void openworkServerClient();
+    void refreshRagflowStatus().catch(() => undefined);
+  });
+
+  createEffect(() => {
+    if (!ragflowPickerOpen()) return;
+    void refreshRagflowDatasets().catch(() => undefined);
   });
 
   function updateOpenworkServerSettings(next: OpenworkServerSettings) {
@@ -6300,6 +6643,29 @@ export default function App() {
     }
   };
 
+  const selectedSessionKnowledgeDatasets = createMemo(() => {
+    const selection = selectedSessionRagflowSelection();
+    if (!selection?.datasetIds.length) return [];
+    const nameMap = new Map<string, string>();
+    for (const dataset of ragflowDatasets()) {
+      nameMap.set(dataset.id, dataset.name);
+    }
+    selection.datasetIds.forEach((id, index) => {
+      const fallbackName = selection.datasetNames[index];
+      if (fallbackName && !nameMap.has(id)) nameMap.set(id, fallbackName);
+    });
+    return selection.datasetIds.map((id, index) => ({
+      id,
+      name: nameMap.get(id) ?? selection.datasetNames[index] ?? id,
+    }));
+  });
+
+  const activeSessionRagflowRetrievalError = createMemo(() => {
+    const sessionId = activeSessionId();
+    if (!sessionId) return null;
+    return ragflowRetrievalErrorBySessionId()[sessionId] ?? null;
+  });
+
   const sessionProps = () => ({
     selectedSessionId: activeSessionId(),
     routeSessionHydratingId: routeSessionHydratingId(),
@@ -6348,6 +6714,19 @@ export default function App() {
     mcpServers: mcpServers(),
     mcpStatuses: mcpStatuses(),
     mcpStatus: mcpStatus(),
+    ragflowStatus: ragflowStatusInfo(),
+    ragflowStatusBusy: ragflowStatusBusy() || ragflowDatasetsBusy(),
+    selectedSessionKnowledgeDatasets: selectedSessionKnowledgeDatasets(),
+    ragflowRetrievalError: activeSessionRagflowRetrievalError(),
+    openKnowledgePicker: () => {
+      setRagflowPickerQuery("");
+      setRagflowPickerOpen(true);
+    },
+    clearSessionKnowledgeSelection: () => {
+      const sessionId = activeSessionId();
+      if (!sessionId) return;
+      void persistSessionRagflowSelection(sessionId, { datasetIds: [], datasetNames: [] });
+    },
     skills: skills(),
     skillsStatus: skillsStatus(),
     createSessionAndOpen: createSessionAndOpen,
@@ -6758,6 +7137,23 @@ export default function App() {
           await refreshMcpServers();
         }}
         onReloadEngine={() => reloadWorkspaceEngineAndResume()}
+      />
+
+      <SessionKnowledgeModal
+        open={ragflowPickerOpen()}
+        status={ragflowStatusInfo()}
+        busy={ragflowDatasetsBusy()}
+        datasets={ragflowDatasets()}
+        error={ragflowDatasetsError()}
+        query={ragflowPickerQuery()}
+        setQuery={setRagflowPickerQuery}
+        selectedDatasetIds={selectedSessionRagflowSelection()?.datasetIds ?? []}
+        onClose={() => setRagflowPickerOpen(false)}
+        onSave={async (selection) => {
+          const sessionId = activeSessionId();
+          if (!sessionId) return;
+          await persistSessionRagflowSelection(sessionId, selection);
+        }}
       />
 
       <CreateWorkspaceModal

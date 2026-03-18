@@ -152,4 +152,27 @@ describe("ragflow client", () => {
       datasetIds: ["ds_1"],
     });
   });
+
+  test("wraps transport failures in an api error with a specific message", async () => {
+    const client = createRagflowClient({
+      baseUrl: "http://ragflow.local",
+      apiKey: "test",
+      fetchImpl: async () => {
+        const error = new Error("The socket connection was closed unexpectedly.");
+        Object.assign(error, { code: "ECONNRESET" });
+        throw error;
+      },
+    });
+
+    await expect(client.retrieve({ question: "What changed?", datasetIds: ["ds_1"] })).rejects.toMatchObject({
+      status: 502,
+      code: "ragflow_request_failed",
+      message: "RAGFlow connection was reset before it returned a response.",
+      details: {
+        url: "http://ragflow.local/api/v1/retrieval",
+        code: "ECONNRESET",
+        cause: "The socket connection was closed unexpectedly.",
+      },
+    });
+  });
 });

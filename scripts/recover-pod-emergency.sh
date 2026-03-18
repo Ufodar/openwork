@@ -93,6 +93,7 @@ load_env_file "$PROJECT_DIR/.env.pod.local"
 
 export OPENWORK_PORT="${OPENWORK_PORT:-8789}"
 export OPENWORK_WEB_PORT="${OPENWORK_WEB_PORT:-32765}"
+export OPENWORK_LEGACY_WEB_PORT="${OPENWORK_LEGACY_WEB_PORT:-${PORT:-5173}}"
 export OPENWORK_WEB_HOST="${OPENWORK_WEB_HOST:-0.0.0.0}"
 export OPENWORK_WEB_BACKEND_URL="${OPENWORK_WEB_BACKEND_URL:-http://127.0.0.1:${OPENWORK_PORT}}"
 export OPENWORK_OPENCODE_PORT="${OPENWORK_OPENCODE_PORT:-4096}"
@@ -111,7 +112,9 @@ ensure_file "packages/server/dist/bin/openwork-server" "$PNPM_CMD --filter openw
 kill_port "$OPENWORK_WEB_PORT"
 kill_port "$OPENWORK_PORT"
 kill_port "$OPENWORK_OPENCODE_PORT"
-kill_port 5173
+if [ "$OPENWORK_LEGACY_WEB_PORT" != "$OPENWORK_WEB_PORT" ]; then
+    kill_port "$OPENWORK_LEGACY_WEB_PORT"
+fi
 
 pkill -f 'serve-web-prod.mjs' 2>/dev/null || true
 pkill -f 'packages/orchestrator/dist/bin/openwork' 2>/dev/null || true
@@ -175,6 +178,19 @@ if ! wait_for_http_ok "http://127.0.0.1:${OPENWORK_WEB_PORT}/healthz" 20; then
     exit 1
 fi
 
+if [ "$OPENWORK_LEGACY_WEB_PORT" != "$OPENWORK_WEB_PORT" ]; then
+    echo "[recover-pod] Starting legacy web listener on ${OPENWORK_WEB_HOST}:${OPENWORK_LEGACY_WEB_PORT}..."
+    nohup env OPENWORK_PORT="${OPENWORK_PORT}" OPENWORK_WEB_PORT="${OPENWORK_LEGACY_WEB_PORT}" OPENWORK_WEB_HOST="${OPENWORK_WEB_HOST}" OPENWORK_WEB_BACKEND_URL="${OPENWORK_WEB_BACKEND_URL}" \
+        node "$PROJECT_DIR/scripts/serve-web-prod.mjs" \
+        > "$PROJECT_DIR/tmp/prod-web-legacy.log" 2>&1 &
+
+    if ! wait_for_http_ok "http://127.0.0.1:${OPENWORK_LEGACY_WEB_PORT}/healthz" 20; then
+        echo "[recover-pod] Legacy web listener failed to become healthy." >&2
+        tail -n 80 "$PROJECT_DIR/tmp/prod-web-legacy.log" >&2 || true
+        exit 1
+    fi
+fi
+
 echo "[recover-pod] Emergency recovery stack is up."
 echo "[recover-pod] Web: http://${OPENWORK_POD_IP:-127.0.0.1}:${OPENWORK_WEB_PORT}"
 echo "[recover-pod] API: http://127.0.0.1:${OPENWORK_PORT}/health"
@@ -182,3 +198,6 @@ echo "[recover-pod] Logs:"
 echo "  tail -f $PROJECT_DIR/tmp/opencode-manual.log"
 echo "  tail -f $PROJECT_DIR/tmp/openwork-server-manual.log"
 echo "  tail -f $PROJECT_DIR/tmp/prod-web-manual.log"
+if [ "$OPENWORK_LEGACY_WEB_PORT" != "$OPENWORK_WEB_PORT" ]; then
+    echo "  tail -f $PROJECT_DIR/tmp/prod-web-legacy.log"
+fi

@@ -2561,6 +2561,35 @@ export function createWorkspaceStore(options: {
     }
   }
 
+  function resetWebRuntimeState() {
+    if (isTauriRuntime()) return;
+
+    setEngineAuth(null);
+    options.setClient(null);
+    options.setConnectedVersion(null);
+    options.setSseConnected(false);
+    options.setSelectedSessionId(null);
+    options.setMessages([]);
+    options.setTodos([]);
+    options.setPendingPermissions([]);
+    options.setSessionStatusById({});
+    options.setProviders([]);
+    options.setProviderDefaults({});
+    options.setProviderConnectedIds([]);
+    options.setOpencodeConnectStatus?.(null);
+
+    setProjectDir("");
+    setWorkspaces([]);
+    syncActiveWorkspaceId("starter");
+    setAuthorizedDirs([]);
+    setWorkspaceConfig(null);
+    setWorkspaceConfigLoaded(false);
+    setCreateWorkspaceOpen(false);
+    setCreateRemoteWorkspaceOpen(false);
+    setConnectingWorkspaceId(null);
+    setWorkspaceConnectionStateById({});
+  }
+
   async function reloadWorkspaceEngine() {
     if (!isTauriRuntime()) {
       options.setError("Reloading the engine requires the desktop app.");
@@ -3071,6 +3100,7 @@ export function createWorkspaceStore(options: {
     repairOpencodeMigration,
     startHost,
     stopHost,
+    resetWebRuntimeState,
     reloadWorkspaceEngine,
     bootstrapOnboarding,
     onSelectStartup,

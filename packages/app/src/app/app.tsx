@@ -57,7 +57,14 @@ import {
   routeForSessionView,
   type AppRouteView,
 } from "./lib/session-view-routing";
-import { clearOpenworkWebSession, readWebAuthUser, writeWebAuthUser } from "./lib/web-auth";
+import {
+  clearOpenworkWebSession,
+  clearWebLogoutStorage,
+  OPENWORK_SESSION_PREFS_LOCAL_STORAGE_KEY,
+  readWebAuthUser,
+  SESSION_BY_WORKSPACE_KEY,
+  writeWebAuthUser,
+} from "./lib/web-auth";
 import {
   DEFAULT_MODEL,
   HIDE_TITLEBAR_PREF_KEY,
@@ -845,7 +852,6 @@ export default function App() {
   const [selectedSessionId, setSelectedSessionId] = createSignal<string | null>(
     null
   );
-  const SESSION_BY_WORKSPACE_KEY = "openwork.workspace-last-session.v1";
   const readSessionByWorkspace = () => {
     if (typeof window === "undefined") return {} as Record<string, string>;
     try {
@@ -2729,13 +2735,34 @@ export default function App() {
     if (!hasWebAuthSession()) return false;
     return openworkAccessTokenPresent();
   });
+  const clearCurrentWebSessionState = () => {
+    workspaceStore.resetWebRuntimeState();
+    setSessions([]);
+    setSessionsLoaded(false);
+    setSidebarSessionsByWorkspaceId({});
+    setSidebarSessionStatusByWorkspaceId({});
+    setSidebarSessionErrorByWorkspaceId({});
+    setSessionModelOverrideById({});
+    setSessionModelById({});
+    setOpenworkSessionPrefsById({});
+    setOpenworkSessionPrefsLoaded(false);
+    setOpenworkSessionPrefsWorkspaceId(null);
+    setOpenworkServerWorkspaceId(null);
+    setDevtoolsWorkspaceId(null);
+    writeSessionByWorkspace({});
+    clearWebLogoutStorage(typeof window === "undefined" ? null : window.localStorage);
+  };
   const clearInvalidWebAuthSession = () => {
-    setWebAuthSessionUser(null);
-    updateOpenworkServerSettings(clearOpenworkWebSession(openworkServerSettings()));
+    batch(() => {
+      clearCurrentWebSessionState();
+      setWebAuthSessionUser(null);
+      updateOpenworkServerSettings(clearOpenworkWebSession(openworkServerSettings()));
+    });
   };
   const logoutWebSession = () => {
     if (!requiresWebServerAuth()) return;
     batch(() => {
+      clearCurrentWebSessionState();
       setWebAuthSessionUser(null);
       updateOpenworkServerSettings(clearOpenworkWebSession(openworkServerSettings()));
     });
@@ -2801,8 +2828,6 @@ export default function App() {
 
     return next;
   };
-
-  const OPENWORK_SESSION_PREFS_LOCAL_STORAGE_KEY = "openwork.sessionPrefs.v1";
 
   const readLocalOpenworkSessionPrefs = (): Record<string, OpenworkSessionPrefs> => {
     if (typeof window === "undefined") return {};

@@ -3,7 +3,6 @@ import { homedir } from "node:os";
 import { readFile, rename, writeFile } from "node:fs/promises";
 
 import { ensureDir, exists, shortId } from "./utils.js";
-import { copyWorkspaceConfigTemplate } from "./workspace-template.js";
 
 type PermissionAction = "allow" | "deny" | "ask";
 
@@ -82,7 +81,6 @@ export async function provisionSessionWorkspace(workspacePath: string): Promise<
   const runtimeId = shortId().replace(/-/g, "");
   const runtimeDir = join(workspacePath, "documents", "sessions", runtimeId);
   await ensureDir(runtimeDir);
-  await copyWorkspaceConfigTemplate(workspacePath, runtimeDir);
   return { runtimeId, runtimeDir };
 }
 

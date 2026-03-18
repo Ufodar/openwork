@@ -471,6 +471,8 @@ const ALLOWED_HIDDEN_FILE_NAMES = new Set([
     ".zshrc",
 ]);
 
+const RESERVED_DOCUMENT_ROOT_FILES = new Set(["opencode.json", "opencode.jsonc"]);
+
 function isAllowedHiddenLeafName(name: string): boolean {
     const lower = name.trim().toLowerCase();
     if (!lower.startsWith(".")) return false;
@@ -483,6 +485,12 @@ function shouldHideDocumentEntry(entryName: string, isDirectory: boolean): boole
     if (!entryName.startsWith(".")) return false;
     if (isDirectory) return true;
     return !isAllowedHiddenLeafName(entryName);
+}
+
+function shouldHideListedDocumentPath(relPath: string): boolean {
+    const normalized = relPath.replace(/\\/g, "/").replace(/^\/+/, "").trim();
+    if (!normalized) return false;
+    return RESERVED_DOCUMENT_ROOT_FILES.has(normalized);
 }
 
 function validateDocumentMutationPath(relPath: string, options?: { allowHiddenLeafFile?: boolean }): void {
@@ -780,6 +788,7 @@ export function createDocumentRoutes(routes: unknown[], sessionWorkspaces?: Sess
 
                     const info = await stat(fullPath);
                     const relName = relative(docsDir, fullPath).replace(/\\/g, "/");
+                    if (shouldHideListedDocumentPath(relName)) continue;
                     docs.push({
                         name: relName,
                         updatedAt: info.mtimeMs,

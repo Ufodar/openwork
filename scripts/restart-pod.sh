@@ -721,7 +721,17 @@ wait_for_runtime_drain() {
 }
 
 resolve_managed_opencode_source() {
-    local requested="${OPENWORK_POD_OPENCODE_SOURCE:-${OPENWORK_OPENCODE_SOURCE:-downloaded}}"
+    local requested=""
+    if [ -n "${OPENWORK_POD_OPENCODE_SOURCE:-}" ]; then
+        requested="$OPENWORK_POD_OPENCODE_SOURCE"
+    elif [ -n "${OPENWORK_OPENCODE_SOURCE:-}" ]; then
+        requested="$OPENWORK_OPENCODE_SOURCE"
+    elif [ -n "${OPENWORK_OPENCODE_BIN:-}" ] || command -v opencode >/dev/null 2>&1; then
+        requested="external"
+    else
+        requested="downloaded"
+    fi
+
     case "$requested" in
         auto|bundled|downloaded|external) ;;
         *)
@@ -730,12 +740,45 @@ resolve_managed_opencode_source() {
             ;;
     esac
 
-    if [ -z "${OPENWORK_POD_OPENCODE_SOURCE:-}" ] && [ "$requested" = "external" ] && ! is_truthy "${OPENWORK_ALLOW_LEGACY_EXTERNAL_OPENCODE:-0}"; then
-        echo "[restart-pod] Ignoring legacy OPENWORK_OPENCODE_SOURCE=external; using managed downloaded OpenCode instead."
-        requested="downloaded"
+    printf '%s\n' "$requested"
+}
+
+resolve_external_opencode_bin() {
+    local candidate="${OPENWORK_OPENCODE_BIN:-}"
+    if [ -n "$candidate" ]; then
+        if [ ! -x "$candidate" ]; then
+            echo "[restart-pod] OPENWORK_OPENCODE_BIN points to a non-executable path: $candidate" >&2
+            exit 1
+        fi
+        printf '%s\n' "$candidate"
+        return 0
     fi
 
-    printf '%s\n' "$requested"
+    candidate="$(command -v opencode 2>/dev/null || true)"
+    if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+        printf '%s\n' "$candidate"
+        return 0
+    fi
+
+    echo "[restart-pod] OpenCode source resolved to external, but no usable opencode binary was found in OPENWORK_OPENCODE_BIN or PATH." >&2
+    exit 1
+}
+
+prepare_opencode_launch_env() {
+    local source="$1"
+    case "$source" in
+        external)
+            OPENWORK_OPENCODE_BIN="$(resolve_external_opencode_bin)"
+            export OPENWORK_OPENCODE_BIN
+            echo "[restart-pod] Reusing pod OpenCode binary: $OPENWORK_OPENCODE_BIN ($(\"$OPENWORK_OPENCODE_BIN\" --version 2>/dev/null || echo unknown))"
+            ;;
+        bundled|downloaded)
+            if [ -n "${OPENWORK_OPENCODE_BIN:-}" ]; then
+                echo "[restart-pod] Unsetting OPENWORK_OPENCODE_BIN because OpenCode source is $source."
+                unset OPENWORK_OPENCODE_BIN
+            fi
+            ;;
+    esac
 }
 
 cleanup_runtime_control_on_exit() {
@@ -852,6 +895,7 @@ if ! wait_for_http_ok "http://127.0.0.1:${OPENWORK_WEB_PORT}/healthz" 10; then
 fi
 
 OPENCODE_SOURCE_MODE="$(resolve_managed_opencode_source)"
+prepare_opencode_launch_env "$OPENCODE_SOURCE_MODE"
 
 orchestrator_args=(
     serve
@@ -870,8 +914,6 @@ orchestrator_args=(
 
 if [ "$OPENCODE_SOURCE_MODE" = "external" ] && [ -n "${OPENWORK_OPENCODE_BIN:-}" ]; then
     orchestrator_args+=(--opencode-bin "$OPENWORK_OPENCODE_BIN")
-elif [ "$OPENCODE_SOURCE_MODE" != "external" ] && [ -n "${OPENWORK_OPENCODE_BIN:-}" ]; then
-    echo "[restart-pod] Ignoring OPENWORK_OPENCODE_BIN because managed OpenCode source is $OPENCODE_SOURCE_MODE."
 fi
 
 if is_truthy "$OPENWORK_OPENCODE_ROUTER"; then

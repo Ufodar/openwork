@@ -68,6 +68,16 @@ while [ $# -gt 0 ]; do
     shift
 done
 
+# `nohup bash scripts/restart-pod.sh ... &` only protects this shell process.
+# Re-exec under a dedicated session so child services do not inherit the SSH
+# session/process group and die on a later SIGHUP.
+if [ -z "${OPENWORK_RESTART_POD_SETSID:-}" ] && command -v setsid >/dev/null 2>&1; then
+    echo "[restart-pod] Re-executing in a dedicated session to survive SSH hangups..."
+    exec env OPENWORK_RESTART_POD_SETSID=1 setsid bash "$0" "$@"
+fi
+
+trap '' HUP
+
 kill_pids_gracefully() {
     local reason="$1"
     shift

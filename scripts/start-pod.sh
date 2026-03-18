@@ -128,7 +128,9 @@ install_system_deps() {
     command -v lsof      &>/dev/null || pkgs+=(lsof)
 
     # Python
-    command -v python3   &>/dev/null || pkgs+=(python3 python3-pip python3-venv)
+    command -v python3   &>/dev/null || pkgs+=(python3)
+    python3 -m pip --version &>/dev/null || pkgs+=(python3-pip)
+    python3 -m venv --help &>/dev/null || pkgs+=(python3-venv)
 
     # Document processing
     command -v file      &>/dev/null || pkgs+=(file)
@@ -154,17 +156,58 @@ install_system_deps() {
 # ============================================
 # Phase 1b: Install Python packages (for skills)
 # ============================================
+detect_missing_python_skill_packages() {
+    if ! command -v python3 &>/dev/null; then
+        return 0
+    fi
+
+    python3 - <<'PY'
+checks = [
+    ("pypdf", "pypdf"),
+    ("pdfplumber", "pdfplumber"),
+    ("reportlab", "reportlab"),
+    ("pytesseract", "pytesseract"),
+    ("pdf2image", "pdf2image"),
+    ("openpyxl", "openpyxl"),
+    ("pandas", "pandas"),
+    ("PIL", "pillow"),
+    ("defusedxml", "defusedxml"),
+    ("lxml", "lxml"),
+    ("docx", "python-docx"),
+    ("markitdown", "markitdown[pptx]"),
+]
+missing = []
+seen = set()
+for module_name, package_name in checks:
+    try:
+        __import__(module_name)
+    except Exception:
+        if package_name not in seen:
+            missing.append(package_name)
+            seen.add(package_name)
+print("\n".join(missing))
+PY
+}
+
 install_python_deps() {
     if ! command -v python3 &>/dev/null; then
         echo "[start-pod] python3 not found, skipping Python packages."
         return
     fi
 
-    # Check if key packages are already installed
-    if python3 -c "import pypdf, pdfplumber, openpyxl, pandas, defusedxml, lxml, docx" &>/dev/null; then
+    if ! python3 -m pip --version &>/dev/null; then
+        echo "[start-pod] python3 is available but pip is missing." >&2
+        echo "[start-pod] Install python3-pip first, then rerun start-pod.sh." >&2
+        exit 1
+    fi
+
+    local missing_raw
+    missing_raw="$(detect_missing_python_skill_packages)"
+    if [ -z "$missing_raw" ]; then
         echo "[start-pod] Python packages already installed."
         return
     fi
+    mapfile -t missing_packages <<<"$missing_raw"
 
     local pip_cmd=(python3 -m pip)
     local break_system_packages=()
@@ -186,19 +229,6 @@ install_python_deps() {
         --timeout 60
         --prefer-binary
     )
-    local core_packages=(
-        pypdf
-        pdfplumber
-        reportlab
-        pytesseract
-        pdf2image
-        openpyxl
-        pandas
-        pillow
-        defusedxml
-        lxml
-        python-docx
-    )
 
     echo "[start-pod] Installing Python packages for skills..."
     echo "[start-pod] Python: $(python3 -V 2>&1)"
@@ -208,19 +238,12 @@ install_python_deps() {
     else
         echo "[start-pod] Pip index: default (set OPENWORK_PIP_INDEX_URL if network to pypi is slow)"
     fi
-    echo "[start-pod] Installing core Python packages..."
+    echo "[start-pod] Installing missing Python packages: ${missing_packages[*]}"
     "${pip_cmd[@]}" install \
         "${break_system_packages[@]}" \
         "${common_args[@]}" \
         "${index_args[@]}" \
-        "${core_packages[@]}"
-
-    echo "[start-pod] Installing markitdown[pptx]..."
-    "${pip_cmd[@]}" install \
-        "${break_system_packages[@]}" \
-        "${common_args[@]}" \
-        "${index_args[@]}" \
-        "markitdown[pptx]"
+        "${missing_packages[@]}"
 }
 
 install_node_skill_deps() {

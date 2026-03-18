@@ -349,6 +349,39 @@ configure_global_node_path() {
     echo "[restart-pod] NODE_PATH includes global npm modules: $npm_root"
 }
 
+detect_missing_python_skill_packages() {
+    if ! command -v python3 &>/dev/null; then
+        return 0
+    fi
+
+    python3 - <<'PY'
+checks = [
+    ("pypdf", "pypdf"),
+    ("pdfplumber", "pdfplumber"),
+    ("reportlab", "reportlab"),
+    ("pytesseract", "pytesseract"),
+    ("pdf2image", "pdf2image"),
+    ("openpyxl", "openpyxl"),
+    ("pandas", "pandas"),
+    ("PIL", "pillow"),
+    ("defusedxml", "defusedxml"),
+    ("lxml", "lxml"),
+    ("docx", "python-docx"),
+    ("markitdown", "markitdown[pptx]"),
+]
+missing = []
+seen = set()
+for module_name, package_name in checks:
+    try:
+        __import__(module_name)
+    except Exception:
+        if package_name not in seen:
+            missing.append(package_name)
+            seen.add(package_name)
+print("\n".join(missing))
+PY
+}
+
 load_runtime_env
 ensure_runtime_tokens
 configure_global_node_path
@@ -408,6 +441,54 @@ ensure_runtime_ready() {
     fi
 }
 
+ensure_python_skill_deps() {
+    if ! command -v python3 &>/dev/null; then
+        return 0
+    fi
+    if ! python3 -m pip --version &>/dev/null; then
+        echo "[restart-pod] Warning: python3 is available but pip is missing."
+        echo "[restart-pod] Run bash scripts/start-pod.sh to install python3-pip and the full Python skill toolchain."
+        return 0
+    fi
+
+    local missing_raw
+    missing_raw="$(detect_missing_python_skill_packages)"
+    if [ -z "$missing_raw" ]; then
+        echo "[restart-pod] Python skill packages already installed."
+        return 0
+    fi
+
+    mapfile -t missing_packages <<<"$missing_raw"
+
+    local pip_cmd=(python3 -m pip)
+    local break_system_packages=()
+    if "${pip_cmd[@]}" install --help 2>/dev/null | grep -q -- "--break-system-packages"; then
+        break_system_packages+=(--break-system-packages)
+    fi
+
+    local index_url="${OPENWORK_PIP_INDEX_URL:-${PIP_INDEX_URL:-}}"
+    local index_args=()
+    if [ -n "$index_url" ]; then
+        index_args+=(--index-url "$index_url")
+    fi
+
+    local common_args=(
+        --disable-pip-version-check
+        --progress-bar on
+        --no-cache-dir
+        --retries 5
+        --timeout 60
+        --prefer-binary
+    )
+
+    echo "[restart-pod] Installing missing Python skill packages: ${missing_packages[*]}"
+    "${pip_cmd[@]}" install \
+        "${break_system_packages[@]}" \
+        "${common_args[@]}" \
+        "${index_args[@]}" \
+        "${missing_packages[@]}"
+}
+
 install_opencode() {
     if command -v opencode &>/dev/null; then
         echo "[restart-pod] opencode already installed: $(opencode --version 2>/dev/null || echo unknown)"
@@ -430,6 +511,7 @@ install_opencode() {
 
 ensure_runtime_ready
 install_opencode
+ensure_python_skill_deps
 
 build_frontend() {
     echo "[restart-pod] Building web UI..."

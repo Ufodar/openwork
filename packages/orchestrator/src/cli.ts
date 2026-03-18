@@ -2348,16 +2348,70 @@ async function waitForOpenCodeRouterHealthyViaOpenwork(
   throw new Error(lastError ?? "Timed out waiting for opencodeRouter health via openwork-server");
 }
 
-async function waitForOpencodeHealthy(client: ReturnType<typeof createOpencodeClient>, timeoutMs = 10_000, pollMs = 250) {
+async function fetchLegacyOpencodeHealth(baseUrl: string, headers?: Record<string, string>) {
+  const response = await fetch(`${baseUrl.replace(/\/$/, "")}/health`, {
+    headers,
+    signal: AbortSignal.timeout(2_000),
+  });
+  if (!response.ok) {
+    throw new Error(`legacy /health returned HTTP ${response.status}`);
+  }
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.includes("application/json")) {
+    return { healthy: true, legacy: true };
+  }
+
+  const text = await response.text();
+  if (!text.trim()) {
+    return { healthy: true, legacy: true };
+  }
+
+  try {
+    const payload = JSON.parse(text) as { healthy?: boolean };
+    if (payload?.healthy === false) {
+      throw new Error("legacy /health reported unhealthy");
+    }
+    return payload;
+  } catch (error) {
+    if (error instanceof Error && error.message === "legacy /health reported unhealthy") {
+      throw error;
+    }
+    return { healthy: true, legacy: true };
+  }
+}
+
+async function waitForOpencodeHealthy(
+  client: ReturnType<typeof createOpencodeClient>,
+  timeoutMs = 10_000,
+  pollMs = 250,
+  options?: {
+    legacyBaseUrl?: string;
+    legacyHeaders?: Record<string, string>;
+  },
+) {
   const start = Date.now();
   let lastError: string | null = null;
   while (Date.now() - start < timeoutMs) {
+    let globalHealthError: string | null = null;
     try {
       const health = unwrap(await client.global.health());
       if (health?.healthy) return health;
-      lastError = "Server reported unhealthy";
+      globalHealthError = "Server reported unhealthy";
     } catch (error) {
-      lastError = error instanceof Error ? error.message : String(error);
+      globalHealthError = error instanceof Error ? error.message : String(error);
+    }
+
+    if (options?.legacyBaseUrl) {
+      try {
+        return await fetchLegacyOpencodeHealth(options.legacyBaseUrl, options.legacyHeaders);
+      } catch (error) {
+        const legacyError = error instanceof Error ? error.message : String(error);
+        lastError = globalHealthError
+          ? `global.health failed: ${globalHealthError}; legacy /health failed: ${legacyError}`
+          : legacyError;
+      }
+    } else {
+      lastError = globalHealthError;
     }
     await new Promise((resolve) => setTimeout(resolve, pollMs));
   }
@@ -4124,7 +4178,10 @@ async function runRouterDaemon(args: ParsedArgs) {
         headers: authHeaders,
       });
       try {
-        await waitForOpencodeHealthy(client, 2000, 200);
+        await waitForOpencodeHealthy(client, 2000, 200, {
+          legacyBaseUrl: existing.baseUrl,
+          legacyHeaders: authHeaders,
+        });
         if (!state.sidecar || !state.cliVersion || !state.binaries?.opencode) {
           updateDiagnostics(state.binaries?.opencode?.actualVersion);
           await saveRouterState(statePath, state);
@@ -4164,7 +4221,10 @@ async function runRouterDaemon(args: ParsedArgs) {
       headers: authHeaders,
     });
     logger.info("Waiting for health", { url: baseUrl }, "opencode");
-    await waitForOpencodeHealthy(client);
+    await waitForOpencodeHealthy(client, 10_000, 250, {
+      legacyBaseUrl: baseUrl,
+      legacyHeaders: authHeaders,
+    });
     logger.info("Healthy", { url: baseUrl }, "opencode");
     state.opencode = {
       pid: child.pid ?? 0,
@@ -4515,7 +4575,10 @@ async function runStatus(args: ParsedArgs) {
         baseUrl: opencodeUrl,
         headers,
       });
-      const health = await waitForOpencodeHealthy(client, 5000, 400);
+      const health = await waitForOpencodeHealthy(client, 5000, 400, {
+        legacyBaseUrl: opencodeUrl,
+        legacyHeaders: headers,
+      });
       status.opencode = { ok: true, url: opencodeUrl, health };
     } catch (error) {
       status.opencode = { ok: false, url: opencodeUrl, error: String(error) };
@@ -5228,7 +5291,10 @@ async function runStart(args: ParsedArgs) {
       });
 
       logger.info("Waiting for health", { url: opencodeBaseUrl }, "opencode");
-      await waitForOpencodeHealthy(opencodeClient);
+      await waitForOpencodeHealthy(opencodeClient, 10_000, 250, {
+        legacyBaseUrl: opencodeBaseUrl,
+        legacyHeaders: Object.keys(authHeaders).length ? authHeaders : undefined,
+      });
       logger.info("Healthy", { url: opencodeBaseUrl }, "opencode");
       tui?.updateService("opencode", { status: "healthy" });
 

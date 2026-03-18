@@ -94,6 +94,7 @@ import { currentLocale, t } from "../../i18n";
 
 export type SessionViewProps = {
   selectedSessionId: string | null;
+  routeSessionHydratingId: string | null;
   setView: (view: View, sessionId?: string) => void;
   openSessionInPreferredView: (sessionId: string, options?: { title?: string | null }) => void | Promise<void>;
   tab: DashboardTab;

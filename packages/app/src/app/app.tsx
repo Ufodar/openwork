@@ -852,6 +852,7 @@ export default function App() {
   const [selectedSessionId, setSelectedSessionId] = createSignal<string | null>(
     null
   );
+  const [routeSessionHydratingId, setRouteSessionHydratingId] = createSignal<string | null>(null);
   const readSessionByWorkspace = () => {
     if (typeof window === "undefined") return {} as Record<string, string>;
     try {
@@ -6291,6 +6292,7 @@ export default function App() {
 
   const sessionProps = () => ({
     selectedSessionId: activeSessionId(),
+    routeSessionHydratingId: routeSessionHydratingId(),
     setView,
     openSessionInPreferredView,
     tab: tab(),
@@ -6488,7 +6490,11 @@ export default function App() {
       const key = `${workspaceStore.activeWorkspaceId()}::${sessionId}`;
       if (selectedSessionId() === sessionId && routeHydratedSessionKey === key) return;
       routeHydratedSessionKey = key;
-      void selectSession(sessionId);
+      setRouteSessionHydratingId(sessionId);
+      void selectSession(sessionId).finally(() => {
+        if (routeHydratedSessionKey !== key) return;
+        setRouteSessionHydratingId((current) => (current === sessionId ? null : current));
+      });
     };
 
     if (path === "" || path === "/") {

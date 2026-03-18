@@ -1,6 +1,6 @@
 import { For, Show, createEffect, createMemo, createResource, createSignal, on, onCleanup } from "solid-js";
 import type { Agent } from "@opencode-ai/sdk/v2/client";
-import { ArrowLeft, AtSign, Check, ChevronDown, ChevronRight, Download, FileText, Folder, FolderOpen, FolderPlus, ListTodo, Minimize2, MoveRight, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Trash2 } from "lucide-solid";
+import { ArrowLeft, AtSign, Check, ChevronDown, ChevronRight, Download, FileText, Folder, FolderOpen, FolderPlus, ListTodo, Loader2, Minimize2, MoveRight, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Trash2 } from "lucide-solid";
 import { useNavigate } from "@solidjs/router";
 
 import type { ComposerDraft, SlashCommandOption } from "../types";
@@ -587,6 +587,12 @@ export default function DocumentAgentView(props: SessionViewProps) {
       dirs: Array.isArray(data.dirs) ? data.dirs : [],
     } satisfies DocumentListResult;
   });
+  const sessionHydrating = createMemo(() => {
+    const sid = sessionId();
+    if (!sid) return false;
+    return props.routeSessionHydratingId?.trim() === sid || props.busyLabel === "status.loading_session";
+  });
+  const initialDocumentsLoading = createMemo(() => documents.loading && !documents.latest);
 
   const documentsList = createMemo(() => documents()?.items ?? []);
   const documentDirs = createMemo(() => documents()?.dirs ?? []);
@@ -635,6 +641,13 @@ export default function DocumentAgentView(props: SessionViewProps) {
   });
 
   const fileTree = createMemo(() => buildFileTree(documentsList(), documentDirs()));
+  const showDocumentListLoading = createMemo(() => serverReady() && (sessionHydrating() || initialDocumentsLoading()));
+  const showPreviewLoading = createMemo(() => {
+    if (activeDoc()) return false;
+    if (!serverReady()) return false;
+    return sessionHydrating() || initialDocumentsLoading();
+  });
+  const showChatLoading = createMemo(() => sessionHydrating() && props.messages.length === 0);
   const [expandedFolders, setExpandedFolders] = createSignal<Set<string>>(new Set());
 
   const expandFolderPath = (folderPath: string) => {
@@ -2102,20 +2115,30 @@ export default function DocumentAgentView(props: SessionViewProps) {
             fallback={<div class="p-2 text-xs text-dls-secondary">{tr("docagent.server_not_connected")}</div>}
           >
             <Show
-              when={!documents.error}
+              when={!showDocumentListLoading()}
               fallback={
-                <div class="p-2 text-xs text-red-11 whitespace-pre-wrap break-words">
-                  {documents.error instanceof Error ? documents.error.message : tr("docagent.failed_load_documents")}
+                <div class="px-4 py-8 flex flex-col items-center justify-center gap-2 text-xs text-dls-secondary">
+                  <Loader2 size={16} class="animate-spin" />
+                  <span>{tr("status.loading_session")}</span>
                 </div>
               }
             >
-              <For each={fileTree()}>
-                {(node) => <TreeNodeView node={node} depth={0} />}
-              </For>
-              <Show when={fileTree().length === 0}>
-                <div class="px-4 py-8 text-center text-xs text-gray-10">
-                  {tr("docagent.no_documents")}
-                </div>
+              <Show
+                when={!documents.error}
+                fallback={
+                  <div class="p-2 text-xs text-red-11 whitespace-pre-wrap break-words">
+                    {documents.error instanceof Error ? documents.error.message : tr("docagent.failed_load_documents")}
+                  </div>
+                }
+              >
+                <For each={fileTree()}>
+                  {(node) => <TreeNodeView node={node} depth={0} />}
+                </For>
+                <Show when={fileTree().length === 0}>
+                  <div class="px-4 py-8 text-center text-xs text-gray-10">
+                    {tr("docagent.no_documents")}
+                  </div>
+                </Show>
               </Show>
             </Show>
           </Show>
@@ -2204,7 +2227,17 @@ export default function DocumentAgentView(props: SessionViewProps) {
         <div class="flex-1 min-h-0 overflow-hidden">
           <Show
             when={activeDoc()}
-            fallback={<div class="h-full flex items-center justify-center text-dls-secondary">{tr("docagent.select_document_to_edit")}</div>}
+            fallback={
+              <Show
+                when={showPreviewLoading()}
+                fallback={<div class="h-full flex items-center justify-center text-dls-secondary">{tr("docagent.select_document_to_edit")}</div>}
+              >
+                <div class="h-full flex flex-col items-center justify-center gap-2 text-dls-secondary">
+                  <Loader2 size={18} class="animate-spin" />
+                  <span class="text-xs">{tr("status.loading_session")}</span>
+                </div>
+              </Show>
+            }
           >
             <div class="relative h-full w-full">
               <Show when={activeDocKind() === "image"}>
@@ -2219,7 +2252,15 @@ export default function DocumentAgentView(props: SessionViewProps) {
               <Show when={activeDocKind() === "pdf"}>
                 <div class="h-full w-full bg-dls-surface">
                   <Show when={!pdfPreviewError()} fallback={<div class="p-4 text-xs text-red-11">{pdfPreviewError()}</div>}>
-                    <Show when={pdfPreviewUrl()} fallback={<div class="p-4 text-xs text-dls-secondary">{tr("docagent.loading_pdf_preview")}</div>}>
+                    <Show
+                      when={pdfPreviewUrl()}
+                      fallback={
+                        <div class="h-full flex flex-col items-center justify-center gap-2 p-4 text-xs text-dls-secondary">
+                          <Loader2 size={16} class="animate-spin" />
+                          <span>{tr("docagent.loading_pdf_preview")}</span>
+                        </div>
+                      }
+                    >
                       <iframe
                         src={pdfPreviewUrl()!}
                         title={activeDoc() ?? tr("docagent.pdf_preview_title")}
@@ -2232,7 +2273,15 @@ export default function DocumentAgentView(props: SessionViewProps) {
               <Show when={activeDocKind() === "markdown" || activeDocKind() === "text"}>
                 <div class="h-full w-full overflow-auto bg-dls-surface p-4">
                   <Show when={!textPreview.error} fallback={<div class="text-xs text-red-11">{textPreview.error instanceof Error ? textPreview.error.message : tr("docagent.preview_load_failed")}</div>}>
-                    <Show when={!textPreview.loading && textPreview()} fallback={<div class="text-xs text-dls-secondary">{tr("docagent.loading_text_preview")}</div>}>
+                    <Show
+                      when={!textPreview.loading && textPreview()}
+                      fallback={
+                        <div class="h-full flex flex-col items-center justify-center gap-2 text-xs text-dls-secondary">
+                          <Loader2 size={16} class="animate-spin" />
+                          <span>{tr("docagent.loading_text_preview")}</span>
+                        </div>
+                      }
+                    >
                       <div class="mb-2 text-[11px] text-dls-secondary">
                         <Show when={activeDocKind() === "markdown"} fallback={tr("docagent.text_preview_readonly")}>
                           {tr("docagent.markdown_preview_readonly")}
@@ -2252,7 +2301,15 @@ export default function DocumentAgentView(props: SessionViewProps) {
                 </div>
               </Show>
               <Show when={activeDocKind() === "onlyoffice"}>
-                <Show when={editorPayload()} fallback={<div class="p-4 text-xs text-dls-secondary">{tr("docagent.loading_editor")}</div>}>
+                <Show
+                  when={editorPayload()}
+                  fallback={
+                    <div class="h-full flex flex-col items-center justify-center gap-2 p-4 text-xs text-dls-secondary">
+                      <Loader2 size={16} class="animate-spin" />
+                      <span>{tr("docagent.loading_editor")}</span>
+                    </div>
+                  }
+                >
                   <OnlyOfficeEditor
                     documentServerUrl={editorPayload()!.documentServerUrl}
                     config={editorPayload()!.config}
@@ -2344,20 +2401,30 @@ export default function DocumentAgentView(props: SessionViewProps) {
         </div>
 
         <div class="flex-1 min-h-0 overflow-y-auto overscroll-contain" ref={(el) => (chatContainerEl = el)}>
-          <MessageList
-            messages={props.messages}
-            developerMode={props.developerMode}
-            showThinking={props.showThinking}
-            expandedStepIds={props.expandedStepIds}
-            setExpandedStepIds={props.setExpandedStepIds}
-            compact
-          />
-          <div
-            ref={(el) => {
-              messagesEndEl = el;
-              bottomVisibilityEl = el;
-            }}
-          />
+          <Show
+            when={!showChatLoading()}
+            fallback={
+              <div class="h-full flex flex-col items-center justify-center gap-2 text-xs text-dls-secondary">
+                <Loader2 size={18} class="animate-spin" />
+                <span>{tr("status.loading_session")}</span>
+              </div>
+            }
+          >
+            <MessageList
+              messages={props.messages}
+              developerMode={props.developerMode}
+              showThinking={props.showThinking}
+              expandedStepIds={props.expandedStepIds}
+              setExpandedStepIds={props.setExpandedStepIds}
+              compact
+            />
+            <div
+              ref={(el) => {
+                messagesEndEl = el;
+                bottomVisibilityEl = el;
+              }}
+            />
+          </Show>
         </div>
 
         <ToolMonitorPanel

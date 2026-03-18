@@ -408,6 +408,7 @@ export OPENWORK_WEB_HOST="${OPENWORK_WEB_HOST:-${HOST:-0.0.0.0}}"
 export OPENWORK_PORT="${OPENWORK_PORT:-8789}"
 export PORT="${PORT:-5173}"
 export OPENWORK_WEB_PORT="${OPENWORK_WEB_PORT:-$PORT}"
+export OPENWORK_PUBLIC_WEB_PORT="${OPENWORK_PUBLIC_WEB_PORT:-32765}"
 export OPENWORK_ONLYOFFICE_URL="${OPENWORK_ONLYOFFICE_URL:-http://${OPENWORK_POD_IP}:32764}"
 export OPENWORK_ONLYOFFICE_INTERNAL_URL="${OPENWORK_ONLYOFFICE_INTERNAL_URL:-http://onlyoffice:80}"
 export OPENWORK_ONLYOFFICE_PUBLIC_BASE_URL="${OPENWORK_ONLYOFFICE_PUBLIC_BASE_URL:-http://${OPENWORK_POD_IP}:32765/openwork}"
@@ -859,11 +860,11 @@ kill_by_pattern "compiled opencode-router" "$PROJECT_DIR/packages/opencode-route
 kill_by_pattern "orchestrator opencode sidecar" "/openwork-orchestrator/sidecars/opencode/.*/opencode serve"
 
 # Port-level fallback cleanup.
-for p in "$OPENWORK_PORT" "$PORT" 8789 5173; do
+for p in "$OPENWORK_PORT" "$PORT" "$OPENWORK_WEB_PORT" "$OPENWORK_PUBLIC_WEB_PORT" 8789 5173 32765; do
     kill_by_port "$p"
 done
 
-for p in "$OPENWORK_PORT" "$PORT" 8789 5173; do
+for p in "$OPENWORK_PORT" "$PORT" "$OPENWORK_WEB_PORT" "$OPENWORK_PUBLIC_WEB_PORT" 8789 5173 32765; do
     ensure_port_free "$p"
 done
 
@@ -879,6 +880,7 @@ echo "[restart-pod] Starting OpenWork (POD_IP=$OPENWORK_POD_IP)..."
 cd "$PROJECT_DIR"
 
 WEB_PID=""
+PUBLIC_WEB_PID=""
 ORCHESTRATOR_PID=""
 
 cleanup_children() {
@@ -889,6 +891,9 @@ cleanup_children() {
     fi
     if [ -n "$WEB_PID" ] && kill -0 "$WEB_PID" 2>/dev/null; then
         kill_pids_gracefully "prod web server" "$WEB_PID"
+    fi
+    if [ -n "$PUBLIC_WEB_PID" ] && kill -0 "$PUBLIC_WEB_PID" 2>/dev/null; then
+        kill_pids_gracefully "public web server" "$PUBLIC_WEB_PID"
     fi
     exit "$status"
 }
@@ -909,6 +914,27 @@ fi
 if ! wait_for_http_ok "http://127.0.0.1:${OPENWORK_WEB_PORT}/healthz" 10; then
     echo "[restart-pod] Production web server health check failed." >&2
     exit 1
+fi
+
+if [ "$OPENWORK_PUBLIC_WEB_PORT" != "$OPENWORK_WEB_PORT" ]; then
+    echo "[restart-pod] Starting public web server on ${OPENWORK_WEB_HOST}:${OPENWORK_PUBLIC_WEB_PORT}..."
+    OPENWORK_PORT="${OPENWORK_PORT}" \
+    OPENWORK_WEB_PORT="${OPENWORK_PUBLIC_WEB_PORT}" \
+    OPENWORK_WEB_HOST="${OPENWORK_WEB_HOST}" \
+    OPENWORK_WEB_BACKEND_URL="${OPENWORK_WEB_BACKEND_URL}" \
+    node "$SCRIPT_DIR/serve-web-prod.mjs" &
+    PUBLIC_WEB_PID=$!
+    sleep 1
+    if ! kill -0 "$PUBLIC_WEB_PID" 2>/dev/null; then
+        echo "[restart-pod] Public web server failed to start." >&2
+        wait "$PUBLIC_WEB_PID"
+        exit 1
+    fi
+
+    if ! wait_for_http_ok "http://127.0.0.1:${OPENWORK_PUBLIC_WEB_PORT}/healthz" 10; then
+        echo "[restart-pod] Public web server health check failed." >&2
+        exit 1
+    fi
 fi
 
 OPENCODE_SOURCE_MODE="$(resolve_managed_opencode_source)"
@@ -957,11 +983,19 @@ if ! wait_for_http_ok "http://127.0.0.1:${OPENWORK_PORT}/health" 20; then
     exit 1
 fi
 
-echo "[restart-pod] Deployment is up. Web: http://${OPENWORK_POD_IP}:32765  OpenWork: http://127.0.0.1:${OPENWORK_PORT}"
+if [ "$OPENWORK_PUBLIC_WEB_PORT" != "$OPENWORK_WEB_PORT" ]; then
+    echo "[restart-pod] Deployment is up. Web: http://${OPENWORK_POD_IP}:${OPENWORK_PUBLIC_WEB_PORT}  Internal Web: http://127.0.0.1:${OPENWORK_WEB_PORT}  OpenWork: http://127.0.0.1:${OPENWORK_PORT}"
+else
+    echo "[restart-pod] Deployment is up. Web: http://${OPENWORK_POD_IP}:${OPENWORK_WEB_PORT}  OpenWork: http://127.0.0.1:${OPENWORK_PORT}"
+fi
 
 while true; do
     if ! kill -0 "$WEB_PID" 2>/dev/null; then
         wait "$WEB_PID"
+        exit $?
+    fi
+    if [ -n "$PUBLIC_WEB_PID" ] && ! kill -0 "$PUBLIC_WEB_PID" 2>/dev/null; then
+        wait "$PUBLIC_WEB_PID"
         exit $?
     fi
     if ! kill -0 "$ORCHESTRATOR_PID" 2>/dev/null; then

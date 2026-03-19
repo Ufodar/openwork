@@ -12,6 +12,9 @@
 #   OPENWORK_PORT         — host port to map to container :8787 (default: 8787)
 #   WEB_PORT              — host port to map to container :5173 (default: 5173)
 #   OPENWORK_DEV_ID       — unique ID for this stack (default: default)
+#   RAGFLOW_BASE_URL      — optional RAGFlow HTTP base URL for knowledge retrieval
+#   RAGFLOW_API_KEY       — optional RAGFlow API key used by the OpenWork server
+#   RAGFLOW_MCP_URL       — optional reference URL for the legacy RAGFlow MCP endpoint
 
 x-shared: &shared
   image: node:22-bookworm-slim
@@ -140,6 +143,11 @@ services:
       OPENWORK_HOST_TOKEN: ${OPENWORK_HOST_TOKEN:-}
       OPENWORK_DEV_ID: ${OPENWORK_DEV_ID:-default}
       OPENWORK_SIDECAR_SOURCE: external
+      RAGFLOW_BASE_URL: ${RAGFLOW_BASE_URL:-}
+      RAGFLOW_API_KEY: ${RAGFLOW_API_KEY:-}
+      RAGFLOW_MCP_URL: ${RAGFLOW_MCP_URL:-}
+      RAGFLOW_URL: ${RAGFLOW_URL:-}
+      RAGFLOW_APP_URL: ${RAGFLOW_APP_URL:-}
  
   web:
     <<: *shared

@@ -58,6 +58,11 @@ export interface ServerConfig {
   hostTokenSource: "cli" | "env" | "file" | "generated";
   logFormat: LogFormat;
   logRequests: boolean;
+  ragflow?: {
+    baseUrl?: string;
+    apiKey?: string;
+    mcpUrl?: string;
+  };
 }
 
 export interface Capabilities {

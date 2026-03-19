@@ -21,8 +21,13 @@ import { workspaceIdForPath } from "./workspaces.js";
 import { sanitizeCommandName, validateMcpName } from "./validators.js";
 import { TokenService } from "./tokens.js";
 import { AuthService, type AuthIdentity } from "./auth.js";
+import { KnowledgeAttachmentService } from "./knowledge-attachments.js";
+import { KnowledgeRegistryService, type KnowledgeRegistryRecord } from "./knowledge-registry.js";
+import { handleKnowledgeMcpRequest } from "./knowledge-mcp.js";
+import { createConfiguredRagflowClient, type RagflowClient } from "./ragflow.js";
+import { RuntimeKnowledgeTokenService } from "./runtime-knowledge-tokens.js";
 import { SessionOwnershipService } from "./session-ownership.js";
-import { buildSessionPermissionRules, provisionSessionWorkspace, SessionWorkspaceService, sessionDirectoryBelongsToWorkspace } from "./session-workspaces.js";
+import { buildSessionPermissionRules, provisionSessionWorkspace, SessionWorkspaceService, sessionDirectoryBelongsToWorkspace, writeRuntimeKnowledgeCarrierConfig } from "./session-workspaces.js";
 import { RuntimeMaintenanceService, isRuntimeMaintenanceBlockingNewWork, type RuntimeMaintenanceState } from "./runtime-maintenance.js";
 import { SessionActivityService } from "./session-activity.js";
 import { TOY_UI_CSS, TOY_UI_HTML, TOY_UI_JS, cssResponse, htmlResponse, jsResponse } from "./toy-ui.js";
@@ -272,6 +277,10 @@ export function startServer(config: ServerConfig) {
   const auth = new AuthService(config, tokens);
   const sessionOwnership = new SessionOwnershipService();
   const sessionWorkspaces = new SessionWorkspaceService();
+  const knowledgeRegistry = new KnowledgeRegistryService();
+  const knowledgeAttachments = new KnowledgeAttachmentService();
+  const ragflow = createConfiguredRagflowClient(config);
+  const runtimeKnowledgeTokens = new RuntimeKnowledgeTokenService();
   const logger = createServerLogger(config);
   const runtimeMaintenance = new RuntimeMaintenanceService();
   const sessionActivity = new SessionActivityService(logger);
@@ -283,6 +292,10 @@ export function startServer(config: ServerConfig) {
     auth,
     sessionOwnership,
     sessionWorkspaces,
+    knowledgeRegistry,
+    knowledgeAttachments,
+    ragflow,
+    runtimeKnowledgeTokens,
     runtimeMaintenance,
     sessionActivity,
     logger,
@@ -351,6 +364,8 @@ export function startServer(config: ServerConfig) {
             actor,
             sessionOwnership,
             sessionWorkspaces,
+            runtimeKnowledgeTokens,
+            openworkBaseUrl: resolveServerLoopbackBaseUrl(config),
             runtimeMaintenance,
             sessionActivity,
           });
@@ -423,6 +438,8 @@ export function startServer(config: ServerConfig) {
             actor,
             sessionOwnership,
             sessionWorkspaces,
+            runtimeKnowledgeTokens,
+            openworkBaseUrl: resolveServerLoopbackBaseUrl(config),
             runtimeMaintenance,
             sessionActivity,
           });
@@ -516,7 +533,7 @@ export function startServer(config: ServerConfig) {
   return server;
 }
 
-function matchRoute(routes: Route[], method: string, path: string) {
+export function matchRoute(routes: Route[], method: string, path: string) {
   for (const route of routes) {
     if (route.method !== method) continue;
     const match = path.match(route.regex);
@@ -921,6 +938,8 @@ export async function proxyOpencodeRequest(input: {
   actor?: Actor;
   sessionOwnership: SessionOwnershipService;
   sessionWorkspaces: SessionWorkspaceService;
+  runtimeKnowledgeTokens: RuntimeKnowledgeTokenService;
+  openworkBaseUrl: string;
   runtimeMaintenance?: RuntimeMaintenanceService;
   sessionActivity?: SessionActivityService;
 }) {
@@ -1112,6 +1131,24 @@ export async function proxyOpencodeRequest(input: {
             runtimeDir: provisionedRuntime.runtimeDir,
             createdAt: Date.now(),
           });
+          if (workspace) {
+            try {
+              const issued = await input.runtimeKnowledgeTokens.issue({
+                workspaceId,
+                sessionId: createdSessionId,
+                runtimeId: provisionedRuntime.runtimeId,
+              });
+              await writeRuntimeKnowledgeCarrierConfig({
+                workspacePath: workspace.path,
+                runtimeDir: provisionedRuntime.runtimeDir,
+                mcpUrl: `${input.openworkBaseUrl}/workspace/${encodeURIComponent(workspaceId)}/knowledge/mcp`,
+                runtimeToken: issued.token,
+              });
+            } catch (error) {
+              console.warn("[openwork-server] Failed to provision runtime knowledge carrier:", error);
+              await input.runtimeKnowledgeTokens.revokeRuntime(workspaceId, createdSessionId, provisionedRuntime.runtimeId);
+            }
+          }
         }
       }
       return new Response(raw, { status: response.status, headers: response.headers });
@@ -1120,6 +1157,9 @@ export async function proxyOpencodeRequest(input: {
     if (workspaceId && method === "DELETE" && pathSessionId && response.ok) {
       await input.sessionOwnership.removeOwner(workspaceId, pathSessionId);
       await input.sessionWorkspaces.removeWorkspace(workspaceId, pathSessionId);
+      if (runtimeWorkspace?.runtimeId) {
+        await input.runtimeKnowledgeTokens.revokeRuntime(workspaceId, pathSessionId, runtimeWorkspace.runtimeId);
+      }
       input.sessionActivity?.removeSession(workspaceId, pathSessionId);
       if (runtimeDirectory) {
         await rm(runtimeDirectory, { recursive: true, force: true }).catch(() => undefined);
@@ -1248,7 +1288,7 @@ function logOpenCodeRouterDebug(message: string, details?: Record<string, unknow
   console.log(`[opencodeRouter] ${message}${payload}`);
 }
 
-function withCors(response: Response, request: Request, config: ServerConfig) {
+export function withCors(response: Response, request: Request, config: ServerConfig) {
   const origin = request.headers.get("origin");
   const allowedOrigins = config.corsOrigins;
   let allowOrigin: string | null = null;
@@ -1265,7 +1305,7 @@ function withCors(response: Response, request: Request, config: ServerConfig) {
     "Access-Control-Allow-Headers",
     "Authorization, Content-Type, X-OpenWork-Host-Token, X-OpenWork-Client-Id, X-OpenCode-Directory, X-Opencode-Directory, x-opencode-directory",
   );
-  headers.set("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS");
+  headers.set("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
   headers.set("Vary", "Origin");
   return new Response(response.body, { status: response.status, headers });
 }
@@ -1845,13 +1885,17 @@ function preloadPersistedUserWorkspaces(
     });
 }
 
-function createRoutes(
+export function createRoutes(
   config: ServerConfig,
   approvals: ApprovalService,
   tokens: TokenService,
   auth: AuthService,
   sessionOwnership: SessionOwnershipService,
   sessionWorkspaces: SessionWorkspaceService,
+  knowledgeRegistry: KnowledgeRegistryService,
+  knowledgeAttachments: KnowledgeAttachmentService,
+  ragflow: RagflowClient,
+  runtimeKnowledgeTokens: RuntimeKnowledgeTokenService,
   runtimeMaintenance: RuntimeMaintenanceService,
   sessionActivity: SessionActivityService,
   logger: ServerLogger,
@@ -2253,11 +2297,163 @@ function createRoutes(
 
     await sessionOwnership.removeOwner(workspace.id, sessionId);
     await sessionWorkspaces.removeWorkspace(workspace.id, sessionId);
+    await knowledgeAttachments.remove(workspace.id, sessionId);
+    if (runtimeWorkspace?.runtimeId) {
+      await runtimeKnowledgeTokens.revokeRuntime(workspace.id, sessionId, runtimeWorkspace.runtimeId);
+    }
     if (runtimeWorkspace?.runtimeDir) {
       await rm(runtimeWorkspace.runtimeDir, { recursive: true, force: true }).catch(() => undefined);
     }
 
     return jsonResponse({ ok: true });
+  });
+
+  addRoute(routes, "GET", "/workspace/:id/knowledge", "client", async (ctx) => {
+    await resolveWorkspace(config, ctx.params.id);
+    const user = await resolveKnowledgeCaller(auth, ctx);
+    const scopeRaw = (ctx.url.searchParams.get("scope") ?? "mine").trim().toLowerCase();
+    if (scopeRaw !== "mine" && scopeRaw !== "others") {
+      throw new ApiError(400, "invalid_scope", "scope must be mine or others");
+    }
+    const items = scopeRaw === "others"
+      ? await knowledgeRegistry.listOthers(user.id)
+      : await knowledgeRegistry.listMine(user.id);
+    return jsonResponse({
+      scope: scopeRaw,
+      items: items.filter(isKnowledgeVisible).map(serializeKnowledgeRecord),
+    });
+  });
+
+  addRoute(routes, "GET", "/workspace/:id/sessions/:sessionId/knowledge", "client", async (ctx) => {
+    const workspace = await resolveWorkspace(config, ctx.params.id);
+    const sessionId = normalizeRequiredSessionId(ctx.params.sessionId);
+    const runtimeWorkspace = await requireKnowledgeSessionAccess({
+      workspace,
+      sessionId,
+      ctx,
+      sessionOwnership,
+      sessionWorkspaces,
+    });
+    const knowledgeIds = await knowledgeAttachments.get(workspace.id, sessionId);
+    const items = await listKnowledgeRecordsByIds(knowledgeRegistry, knowledgeIds);
+    return jsonResponse({
+      sessionId,
+      runtimeId: runtimeWorkspace.runtimeId,
+      knowledgeIds,
+      items: items.map(serializeKnowledgeRecord),
+    });
+  });
+
+  addRoute(routes, "PUT", "/workspace/:id/sessions/:sessionId/knowledge", "client", async (ctx) => {
+    ensureWritable(config);
+    requireClientScope(ctx, "collaborator");
+    const workspace = await resolveWorkspace(config, ctx.params.id);
+    const sessionId = normalizeRequiredSessionId(ctx.params.sessionId);
+    const runtimeWorkspace = await requireKnowledgeSessionAccess({
+      workspace,
+      sessionId,
+      ctx,
+      sessionOwnership,
+      sessionWorkspaces,
+    });
+    const body = await readJsonBody(ctx.request);
+    const knowledgeIds = normalizeKnowledgeIdList(body.knowledgeIds);
+    if (body.knowledgeIds !== undefined && !Array.isArray(body.knowledgeIds)) {
+      throw new ApiError(400, "invalid_payload", "knowledgeIds must be an array");
+    }
+    const records = await requireKnowledgeRecordsForAttachment(knowledgeRegistry, knowledgeIds);
+    await knowledgeAttachments.set(workspace.id, sessionId, runtimeWorkspace.runtimeId, knowledgeIds);
+    return jsonResponse({
+      ok: true,
+      sessionId,
+      runtimeId: runtimeWorkspace.runtimeId,
+      knowledgeIds,
+      items: records.map(serializeKnowledgeRecord),
+    });
+  });
+
+  addRoute(routes, "POST", "/workspace/:id/knowledge/search", "client", async (ctx) => {
+    const workspace = await resolveWorkspace(config, ctx.params.id);
+    const body = await readJsonBody(ctx.request);
+    const sessionId = normalizeRequiredSessionId(body.sessionId);
+    const runtimeWorkspace = await requireKnowledgeSessionAccess({
+      workspace,
+      sessionId,
+      ctx,
+      sessionOwnership,
+      sessionWorkspaces,
+    });
+    const question = typeof body.question === "string" ? body.question.trim() : "";
+    if (!question) {
+      throw new ApiError(400, "invalid_payload", "question is required");
+    }
+
+    const attachedKnowledgeIds = await knowledgeAttachments.get(workspace.id, sessionId);
+    const overrideProvided = body.knowledgeIds !== undefined;
+    if (overrideProvided && !Array.isArray(body.knowledgeIds)) {
+      throw new ApiError(400, "invalid_payload", "knowledgeIds must be an array");
+    }
+    const requestedKnowledgeIds = overrideProvided
+      ? normalizeKnowledgeIdList(body.knowledgeIds)
+      : attachedKnowledgeIds;
+    if (!requestedKnowledgeIds.length) {
+      throw new ApiError(400, "no_attached_knowledge", "No knowledge bases are attached to this session.");
+    }
+    const attachedSet = new Set(attachedKnowledgeIds);
+    if (overrideProvided && requestedKnowledgeIds.some((knowledgeId) => !attachedSet.has(knowledgeId))) {
+      throw new ApiError(403, "knowledge_scope_forbidden", "Requested knowledgeIds must already be attached to this session.");
+    }
+
+    const records = await requireKnowledgeRecordsForSearch(knowledgeRegistry, requestedKnowledgeIds);
+    const recordByDatasetId = new Map(records.map((record) => [record.ragflowDatasetId, record]));
+    const result = await ragflow.retrieve({
+      question,
+      datasetIds: records.map((record) => record.ragflowDatasetId),
+    });
+
+    const items = result.chunks.map((chunk) => {
+      const knowledge = chunk.datasetId ? recordByDatasetId.get(chunk.datasetId) ?? null : null;
+      return {
+        id: chunk.id,
+        content: chunk.content,
+        similarity: chunk.similarity,
+        vectorSimilarity: chunk.vectorSimilarity,
+        termSimilarity: chunk.termSimilarity,
+        datasetId: chunk.datasetId,
+        documentId: chunk.documentId,
+        documentName: chunk.documentName,
+        positions: chunk.positions,
+        imageId: chunk.imageId,
+        knowledgeId: knowledge?.knowledgeId ?? null,
+        knowledgeTitle: knowledge?.title ?? null,
+        ownerUserId: knowledge?.ownerUserId ?? null,
+        ownerDisplayName: knowledge?.ownerDisplayName ?? null,
+      };
+    });
+
+    return jsonResponse({
+      sessionId,
+      runtimeId: runtimeWorkspace.runtimeId,
+      question: result.question,
+      knowledgeIds: requestedKnowledgeIds,
+      total: result.total,
+      page: result.page,
+      pageSize: result.pageSize,
+      items,
+    });
+  });
+
+  addRoute(routes, "POST", "/workspace/:id/knowledge/mcp", "none", async (ctx) => {
+    const workspace = await resolveWorkspace(config, ctx.params.id);
+    return handleKnowledgeMcpRequest({
+      request: ctx.request,
+      workspaceId: workspace.id,
+      runtimeTokens: runtimeKnowledgeTokens,
+      knowledgeAttachments,
+      knowledgeRegistry,
+      ragflow,
+      serverVersion: SERVER_VERSION,
+    });
   });
 
   addRoute(routes, "PATCH", "/workspace/:id/config", "client", async (ctx) => {
@@ -4257,6 +4453,134 @@ async function resolveWorkspace(config: ServerConfig, id: string): Promise<Works
     throw new ApiError(403, "workspace_unauthorized", "Workspace is not authorized");
   }
   return { ...workspace, path: resolvedWorkspace };
+}
+
+function resolveServerLoopbackBaseUrl(config: ServerConfig): string {
+  return `http://127.0.0.1:${config.port}`;
+}
+
+function normalizeKnowledgeIdList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const next: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "string") continue;
+    const trimmed = entry.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    next.push(trimmed);
+  }
+  return next;
+}
+
+function normalizeRequiredSessionId(value: unknown): string {
+  const sessionId = typeof value === "string" ? value.trim() : "";
+  if (!sessionId) {
+    throw new ApiError(400, "invalid_payload", "sessionId is required");
+  }
+  return sessionId;
+}
+
+function isKnowledgeVisible(record: KnowledgeRegistryRecord): boolean {
+  return record.visibility === "visible_to_all_users" && record.status !== "deleted";
+}
+
+function serializeKnowledgeRecord(record: KnowledgeRegistryRecord) {
+  return {
+    knowledgeId: record.knowledgeId,
+    ragflowDatasetId: record.ragflowDatasetId,
+    ownerUserId: record.ownerUserId,
+    ownerDisplayName: record.ownerDisplayName,
+    title: record.title,
+    description: record.description ?? null,
+    source: record.source,
+    visibility: record.visibility,
+    ingestionPreset: record.ingestionPreset ?? null,
+    chunkMethod: record.chunkMethod ?? null,
+    parserConfig: record.parserConfig ?? {},
+    embeddingModel: record.embeddingModel ?? null,
+    status: record.status,
+    documentCount: record.documentCount ?? 0,
+    chunkCount: record.chunkCount ?? 0,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+  };
+}
+
+async function listKnowledgeRecordsByIds(
+  knowledgeRegistry: KnowledgeRegistryService,
+  knowledgeIds: string[],
+): Promise<KnowledgeRegistryRecord[]> {
+  const items: KnowledgeRegistryRecord[] = [];
+  for (const knowledgeId of knowledgeIds) {
+    const record = await knowledgeRegistry.get(knowledgeId);
+    if (!record || !isKnowledgeVisible(record)) continue;
+    items.push(record);
+  }
+  return items;
+}
+
+async function requireKnowledgeRecordsForAttachment(
+  knowledgeRegistry: KnowledgeRegistryService,
+  knowledgeIds: string[],
+): Promise<KnowledgeRegistryRecord[]> {
+  const items: KnowledgeRegistryRecord[] = [];
+  for (const knowledgeId of knowledgeIds) {
+    const record = await knowledgeRegistry.get(knowledgeId);
+    if (!record || !isKnowledgeVisible(record)) {
+      throw new ApiError(400, "invalid_knowledge_ids", `Knowledge base ${knowledgeId} is unavailable.`);
+    }
+    items.push(record);
+  }
+  return items;
+}
+
+async function requireKnowledgeRecordsForSearch(
+  knowledgeRegistry: KnowledgeRegistryService,
+  knowledgeIds: string[],
+): Promise<KnowledgeRegistryRecord[]> {
+  const items = await requireKnowledgeRecordsForAttachment(knowledgeRegistry, knowledgeIds);
+  if (!items.length) {
+    throw new ApiError(400, "no_attached_knowledge", "No knowledge bases are attached to this session.");
+  }
+  return items;
+}
+
+async function resolveKnowledgeCaller(auth: AuthService, ctx: RequestContext): Promise<AuthIdentity> {
+  const ownerKey = ctx.actor?.tokenHash?.trim() ?? "";
+  if (!ownerKey) {
+    throw new ApiError(403, "knowledge_user_context_required", "Knowledge routes require a user-bound client token.");
+  }
+  const user = await auth.getUserByOwnerKey(ownerKey);
+  if (!user) {
+    throw new ApiError(403, "knowledge_user_context_required", "Knowledge routes require a user-bound client token.");
+  }
+  return user;
+}
+
+async function requireKnowledgeSessionAccess(input: {
+  workspace: WorkspaceInfo;
+  sessionId: string;
+  ctx: RequestContext;
+  sessionOwnership: SessionOwnershipService;
+  sessionWorkspaces: SessionWorkspaceService;
+}) {
+  const scope = input.ctx.actor?.scope ?? "viewer";
+  const requesterKey = input.ctx.actor?.tokenHash?.trim() ?? "";
+  if (scope !== "owner") {
+    if (!requesterKey) {
+      throw new ApiError(403, "forbidden", "Missing requester identity");
+    }
+    const knownOwner = await input.sessionOwnership.getOwner(input.workspace.id, input.sessionId);
+    if (!knownOwner || knownOwner !== requesterKey) {
+      throw new ApiError(404, "session_not_found", "Session not found");
+    }
+  }
+  const runtimeWorkspace = await input.sessionWorkspaces.getWorkspace(input.workspace.id, input.sessionId);
+  if (!runtimeWorkspace) {
+    throw new ApiError(404, "session_not_found", "Session not found");
+  }
+  return runtimeWorkspace;
 }
 
 async function isAuthorizedRoot(workspacePath: string, roots: string[]): Promise<boolean> {

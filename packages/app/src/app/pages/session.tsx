@@ -85,6 +85,7 @@ import soulSetupTemplate from "../data/commands/give-me-a-soul.md?raw";
 import MessageList from "../components/session/message-list";
 import Composer from "../components/session/composer";
 import type { SidebarSectionState } from "../components/session/sidebar";
+import SessionKnowledgeSurface from "../components/session/session-knowledge-surface";
 import FlyoutItem from "../components/flyout-item";
 import QuestionModal from "../components/question-modal";
 import ArtifactsPanel from "../components/session/artifacts-panel";
@@ -316,7 +317,7 @@ export default function SessionView(props: SessionViewProps) {
         Boolean(workspace.sandboxRunId?.trim()) ||
         Boolean(workspace.sandboxContainerName?.trim())
         ? "Sandbox"
-        : "Remote"
+      : "Remote"
       : "Local";
   const todoList = createMemo(() => props.todos.filter((todo) => todo.content.trim()));
   const todoCount = createMemo(() => todoList().length);
@@ -3384,6 +3385,15 @@ export default function SessionView(props: SessionViewProps) {
           </div>
         </div>
       </Show>
+
+      <SessionKnowledgeSurface
+        client={props.openworkServerClient}
+        workspaceId={props.openworkServerWorkspaceId}
+        sessionId={props.selectedSessionId}
+        editingLocked={showRunIndicator()}
+        tr={tr}
+        onToast={(message) => setToastMessage(message)}
+      />
 
       <Composer
         prompt={props.prompt}

@@ -127,6 +127,68 @@ export type OpenworkWorkspaceList = {
   activeId?: string | null;
 };
 
+export type OpenworkKnowledgeScope = "mine" | "others";
+
+export type OpenworkKnowledgeItem = {
+  knowledgeId: string;
+  ragflowDatasetId: string;
+  ownerUserId: string;
+  ownerDisplayName: string;
+  title: string;
+  description: string | null;
+  source: string;
+  visibility: string;
+  ingestionPreset: string | null;
+  chunkMethod: string | null;
+  parserConfig: Record<string, unknown>;
+  embeddingModel: string | null;
+  status: string;
+  documentCount: number;
+  chunkCount: number;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type OpenworkKnowledgeListResponse = {
+  scope: OpenworkKnowledgeScope;
+  items: OpenworkKnowledgeItem[];
+};
+
+export type OpenworkSessionKnowledgeResponse = {
+  sessionId: string;
+  runtimeId: string;
+  knowledgeIds: string[];
+  items: OpenworkKnowledgeItem[];
+};
+
+export type OpenworkKnowledgeSearchItem = {
+  id: string;
+  content: string;
+  similarity: number | null;
+  vectorSimilarity: number | null;
+  termSimilarity: number | null;
+  datasetId: string | null;
+  documentId: string | null;
+  documentName: string | null;
+  positions: unknown[];
+  imageId: string | null;
+  knowledgeId: string | null;
+  knowledgeTitle: string | null;
+  ownerUserId: string | null;
+  ownerDisplayName: string | null;
+};
+
+export type OpenworkKnowledgeSearchResponse = {
+  sessionId: string;
+  runtimeId: string;
+  question: string;
+  knowledgeIds: string[];
+  total: number;
+  page: number;
+  pageSize: number;
+  items: OpenworkKnowledgeSearchItem[];
+};
+
 export type OpenworkPluginItem = {
   spec: string;
   source: "config" | "dir.project" | "dir.global";
@@ -1060,6 +1122,7 @@ export function createOpenworkServerClient(options: { baseUrl: string; token?: s
     activateWorkspace: 10_000,
     deleteWorkspace: 10_000,
     deleteSession: 12_000,
+    knowledge: 12_000,
     status: 6_000,
     admin: 12_000,
     config: 10_000,
@@ -1134,6 +1197,33 @@ export function createOpenworkServerClient(options: { baseUrl: string; token?: s
         baseUrl,
         `/workspace/${encodeURIComponent(workspaceId)}/sessions/${encodeURIComponent(sessionId)}`,
         { token, hostToken, method: "DELETE", timeoutMs: timeouts.deleteSession },
+      ),
+    listKnowledge: (workspaceId: string, scope: OpenworkKnowledgeScope = "mine") =>
+      requestJson<OpenworkKnowledgeListResponse>(
+        baseUrl,
+        `/workspace/${encodeURIComponent(workspaceId)}/knowledge?scope=${encodeURIComponent(scope)}`,
+        { token, hostToken, timeoutMs: timeouts.knowledge },
+      ),
+    getSessionKnowledge: (workspaceId: string, sessionId: string) =>
+      requestJson<OpenworkSessionKnowledgeResponse>(
+        baseUrl,
+        `/workspace/${encodeURIComponent(workspaceId)}/sessions/${encodeURIComponent(sessionId)}/knowledge`,
+        { token, hostToken, timeoutMs: timeouts.knowledge },
+      ),
+    setSessionKnowledge: (workspaceId: string, sessionId: string, knowledgeIds: string[]) =>
+      requestJson<OpenworkSessionKnowledgeResponse>(
+        baseUrl,
+        `/workspace/${encodeURIComponent(workspaceId)}/sessions/${encodeURIComponent(sessionId)}/knowledge`,
+        { token, hostToken, method: "PUT", body: { knowledgeIds }, timeoutMs: timeouts.knowledge },
+      ),
+    searchKnowledge: (
+      workspaceId: string,
+      input: { sessionId: string; question: string; knowledgeIds?: string[] },
+    ) =>
+      requestJson<OpenworkKnowledgeSearchResponse>(
+        baseUrl,
+        `/workspace/${encodeURIComponent(workspaceId)}/knowledge/search`,
+        { token, hostToken, method: "POST", body: input, timeoutMs: timeouts.knowledge },
       ),
     exportWorkspace: (workspaceId: string) =>
       requestJson<OpenworkWorkspaceExport>(baseUrl, `/workspace/${encodeURIComponent(workspaceId)}/export`, {

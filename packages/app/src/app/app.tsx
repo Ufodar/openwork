@@ -45,6 +45,7 @@ import {
   listCommands as listCommandsTyped,
 } from "./lib/opencode-session";
 import { clearPerfLogs, finishPerf, perfNow, recordPerfLog } from "./lib/perf-log";
+import { clearBusyState } from "./lib/busy-state";
 import {
   type OpenworkSessionPrefs,
   normalizeStoredAgent,
@@ -889,6 +890,17 @@ export default function App() {
   const [providerAuthError, setProviderAuthError] = createSignal<string | null>(null);
   const [providerAuthMethods, setProviderAuthMethods] = createSignal<Record<string, ProviderAuthMethod[]>>({});
 
+  const resetBusyState = () => {
+    const next = clearBusyState({
+      busy: busy(),
+      busyLabel: busyLabel(),
+      busyStartedAt: busyStartedAt(),
+    });
+    setBusy(next.busy);
+    setBusyLabel(next.busyLabel);
+    setBusyStartedAt(next.busyStartedAt);
+  };
+
   createEffect(() => {
     const current = defaultModel();
     const normalized = resolveSupportedModel(current, providers(), DEFAULT_MODEL);
@@ -1359,9 +1371,7 @@ export default function App() {
       const message = e instanceof Error ? e.message : safeStringify(e);
       setError(addOpencodeCacheHint(message));
     } finally {
-      setBusy(false);
-      setBusyLabel(null);
-      setBusyStartedAt(null);
+      resetBusyState();
     }
   }
 
@@ -5216,7 +5226,7 @@ export default function App() {
       return undefined;
     } finally {
       setCreatingSession(false);
-      setBusy(false);
+      resetBusyState();
     }
   }
 

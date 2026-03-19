@@ -21,6 +21,8 @@ import { workspaceIdForPath } from "./workspaces.js";
 import { sanitizeCommandName, validateMcpName } from "./validators.js";
 import { TokenService } from "./tokens.js";
 import { AuthService, type AuthIdentity } from "./auth.js";
+import { KnowledgeAttachmentService } from "./knowledge-attachments.js";
+import { KnowledgeRegistryService } from "./knowledge-registry.js";
 import { SessionOwnershipService } from "./session-ownership.js";
 import { buildSessionPermissionRules, provisionSessionWorkspace, SessionWorkspaceService, sessionDirectoryBelongsToWorkspace } from "./session-workspaces.js";
 import { RuntimeMaintenanceService, isRuntimeMaintenanceBlockingNewWork, type RuntimeMaintenanceState } from "./runtime-maintenance.js";
@@ -272,6 +274,8 @@ export function startServer(config: ServerConfig) {
   const auth = new AuthService(config, tokens);
   const sessionOwnership = new SessionOwnershipService();
   const sessionWorkspaces = new SessionWorkspaceService();
+  const knowledgeRegistry = new KnowledgeRegistryService();
+  const knowledgeAttachments = new KnowledgeAttachmentService();
   const logger = createServerLogger(config);
   const runtimeMaintenance = new RuntimeMaintenanceService();
   const sessionActivity = new SessionActivityService(logger);
@@ -283,6 +287,8 @@ export function startServer(config: ServerConfig) {
     auth,
     sessionOwnership,
     sessionWorkspaces,
+    knowledgeRegistry,
+    knowledgeAttachments,
     runtimeMaintenance,
     sessionActivity,
     logger,
@@ -1852,6 +1858,8 @@ function createRoutes(
   auth: AuthService,
   sessionOwnership: SessionOwnershipService,
   sessionWorkspaces: SessionWorkspaceService,
+  _knowledgeRegistry: KnowledgeRegistryService,
+  knowledgeAttachments: KnowledgeAttachmentService,
   runtimeMaintenance: RuntimeMaintenanceService,
   sessionActivity: SessionActivityService,
   logger: ServerLogger,
@@ -2253,6 +2261,7 @@ function createRoutes(
 
     await sessionOwnership.removeOwner(workspace.id, sessionId);
     await sessionWorkspaces.removeWorkspace(workspace.id, sessionId);
+    await knowledgeAttachments.remove(workspace.id, sessionId);
     if (runtimeWorkspace?.runtimeDir) {
       await rm(runtimeWorkspace.runtimeDir, { recursive: true, force: true }).catch(() => undefined);
     }

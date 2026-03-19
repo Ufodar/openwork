@@ -222,6 +222,17 @@ function encodeInboxId(path: string): string {
     return Buffer.from(path, "utf8").toString("base64url");
 }
 
+export async function persistUploadedDocumentFile(destPath: string, file: File) {
+    await ensureDir(dirname(destPath));
+    const tmpPath = `${destPath}.tmp-${shortId()}`;
+    if (typeof Bun !== "undefined" && typeof Bun.write === "function") {
+        await Bun.write(tmpPath, file);
+    } else {
+        await writeFile(tmpPath, Buffer.from(await file.arrayBuffer()));
+    }
+    await rename(tmpPath, destPath);
+}
+
 async function ensureDocxZipPath(workspacePath: string, inputPath: string): Promise<string> {
     const ext = extname(inputPath).toLowerCase();
     if (DOCX_ZIP_EXTENSIONS.has(ext)) return inputPath;
@@ -2068,8 +2079,7 @@ export function createDocumentRoutes(routes: unknown[], sessionWorkspaces?: Sess
             validateDocumentMutationPath(destRel, { allowHiddenLeafFile: true });
 
             const filePath = resolveDocumentPathSafe(docsDir, destRel);
-            await ensureDir(dirname(filePath));
-            await writeFile(filePath, Buffer.from(await file.arrayBuffer()));
+            await persistUploadedDocumentFile(filePath, file);
 
             return jsonResponse({ ok: true, name: destRel });
         },

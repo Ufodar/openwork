@@ -441,7 +441,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
       typeof init?.timeoutMs === "number"
         ? init.timeoutMs
         : init?.body instanceof FormData
-          ? 300_000
+          ? 1_000_000
           : 12_000;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     if (controller && Number.isFinite(timeoutMs) && timeoutMs > 0) {

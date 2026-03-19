@@ -18,6 +18,8 @@ A .docx file is a ZIP archive containing XML files.
 | Create new document | Use `docx-js` - see Creating New Documents below |
 | Edit existing document | Unpack → edit XML → repack - see Editing Existing Documents below |
 
+Document normalization rule: semantic structure beats visual appearance. If a line is meant to behave like a heading or list item, encode it with real heading styles or numbering semantics instead of typing visual prefixes such as `1.`, `1.1`, `一、`, or `-`.
+
 ### Converting .doc to .docx
 
 Legacy `.doc` files must be converted before editing:
@@ -136,12 +138,16 @@ const doc = new Document({
 });
 ```
 
-### Lists (NEVER use unicode bullets)
+Use heading styles for structural headings, not visual lookalikes. If the target document already has a heading system, reuse the closest existing heading paragraph/style instead of inventing a new visual variant. Do not type `1.` / `1.1` / `一、` as plain paragraph text when the line is meant to participate in TOC, navigation, or structured reuse.
+
+### Lists (NEVER use unicode bullets or manual prefixes)
 
 ```javascript
 // ❌ WRONG - never manually insert bullet characters
 new Paragraph({ children: [new TextRun("• Item")] })  // BAD
 new Paragraph({ children: [new TextRun("\u2022 Item")] })  // BAD
+new Paragraph({ children: [new TextRun("1. Numbered item")] })  // BAD
+new Paragraph({ children: [new TextRun("(1) Numbered item")] })  // BAD
 
 // ✅ CORRECT - use numbering config with LevelFormat.BULLET
 const doc = new Document({
@@ -273,6 +279,8 @@ sections: [{
 - **Landscape: pass portrait dimensions** - docx-js swaps width/height internally; pass short edge as `width`, long edge as `height`, and set `orientation: PageOrientation.LANDSCAPE`
 - **Never use `\n`** - use separate Paragraph elements
 - **Never use unicode bullets** - use `LevelFormat.BULLET` with numbering config
+- **Headings are semantic, not visual** - if a line should appear in TOC, navigation, or outline views, use heading styles/`HeadingLevel`, not a Normal paragraph with typed numeric prefixes
+- **Lists are structural, not textual** - if a line is a list item, encode it with numbering rather than manually typed `1.` / `(1)` / `-` prefixes
 - **PageBreak must be in Paragraph** - standalone creates invalid XML
 - **ImageRun requires `type`** - always specify png/jpg/etc
 - **Always set table `width` with DXA** - never use `WidthType.PERCENTAGE` (breaks in Google Docs)
@@ -283,6 +291,8 @@ sections: [{
 - **TOC requires HeadingLevel only** - no custom styles on heading paragraphs
 - **Override built-in styles** - use exact IDs: "Heading1", "Heading2", etc.
 - **Include `outlineLevel`** - required for TOC (0 for H1, 1 for H2, etc.)
+- **Reuse the target document's style system** - when editing existing docs, copy the nearest valid `pStyle`, `numPr`, spacing, and outline pattern before changing text
+- **If structure is ambiguous, inherit instead of inventing** - prefer copying the nearest correct heading, list, or body block over creating an ad-hoc format
 
 ---
 
@@ -299,6 +309,8 @@ Extracts XML, pretty-prints, merges adjacent runs, and converts smart quotes to 
 ### Step 2: Edit XML
 
 Edit files in `unpacked/word/`. See XML Reference below for patterns.
+
+Before editing XML, identify whether the target block is a heading, body paragraph, list item, table note, or table cell. Preserve or deliberately set the corresponding `w:pStyle`, `w:numPr`, and outline semantics. Do not keep visually formatted pseudo-headings or pseudo-lists as plain paragraphs when they are meant to participate in TOC, navigation, or structured reuse.
 
 **Use "Claude" as the author** for tracked changes and comments, unless the user explicitly requests use of a different name.
 
@@ -353,6 +365,8 @@ Validates with auto-repair, condenses XML, and creates DOCX. Use `--validate fal
 
 - **Replace entire `<w:r>` elements**: When adding tracked changes, replace the whole `<w:r>...</w:r>` block with `<w:del>...<w:ins>...` as siblings. Don't inject tracked change tags inside a run.
 - **Preserve `<w:rPr>` formatting**: Copy the original run's `<w:rPr>` block into your tracked change runs to maintain bold, font size, etc.
+- **Pseudo headings and pseudo lists break document structure**: A plain paragraph that only looks like `1.` / `1.1` / `一、` / `-` will not participate correctly in TOC, navigation, cross-references, or future structured edits. Convert it to real heading or numbering semantics instead of copying the visual pattern forward.
+- **Reuse nearby paragraph semantics when normalizing**: When adding or fixing a heading, list, or body block, copy the nearest valid `w:pStyle` / `w:numPr` pattern before changing the text.
 - **Never use DOM 解析器（ElementTree / lxml）提取章节**: DOM 解析器在序列化时会丢弃未显式声明的命名空间前缀（如 `wp14`、`w14`、`w15`、`mc`），导致 pack 后文档损坏（报 "namespace not declared" 错误）。**必须使用字符串操作**（`str.find()` + 切片）提取 XML 片段，这样能 100% 保留原始命名空间声明和格式。
 - **定位章节时跳过 TOC 区域**: document.xml 中的目录（Table of Contents）包裹在 `<w:sdt>` 标签内，其中的文字也包含章节标题（如"第五部分"）。搜索章节标题时，必须跳过 `<w:sdt>...</w:sdt>` 区域内的匹配，否则会定位到目录条目而非实际正文。实用方法：搜索所有匹配位置，取 `<w:sdt>` 块之外的**最后一个**匹配。
 

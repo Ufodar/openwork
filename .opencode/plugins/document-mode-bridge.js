@@ -149,9 +149,14 @@ Document-native operating rules:
 - Persist reusable state in workspace files instead of relying on short-term chat memory.
 
 Whole-document quality rules:
+- For Word documents, you must use real Word heading semantics for headings instead of manual numeric prefixes such as \`1.\`, \`1.1\`, or \`一、\`.
+- For Word documents, you must use real numbering or bullet structure for lists instead of manually typed prefixes.
+- When the target document already has styles, numbering, paragraph spacing, or table rules, reuse that structure instead of inventing a new format.
+- If a block's role is ambiguous, inherit the nearest equivalent heading, list, or body style instead of improvising a visual clone.
 - Before major edits to a long document, reread the title, outline, adjacent sections, and current conclusions.
 - Local edits must preserve global logic, terminology, numbering, cross-references, and section dependencies.
 - Before claiming a whole document is done, reread the whole document or a faithful extracted representation.
+- Use /doc-normalize for full-document normalization instead of hiding that work inside ordinary drafting or revision turns.
 
 Process routing:
 - Use writing-plans only for clearly multi-round, multi-file, or multi-output tasks.

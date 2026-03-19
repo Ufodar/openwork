@@ -10,6 +10,7 @@ import MessageList from "../components/session/message-list";
 import Composer from "../components/session/composer";
 import ToolMonitorPanel from "../components/tool-monitor/tool-monitor-panel";
 import { DOCUMENT_UPLOAD_ACCEPT } from "../lib/documents";
+import { isSessionHydrating } from "../lib/session-hydration";
 import { currentLocale, t as i18n } from "../../i18n";
 import {
   buildToolMonitorTurnReport,
@@ -595,9 +596,12 @@ export default function DocumentWriterView(props: SessionViewProps) {
     } satisfies DocumentListResult;
   });
   const sessionHydrating = createMemo(() => {
-    const sid = sessionId();
-    if (!sid) return false;
-    return props.routeSessionHydratingId?.trim() === sid || props.busyLabel === "status.loading_session";
+    return isSessionHydrating({
+      sessionId: sessionId(),
+      routeSessionHydratingId: props.routeSessionHydratingId,
+      busy: props.busy,
+      busyLabel: props.busyLabel,
+    });
   });
   const initialDocumentsLoading = createMemo(() => documents.loading && !documents.latest);
 

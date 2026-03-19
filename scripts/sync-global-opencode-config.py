@@ -70,6 +70,7 @@ def main() -> int:
     )
     provider_id = os.environ.get("OPENWORK_PROVIDER_ID", "my-company").strip() or "my-company"
     default_model = os.environ.get("OPENWORK_DEFAULT_MODEL", DEFAULT_MODEL_ID).strip() or DEFAULT_MODEL_ID
+    small_model = os.environ.get("OPENWORK_SMALL_MODEL", default_model).strip() or default_model
     base_url = resolve_default_base_url()
     api_key = os.environ.get("MY_COMPANY_API_KEY", "").strip()
 
@@ -80,6 +81,14 @@ def main() -> int:
             file=sys.stderr,
         )
         default_model = DEFAULT_MODEL_ID
+
+    if small_model not in SUPPORTED_MODELS:
+        print(
+            f"[sync-global-opencode-config] Unsupported OPENWORK_SMALL_MODEL={small_model!r}; "
+            f"falling back to {default_model}. Supported: {', '.join(SUPPORTED_MODELS)}",
+            file=sys.stderr,
+        )
+        small_model = default_model
 
     config = load_json(global_path)
     config["$schema"] = "https://opencode.ai/config.json"
@@ -100,6 +109,7 @@ def main() -> int:
     }
     provider["models"] = SUPPORTED_MODELS
     config["model"] = f"{provider_id}/{default_model}"
+    config["small_model"] = f"{provider_id}/{small_model}"
 
     global_path.parent.mkdir(parents=True, exist_ok=True)
     global_path.write_text(json.dumps(config, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -107,7 +117,7 @@ def main() -> int:
     api_key_state = "set" if api_key else "empty"
     print(
         f"[sync-global-opencode-config] Wrote {global_path} "
-        f"(provider={provider_id}, default_model={default_model}, api_key={api_key_state})"
+        f"(provider={provider_id}, default_model={default_model}, small_model={small_model}, api_key={api_key_state})"
     )
     return 0
 

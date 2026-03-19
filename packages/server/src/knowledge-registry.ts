@@ -141,6 +141,17 @@ function sortByUpdatedAtDesc(items: KnowledgeRegistryRecord[]): KnowledgeRegistr
   });
 }
 
+function nextUpdatedAt(items: Record<string, KnowledgeRegistryRecord>, existing: KnowledgeRegistryRecord | undefined): number {
+  const now = Date.now();
+  let minimum = existing ? existing.updatedAt + 1 : 0;
+  if (!existing) {
+    for (const item of Object.values(items)) {
+      minimum = Math.max(minimum, item.updatedAt + 1);
+    }
+  }
+  return Math.max(now, minimum);
+}
+
 export class KnowledgeRegistryService {
   private store: KnowledgeRegistryStore | null = null;
 
@@ -169,7 +180,7 @@ export class KnowledgeRegistryService {
 
     const store = await this.ensureLoaded();
     const existing = store.items[knowledgeId];
-    const now = Date.now();
+    const updatedAt = nextUpdatedAt(store.items, existing);
     const record: KnowledgeRegistryRecord = {
       knowledgeId,
       ragflowDatasetId,
@@ -186,8 +197,8 @@ export class KnowledgeRegistryService {
       status: normalizeStatus(input.status),
       documentCount: normalizeCount(input.documentCount),
       chunkCount: normalizeCount(input.chunkCount),
-      createdAt: existing?.createdAt ?? now,
-      updatedAt: now,
+      createdAt: existing?.createdAt ?? updatedAt,
+      updatedAt,
     };
     store.items[knowledgeId] = record;
     await writeStore(resolveKnowledgeRegistryPath(), store.items);

@@ -157,6 +157,7 @@ fi
 
 nohup env -u OPENWORK_OPENCODE_USERNAME -u OPENWORK_OPENCODE_PASSWORD \
     OPENWORK_SERVER_CONFIG=/tmp/openwork-recovery-server.json \
+    OPENWORK_USER_WORKSPACE_TEMPLATE_DIR="$PROJECT_DIR" \
     "$PROJECT_DIR/packages/server/dist/bin/openwork-server" \
     "${openwork_args[@]}" \
     > "$PROJECT_DIR/tmp/openwork-server-manual.log" 2>&1 &

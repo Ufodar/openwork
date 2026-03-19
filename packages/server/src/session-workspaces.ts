@@ -2,6 +2,8 @@ import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { readFile, rename, writeFile } from "node:fs/promises";
 
+import { readJsoncFile, writeJsoncFile } from "./jsonc.js";
+import { opencodeConfigPath } from "./workspace-files.js";
 import { ensureDir, exists, shortId } from "./utils.js";
 
 type PermissionAction = "allow" | "deny" | "ask";
@@ -82,6 +84,32 @@ export async function provisionSessionWorkspace(workspacePath: string): Promise<
   const runtimeDir = join(workspacePath, "documents", "sessions", runtimeId);
   await ensureDir(runtimeDir);
   return { runtimeId, runtimeDir };
+}
+
+export async function writeRuntimeKnowledgeCarrierConfig(input: {
+  workspacePath: string;
+  runtimeDir: string;
+  mcpUrl: string;
+  runtimeToken: string;
+}): Promise<string> {
+  const workspaceConfigPath = opencodeConfigPath(input.workspacePath);
+  const runtimeConfigPath = opencodeConfigPath(input.runtimeDir);
+  const { data: workspaceConfig } = await readJsoncFile<Record<string, unknown>>(workspaceConfigPath, {});
+  const { data: runtimeConfig } = await readJsoncFile<Record<string, unknown>>(runtimeConfigPath, workspaceConfig);
+  const baseConfig = runtimeConfig && typeof runtimeConfig === "object" ? { ...runtimeConfig } : {};
+  const existingMcp = baseConfig.mcp && typeof baseConfig.mcp === "object"
+    ? { ...(baseConfig.mcp as Record<string, unknown>) }
+    : {};
+  existingMcp["openwork-knowledge"] = {
+    type: "remote",
+    url: input.mcpUrl,
+    headers: {
+      Authorization: `Bearer ${input.runtimeToken}`,
+    },
+  };
+  baseConfig.mcp = existingMcp;
+  await writeJsoncFile(runtimeConfigPath, baseConfig);
+  return runtimeConfigPath;
 }
 
 export function buildSessionPermissionRules(): PermissionRuleset {

@@ -23,9 +23,11 @@ import { TokenService } from "./tokens.js";
 import { AuthService, type AuthIdentity } from "./auth.js";
 import { KnowledgeAttachmentService } from "./knowledge-attachments.js";
 import { KnowledgeRegistryService, type KnowledgeRegistryRecord } from "./knowledge-registry.js";
+import { handleKnowledgeMcpRequest } from "./knowledge-mcp.js";
 import { createConfiguredRagflowClient, type RagflowClient } from "./ragflow.js";
+import { RuntimeKnowledgeTokenService } from "./runtime-knowledge-tokens.js";
 import { SessionOwnershipService } from "./session-ownership.js";
-import { buildSessionPermissionRules, provisionSessionWorkspace, SessionWorkspaceService, sessionDirectoryBelongsToWorkspace } from "./session-workspaces.js";
+import { buildSessionPermissionRules, provisionSessionWorkspace, SessionWorkspaceService, sessionDirectoryBelongsToWorkspace, writeRuntimeKnowledgeCarrierConfig } from "./session-workspaces.js";
 import { RuntimeMaintenanceService, isRuntimeMaintenanceBlockingNewWork, type RuntimeMaintenanceState } from "./runtime-maintenance.js";
 import { SessionActivityService } from "./session-activity.js";
 import { TOY_UI_CSS, TOY_UI_HTML, TOY_UI_JS, cssResponse, htmlResponse, jsResponse } from "./toy-ui.js";
@@ -278,6 +280,7 @@ export function startServer(config: ServerConfig) {
   const knowledgeRegistry = new KnowledgeRegistryService();
   const knowledgeAttachments = new KnowledgeAttachmentService();
   const ragflow = createConfiguredRagflowClient(config);
+  const runtimeKnowledgeTokens = new RuntimeKnowledgeTokenService();
   const logger = createServerLogger(config);
   const runtimeMaintenance = new RuntimeMaintenanceService();
   const sessionActivity = new SessionActivityService(logger);
@@ -292,6 +295,7 @@ export function startServer(config: ServerConfig) {
     knowledgeRegistry,
     knowledgeAttachments,
     ragflow,
+    runtimeKnowledgeTokens,
     runtimeMaintenance,
     sessionActivity,
     logger,
@@ -360,6 +364,8 @@ export function startServer(config: ServerConfig) {
             actor,
             sessionOwnership,
             sessionWorkspaces,
+            runtimeKnowledgeTokens,
+            openworkBaseUrl: resolveServerLoopbackBaseUrl(config),
             runtimeMaintenance,
             sessionActivity,
           });
@@ -432,6 +438,8 @@ export function startServer(config: ServerConfig) {
             actor,
             sessionOwnership,
             sessionWorkspaces,
+            runtimeKnowledgeTokens,
+            openworkBaseUrl: resolveServerLoopbackBaseUrl(config),
             runtimeMaintenance,
             sessionActivity,
           });
@@ -930,6 +938,8 @@ export async function proxyOpencodeRequest(input: {
   actor?: Actor;
   sessionOwnership: SessionOwnershipService;
   sessionWorkspaces: SessionWorkspaceService;
+  runtimeKnowledgeTokens: RuntimeKnowledgeTokenService;
+  openworkBaseUrl: string;
   runtimeMaintenance?: RuntimeMaintenanceService;
   sessionActivity?: SessionActivityService;
 }) {
@@ -1121,6 +1131,24 @@ export async function proxyOpencodeRequest(input: {
             runtimeDir: provisionedRuntime.runtimeDir,
             createdAt: Date.now(),
           });
+          if (workspace) {
+            try {
+              const issued = await input.runtimeKnowledgeTokens.issue({
+                workspaceId,
+                sessionId: createdSessionId,
+                runtimeId: provisionedRuntime.runtimeId,
+              });
+              await writeRuntimeKnowledgeCarrierConfig({
+                workspacePath: workspace.path,
+                runtimeDir: provisionedRuntime.runtimeDir,
+                mcpUrl: `${input.openworkBaseUrl}/workspace/${encodeURIComponent(workspaceId)}/knowledge/mcp`,
+                runtimeToken: issued.token,
+              });
+            } catch (error) {
+              console.warn("[openwork-server] Failed to provision runtime knowledge carrier:", error);
+              await input.runtimeKnowledgeTokens.revokeRuntime(workspaceId, createdSessionId, provisionedRuntime.runtimeId);
+            }
+          }
         }
       }
       return new Response(raw, { status: response.status, headers: response.headers });
@@ -1129,6 +1157,9 @@ export async function proxyOpencodeRequest(input: {
     if (workspaceId && method === "DELETE" && pathSessionId && response.ok) {
       await input.sessionOwnership.removeOwner(workspaceId, pathSessionId);
       await input.sessionWorkspaces.removeWorkspace(workspaceId, pathSessionId);
+      if (runtimeWorkspace?.runtimeId) {
+        await input.runtimeKnowledgeTokens.revokeRuntime(workspaceId, pathSessionId, runtimeWorkspace.runtimeId);
+      }
       input.sessionActivity?.removeSession(workspaceId, pathSessionId);
       if (runtimeDirectory) {
         await rm(runtimeDirectory, { recursive: true, force: true }).catch(() => undefined);
@@ -1864,6 +1895,7 @@ export function createRoutes(
   knowledgeRegistry: KnowledgeRegistryService,
   knowledgeAttachments: KnowledgeAttachmentService,
   ragflow: RagflowClient,
+  runtimeKnowledgeTokens: RuntimeKnowledgeTokenService,
   runtimeMaintenance: RuntimeMaintenanceService,
   sessionActivity: SessionActivityService,
   logger: ServerLogger,
@@ -2266,6 +2298,9 @@ export function createRoutes(
     await sessionOwnership.removeOwner(workspace.id, sessionId);
     await sessionWorkspaces.removeWorkspace(workspace.id, sessionId);
     await knowledgeAttachments.remove(workspace.id, sessionId);
+    if (runtimeWorkspace?.runtimeId) {
+      await runtimeKnowledgeTokens.revokeRuntime(workspace.id, sessionId, runtimeWorkspace.runtimeId);
+    }
     if (runtimeWorkspace?.runtimeDir) {
       await rm(runtimeWorkspace.runtimeDir, { recursive: true, force: true }).catch(() => undefined);
     }
@@ -2405,6 +2440,19 @@ export function createRoutes(
       page: result.page,
       pageSize: result.pageSize,
       items,
+    });
+  });
+
+  addRoute(routes, "POST", "/workspace/:id/knowledge/mcp", "none", async (ctx) => {
+    const workspace = await resolveWorkspace(config, ctx.params.id);
+    return handleKnowledgeMcpRequest({
+      request: ctx.request,
+      workspaceId: workspace.id,
+      runtimeTokens: runtimeKnowledgeTokens,
+      knowledgeAttachments,
+      knowledgeRegistry,
+      ragflow,
+      serverVersion: SERVER_VERSION,
     });
   });
 
@@ -4405,6 +4453,10 @@ async function resolveWorkspace(config: ServerConfig, id: string): Promise<Works
     throw new ApiError(403, "workspace_unauthorized", "Workspace is not authorized");
   }
   return { ...workspace, path: resolvedWorkspace };
+}
+
+function resolveServerLoopbackBaseUrl(config: ServerConfig): string {
+  return `http://127.0.0.1:${config.port}`;
 }
 
 function normalizeKnowledgeIdList(value: unknown): string[] {

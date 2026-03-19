@@ -62,11 +62,8 @@ import {
   buildOpenworkConnectInviteUrl,
   buildOpenworkWorkspaceBaseUrl,
   createOpenworkServerClient,
-  OpenworkServerError,
 } from "../lib/openwork-server";
 import type {
-  OpenworkKnowledgeItem,
-  OpenworkKnowledgeScope,
   OpenworkServerClient,
   OpenworkServerSettings,
   OpenworkServerStatus,
@@ -88,15 +85,13 @@ import soulSetupTemplate from "../data/commands/give-me-a-soul.md?raw";
 import MessageList from "../components/session/message-list";
 import Composer from "../components/session/composer";
 import type { SidebarSectionState } from "../components/session/sidebar";
-import KnowledgePickerModal from "../components/session/knowledge-picker-modal";
-import KnowledgeStrip from "../components/session/knowledge-strip";
+import SessionKnowledgeSurface from "../components/session/session-knowledge-surface";
 import FlyoutItem from "../components/flyout-item";
 import QuestionModal from "../components/question-modal";
 import ArtifactsPanel from "../components/session/artifacts-panel";
 import InboxPanel from "../components/session/inbox-panel";
 import ArtifactMarkdownEditor from "../components/session/artifact-markdown-editor";
 import { currentLocale, t } from "../../i18n";
-import { reduceKnowledgeSelection, sameKnowledgeSelection } from "../lib/knowledge-selection";
 
 export type SessionViewProps = {
   selectedSessionId: string | null;
@@ -269,9 +264,6 @@ export default function SessionView(props: SessionViewProps) {
   let streamRenderBatchTimer: number | undefined;
   let streamRenderBatchQueuedAt = 0;
   let streamRenderBatchReschedules = 0;
-  let knowledgeAttachmentRequestSeq = 0;
-  let knowledgeMineRequestSeq = 0;
-  let knowledgeOthersRequestSeq = 0;
   const topInitializedSessionIds = new Set<string>();
 
   const [toastMessage, setToastMessage] = createSignal<string | null>(null);
@@ -305,21 +297,6 @@ export default function SessionView(props: SessionViewProps) {
 
   const [markdownEditorOpen, setMarkdownEditorOpen] = createSignal(false);
   const [markdownEditorPath, setMarkdownEditorPath] = createSignal<string | null>(null);
-  const [knowledgePickerOpen, setKnowledgePickerOpen] = createSignal(false);
-  const [knowledgePickerScope, setKnowledgePickerScope] = createSignal<OpenworkKnowledgeScope>("mine");
-  const [attachedKnowledgeIds, setAttachedKnowledgeIds] = createSignal<string[]>([]);
-  const [attachedKnowledgeItems, setAttachedKnowledgeItems] = createSignal<OpenworkKnowledgeItem[]>([]);
-  const [knowledgeAttachmentsLoading, setKnowledgeAttachmentsLoading] = createSignal(false);
-  const [knowledgeAttachmentsError, setKnowledgeAttachmentsError] = createSignal<string | null>(null);
-  const [knowledgeMineItems, setKnowledgeMineItems] = createSignal<OpenworkKnowledgeItem[]>([]);
-  const [knowledgeOthersItems, setKnowledgeOthersItems] = createSignal<OpenworkKnowledgeItem[]>([]);
-  const [knowledgeMineLoaded, setKnowledgeMineLoaded] = createSignal(false);
-  const [knowledgeOthersLoaded, setKnowledgeOthersLoaded] = createSignal(false);
-  const [knowledgeMineLoading, setKnowledgeMineLoading] = createSignal(false);
-  const [knowledgeOthersLoading, setKnowledgeOthersLoading] = createSignal(false);
-  const [knowledgePickerError, setKnowledgePickerError] = createSignal<string | null>(null);
-  const [knowledgeDraftIds, setKnowledgeDraftIds] = createSignal<string[]>([]);
-  const [knowledgeSaveBusy, setKnowledgeSaveBusy] = createSignal(false);
 
   // When a session is selected (i.e. we are in SessionView), the right sidebar is
   // navigation-only. Avoid showing any tab as "selected" to reduce confusion.
@@ -342,37 +319,6 @@ export default function SessionView(props: SessionViewProps) {
         ? "Sandbox"
       : "Remote"
       : "Local";
-  const sessionKnowledgeContext = createMemo(() => {
-    const client = props.openworkServerClient;
-    const workspaceId = (props.openworkServerWorkspaceId ?? "").trim();
-    const sessionId = (props.selectedSessionId ?? "").trim();
-    if (!client || !workspaceId || !sessionId) return null;
-    return { client, workspaceId, sessionId };
-  });
-  const knowledgeAvailable = createMemo(() => Boolean(sessionKnowledgeContext()));
-  const allKnownKnowledgeItems = createMemo(() => {
-    const map = new Map<string, OpenworkKnowledgeItem>();
-    for (const item of [
-      ...attachedKnowledgeItems(),
-      ...knowledgeMineItems(),
-      ...knowledgeOthersItems(),
-    ]) {
-      if (!item.knowledgeId || map.has(item.knowledgeId)) continue;
-      map.set(item.knowledgeId, item);
-    }
-    return map;
-  });
-  const draftKnowledgeItems = createMemo(() =>
-    knowledgeDraftIds()
-      .map((knowledgeId) => allKnownKnowledgeItems().get(knowledgeId))
-      .filter((item): item is OpenworkKnowledgeItem => Boolean(item)),
-  );
-  const knowledgePickerLoading = createMemo(() =>
-    knowledgePickerScope() === "others" ? knowledgeOthersLoading() : knowledgeMineLoading(),
-  );
-  const knowledgeSelectionDirty = createMemo(() =>
-    !sameKnowledgeSelection(attachedKnowledgeIds(), knowledgeDraftIds()),
-  );
   const todoList = createMemo(() => props.todos.filter((todo) => todo.content.trim()));
   const todoCount = createMemo(() => todoList().length);
   const todoCompletedCount = createMemo(() =>
@@ -1150,175 +1096,6 @@ export default function SessionView(props: SessionViewProps) {
   });
 
   const showRunIndicator = createMemo(() => runPhase() !== "idle");
-  const knowledgeEditingLocked = createMemo(() => showRunIndicator() || knowledgeSaveBusy());
-
-  const resetKnowledgeCatalog = () => {
-    setKnowledgeMineItems([]);
-    setKnowledgeOthersItems([]);
-    setKnowledgeMineLoaded(false);
-    setKnowledgeOthersLoaded(false);
-    setKnowledgeMineLoading(false);
-    setKnowledgeOthersLoading(false);
-    setKnowledgePickerError(null);
-  };
-
-  const describeKnowledgeError = (error: unknown, fallbackKey: string) => {
-    if (error instanceof OpenworkServerError) return error.message;
-    if (error instanceof Error) return error.message;
-    return tr(fallbackKey);
-  };
-
-  const loadKnowledgeCatalog = async (scope: OpenworkKnowledgeScope) => {
-    const ctx = sessionKnowledgeContext();
-    if (!ctx) return;
-
-    if (scope === "mine" && (knowledgeMineLoaded() || knowledgeMineLoading())) return;
-    if (scope === "others" && (knowledgeOthersLoaded() || knowledgeOthersLoading())) return;
-
-    if (scope === "mine") {
-      const requestId = ++knowledgeMineRequestSeq;
-      setKnowledgeMineLoading(true);
-      setKnowledgePickerError(null);
-      try {
-        const result = await ctx.client.listKnowledge(ctx.workspaceId, "mine");
-        if (requestId !== knowledgeMineRequestSeq) return;
-        setKnowledgeMineItems(result.items);
-        setKnowledgeMineLoaded(true);
-      } catch (error) {
-        if (requestId !== knowledgeMineRequestSeq) return;
-        setKnowledgePickerError(describeKnowledgeError(error, "session.knowledge_picker_failed_load"));
-      } finally {
-        if (requestId === knowledgeMineRequestSeq) {
-          setKnowledgeMineLoading(false);
-        }
-      }
-      return;
-    }
-
-    const requestId = ++knowledgeOthersRequestSeq;
-    setKnowledgeOthersLoading(true);
-    setKnowledgePickerError(null);
-    try {
-      const result = await ctx.client.listKnowledge(ctx.workspaceId, "others");
-      if (requestId !== knowledgeOthersRequestSeq) return;
-      setKnowledgeOthersItems(result.items);
-      setKnowledgeOthersLoaded(true);
-    } catch (error) {
-      if (requestId !== knowledgeOthersRequestSeq) return;
-      setKnowledgePickerError(describeKnowledgeError(error, "session.knowledge_picker_failed_load"));
-    } finally {
-      if (requestId === knowledgeOthersRequestSeq) {
-        setKnowledgeOthersLoading(false);
-      }
-    }
-  };
-
-  const openKnowledgePicker = () => {
-    if (!knowledgeAvailable()) return;
-    setKnowledgeDraftIds(attachedKnowledgeIds());
-    setKnowledgePickerScope("mine");
-    setKnowledgePickerError(null);
-    setKnowledgePickerOpen(true);
-    void loadKnowledgeCatalog("mine");
-  };
-
-  const closeKnowledgePicker = () => {
-    setKnowledgePickerOpen(false);
-    setKnowledgePickerError(null);
-    setKnowledgeDraftIds(attachedKnowledgeIds());
-  };
-
-  const toggleKnowledgeDraft = (knowledgeId: string, checked: boolean) => {
-    setKnowledgeDraftIds((current) => reduceKnowledgeSelection(current, [{ id: knowledgeId, checked }]));
-  };
-
-  const saveKnowledgeSelection = async () => {
-    const ctx = sessionKnowledgeContext();
-    if (!ctx || knowledgeSaveBusy()) return;
-    setKnowledgeSaveBusy(true);
-    setKnowledgePickerError(null);
-    try {
-      const result = await ctx.client.setSessionKnowledge(ctx.workspaceId, ctx.sessionId, knowledgeDraftIds());
-      setAttachedKnowledgeIds(result.knowledgeIds);
-      setAttachedKnowledgeItems(result.items);
-      setKnowledgeDraftIds(result.knowledgeIds);
-      setKnowledgePickerOpen(false);
-      setToastMessage(tr("session.knowledge_picker_saved"));
-    } catch (error) {
-      const message = describeKnowledgeError(error, "session.knowledge_picker_failed_save");
-      setKnowledgePickerError(message);
-      setToastMessage(message);
-    } finally {
-      setKnowledgeSaveBusy(false);
-    }
-  };
-
-  createEffect(
-    on(sessionKnowledgeContext, (ctx) => {
-      const requestId = ++knowledgeAttachmentRequestSeq;
-      if (!ctx) {
-        setAttachedKnowledgeIds([]);
-        setAttachedKnowledgeItems([]);
-        setKnowledgeAttachmentsLoading(false);
-        setKnowledgeAttachmentsError(null);
-        closeKnowledgePicker();
-        return;
-      }
-
-      setKnowledgeAttachmentsLoading(true);
-      setKnowledgeAttachmentsError(null);
-      void ctx.client
-        .getSessionKnowledge(ctx.workspaceId, ctx.sessionId)
-        .then((result) => {
-          if (requestId !== knowledgeAttachmentRequestSeq) return;
-          setAttachedKnowledgeIds(result.knowledgeIds);
-          setAttachedKnowledgeItems(result.items);
-          if (!knowledgePickerOpen()) {
-            setKnowledgeDraftIds(result.knowledgeIds);
-          }
-        })
-        .catch((error) => {
-          if (requestId !== knowledgeAttachmentRequestSeq) return;
-          setAttachedKnowledgeIds([]);
-          setAttachedKnowledgeItems([]);
-          setKnowledgeAttachmentsError(describeKnowledgeError(error, "session.knowledge_load_failed"));
-        })
-        .finally(() => {
-          if (requestId === knowledgeAttachmentRequestSeq) {
-            setKnowledgeAttachmentsLoading(false);
-          }
-        });
-    }),
-  );
-
-  createEffect(
-    on(
-      () => props.openworkServerWorkspaceId,
-      () => {
-        resetKnowledgeCatalog();
-      },
-    ),
-  );
-
-  createEffect(
-    on(
-      () => props.selectedSessionId,
-      () => {
-        setKnowledgePickerOpen(false);
-        setKnowledgePickerError(null);
-      },
-    ),
-  );
-
-  createEffect(
-    on(
-      () => [knowledgePickerOpen(), knowledgePickerScope()] as const,
-      ([open, scope]) => {
-        if (!open) return;
-        void loadKnowledgeCatalog(scope);
-      },
-    ),
-  );
 
   const latestRunPart = createMemo<Part | null>(() => {
     if (!showRunIndicator()) return null;
@@ -3609,16 +3386,14 @@ export default function SessionView(props: SessionViewProps) {
         </div>
       </Show>
 
-      <Show when={knowledgeAvailable()}>
-        <KnowledgeStrip
-          attachedItems={attachedKnowledgeItems()}
-          loading={knowledgeAttachmentsLoading()}
-          error={knowledgeAttachmentsError()}
-          editingLocked={knowledgeEditingLocked()}
-          onManage={openKnowledgePicker}
-          tr={tr}
-        />
-      </Show>
+      <SessionKnowledgeSurface
+        client={props.openworkServerClient}
+        workspaceId={props.openworkServerWorkspaceId}
+        sessionId={props.selectedSessionId}
+        editingLocked={showRunIndicator()}
+        tr={tr}
+        onToast={(message) => setToastMessage(message)}
+      />
 
       <Composer
         prompt={props.prompt}
@@ -3889,25 +3664,6 @@ export default function SessionView(props: SessionViewProps) {
           </div>
         </div>
       </Show>
-
-      <KnowledgePickerModal
-        open={knowledgePickerOpen()}
-        scope={knowledgePickerScope()}
-        selectedIds={knowledgeDraftIds()}
-        selectedItems={draftKnowledgeItems()}
-        mineItems={knowledgeMineItems()}
-        othersItems={knowledgeOthersItems()}
-        loading={knowledgePickerLoading()}
-        error={knowledgePickerError()}
-        saving={knowledgeSaveBusy()}
-        saveDisabled={knowledgeSaveBusy() || !knowledgeSelectionDirty() || knowledgeEditingLocked()}
-        editingLocked={knowledgeEditingLocked()}
-        onScopeChange={setKnowledgePickerScope}
-        onToggle={toggleKnowledgeDraft}
-        onClose={closeKnowledgePicker}
-        onSave={saveKnowledgeSelection}
-        tr={tr}
-      />
 
       <ProviderAuthModal
         open={props.providerAuthModalOpen}

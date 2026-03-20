@@ -9,6 +9,7 @@
  */
 import type { Session } from "@opencode-ai/sdk/v2/client";
 import type { Client, ModelRef } from "../types";
+import { normalizeDirectoryPath } from "../utils";
 import { unwrap } from "./opencode";
 
 // ---------------------------------------------------------------------------
@@ -129,19 +130,33 @@ export async function listCommands(
   client: Client,
   directory?: string,
 ): Promise<CommandListItem[]> {
-  try {
-    const result = await client.command.list({ directory });
-    const list = result?.data ?? [];
-    if (!Array.isArray(list)) return [];
-    return list.map((cmd: Record<string, unknown>) => ({
-      id: `cmd:${cmd.name}`,
-      name: String(cmd.name ?? ""),
-      description: cmd.description ? String(cmd.description) : undefined,
-      source: cmd.source as CommandListItem["source"],
-    }));
-  } catch {
-    return [];
+  const items: CommandListItem[] = [];
+  const seen = new Set<string>();
+
+  for (const target of resolveCommandDirectories(directory)) {
+    try {
+      const result = await client.command.list(target ? { directory: target } : {});
+      const list = result?.data ?? [];
+      if (!Array.isArray(list)) continue;
+      for (const cmd of list) {
+        const name = String((cmd as Record<string, unknown>).name ?? "");
+        if (!name || seen.has(name)) continue;
+        seen.add(name);
+        items.push({
+          id: `cmd:${name}`,
+          name,
+          description: (cmd as Record<string, unknown>).description
+            ? String((cmd as Record<string, unknown>).description)
+            : undefined,
+          source: (cmd as Record<string, unknown>).source as CommandListItem["source"],
+        });
+      }
+    } catch {
+      continue;
+    }
   }
+
+  return items;
 }
 
 // ---------------------------------------------------------------------------
@@ -158,4 +173,21 @@ function assertNoClientError(result: unknown): void {
         ? maybe.error
         : JSON.stringify(maybe.error);
   throw new Error(message || "Unknown error");
+}
+
+function resolveCommandDirectories(directory?: string): Array<string | undefined> {
+  const normalized = normalizeDirectoryPath(directory);
+  if (!normalized) return [undefined];
+
+  const candidates: string[] = [normalized];
+  const runtimeMarker = "/documents/sessions/";
+  const runtimeIndex = normalized.lastIndexOf(runtimeMarker);
+  if (runtimeIndex !== -1) {
+    const workspaceRoot = normalized.slice(0, runtimeIndex) || "/";
+    if (workspaceRoot && workspaceRoot !== normalized) {
+      candidates.push(workspaceRoot);
+    }
+  }
+
+  return [...new Set(candidates)];
 }

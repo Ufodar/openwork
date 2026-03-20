@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { AuthService } from "./auth.js";
 import { TokenService } from "./tokens.js";
 import type { ServerConfig } from "./types.js";
+import { hashToken } from "./utils.js";
 
 function createTestConfig(): ServerConfig {
   const tempDir = join(
@@ -136,5 +137,43 @@ describe("AuthService", () => {
     await auth.login({ username: "bob", password: "123456" });
 
     expect(await readFile(missingAgentPath, "utf8")).toContain("agent");
+  });
+
+  test("resolving a bound user repairs an existing workspace without requiring a new login", async () => {
+    const root = join(tmpdir(), `openwork-auth-bound-user-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const blankWorkspace = join(root, "blank-workspace");
+    const templateDir = join(root, "template");
+    const userRoots = join(root, "user-workspaces");
+    await mkdir(blankWorkspace, { recursive: true });
+    await writeFile(join(blankWorkspace, "opencode.jsonc"), "{\n  \"model\": \"blank\"\n}\n", "utf8");
+    await mkdir(join(templateDir, ".opencode", "commands"), { recursive: true });
+    await writeFile(join(templateDir, "opencode.jsonc"), "{\n  \"model\": \"test\"\n}\n", "utf8");
+    await writeFile(
+      join(templateDir, ".opencode", "commands", "doc-normalize.md"),
+      "---\nname: doc-normalize\ndescription: normalize docs\n---\nscan docs\n",
+      "utf8",
+    );
+
+    config.workspaces = [{
+      id: "ws_blank",
+      name: "blank",
+      path: blankWorkspace,
+      workspaceType: "local",
+    }];
+    process.env.OPENWORK_USER_WORKSPACES_ROOT = userRoots;
+    process.env.OPENWORK_USER_WORKSPACE_TEMPLATE_DIR = blankWorkspace;
+    auth = new AuthService(config, tokens);
+
+    const registered = await auth.register({ username: "carol", password: "123456" });
+    const missingCommandPath = join(registered.workspace.path, ".opencode", "commands", "doc-normalize.md");
+    await expect(readFile(missingCommandPath, "utf8")).rejects.toThrow();
+
+    delete process.env.OPENWORK_USER_WORKSPACE_TEMPLATE_DIR;
+    process.chdir(templateDir);
+
+    const boundUser = await auth.getUserByOwnerKey(hashToken(registered.token));
+
+    expect(boundUser?.workspace?.path).toBe(registered.workspace.path);
+    expect(await readFile(missingCommandPath, "utf8")).toContain("doc-normalize");
   });
 });

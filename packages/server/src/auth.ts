@@ -224,6 +224,19 @@ export class AuthService {
     };
   }
 
+  private async toAuthIdentityEnsuringWorkspace(user: AuthUserRecord): Promise<AuthIdentity> {
+    const workspace = await this.ensureUserWorkspace(user);
+    return {
+      id: user.id,
+      username: user.username,
+      createdAt: user.createdAt,
+      lastLoginAt: user.lastLoginAt ?? null,
+      isAdmin: false,
+      ownerKey: hashToken(user.token),
+      workspace,
+    };
+  }
+
   private async ensureUserWorkspace(user: AuthUserRecord) {
     const templateDir = await resolveUserWorkspaceTemplateDir(this.config);
     const provisioned = await provisionUserWorkspace({
@@ -263,7 +276,7 @@ export class AuthService {
       return this.buildAdminIdentity(this.adminLastLoginAt);
     }
     const user = this.users.find((item) => item.id === target);
-    return user ? this.toAuthIdentity(user) : null;
+    return user ? this.toAuthIdentityEnsuringWorkspace(user) : null;
   }
 
   async getUserByOwnerKey(ownerKey: string): Promise<AuthIdentity | null> {
@@ -274,7 +287,7 @@ export class AuthService {
       return this.buildAdminIdentity(this.adminLastLoginAt);
     }
     const user = this.users.find((item) => hashToken(item.token) === target);
-    return user ? this.toAuthIdentity(user) : null;
+    return user ? this.toAuthIdentityEnsuringWorkspace(user) : null;
   }
 
   private async ensureLoaded(): Promise<void> {

@@ -1,6 +1,11 @@
 services:
   onlyoffice:
-    image: onlyoffice/documentserver:latest
+    build:
+      context: .
+      dockerfile: packaging/onlyoffice/Dockerfile
+      args:
+        ONLYOFFICE_BASE_IMAGE: ${ONLYOFFICE_BASE_IMAGE:-onlyoffice/documentserver:latest}
+    image: ${OPENWORK_ONLYOFFICE_IMAGE:-openwork-onlyoffice:latest}
     container_name: onlyoffice
     ports:
       - "8080:80"

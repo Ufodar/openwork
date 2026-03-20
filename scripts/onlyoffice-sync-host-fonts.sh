@@ -76,6 +76,12 @@ fi
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STAGING_DIR="$ROOT_DIR/tmp/onlyoffice-host-fonts"
+ALIAS_CONFIG_SOURCE="$ROOT_DIR/packaging/onlyoffice/99-openwork-cjk-aliases.conf"
+
+if [[ ! -f "$ALIAS_CONFIG_SOURCE" ]]; then
+  echo "Missing font alias config: $ALIAS_CONFIG_SOURCE" >&2
+  exit 1
+fi
 
 rm -rf "$STAGING_DIR"
 mkdir -p "$STAGING_DIR"
@@ -125,6 +131,7 @@ mkdir -p /usr/share/fonts/truetype/custom/host
 '
 
 docker cp "$STAGING_DIR/." "$CONTAINER:/usr/share/fonts/truetype/custom/host" >/dev/null
+docker cp "$ALIAS_CONFIG_SOURCE" "$CONTAINER:/etc/fonts/conf.d/99-openwork-cjk-aliases.conf" >/dev/null
 
 docker exec "$CONTAINER" bash -lc 'set -euo pipefail
 fc-cache -f >/dev/null
@@ -136,6 +143,8 @@ echo "fc-match 苹方-简 => $(fc-match "苹方-简" || true)"
 echo "fc-match PingFang SC => $(fc-match "PingFang SC" || true)"
 echo "fc-match 宋体 => $(fc-match "宋体" || true)"
 echo "fc-match 微软雅黑 => $(fc-match "微软雅黑" || true)"
+echo "fc-match 仿宋_GB2312 => $(fc-match "仿宋_GB2312" || true)"
+echo "fc-match 楷体_GB2312 => $(fc-match "楷体_GB2312" || true)"
 '
 
 if [[ "$RESTART" == "1" ]]; then
@@ -147,4 +156,3 @@ else
 fi
 
 echo "[onlyoffice] Done." >&2
-

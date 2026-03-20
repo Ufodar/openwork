@@ -23,6 +23,8 @@ set -euo pipefail
 
 RESTART=1
 CONTAINER="${1:-opencode-onlyoffice-1}"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ALIAS_CONFIG_SOURCE="$ROOT_DIR/packaging/onlyoffice/99-openwork-cjk-aliases.conf"
 
 if [[ "${1:-}" == "--no-restart" ]]; then
   RESTART=0
@@ -39,6 +41,11 @@ if [[ -z "$CONTAINER" ]]; then
   exit 1
 fi
 
+if [[ ! -f "$ALIAS_CONFIG_SOURCE" ]]; then
+  echo "Missing font alias config: $ALIAS_CONFIG_SOURCE" >&2
+  exit 1
+fi
+
 echo "[onlyoffice] Installing fonts in container: $CONTAINER" >&2
 
 docker exec "$CONTAINER" bash -lc 'set -euo pipefail
@@ -50,203 +57,12 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
   fonts-arphic-ukai \
   fonts-arphic-uming \
   >/dev/null
+'
 
-cat > /etc/fonts/conf.d/99-openwork-cjk-aliases.conf <<"EOF"
-<?xml version="1.0"?>
-<!DOCTYPE fontconfig SYSTEM "fonts.dtd">
-<fontconfig>
-  <!-- Serif (Song) -->
-  <alias>
-    <family>宋体</family>
-    <prefer>
-      <family>Noto Serif CJK SC</family>
-      <family>AR PL UMing CN</family>
-      <family>WenQuanYi Micro Hei</family>
-    </prefer>
-  </alias>
-  <alias>
-    <family>新宋体</family>
-    <prefer>
-      <family>Noto Serif CJK SC</family>
-      <family>AR PL UMing CN</family>
-      <family>WenQuanYi Micro Hei</family>
-    </prefer>
-  </alias>
-  <alias>
-    <family>SimSun</family>
-    <prefer>
-      <family>Noto Serif CJK SC</family>
-      <family>AR PL UMing CN</family>
-      <family>WenQuanYi Micro Hei</family>
-    </prefer>
-  </alias>
-  <alias>
-    <family>NSimSun</family>
-    <prefer>
-      <family>Noto Serif CJK SC</family>
-      <family>AR PL UMing CN</family>
-      <family>WenQuanYi Micro Hei</family>
-    </prefer>
-  </alias>
+docker cp "$ALIAS_CONFIG_SOURCE" "$CONTAINER:/etc/fonts/conf.d/99-openwork-cjk-aliases.conf" >/dev/null
 
-  <!-- Sans (Hei/Deng) -->
-  <alias>
-    <family>黑体</family>
-    <prefer>
-      <family>Noto Sans CJK SC</family>
-      <family>WenQuanYi Zen Hei</family>
-      <family>WenQuanYi Micro Hei</family>
-    </prefer>
-  </alias>
-  <alias>
-    <family>SimHei</family>
-    <prefer>
-      <family>Noto Sans CJK SC</family>
-      <family>WenQuanYi Zen Hei</family>
-      <family>WenQuanYi Micro Hei</family>
-    </prefer>
-  </alias>
-  <alias>
-    <family>等线</family>
-    <prefer>
-      <family>Noto Sans CJK SC</family>
-      <family>WenQuanYi Micro Hei</family>
-      <family>WenQuanYi Zen Hei</family>
-    </prefer>
-  </alias>
-  <alias>
-    <family>DengXian</family>
-    <prefer>
-      <family>Noto Sans CJK SC</family>
-      <family>WenQuanYi Micro Hei</family>
-      <family>WenQuanYi Zen Hei</family>
-    </prefer>
-  </alias>
-
-  <!-- Kai -->
-  <alias>
-    <family>楷体</family>
-    <prefer>
-      <family>AR PL UKai CN</family>
-      <family>Noto Serif CJK SC</family>
-    </prefer>
-  </alias>
-  <alias>
-    <family>KaiTi</family>
-    <prefer>
-      <family>AR PL UKai CN</family>
-      <family>Noto Serif CJK SC</family>
-    </prefer>
-  </alias>
-
-  <!-- Common macOS / vendor fonts seen in bid templates -->
-  <alias>
-    <family>苹方-简</family>
-    <prefer>
-      <family>Noto Sans CJK SC</family>
-      <family>WenQuanYi Micro Hei</family>
-      <family>WenQuanYi Zen Hei</family>
-    </prefer>
-  </alias>
-  <alias>
-    <!-- Fontconfig parses "苹方-简" as family "苹方" (style suffix), so alias both. -->
-    <family>苹方</family>
-    <prefer>
-      <family>Noto Sans CJK SC</family>
-      <family>WenQuanYi Micro Hei</family>
-      <family>WenQuanYi Zen Hei</family>
-    </prefer>
-  </alias>
-  <alias>
-    <family>PingFang SC</family>
-    <prefer>
-      <family>Noto Sans CJK SC</family>
-      <family>WenQuanYi Micro Hei</family>
-      <family>WenQuanYi Zen Hei</family>
-    </prefer>
-  </alias>
-  <alias>
-    <family>.AppleSystemUIFont</family>
-    <prefer>
-      <family>Noto Sans CJK SC</family>
-      <family>WenQuanYi Micro Hei</family>
-      <family>WenQuanYi Zen Hei</family>
-    </prefer>
-  </alias>
-
-  <!-- HanYi fonts in some templates -->
-  <alias>
-    <family>汉仪中黑KW</family>
-    <prefer>
-      <family>Noto Sans CJK SC</family>
-      <family>WenQuanYi Micro Hei</family>
-      <family>WenQuanYi Zen Hei</family>
-    </prefer>
-  </alias>
-  <alias>
-    <family>汉仪书宋二KW</family>
-    <prefer>
-      <family>Noto Serif CJK SC</family>
-      <family>AR PL UMing CN</family>
-      <family>WenQuanYi Micro Hei</family>
-    </prefer>
-  </alias>
-
-  <!-- Common Windows Chinese fonts -->
-  <alias>
-    <family>微软雅黑</family>
-    <prefer>
-      <family>Noto Sans CJK SC</family>
-      <family>WenQuanYi Micro Hei</family>
-      <family>WenQuanYi Zen Hei</family>
-    </prefer>
-  </alias>
-  <alias>
-    <family>Microsoft YaHei</family>
-    <prefer>
-      <family>Noto Sans CJK SC</family>
-      <family>WenQuanYi Micro Hei</family>
-      <family>WenQuanYi Zen Hei</family>
-    </prefer>
-  </alias>
-  <alias>
-    <family>仿宋</family>
-    <prefer>
-      <family>Noto Serif CJK SC</family>
-      <family>AR PL UMing CN</family>
-    </prefer>
-  </alias>
-  <alias>
-    <family>FangSong</family>
-    <prefer>
-      <family>Noto Serif CJK SC</family>
-      <family>AR PL UMing CN</family>
-    </prefer>
-  </alias>
-  <alias>
-    <family>方正小标宋</family>
-    <prefer>
-      <family>Noto Serif CJK SC</family>
-      <family>AR PL UMing CN</family>
-    </prefer>
-  </alias>
-  <alias>
-    <family>小标宋</family>
-    <prefer>
-      <family>Noto Serif CJK SC</family>
-      <family>AR PL UMing CN</family>
-    </prefer>
-  </alias>
-</fontconfig>
-EOF
-
-# Make aliases "weak" so if the real font family exists (e.g. host-mounted PingFang / Microsoft fonts),
-# it wins; otherwise fall back to the open-source substitutes above.
-sed -i "s/<alias>/<alias binding=\\\"weak\\\">/g" /etc/fonts/conf.d/99-openwork-cjk-aliases.conf
-
+docker exec "$CONTAINER" bash -lc 'set -euo pipefail
 fc-cache -f >/dev/null
-
-# OnlyOffice caches fonts list; regenerate to pick up new families.
 if command -v documentserver-generate-allfonts.sh >/dev/null 2>&1; then
   documentserver-generate-allfonts.sh >/dev/null 2>&1 || true
 fi
@@ -255,6 +71,8 @@ echo "fc-match 宋体 => $(fc-match "宋体")"
 echo "fc-match 等线 => $(fc-match "等线")"
 echo "fc-match 黑体 => $(fc-match "黑体")"
 echo "fc-match 楷体 => $(fc-match "楷体")"
+echo "fc-match 楷体_GB2312 => $(fc-match "楷体_GB2312")"
+echo "fc-match 仿宋_GB2312 => $(fc-match "仿宋_GB2312")"
 echo "fc-match 苹方-简 => $(fc-match "苹方-简")"
 echo "fc-match .AppleSystemUIFont => $(fc-match ".AppleSystemUIFont")"
 '

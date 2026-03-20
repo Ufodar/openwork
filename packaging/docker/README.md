@@ -39,13 +39,31 @@ The Document Writer view uses **OnlyOffice DocumentServer** for in-browser editi
 
 If your bid/tender templates use common Chinese fonts like `宋体/等线/黑体/楷体`, a default OnlyOffice Docker image may not have them installed, leading to heavy font substitution and “潦草/不工整” rendering compared to Word.
 
-For local dev, you can patch an existing OnlyOffice container by installing open-source CJK fonts + fontconfig aliases:
+The repo now ships a derived OnlyOffice image under `packaging/onlyoffice/Dockerfile` that bakes in:
+
+* open-source CJK fonts (`Noto`, `WenQuanYi`, `Arphic`)
+* fontconfig aliases for common Chinese Office families
+* exact aliases for legacy Office names such as `仿宋_GB2312` and `楷体_GB2312`
+
+If you run the root `docker-compose.yml`, build the image instead of pulling the stock upstream image:
+
+```bash
+docker compose up --build onlyoffice
+```
+
+If you already have an existing OnlyOffice container and want to patch it in place, install the same open-source CJK fonts + aliases:
 
 ```bash
 ./scripts/onlyoffice-install-cjk-fonts.sh opencode-onlyoffice-1
 ```
 
-Then reload the document in OpenWork.
+If the document still differs from Word because the template depends on proprietary host fonts such as `PingFang SC` or vendor fonts, sync those host fonts too:
+
+```bash
+./scripts/onlyoffice-sync-host-fonts.sh opencode-onlyoffice-1
+```
+
+Then reload the document in OpenWork and compare again.
 
 ---
 

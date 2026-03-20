@@ -10,6 +10,7 @@ import MessageList from "../components/session/message-list";
 import Composer from "../components/session/composer";
 import ToolMonitorPanel from "../components/tool-monitor/tool-monitor-panel";
 import { DOCUMENT_UPLOAD_ACCEPT } from "../lib/documents";
+import { MARKDOWN_PREVIEW_CLASS, renderMarkdownPreview } from "../lib/markdown-preview";
 import { isSessionHydrating } from "../lib/session-hydration";
 import { currentLocale, t as i18n } from "../../i18n";
 import {
@@ -1476,6 +1477,12 @@ export default function DocumentAgentView(props: SessionViewProps) {
       truncated: blob.size > shownBytes,
     };
   });
+  const renderedMarkdownPreview = createMemo(() => {
+    if (activeDocKind() !== "markdown") return null;
+    const preview = textPreview();
+    if (!preview?.content) return "";
+    return renderMarkdownPreview(preview.content);
+  });
   const [pdfPreviewUrl, setPdfPreviewUrl] = createSignal<string | null>(null);
   const [pdfPreviewError, setPdfPreviewError] = createSignal<string | null>(null);
   const clearPdfPreviewUrl = () => {
@@ -2297,9 +2304,28 @@ export default function DocumentAgentView(props: SessionViewProps) {
                             .replace("{total}", formatPreviewBytes(textPreview()!.totalBytes))}
                         </Show>
                       </div>
-                      <pre class="text-xs leading-relaxed whitespace-pre-wrap break-words rounded-lg border border-dls-border bg-dls-sidebar p-3 text-dls-text font-mono">
-                        {textPreview()!.content}
-                      </pre>
+                      <Show
+                        when={activeDocKind() === "markdown"}
+                        fallback={
+                          <pre class="text-xs leading-relaxed whitespace-pre-wrap break-words rounded-lg border border-dls-border bg-dls-sidebar p-3 text-dls-text font-mono">
+                            {textPreview()!.content}
+                          </pre>
+                        }
+                      >
+                        <Show
+                          when={renderedMarkdownPreview() !== null}
+                          fallback={
+                            <pre class="text-xs leading-relaxed whitespace-pre-wrap break-words rounded-lg border border-dls-border bg-dls-sidebar p-3 text-dls-text font-mono">
+                              {textPreview()!.content}
+                            </pre>
+                          }
+                        >
+                          <div
+                            class={MARKDOWN_PREVIEW_CLASS}
+                            innerHTML={renderedMarkdownPreview() || ""}
+                          />
+                        </Show>
+                      </Show>
                     </Show>
                   </Show>
                 </div>

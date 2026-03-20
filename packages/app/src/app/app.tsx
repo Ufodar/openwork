@@ -46,6 +46,7 @@ import {
 } from "./lib/opencode-session";
 import { clearPerfLogs, finishPerf, perfNow, recordPerfLog } from "./lib/perf-log";
 import { clearBusyState } from "./lib/busy-state";
+import { reconcileOpenworkServerProbe } from "./lib/openwork-server-status";
 import {
   type OpenworkSessionPrefs,
   normalizeStoredAgent,
@@ -493,6 +494,7 @@ export default function App() {
     },
   });
   const [openworkServerCheckedAt, setOpenworkServerCheckedAt] = createSignal<number | null>(null);
+  const [openworkServerDisconnectStreak, setOpenworkServerDisconnectStreak] = createSignal(0);
   const [openworkServerWorkspaceId, setOpenworkServerWorkspaceId] = createSignal<string | null>(null);
   const [openworkServerHostInfo, setOpenworkServerHostInfo] = createSignal<OpenworkServerInfo | null>(null);
   const [openworkServerDiagnostics, setOpenworkServerDiagnostics] = createSignal<OpenworkServerDiagnostics | null>(null);
@@ -647,6 +649,7 @@ export default function App() {
     if (!url) {
       setOpenworkServerStatus("disconnected");
       setOpenworkServerCapabilities(null);
+      setOpenworkServerDisconnectStreak(0);
       setOpenworkServerCheckedAt(Date.now());
       return;
     }
@@ -667,10 +670,19 @@ export default function App() {
       try {
         const result = await checkOpenworkServer(url, token, hostToken);
         if (!active) return;
-        setOpenworkServerStatus(result.status);
-        setOpenworkServerCapabilities(result.capabilities);
+        const reconciled = reconcileOpenworkServerProbe(
+          {
+            status: untrack(openworkServerStatus),
+            capabilities: untrack(openworkServerCapabilities),
+            disconnectStreak: untrack(openworkServerDisconnectStreak),
+          },
+          result,
+        );
+        setOpenworkServerStatus(reconciled.status);
+        setOpenworkServerCapabilities(reconciled.capabilities);
+        setOpenworkServerDisconnectStreak(reconciled.disconnectStreak);
         delayMs =
-          result.status === "connected" || result.status === "limited"
+          reconciled.status === "connected" || reconciled.status === "limited"
             ? 10_000
             : Math.min(delayMs * 2, 60_000);
       } catch {

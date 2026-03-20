@@ -11,6 +11,7 @@ import Composer from "../components/session/composer";
 import ToolMonitorPanel from "../components/tool-monitor/tool-monitor-panel";
 import { DOCUMENT_UPLOAD_ACCEPT } from "../lib/documents";
 import { MARKDOWN_PREVIEW_CLASS, renderMarkdownPreview } from "../lib/markdown-preview";
+import { resolveOnlyOfficeEditorKey } from "../lib/onlyoffice-editor-key";
 import { isSessionHydrating } from "../lib/session-hydration";
 import { currentLocale, t as i18n } from "../../i18n";
 import {
@@ -946,6 +947,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
     }
     return { documentServerUrl: "http://localhost:8080", config: data };
   });
+  const onlyOfficeEditorKey = createMemo(() => resolveOnlyOfficeEditorKey(editorPayload()));
 
   const documentWorkspaceRoot = createMemo(() => {
     return "";
@@ -2347,10 +2349,15 @@ export default function DocumentWriterView(props: SessionViewProps) {
                     </div>
                   }
                 >
-                  <OnlyOfficeEditor
-                    documentServerUrl={editorPayload()!.documentServerUrl}
-                    config={editorPayload()!.config}
-                  />
+                  <Show when={onlyOfficeEditorKey()} keyed>
+                    {(editorKey) => (
+                      <OnlyOfficeEditor
+                        id={`document-writer-${sessionId()}-${editorKey}`}
+                        documentServerUrl={editorPayload()!.documentServerUrl}
+                        config={editorPayload()!.config}
+                      />
+                    )}
+                  </Show>
                 </Show>
               </Show>
               <Show when={activeDocKind() === "unsupported"}>

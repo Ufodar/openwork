@@ -53,6 +53,10 @@ interface OnlyOfficeConfig {
         customization: {
             autosave: boolean;
             forcesave: boolean;
+            spellcheck: boolean;
+            features: {
+                spellcheck: boolean;
+            };
         };
     };
     token?: string;
@@ -1723,6 +1727,11 @@ export function createDocumentRoutes(routes: unknown[], sessionWorkspaces?: Sess
                     customization: {
                         autosave: canEdit,
                         forcesave: canEdit,
+                        // Red proofing underlines are noisy for mixed-language bid docs.
+                        spellcheck: false,
+                        features: {
+                            spellcheck: false,
+                        },
                     },
                 },
             };

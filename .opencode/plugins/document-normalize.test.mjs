@@ -7,6 +7,7 @@ import { pathToFileURL } from "node:url";
 const rootDir = path.resolve(import.meta.dirname, "..", "..");
 const pluginPath = path.join(rootDir, ".opencode", "plugins", "document-mode-bridge.js");
 const commandPath = path.join(rootDir, ".opencode", "commands", "doc-normalize.md");
+const commandAliasPath = path.join(rootDir, ".opencode", "commands", "document-normalize.md");
 const skillPath = path.join(rootDir, ".opencode", "skills", "doc-normalize", "SKILL.md");
 
 test("document mode bridge injects normalization rules and doc-normalize routing", async () => {
@@ -27,6 +28,15 @@ test("doc-normalize command exists as a thin wrapper around the skill", () => {
   const command = fs.readFileSync(commandPath, "utf8");
 
   assert.match(command, /^---[\s\S]*name:\s*doc-normalize/m);
+  assert.match(command, /Use the `doc-normalize` skill/i);
+  assert.match(command, /first execution scan-only/i);
+});
+
+test("document-normalize alias exists and routes to the same skill", () => {
+  assert.ok(fs.existsSync(commandAliasPath), "expected .opencode/commands/document-normalize.md to exist");
+  const command = fs.readFileSync(commandAliasPath, "utf8");
+
+  assert.match(command, /^---[\s\S]*name:\s*document-normalize/m);
   assert.match(command, /Use the `doc-normalize` skill/i);
   assert.match(command, /first execution scan-only/i);
 });

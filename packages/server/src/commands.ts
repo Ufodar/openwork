@@ -1,5 +1,5 @@
 import { readdir, readFile, writeFile, rm, mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { homedir } from "node:os";
 import type { CommandItem } from "./types.js";
 import { parseFrontmatter, buildFrontmatter } from "./frontmatter.js";
@@ -7,6 +7,19 @@ import { exists } from "./utils.js";
 import { projectCommandsDir } from "./workspace-files.js";
 import { validateCommandName, sanitizeCommandName } from "./validators.js";
 import { ApiError } from "./errors.js";
+
+async function findWorkspaceRoots(workspaceRoot: string): Promise<string[]> {
+  const roots: string[] = [];
+  let current = resolve(workspaceRoot);
+  while (true) {
+    roots.push(current);
+    if (await exists(join(current, ".git"))) break;
+    const parent = resolve(current, "..");
+    if (parent === current) break;
+    current = parent;
+  }
+  return roots;
+}
 
 async function listCommandsInDir(dir: string, scope: "workspace" | "global"): Promise<CommandItem[]> {
   if (!(await exists(dir))) return [];
@@ -42,7 +55,18 @@ export async function listCommands(workspaceRoot: string, scope: "workspace" | "
     const dir = join(homedir(), ".config", "opencode", "commands");
     return listCommandsInDir(dir, "global");
   }
-  return listCommandsInDir(projectCommandsDir(workspaceRoot), "workspace");
+  const roots = await findWorkspaceRoots(workspaceRoot);
+  const items: CommandItem[] = [];
+  for (const root of roots) {
+    items.push(...(await listCommandsInDir(projectCommandsDir(root), "workspace")));
+  }
+
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    if (seen.has(item.name)) return false;
+    seen.add(item.name);
+    return true;
+  });
 }
 
 export async function upsertCommand(

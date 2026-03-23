@@ -11,7 +11,11 @@ import Composer from "../components/session/composer";
 import ToolMonitorPanel from "../components/tool-monitor/tool-monitor-panel";
 import { DOCUMENT_UPLOAD_ACCEPT } from "../lib/documents";
 import { MARKDOWN_PREVIEW_CLASS, renderMarkdownPreview } from "../lib/markdown-preview";
-import { resolveOnlyOfficeEditorKey } from "../lib/onlyoffice-editor-key";
+import {
+  resolveCurrentOnlyOfficePayload,
+  resolveOnlyOfficeContainerId,
+  resolveOnlyOfficeEditorKey,
+} from "../lib/onlyoffice-editor-key";
 import { isSessionHydrating } from "../lib/session-hydration";
 import { currentLocale, t as i18n } from "../../i18n";
 import {
@@ -940,7 +944,13 @@ export default function DocumentAgentView(props: SessionViewProps) {
     }
     return { documentServerUrl: "http://localhost:8080", config: data };
   });
-  const onlyOfficeEditorKey = createMemo(() => resolveOnlyOfficeEditorKey(editorPayload()));
+  const currentEditorPayload = createMemo(() =>
+    resolveCurrentOnlyOfficePayload(editorPayload(), editorSource())
+  );
+  const onlyOfficeEditorKey = createMemo(() => resolveOnlyOfficeEditorKey(currentEditorPayload()));
+  const onlyOfficeContainerId = createMemo(() =>
+    resolveOnlyOfficeContainerId("document-agent", sessionId(), onlyOfficeEditorKey())
+  );
 
   const documentWorkspaceRoot = createMemo(() => {
     return "";
@@ -2334,7 +2344,7 @@ export default function DocumentAgentView(props: SessionViewProps) {
               </Show>
               <Show when={activeDocKind() === "onlyoffice"}>
                 <Show
-                  when={editorPayload()}
+                  when={currentEditorPayload()}
                   fallback={
                     <div class="h-full flex flex-col items-center justify-center gap-2 p-4 text-xs text-dls-secondary">
                       <Loader2 size={16} class="animate-spin" />
@@ -2343,11 +2353,11 @@ export default function DocumentAgentView(props: SessionViewProps) {
                   }
                 >
                   <Show when={onlyOfficeEditorKey()} keyed>
-                    {(editorKey) => (
+                    {() => (
                       <OnlyOfficeEditor
-                        id={`document-agent-${sessionId()}-${editorKey}`}
-                        documentServerUrl={editorPayload()!.documentServerUrl}
-                        config={editorPayload()!.config}
+                        id={onlyOfficeContainerId()}
+                        documentServerUrl={currentEditorPayload()!.documentServerUrl}
+                        config={currentEditorPayload()!.config}
                       />
                     )}
                   </Show>

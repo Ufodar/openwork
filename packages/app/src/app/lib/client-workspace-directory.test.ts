@@ -25,6 +25,18 @@ describe("resolveClientWorkspaceDirectory", () => {
     ).toBe("/root/.openwork/user-workspaces/user-target");
   });
 
+  test("prefers the stored remote directory while a workspace switch is in flight", () => {
+    expect(
+      resolveClientWorkspaceDirectory({
+        workspaceType: "remote",
+        clientDirectory: "/root/.openwork/user-workspaces/user-old",
+        workspaceDirectory: "/root/.openwork/user-workspaces/user-target",
+        workspaceRoot: "/root/.openwork/user-workspaces/user-target",
+        preferWorkspaceDirectory: true,
+      }),
+    ).toBe("/root/.openwork/user-workspaces/user-target");
+  });
+
   test("prefers the active local workspace root for local workspaces", () => {
     expect(
       resolveClientWorkspaceDirectory({

@@ -47,6 +47,7 @@ import {
 import { clearPerfLogs, finishPerf, perfNow, recordPerfLog } from "./lib/perf-log";
 import { clearBusyState } from "./lib/busy-state";
 import { resolveClientWorkspaceDirectory } from "./lib/client-workspace-directory";
+import { buildAdminSessionWorkspacePlan } from "./lib/admin-session-workspace-plan";
 import { resolveDashboardClientConnected } from "./lib/dashboard-client-status";
 import { shouldAutoConnectWebClient } from "./lib/web-autoconnect";
 import { reconcileOpenworkServerProbe } from "./lib/openwork-server-status";
@@ -931,6 +932,7 @@ export default function App() {
       clientDirectory: clientDirectory(),
       workspaceDirectory: activeWorkspace.directory ?? activeWorkspace.path ?? "",
       workspaceRoot: workspaceStore.activeWorkspaceRoot().trim(),
+      preferWorkspaceDirectory: Boolean(workspaceStore.connectingWorkspaceId()),
     }).trim();
   };
 
@@ -3697,52 +3699,35 @@ export default function App() {
       throw new Error("管理员会话未连接到 OpenWork 服务。");
     }
 
-    const workspaces = workspaceStore.workspaces();
-    const existingWorkspace = workspaces.find((workspace) =>
-      workspace.workspaceType === "remote" &&
-      workspace.remoteType === "openwork" &&
-      (workspace.openworkWorkspaceId?.trim() ?? "") === targetWorkspaceId &&
-      (normalizeOpenworkServerUrl(workspace.openworkHostUrl ?? workspace.baseUrl ?? "") ?? "") === hostUrl
-    ) ?? null;
+    const plan = buildAdminSessionWorkspacePlan({
+      workspaces: workspaceStore.workspaces(),
+      activeWorkspace: workspaceStore.activeWorkspaceDisplay(),
+      hostUrl,
+      targetWorkspaceId,
+      targetWorkspaceName: session.workspaceName,
+    });
 
-    if (existingWorkspace) {
-      const ok = await Promise.resolve(workspaceStore.activateWorkspace(existingWorkspace.id));
-      if (ok === false) {
+    if (plan.mode === "refresh-existing" || plan.mode === "update-active") {
+      const ok = await workspaceStore.updateRemoteWorkspaceFlow(plan.workspaceId, {
+        openworkHostUrl: hostUrl,
+        openworkToken: token,
+        displayName: plan.displayName,
+        openworkWorkspaceId: targetWorkspaceId,
+        navigate: false,
+      });
+      if (!ok) {
         throw new Error("切换到目标工作区失败。");
       }
     } else {
-      const activeWorkspace = workspaceStore.activeWorkspaceDisplay();
-      const canReuseActiveRemote =
-        activeWorkspace.workspaceType === "remote" &&
-        activeWorkspace.remoteType === "openwork" &&
-        (normalizeOpenworkServerUrl(activeWorkspace.openworkHostUrl ?? activeWorkspace.baseUrl ?? "") ?? "") === hostUrl;
-
-      if (canReuseActiveRemote) {
-        const ok = await workspaceStore.updateRemoteWorkspaceFlow(activeWorkspace.id, {
-          openworkHostUrl: hostUrl,
-          openworkToken: token,
-          displayName:
-            activeWorkspace.displayName ??
-              activeWorkspace.openworkWorkspaceName ??
-              activeWorkspace.name ??
-              session.workspaceName,
-          openworkWorkspaceId: targetWorkspaceId,
-          navigate: false,
-        });
-        if (!ok) {
-          throw new Error("切换到目标工作区失败。");
-        }
-      } else {
-        const ok = await workspaceStore.createRemoteWorkspaceFlow({
-          openworkHostUrl: hostUrl,
-          openworkToken: token,
-          displayName: session.workspaceName,
-          openworkWorkspaceId: targetWorkspaceId,
-          navigate: false,
-        });
-        if (!ok) {
-          throw new Error("创建目标工作区连接失败。");
-        }
+      const ok = await workspaceStore.createRemoteWorkspaceFlow({
+        openworkHostUrl: hostUrl,
+        openworkToken: token,
+        displayName: plan.displayName,
+        openworkWorkspaceId: targetWorkspaceId,
+        navigate: false,
+      });
+      if (!ok) {
+        throw new Error("创建目标工作区连接失败。");
       }
     }
 

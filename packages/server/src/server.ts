@@ -2428,12 +2428,10 @@ export function createRoutes(
           description: record.description ?? null,
         })),
       });
-      if (!isSessionCurrentlyActive(sessionActivity, workspace.id, sessionId)) {
-        await reloadOpencodeEngine({
-          ...workspace,
-          directory: runtimeWorkspace.runtimeDir,
-        });
-      }
+      await reloadOpencodeEngine({
+        ...workspace,
+        directory: runtimeWorkspace.runtimeDir,
+      });
     } catch (error) {
       console.warn("[openwork-server] Failed to refresh runtime knowledge instructions:", error);
     }
@@ -6200,17 +6198,6 @@ async function reloadOpencodeEngine(workspace: WorkspaceInfo): Promise<void> {
     status: response.status,
     body,
   });
-}
-
-function isSessionCurrentlyActive(
-  sessionActivity: SessionActivityService,
-  workspaceId: string,
-  sessionId: string,
-): boolean {
-  const ws = workspaceId.trim();
-  const sid = sessionId.trim();
-  if (!ws || !sid) return false;
-  return sessionActivity.listActiveSessions().some((entry) => entry.workspaceId === ws && entry.sessionId === sid);
 }
 
 async function writeOpenworkConfig(workspaceRoot: string, payload: Record<string, unknown>, merge: boolean): Promise<void> {

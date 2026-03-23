@@ -73,6 +73,8 @@ describe("provisionSessionWorkspace", () => {
     });
     expect(parsed.instructions).toContain(".opencode/openwork-knowledge.md");
     expect(instructionRaw).toContain("openwork_knowledge_search");
+    expect(instructionRaw).toContain("Attached knowledge count: 0");
+    expect(instructionRaw).toContain("do not call `openwork_knowledge_search`");
     expect(instructionRaw).toContain("Never use `memory_search_nodes` or `memory_read_graph`");
     expect(instructionRaw).toContain("do not use `memory_search_nodes` or `memory_read_graph` as a substitute for knowledge retrieval");
     expect(instructionRaw).toContain("(none attached yet; do not substitute session memory for knowledge retrieval)");
@@ -122,6 +124,8 @@ describe("provisionSessionWorkspace", () => {
     expect(parsed.mcp?.ragflow).toBeUndefined();
     expect(parsed.mcp?.memory).toMatchObject({ enabled: false });
     expect(instructionRaw).toContain("商业资质库");
+    expect(instructionRaw).toContain("Attached knowledge count: 1");
+    expect(instructionRaw).toContain("If attachments changed earlier in the conversation");
     expect(instructionRaw).toContain("knowledge_id=kb_alpha");
     expect(instructionRaw).toContain("owner=alice");
   });

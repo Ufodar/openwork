@@ -154,6 +154,26 @@ export type OpenworkKnowledgeListResponse = {
   items: OpenworkKnowledgeItem[];
 };
 
+export type OpenworkKnowledgeCreateInput = {
+  title: string;
+  description?: string | null;
+  chunkMethod?: string | null;
+  parserConfig?: Record<string, unknown> | null;
+};
+
+export type OpenworkKnowledgeCreateResponse = {
+  ok: boolean;
+  item: OpenworkKnowledgeItem;
+};
+
+export type OpenworkKnowledgeUploadResponse = {
+  ok: boolean;
+  knowledgeId: string;
+  uploadedCount: number;
+  documentIds: string[];
+  item: OpenworkKnowledgeItem;
+};
+
 export type OpenworkSessionKnowledgeResponse = {
   sessionId: string;
   runtimeId: string;
@@ -1107,6 +1127,28 @@ async function requestMultipartRaw(
   return { ok: response.ok, status: response.status, text };
 }
 
+async function requestMultipartJson<T>(
+  baseUrl: string,
+  path: string,
+  options: { method?: string; token?: string; hostToken?: string; body?: FormData; timeoutMs?: number } = {},
+): Promise<T> {
+  const response = await requestMultipartRaw(baseUrl, path, options);
+  let json: any = null;
+  try {
+    json = response.text ? JSON.parse(response.text) : null;
+  } catch {
+    json = null;
+  }
+
+  if (!response.ok) {
+    const code = typeof json?.code === "string" ? json.code : "request_failed";
+    const message = typeof json?.message === "string" ? json.message : "Request failed";
+    throw new OpenworkServerError(response.status, code, message, json?.details);
+  }
+
+  return json as T;
+}
+
 async function requestBinary(
   baseUrl: string,
   path: string,
@@ -1245,6 +1287,23 @@ export function createOpenworkServerClient(options: { baseUrl: string; token?: s
         `/workspace/${encodeURIComponent(workspaceId)}/knowledge?scope=${encodeURIComponent(scope)}`,
         { token, hostToken, timeoutMs: timeouts.knowledge },
       ),
+    createKnowledge: (workspaceId: string, input: OpenworkKnowledgeCreateInput) =>
+      requestJson<OpenworkKnowledgeCreateResponse>(
+        baseUrl,
+        `/workspace/${encodeURIComponent(workspaceId)}/knowledge`,
+        { token, hostToken, method: "POST", body: input, timeoutMs: timeouts.knowledge },
+      ),
+    uploadKnowledgeDocuments: (workspaceId: string, knowledgeId: string, files: File[]) => {
+      const form = new FormData();
+      for (const file of files) {
+        form.append("file", file, file.name);
+      }
+      return requestMultipartJson<OpenworkKnowledgeUploadResponse>(
+        baseUrl,
+        `/workspace/${encodeURIComponent(workspaceId)}/knowledge/${encodeURIComponent(knowledgeId)}/documents`,
+        { token, hostToken, method: "POST", body: form, timeoutMs: timeouts.binary },
+      );
+    },
     getSessionKnowledge: (workspaceId: string, sessionId: string) =>
       requestJson<OpenworkSessionKnowledgeResponse>(
         baseUrl,

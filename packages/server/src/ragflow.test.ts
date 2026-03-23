@@ -100,6 +100,99 @@ describe("ragflow client", () => {
     ]);
   });
 
+  test("creates datasets with explicit chunk settings", async () => {
+    const calls: unknown[] = [];
+    const client = createRagflowClient({
+      baseUrl: "http://ragflow.local",
+      apiKey: "test",
+      fetchImpl: async (_url, init) => {
+        calls.push(JSON.parse(String(init?.body ?? "{}")));
+        return new Response(
+          JSON.stringify({
+            code: 0,
+            data: {
+              id: "ds_1",
+              name: "Commercial Docs",
+              description: "Shared qualifications",
+              doc_num: 0,
+              chunk_num: 0,
+              embd_id: "bge-large",
+              permission: "me",
+            },
+          }),
+          { status: 200 },
+        );
+      },
+    });
+
+    await expect(client.createDataset({
+      name: "Commercial Docs",
+      description: "Shared qualifications",
+      chunkMethod: "naive",
+      parserConfig: { chunk_token_num: 2000 },
+    })).resolves.toEqual({
+      id: "ds_1",
+      name: "Commercial Docs",
+      description: "Shared qualifications",
+      documentCount: 0,
+      chunkCount: 0,
+      embeddingModel: "bge-large",
+      permission: "me",
+    });
+
+    expect(calls).toEqual([
+      {
+        name: "Commercial Docs",
+        description: "Shared qualifications",
+        chunk_method: "naive",
+        parser_config: { chunk_token_num: 2000 },
+      },
+    ]);
+  });
+
+  test("lists dataset documents and maps run metadata", async () => {
+    const client = createRagflowClient({
+      baseUrl: "http://ragflow.local",
+      apiKey: "test",
+      fetchImpl: async () =>
+        new Response(
+          JSON.stringify({
+            code: 0,
+            data: {
+              docs: [
+                {
+                  id: "doc_1",
+                  knowledgebase_id: "ds_1",
+                  name: "license.pdf",
+                  size: 15,
+                  chunk_count: 4,
+                  chunk_method: "naive",
+                  parser_config: { chunk_token_num: 2000 },
+                  run: "DONE",
+                  type: "doc",
+                },
+              ],
+            },
+          }),
+          { status: 200 },
+        ),
+    });
+
+    await expect(client.listDocuments({ datasetId: "ds_1" })).resolves.toEqual([
+      {
+        id: "doc_1",
+        datasetId: "ds_1",
+        name: "license.pdf",
+        size: 15,
+        chunkCount: 4,
+        chunkMethod: "naive",
+        parserConfig: { chunk_token_num: 2000 },
+        run: "DONE",
+        type: "doc",
+      },
+    ]);
+  });
+
   test("maps retrieval chunks and preserves selected datasets", async () => {
     const client = createRagflowClient({
       baseUrl: "http://ragflow.local",

@@ -48,6 +48,7 @@ import SoulView from "./soul";
 import ConfigView from "./config";
 import SettingsView from "./settings";
 import SkillsView from "./skills";
+import KnowledgeView from "./knowledge";
 import IdentitiesView from "./identities";
 import AgentsView from "./agents";
 import AdminUsersView from "./admin-users";
@@ -61,6 +62,7 @@ import {
   ChevronDown,
   ChevronRight,
   Circle,
+  HardDrive,
   History,
   HeartPulse,
   Loader2,
@@ -313,6 +315,8 @@ export default function DashboardView(props: DashboardViewProps) {
         return "Soul";
       case "skills":
         return "Skills";
+      case "knowledge":
+        return "Knowledge";
       case "plugins":
         return "Extensions";
       case "mcp":
@@ -1409,6 +1413,14 @@ export default function DashboardView(props: DashboardViewProps) {
               />
             </Match>
 
+            <Match when={props.tab === "knowledge"}>
+              <KnowledgeView
+                client={props.openworkServerClient}
+                workspaceId={props.openworkServerWorkspaceId}
+                workspaceName={props.activeWorkspaceDisplay.name}
+              />
+            </Match>
+
             <Match when={props.tab === "plugins" || props.tab === "mcp"}>
               <ExtensionsView
                 initialSection={props.tab === "plugins" ? "plugins" : "mcp"}
@@ -1689,6 +1701,15 @@ export default function DashboardView(props: DashboardViewProps) {
               <Bot size={18} />
               {tr("dashboard.agents")}
             </button>
+            <button
+              class={`flex flex-col items-center gap-1 text-xs ${
+                props.tab === "knowledge" ? "text-gray-12" : "text-gray-10"
+              }`}
+              onClick={() => props.setTab("knowledge")}
+            >
+              <HardDrive size={18} />
+              Knowledge
+            </button>
             <Show when={props.isAdminUser}>
               <button
                 class={`flex flex-col items-center gap-1 text-xs ${
@@ -1763,6 +1784,7 @@ export default function DashboardView(props: DashboardViewProps) {
       <aside class="w-56 hidden md:flex flex-col bg-dls-sidebar border-l border-dls-border p-4">
         <div class="space-y-1 pt-2">
           {navItem("agents", tr("dashboard.agents"), <Bot size={18} />)}
+          {navItem("knowledge", "Knowledge", <HardDrive size={18} />)}
           <Show when={props.isAdminUser}>
             {navItem("users", "用户会话", <span class="w-4 text-center text-xs font-semibold">管</span>)}
           </Show>

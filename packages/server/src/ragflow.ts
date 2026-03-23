@@ -17,6 +17,42 @@ export type RagflowDatasetSummary = {
   permission: string | null;
 };
 
+export type RagflowDatasetCreateInput = {
+  name: string;
+  description?: string | null;
+  embeddingModel?: string | null;
+  permission?: string | null;
+  chunkMethod?: string | null;
+  parserConfig?: Record<string, unknown> | null;
+};
+
+export type RagflowDocumentSummary = {
+  id: string;
+  datasetId: string | null;
+  name: string;
+  size: number | null;
+  chunkCount: number | null;
+  chunkMethod: string | null;
+  parserConfig: Record<string, unknown> | null;
+  run: string | null;
+  type: string | null;
+};
+
+export type RagflowUploadDocumentsInput = {
+  datasetId: string;
+  files: File[];
+};
+
+export type RagflowStartParseInput = {
+  datasetId: string;
+  documentIds: string[];
+};
+
+export type RagflowListDocumentsInput = {
+  datasetId: string;
+  limit?: number | null;
+};
+
 export type RagflowRetrievalChunk = {
   id: string | null;
   content: string;
@@ -53,6 +89,10 @@ export type RagflowRetrieveInput = {
 
 export type RagflowClient = {
   listDatasets: (options?: { query?: string | null; limit?: number | null }) => Promise<RagflowDatasetSummary[]>;
+  createDataset: (input: RagflowDatasetCreateInput) => Promise<RagflowDatasetSummary>;
+  uploadDocuments: (input: RagflowUploadDocumentsInput) => Promise<RagflowDocumentSummary[]>;
+  listDocuments: (input: RagflowListDocumentsInput) => Promise<RagflowDocumentSummary[]>;
+  startParse: (input: RagflowStartParseInput) => Promise<void>;
   retrieve: (input: RagflowRetrieveInput) => Promise<RagflowRetrievalResult>;
 };
 
@@ -97,6 +137,16 @@ function arrayOfStrings(value: unknown): string[] {
     next.push(trimmed);
   }
   return next;
+}
+
+function objectValue(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function normalizeParserConfig(value: unknown): Record<string, unknown> | null {
+  const object = objectValue(value);
+  return object ? { ...object } : null;
 }
 
 function describeFetchFailure(error: unknown): { message: string; details: Record<string, unknown> } {
@@ -199,24 +249,25 @@ export function getRagflowStatus(
   };
 }
 
-async function fetchRagflowJson<T>(
+async function fetchRagflowEnvelope<T>(
   baseUrl: string,
   apiKey: string,
   path: string,
   fetchImpl: FetchLike,
   init?: RequestInit,
-): Promise<T> {
+): Promise<{ url: string; response: Response; payload: RagflowApiEnvelope<T> | null }> {
   const url = `${baseUrl}/api/v1${path}`;
   let response: Response;
   try {
+    const headers = new Headers(init?.headers ?? {});
+    headers.set("Authorization", `Bearer ${apiKey}`);
+    headers.set("Accept", "application/json");
+    if (init?.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
+      headers.set("Content-Type", "application/json");
+    }
     response = await fetchImpl(url, {
       ...init,
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        Accept: "application/json",
-        ...(init?.body ? { "Content-Type": "application/json" } : {}),
-        ...(init?.headers ?? {}),
-      },
+      headers,
     });
   } catch (error) {
     const failure = describeFetchFailure(error);
@@ -233,6 +284,13 @@ async function fetchRagflowJson<T>(
     payload = null;
   }
 
+  return { url, response, payload };
+}
+
+function assertRagflowEnvelopeOk<T>(
+  input: { url: string; response: Response; payload: RagflowApiEnvelope<T> | null },
+): asserts input is { url: string; response: Response; payload: RagflowApiEnvelope<T> } {
+  const { url, response, payload } = input;
   if (!response.ok) {
     throw new ApiError(502, "ragflow_request_failed", payload?.message ?? `RAGFlow request failed with status ${response.status}`, {
       status: response.status,
@@ -245,8 +303,66 @@ async function fetchRagflowJson<T>(
       url,
     });
   }
+}
 
-  return payload.data;
+async function fetchRagflowJson<T>(
+  baseUrl: string,
+  apiKey: string,
+  path: string,
+  fetchImpl: FetchLike,
+  init?: RequestInit,
+): Promise<T> {
+  const result = await fetchRagflowEnvelope<T>(baseUrl, apiKey, path, fetchImpl, init);
+  assertRagflowEnvelopeOk(result);
+  if (result.payload.data === undefined) {
+    throw new ApiError(502, "ragflow_invalid_response", "RAGFlow returned an unexpected response.", {
+      url: result.url,
+    });
+  }
+  return result.payload.data;
+}
+
+async function fetchRagflowOk(
+  baseUrl: string,
+  apiKey: string,
+  path: string,
+  fetchImpl: FetchLike,
+  init?: RequestInit,
+): Promise<void> {
+  const result = await fetchRagflowEnvelope<unknown>(baseUrl, apiKey, path, fetchImpl, init);
+  assertRagflowEnvelopeOk(result);
+}
+
+function mapDatasetSummary(entry: Record<string, unknown>): RagflowDatasetSummary | null {
+  const id = stringValue(entry.id);
+  const name = stringValue(entry.name);
+  if (!id || !name) return null;
+  return {
+    id,
+    name,
+    description: stringValue(entry.description) ?? "",
+    documentCount: numeric(entry.doc_num) ?? numeric(entry.document_count),
+    chunkCount: numeric(entry.chunk_num) ?? numeric(entry.chunk_count),
+    embeddingModel: stringValue(entry.embd_id) ?? stringValue(entry.embedding_model),
+    permission: stringValue(entry.permission),
+  };
+}
+
+function mapDocumentSummary(entry: Record<string, unknown>): RagflowDocumentSummary | null {
+  const id = stringValue(entry.id);
+  const name = stringValue(entry.name);
+  if (!id || !name) return null;
+  return {
+    id,
+    datasetId: stringValue(entry.dataset_id) ?? stringValue(entry.knowledgebase_id),
+    name,
+    size: numeric(entry.size),
+    chunkCount: numeric(entry.chunk_count),
+    chunkMethod: stringValue(entry.chunk_method) ?? stringValue(entry.parser_id),
+    parserConfig: normalizeParserConfig(entry.parser_config),
+    run: stringValue(entry.run),
+    type: stringValue(entry.type),
+  };
 }
 
 function assertConfigured(config: RagflowServerConfig): { baseUrl: string; apiKey: string } {
@@ -293,17 +409,122 @@ export function createRagflowClient(input: {
       );
 
       return data
-        .map((entry) => ({
-          id: stringValue(entry.id) ?? "",
-          name: stringValue(entry.name) ?? "",
-          description: stringValue(entry.description) ?? "",
-          documentCount: numeric(entry.doc_num) ?? numeric(entry.document_count),
-          chunkCount: numeric(entry.chunk_num) ?? numeric(entry.chunk_count),
-          embeddingModel: stringValue(entry.embd_id) ?? stringValue(entry.embedding_model),
-          permission: stringValue(entry.permission),
-        }))
-        .filter((entry) => entry.id && entry.name)
+        .map((entry) => mapDatasetSummary(entry))
+        .filter((entry): entry is RagflowDatasetSummary => Boolean(entry))
         .sort((left, right) => left.name.localeCompare(right.name, "zh-CN"));
+    },
+
+    async createDataset(input) {
+      const name = stringValue(input.name);
+      if (!name) {
+        throw new ApiError(400, "invalid_ragflow_dataset", "A dataset name is required.");
+      }
+      const payload = {
+        name,
+        ...(stringValue(input.description) ? { description: stringValue(input.description) } : {}),
+        ...(stringValue(input.embeddingModel) ? { embedding_model: stringValue(input.embeddingModel) } : {}),
+        ...(stringValue(input.permission) ? { permission: stringValue(input.permission) } : {}),
+        ...(stringValue(input.chunkMethod) ? { chunk_method: stringValue(input.chunkMethod) } : {}),
+        ...(normalizeParserConfig(input.parserConfig) ? { parser_config: normalizeParserConfig(input.parserConfig) } : {}),
+      };
+
+      const data = await fetchRagflowJson<Record<string, unknown>>(
+        baseUrl,
+        apiKey,
+        "/datasets",
+        fetchImpl,
+        {
+          method: "POST",
+          body: JSON.stringify(payload),
+        },
+      );
+
+      const summary = mapDatasetSummary(data);
+      if (!summary) {
+        throw new ApiError(502, "ragflow_invalid_response", "RAGFlow returned an unexpected dataset response.", {
+          url: `${baseUrl}/api/v1/datasets`,
+        });
+      }
+      return summary;
+    },
+
+    async uploadDocuments(input) {
+      const datasetId = stringValue(input.datasetId);
+      if (!datasetId) {
+        throw new ApiError(400, "invalid_ragflow_dataset", "A dataset id is required.");
+      }
+      const files = Array.isArray(input.files) ? input.files.filter((file): file is File => file instanceof File) : [];
+      if (!files.length) {
+        throw new ApiError(400, "invalid_ragflow_documents", "At least one file is required.");
+      }
+
+      const form = new FormData();
+      for (const file of files) form.append("file", file, file.name);
+
+      const data = await fetchRagflowJson<Record<string, unknown>[]>(
+        baseUrl,
+        apiKey,
+        `/datasets/${encodeURIComponent(datasetId)}/documents`,
+        fetchImpl,
+        {
+          method: "POST",
+          body: form,
+        },
+      );
+
+      return data
+        .map((entry) => mapDocumentSummary(entry))
+        .filter((entry): entry is RagflowDocumentSummary => Boolean(entry));
+    },
+
+    async listDocuments(input) {
+      const datasetId = stringValue(input.datasetId);
+      if (!datasetId) {
+        throw new ApiError(400, "invalid_ragflow_dataset", "A dataset id is required.");
+      }
+      const limit = Math.max(1, Math.min(500, numeric(input.limit) ?? 200));
+      const search = new URLSearchParams();
+      search.set("page", "1");
+      search.set("page_size", String(limit));
+      search.set("orderby", "create_time");
+      search.set("desc", "true");
+
+      const data = await fetchRagflowJson<Record<string, unknown>>(
+        baseUrl,
+        apiKey,
+        `/datasets/${encodeURIComponent(datasetId)}/documents?${search.toString()}`,
+        fetchImpl,
+        { method: "GET" },
+      );
+
+      const docs = Array.isArray(data.docs) ? data.docs : [];
+      return docs
+        .map((entry) => {
+          const object = objectValue(entry);
+          return object ? mapDocumentSummary(object) : null;
+        })
+        .filter((entry): entry is RagflowDocumentSummary => Boolean(entry));
+    },
+
+    async startParse(input) {
+      const datasetId = stringValue(input.datasetId);
+      const documentIds = arrayOfStrings(input.documentIds);
+      if (!datasetId) {
+        throw new ApiError(400, "invalid_ragflow_dataset", "A dataset id is required.");
+      }
+      if (!documentIds.length) {
+        throw new ApiError(400, "invalid_ragflow_documents", "At least one document id is required.");
+      }
+      await fetchRagflowOk(
+        baseUrl,
+        apiKey,
+        `/datasets/${encodeURIComponent(datasetId)}/chunks`,
+        fetchImpl,
+        {
+          method: "POST",
+          body: JSON.stringify({ document_ids: documentIds }),
+        },
+      );
     },
 
     async retrieve(input) {
@@ -390,9 +611,41 @@ export function createConfiguredRagflowClient(
       const resolved = assertConfigured(resolveRagflowServerConfig(config, env));
       return createRagflowClient(resolved).listDatasets(options);
     },
+    async createDataset(input) {
+      const resolved = assertConfigured(resolveRagflowServerConfig(config, env));
+      return createRagflowClient(resolved).createDataset(input);
+    },
+    async uploadDocuments(input) {
+      const resolved = assertConfigured(resolveRagflowServerConfig(config, env));
+      return createRagflowClient(resolved).uploadDocuments(input);
+    },
+    async listDocuments(input) {
+      const resolved = assertConfigured(resolveRagflowServerConfig(config, env));
+      return createRagflowClient(resolved).listDocuments(input);
+    },
+    async startParse(input) {
+      const resolved = assertConfigured(resolveRagflowServerConfig(config, env));
+      return createRagflowClient(resolved).startParse(input);
+    },
     async retrieve(input) {
       const resolved = assertConfigured(resolveRagflowServerConfig(config, env));
       return createRagflowClient(resolved).retrieve(input);
     },
   };
+}
+
+export async function listRagflowDatasets(
+  options?: { query?: string | null; limit?: number | null },
+  config?: Pick<ServerConfig, "ragflow">,
+  env: Record<string, string | undefined> = process.env,
+): Promise<RagflowDatasetSummary[]> {
+  return createConfiguredRagflowClient(config, env).listDatasets(options);
+}
+
+export async function retrieveFromRagflow(
+  input: RagflowRetrieveInput,
+  config?: Pick<ServerConfig, "ragflow">,
+  env: Record<string, string | undefined> = process.env,
+): Promise<RagflowRetrievalResult> {
+  return createConfiguredRagflowClient(config, env).retrieve(input);
 }

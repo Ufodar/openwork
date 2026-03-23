@@ -1312,11 +1312,7 @@ export default function App() {
 
       const model = selectedSessionModel();
       const agent = selectedSessionAgent();
-      const knowledgeContextText =
-        resolvedDraft.mode === "prompt" && !resolvedDraft.command && !compactCommand
-          ? await buildSessionRagflowContextText(sessionID, content)
-          : null;
-      const parts = buildPromptParts(resolvedDraft, { knowledgeContextText });
+      const parts = buildPromptParts(resolvedDraft);
 
       if (resolvedDraft.mode === "shell") {
         await shellInSession(c, sessionID, content);
@@ -6807,6 +6803,7 @@ export default function App() {
 
   const dashboardTabs = new Set<DashboardTab>([
     "agents",
+    "knowledge",
     "users",
     "scheduled",
     "soul",

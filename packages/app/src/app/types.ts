@@ -144,6 +144,7 @@ export type DashboardTab =
   | "scheduled"
   | "soul"
   | "skills"
+  | "knowledge"
   | "plugins"
   | "mcp"
   | "users"

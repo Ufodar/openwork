@@ -30,6 +30,28 @@ describe("knowledge routes", () => {
   let sessionOwnership: SessionOwnershipService;
   let sessionWorkspaces: SessionWorkspaceService;
   let ragflowCalls: Array<{ question: string; datasetIds: string[] }> = [];
+  let ragflowCreateDatasetCalls: Array<{
+    name: string;
+    description: string | null;
+    chunkMethod: string | null;
+    parserConfig: Record<string, unknown> | null;
+  }> = [];
+  let ragflowUploadCalls: Array<{
+    datasetId: string;
+    files: Array<{ name: string; size: number; type: string; text: string }>;
+  }> = [];
+  let ragflowDocumentsByDataset: Map<string, Array<{
+    id: string;
+    datasetId: string | null;
+    name: string;
+    size: number | null;
+    chunkMethod: string | null;
+    parserConfig: Record<string, unknown> | null;
+    run: string | null;
+    type: string | null;
+    chunkCount?: number | null;
+  }>>;
+  let ragflowParseCalls: Array<{ datasetId: string; documentIds: string[] }> = [];
   let usersByOwnerKey: Map<string, TestUser>;
   let routes: ReturnType<typeof createRoutes>;
 
@@ -80,8 +102,62 @@ describe("knowledge routes", () => {
     ]);
 
     ragflowCalls = [];
+    ragflowCreateDatasetCalls = [];
+    ragflowUploadCalls = [];
+    ragflowDocumentsByDataset = new Map();
+    ragflowParseCalls = [];
     const ragflow = {
       listDatasets: async () => [],
+      createDataset: async (input) => {
+        ragflowCreateDatasetCalls.push({
+          name: input.name,
+          description: input.description ?? null,
+          chunkMethod: input.chunkMethod ?? null,
+          parserConfig: input.parserConfig ?? null,
+        });
+        return {
+          id: "ds_created",
+          name: input.name,
+          description: input.description ?? "",
+          documentCount: 0,
+          chunkCount: 0,
+          embeddingModel: null,
+          permission: "me",
+          chunkMethod: input.chunkMethod ?? null,
+          parserConfig: input.parserConfig ?? null,
+        };
+      },
+      uploadDocuments: async (input) => {
+        const capturedFiles = await Promise.all(input.files.map(async (file) => ({
+          name: file.name,
+          size: file.size,
+          type: file.type,
+          text: await file.text(),
+        })));
+        ragflowUploadCalls.push({
+          datasetId: input.datasetId,
+          files: capturedFiles,
+        });
+        return capturedFiles.map((file, index) => ({
+          id: `doc_${index + 1}`,
+          datasetId: input.datasetId,
+          name: file.name,
+          size: file.size,
+          chunkMethod: "naive",
+          parserConfig: { chunk_token_num: 2000 },
+          run: "UNSTART",
+          type: "doc",
+        }));
+      },
+      listDocuments: async (input) => {
+        return ragflowDocumentsByDataset.get(input.datasetId) ?? [];
+      },
+      startParse: async (input) => {
+        ragflowParseCalls.push({
+          datasetId: input.datasetId,
+          documentIds: [...input.documentIds],
+        });
+      },
       retrieve: async (input) => {
         ragflowCalls.push({ question: input.question, datasetIds: [...input.datasetIds] });
         return {
@@ -158,6 +234,7 @@ describe("knowledge routes", () => {
     input?: {
       query?: string;
       body?: Record<string, unknown>;
+      formData?: FormData;
       actor?: { type: "remote"; tokenHash: string; scope: "owner" | "collaborator" | "viewer" };
     },
   ) {
@@ -169,8 +246,12 @@ describe("knowledge routes", () => {
     return matched.handler({
       request: new Request(url, {
         method,
-        body: input?.body ? JSON.stringify(input.body) : undefined,
-        headers: input?.body ? { "Content-Type": "application/json" } : undefined,
+        body: input?.formData ? input.formData : input?.body ? JSON.stringify(input.body) : undefined,
+        headers: input?.formData
+          ? undefined
+          : input?.body
+            ? { "Content-Type": "application/json" }
+            : undefined,
       }),
       url,
       params: matched.params,
@@ -214,6 +295,182 @@ describe("knowledge routes", () => {
     await expect(others.json()).resolves.toMatchObject({
       scope: "others",
       items: [{ knowledgeId: "kb_bob", ownerDisplayName: "bob", title: "Bob Docs" }],
+    });
+  });
+
+  test("creates a personal knowledge base with ragflow defaults", async () => {
+    const response = await invokeRoute("POST", "/workspace/ws_1/knowledge", {
+      body: { title: "商业资质库" },
+    });
+
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      item: {
+        ownerUserId: "user_alice",
+        ownerDisplayName: "alice",
+        title: "商业资质库",
+        status: "ready",
+        chunkMethod: "naive",
+        parserConfig: {
+          chunk_token_num: 2000,
+          delimiter: "\n",
+          layout_recognize: true,
+          html4excel: false,
+          raptor: { use_raptor: false },
+        },
+      },
+    });
+
+    expect(ragflowCreateDatasetCalls).toEqual([
+      {
+        name: "商业资质库",
+        description: null,
+        chunkMethod: "naive",
+        parserConfig: {
+          chunk_token_num: 2000,
+          delimiter: "\n",
+          layout_recognize: true,
+          html4excel: false,
+          raptor: { use_raptor: false },
+        },
+      },
+    ]);
+
+    const mine = await registry.listMine("user_alice");
+    expect(mine).toHaveLength(1);
+    expect(mine[0]).toMatchObject({
+      ragflowDatasetId: "ds_created",
+      title: "商业资质库",
+      ownerDisplayName: "alice",
+      status: "ready",
+      chunkMethod: "naive",
+      parserConfig: {
+        chunk_token_num: 2000,
+      },
+    });
+  });
+
+  test("listing knowledge refreshes processing state from ragflow documents", async () => {
+    await registry.upsert({
+      knowledgeId: "kb_alice",
+      ragflowDatasetId: "ds_alice",
+      ownerUserId: "user_alice",
+      ownerDisplayName: "alice",
+      title: "商业资质库",
+      source: "openwork",
+      visibility: "visible_to_all_users",
+      chunkMethod: "naive",
+      parserConfig: { chunk_token_num: 2000 },
+      status: "processing",
+      documentCount: 0,
+      chunkCount: 0,
+    });
+    ragflowDocumentsByDataset.set("ds_alice", [
+      {
+        id: "doc_1",
+        datasetId: "ds_alice",
+        name: "license.pdf",
+        size: 15,
+        chunkMethod: "naive",
+        parserConfig: { chunk_token_num: 2000 },
+        run: "DONE",
+        type: "doc",
+        chunkCount: 4,
+      },
+      {
+        id: "doc_2",
+        datasetId: "ds_alice",
+        name: "social.txt",
+        size: 14,
+        chunkMethod: "naive",
+        parserConfig: { chunk_token_num: 2000 },
+        run: "DONE",
+        type: "doc",
+        chunkCount: 3,
+      },
+    ]);
+
+    const response = await invokeRoute("GET", "/workspace/ws_1/knowledge", { query: "scope=mine" });
+
+    await expect(response.json()).resolves.toMatchObject({
+      scope: "mine",
+      items: [
+        {
+          knowledgeId: "kb_alice",
+          status: "ready",
+          documentCount: 2,
+          chunkCount: 7,
+        },
+      ],
+    });
+
+    const stored = await registry.get("kb_alice");
+    expect(stored).toMatchObject({
+      status: "ready",
+      documentCount: 2,
+      chunkCount: 7,
+    });
+  });
+
+  test("uploads documents to an owned knowledge base and starts parsing", async () => {
+    await registry.upsert({
+      knowledgeId: "kb_alice",
+      ragflowDatasetId: "ds_alice",
+      ownerUserId: "user_alice",
+      ownerDisplayName: "alice",
+      title: "商业资质库",
+      source: "openwork",
+      visibility: "visible_to_all_users",
+      chunkMethod: "naive",
+      parserConfig: {
+        chunk_token_num: 2000,
+        delimiter: "\n",
+        layout_recognize: true,
+        html4excel: false,
+        raptor: { use_raptor: false },
+      },
+      status: "ready",
+      documentCount: 0,
+      chunkCount: 0,
+    });
+
+    const form = new FormData();
+    form.append("file", new File(["license-content"], "license.pdf", { type: "application/pdf" }));
+    form.append("file", new File(["social-content"], "social.txt", { type: "text/plain" }));
+
+    const response = await invokeRoute("POST", "/workspace/ws_1/knowledge/kb_alice/documents", {
+      formData: form,
+    });
+
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      knowledgeId: "kb_alice",
+      uploadedCount: 2,
+      documentIds: ["doc_1", "doc_2"],
+      item: {
+        knowledgeId: "kb_alice",
+        ragflowDatasetId: "ds_alice",
+        status: "processing",
+        documentCount: 2,
+      },
+    });
+
+    expect(ragflowUploadCalls).toEqual([
+      {
+        datasetId: "ds_alice",
+        files: [
+          { name: "license.pdf", size: 15, type: "application/pdf", text: "license-content" },
+          { name: "social.txt", size: 14, type: "text/plain;charset=utf-8", text: "social-content" },
+        ],
+      },
+    ]);
+    expect(ragflowParseCalls).toEqual([{ datasetId: "ds_alice", documentIds: ["doc_1", "doc_2"] }]);
+
+    const stored = await registry.get("kb_alice");
+    expect(stored).toMatchObject({
+      knowledgeId: "kb_alice",
+      status: "processing",
+      documentCount: 2,
     });
   });
 

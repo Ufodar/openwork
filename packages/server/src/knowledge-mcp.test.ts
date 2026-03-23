@@ -29,6 +29,18 @@ describe("knowledge MCP handler", () => {
     runtimeTokens = new RuntimeKnowledgeTokenService();
     ragflow = {
       listDatasets: async () => [],
+      createDataset: async () => ({
+        id: "ds_1",
+        name: "Dataset 1",
+        description: "",
+        documentCount: 0,
+        chunkCount: 0,
+        embeddingModel: null,
+        permission: "me",
+      }),
+      uploadDocuments: async () => [],
+      listDocuments: async () => [],
+      startParse: async () => undefined,
       retrieve: async (input) => ({
         chunks: [
           {

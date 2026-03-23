@@ -2319,10 +2319,55 @@ export function createRoutes(
     const items = scopeRaw === "others"
       ? await knowledgeRegistry.listOthers(user.id)
       : await knowledgeRegistry.listMine(user.id);
+    const refreshed = await refreshKnowledgeRecordsFromRagflow(knowledgeRegistry, ragflow, items);
     return jsonResponse({
       scope: scopeRaw,
-      items: items.filter(isKnowledgeVisible).map(serializeKnowledgeRecord),
+      items: refreshed.filter(isKnowledgeVisible).map(serializeKnowledgeRecord),
     });
+  });
+
+  addRoute(routes, "POST", "/workspace/:id/knowledge", "client", async (ctx) => {
+    ensureWritable(config);
+    requireClientScope(ctx, "collaborator");
+    await resolveWorkspace(config, ctx.params.id);
+    const user = await resolveKnowledgeCaller(auth, ctx);
+    const body = await readJsonBody(ctx.request);
+    const title = normalizeKnowledgeTitle(body.title);
+    const description = normalizeOptionalKnowledgeDescription(body.description);
+    const chunkMethod = normalizeKnowledgeChunkMethod(body.chunkMethod);
+    const parserConfig = normalizeKnowledgeParserConfig(body.parserConfig, chunkMethod);
+
+    const dataset = await ragflow.createDataset({
+      name: title,
+      ...(description ? { description } : {}),
+      permission: "me",
+      chunkMethod,
+      parserConfig,
+    });
+
+    const knowledgeId = createKnowledgeId();
+    const record = await knowledgeRegistry.upsert({
+      knowledgeId,
+      ragflowDatasetId: dataset.id,
+      ownerUserId: user.id,
+      ownerDisplayName: user.username,
+      title,
+      ...(description ? { description } : {}),
+      source: "openwork",
+      visibility: "visible_to_all_users",
+      ingestionPreset: "ragflow_default",
+      chunkMethod,
+      parserConfig,
+      embeddingModel: dataset.embeddingModel,
+      status: "ready",
+      documentCount: dataset.documentCount ?? 0,
+      chunkCount: dataset.chunkCount ?? 0,
+    });
+
+    return jsonResponse({
+      ok: true,
+      item: serializeKnowledgeRecord(record),
+    }, 201);
   });
 
   addRoute(routes, "GET", "/workspace/:id/sessions/:sessionId/knowledge", "client", async (ctx) => {
@@ -2454,6 +2499,71 @@ export function createRoutes(
       knowledgeRegistry,
       ragflow,
       serverVersion: SERVER_VERSION,
+    });
+  });
+
+  addRoute(routes, "POST", "/workspace/:id/knowledge/:knowledgeId/documents", "client", async (ctx) => {
+    ensureWritable(config);
+    requireClientScope(ctx, "collaborator");
+    await resolveWorkspace(config, ctx.params.id);
+    const user = await resolveKnowledgeCaller(auth, ctx);
+    const knowledgeId = normalizeKnowledgeId(ctx.params.knowledgeId);
+    const record = await knowledgeRegistry.get(knowledgeId);
+    if (!record || !isKnowledgeVisible(record)) {
+      throw new ApiError(404, "knowledge_not_found", "Knowledge base not found");
+    }
+    if (!user.isAdmin && record.ownerUserId !== user.id) {
+      throw new ApiError(403, "knowledge_write_forbidden", "Only the knowledge base owner can upload documents.");
+    }
+
+    const contentType = ctx.request.headers.get("content-type") ?? "";
+    if (!contentType.toLowerCase().includes("multipart/form-data")) {
+      throw new ApiError(400, "invalid_payload", "Expected multipart/form-data");
+    }
+    const form = await ctx.request.formData();
+    const files = form.getAll("file").filter((entry): entry is File => entry instanceof File);
+    if (!files.length) {
+      throw new ApiError(400, "file_required", "Form field 'file' is required");
+    }
+
+    const uploaded = await ragflow.uploadDocuments({
+      datasetId: record.ragflowDatasetId,
+      files,
+    });
+    const documentIds = uploaded
+      .map((item) => item.id)
+      .filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+    if (documentIds.length) {
+      await ragflow.startParse({
+        datasetId: record.ragflowDatasetId,
+        documentIds,
+      });
+    }
+
+    const nextRecord = await knowledgeRegistry.upsert({
+      knowledgeId: record.knowledgeId,
+      ragflowDatasetId: record.ragflowDatasetId,
+      ownerUserId: record.ownerUserId,
+      ownerDisplayName: record.ownerDisplayName,
+      title: record.title,
+      ...(record.description ? { description: record.description } : {}),
+      source: record.source,
+      visibility: record.visibility,
+      ...(record.ingestionPreset ? { ingestionPreset: record.ingestionPreset } : {}),
+      ...(record.chunkMethod ? { chunkMethod: record.chunkMethod } : {}),
+      parserConfig: record.parserConfig,
+      ...(record.embeddingModel ? { embeddingModel: record.embeddingModel } : {}),
+      status: documentIds.length ? "processing" : record.status,
+      documentCount: Math.max(record.documentCount ?? 0, 0) + uploaded.length,
+      chunkCount: record.chunkCount ?? 0,
+    });
+
+    return jsonResponse({
+      ok: true,
+      knowledgeId: record.knowledgeId,
+      uploadedCount: uploaded.length,
+      documentIds,
+      item: serializeKnowledgeRecord(nextRecord),
     });
   });
 
@@ -4514,6 +4624,65 @@ function normalizeRequiredSessionId(value: unknown): string {
   return sessionId;
 }
 
+function normalizeKnowledgeId(value: unknown): string {
+  const knowledgeId = typeof value === "string" ? value.trim() : "";
+  if (!knowledgeId) {
+    throw new ApiError(400, "invalid_payload", "knowledgeId is required");
+  }
+  return knowledgeId;
+}
+
+function normalizeKnowledgeTitle(value: unknown): string {
+  const title = typeof value === "string" ? value.trim() : "";
+  if (!title) {
+    throw new ApiError(400, "invalid_payload", "title is required");
+  }
+  if (title.length > 120) {
+    throw new ApiError(400, "invalid_payload", "title must be 120 characters or fewer");
+  }
+  return title;
+}
+
+function normalizeOptionalKnowledgeDescription(value: unknown): string | null {
+  if (value == null) return null;
+  const description = typeof value === "string" ? value.trim() : "";
+  if (!description) return null;
+  return description.slice(0, 500);
+}
+
+function normalizeKnowledgeChunkMethod(value: unknown): string {
+  const chunkMethod = typeof value === "string" ? value.trim() : "";
+  return chunkMethod || "naive";
+}
+
+function buildDefaultKnowledgeParserConfig(): Record<string, unknown> {
+  return {
+    chunk_token_num: 2000,
+    delimiter: "\n",
+    layout_recognize: true,
+    html4excel: false,
+    raptor: { use_raptor: false },
+  };
+}
+
+function normalizeKnowledgeParserConfig(value: unknown, chunkMethod: string): Record<string, unknown> {
+  if (value == null) {
+    return chunkMethod === "naive" ? buildDefaultKnowledgeParserConfig() : {};
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new ApiError(400, "invalid_payload", "parserConfig must be an object");
+  }
+  const parserConfig = { ...(value as Record<string, unknown>) };
+  if (chunkMethod === "naive" && typeof parserConfig.chunk_token_num !== "number") {
+    parserConfig.chunk_token_num = 2000;
+  }
+  return parserConfig;
+}
+
+function createKnowledgeId(): string {
+  return `kb_${shortId()}`;
+}
+
 function isKnowledgeVisible(record: KnowledgeRegistryRecord): boolean {
   return record.visibility === "visible_to_all_users" && record.status !== "deleted";
 }
@@ -4551,6 +4720,68 @@ async function listKnowledgeRecordsByIds(
     items.push(record);
   }
   return items;
+}
+
+function deriveKnowledgeStatusFromDocuments(
+  currentStatus: KnowledgeRegistryRecord["status"],
+  documents: Array<{ run: string | null }>,
+): KnowledgeRegistryRecord["status"] {
+  if (!documents.length) return currentStatus === "deleted" ? "deleted" : "ready";
+  const runs = documents
+    .map((document) => (typeof document.run === "string" ? document.run.trim().toUpperCase() : ""))
+    .filter(Boolean);
+  if (runs.some((run) => run === "FAIL")) return "degraded";
+  if (runs.some((run) => run !== "DONE")) return "processing";
+  return "ready";
+}
+
+async function refreshKnowledgeRecordsFromRagflow(
+  knowledgeRegistry: KnowledgeRegistryService,
+  ragflow: RagflowClient,
+  records: KnowledgeRegistryRecord[],
+): Promise<KnowledgeRegistryRecord[]> {
+  const next: KnowledgeRegistryRecord[] = [];
+  for (const record of records) {
+    if (!isKnowledgeVisible(record)) {
+      next.push(record);
+      continue;
+    }
+    try {
+      const documents = await ragflow.listDocuments({ datasetId: record.ragflowDatasetId, limit: 500 });
+      const documentCount = documents.length;
+      const chunkCount = documents.reduce((sum, document) => sum + (document.chunkCount ?? 0), 0);
+      const status = deriveKnowledgeStatusFromDocuments(record.status, documents);
+      if (
+        record.documentCount === documentCount &&
+        record.chunkCount === chunkCount &&
+        record.status === status
+      ) {
+        next.push(record);
+        continue;
+      }
+      const updated = await knowledgeRegistry.upsert({
+        knowledgeId: record.knowledgeId,
+        ragflowDatasetId: record.ragflowDatasetId,
+        ownerUserId: record.ownerUserId,
+        ownerDisplayName: record.ownerDisplayName,
+        title: record.title,
+        ...(record.description ? { description: record.description } : {}),
+        source: record.source,
+        visibility: record.visibility,
+        ...(record.ingestionPreset ? { ingestionPreset: record.ingestionPreset } : {}),
+        ...(record.chunkMethod ? { chunkMethod: record.chunkMethod } : {}),
+        parserConfig: record.parserConfig,
+        ...(record.embeddingModel ? { embeddingModel: record.embeddingModel } : {}),
+        status,
+        documentCount,
+        chunkCount,
+      });
+      next.push(updated);
+    } catch {
+      next.push(record);
+    }
+  }
+  return next;
 }
 
 async function requireKnowledgeRecordsForAttachment(

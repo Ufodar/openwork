@@ -7,5 +7,5 @@ export function resolveDashboardClientConnected(input: {
   tab: string;
 }): boolean {
   if (input.clientConnected) return true;
-  return input.tab === "users" && input.globalReady && input.openworkServerStatus === "connected";
+  return input.tab === "users" && input.openworkServerStatus === "connected";
 }

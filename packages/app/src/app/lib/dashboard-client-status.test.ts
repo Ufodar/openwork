@@ -14,15 +14,26 @@ describe("resolveDashboardClientConnected", () => {
     ).toBe(true);
   });
 
-  test("treats admin users tab as connected when global opencode is healthy", () => {
+  test("treats admin users tab as connected when openwork stays healthy", () => {
     expect(
       resolveDashboardClientConnected({
         clientConnected: false,
-        globalReady: true,
+        globalReady: false,
         openworkServerStatus: "connected",
         tab: "users",
       }),
     ).toBe(true);
+  });
+
+  test("does not treat admin users tab as connected when openwork is down", () => {
+    expect(
+      resolveDashboardClientConnected({
+        clientConnected: false,
+        globalReady: true,
+        openworkServerStatus: "disconnected",
+        tab: "users",
+      }),
+    ).toBe(false);
   });
 
   test("does not mask disconnected state on other tabs", () => {

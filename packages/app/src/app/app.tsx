@@ -48,6 +48,7 @@ import { clearPerfLogs, finishPerf, perfNow, recordPerfLog } from "./lib/perf-lo
 import { clearBusyState } from "./lib/busy-state";
 import { resolveClientWorkspaceDirectory } from "./lib/client-workspace-directory";
 import { resolveDashboardClientConnected } from "./lib/dashboard-client-status";
+import { shouldAutoConnectWebClient } from "./lib/web-autoconnect";
 import { reconcileOpenworkServerProbe } from "./lib/openwork-server-status";
 import {
   type OpenworkSessionPrefs,
@@ -4261,12 +4262,20 @@ export default function App() {
   });
 
   createEffect(() => {
-    if (isTauriRuntime()) return;
-    if (client()) return;
-    if (openworkServerStatus() !== "connected") return;
-
     const settings = openworkServerSettings();
-    if (!settings.urlOverride || !settings.token) return;
+    if (
+      !shouldAutoConnectWebClient({
+        isTauri: isTauriRuntime(),
+        hasClient: Boolean(client()),
+        openworkServerStatus: openworkServerStatus(),
+        openworkUrlOverride: settings.urlOverride ?? "",
+        token: settings.token ?? "",
+        view: currentView(),
+        tab: tab(),
+      })
+    ) {
+      return;
+    }
 
     let active = true;
     let timer: number | undefined;

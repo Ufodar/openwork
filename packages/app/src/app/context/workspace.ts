@@ -1338,8 +1338,17 @@ export function createWorkspaceStore(options: {
         connectMetrics.loadSessionsMs = Date.now() - sessionsAt;
         wsDebug("connect:loadSessions:done", { ms: Date.now() - sessionsAt });
         const pendingPermissionsAt = Date.now();
-        await options.refreshPendingPermissions();
-        connectMetrics.pendingPermissionsMs = Date.now() - pendingPermissionsAt;
+        try {
+          await options.refreshPendingPermissions();
+          wsDebug("connect:permissions:done", { ms: Date.now() - pendingPermissionsAt });
+        } catch (error) {
+          wsDebug("connect:permissions:skipped", {
+            ms: Date.now() - pendingPermissionsAt,
+            message: error instanceof Error ? error.message : safeStringify(error),
+          });
+        } finally {
+          connectMetrics.pendingPermissionsMs = Date.now() - pendingPermissionsAt;
+        }
 
         const providerState = await providersPromise;
         options.setProviders(providerState.providers);

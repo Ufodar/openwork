@@ -31,7 +31,17 @@ test("dashboard exposes a dedicated knowledge tab", () => {
   expect(dashboard).toContain('case "knowledge"');
   expect(dashboard).toContain('props.tab === "knowledge"');
   expect(dashboard).toContain('navItem("knowledge"');
+  expect(dashboard).toContain('tr("dashboard.knowledge")');
 
   const app = readFileSync(join(here, "..", "app.tsx"), "utf8");
   expect(app).toContain('"knowledge"');
+});
+
+test("knowledge page uses i18n keys for visible copy", () => {
+  const source = readPage("knowledge.tsx");
+  expect(source).toContain('tr("knowledge.title")');
+  expect(source).toContain('tr("knowledge.refresh")');
+  expect(source).toContain('tr("knowledge.create_title")');
+  expect(source).toContain('tr("knowledge.mine_title")');
+  expect(source).toContain('tr("knowledge.others_title")');
 });

@@ -316,7 +316,7 @@ export default function DashboardView(props: DashboardViewProps) {
       case "skills":
         return "Skills";
       case "knowledge":
-        return "Knowledge";
+        return tr("dashboard.knowledge");
       case "plugins":
         return "Extensions";
       case "mcp":
@@ -1708,7 +1708,7 @@ export default function DashboardView(props: DashboardViewProps) {
               onClick={() => props.setTab("knowledge")}
             >
               <HardDrive size={18} />
-              Knowledge
+              {tr("dashboard.knowledge")}
             </button>
             <Show when={props.isAdminUser}>
               <button
@@ -1784,7 +1784,7 @@ export default function DashboardView(props: DashboardViewProps) {
       <aside class="w-56 hidden md:flex flex-col bg-dls-sidebar border-l border-dls-border p-4">
         <div class="space-y-1 pt-2">
           {navItem("agents", tr("dashboard.agents"), <Bot size={18} />)}
-          {navItem("knowledge", "Knowledge", <HardDrive size={18} />)}
+          {navItem("knowledge", tr("dashboard.knowledge"), <HardDrive size={18} />)}
           <Show when={props.isAdminUser}>
             {navItem("users", "用户会话", <span class="w-4 text-center text-xs font-semibold">管</span>)}
           </Show>

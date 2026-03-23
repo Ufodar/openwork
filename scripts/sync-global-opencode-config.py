@@ -93,6 +93,9 @@ def main() -> int:
     config = load_json(global_path)
     config["$schema"] = "https://opencode.ai/config.json"
 
+    keep_global_mem_plugin = os.environ.get("OPENWORK_KEEP_GLOBAL_MEM_PLUGIN", "").strip() == "1"
+    keep_global_memory_mcp = os.environ.get("OPENWORK_KEEP_GLOBAL_MEMORY_MCP", "").strip() == "1"
+
     providers = config.get("provider")
     if not isinstance(providers, dict):
         providers = {}
@@ -110,6 +113,21 @@ def main() -> int:
     provider["models"] = SUPPORTED_MODELS
     config["model"] = f"{provider_id}/{default_model}"
     config["small_model"] = f"{provider_id}/{small_model}"
+
+    plugins = config.get("plugin")
+    if isinstance(plugins, list) and not keep_global_mem_plugin:
+        filtered_plugins = [
+            item
+            for item in plugins
+            if not (isinstance(item, str) and "opencode-mem" in item)
+        ]
+        config["plugin"] = filtered_plugins
+
+    mcp = config.get("mcp")
+    if isinstance(mcp, dict) and not keep_global_memory_mcp:
+        memory = mcp.get("memory")
+        if isinstance(memory, dict):
+            memory["enabled"] = False
 
     global_path.parent.mkdir(parents=True, exist_ok=True)
     global_path.write_text(json.dumps(config, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

@@ -314,7 +314,7 @@ describe("knowledge routes", () => {
         parserConfig: {
           chunk_token_num: 2000,
           delimiter: "\n",
-          layout_recognize: true,
+          layout_recognize: "True",
           html4excel: false,
           raptor: { use_raptor: false },
         },
@@ -329,7 +329,7 @@ describe("knowledge routes", () => {
         parserConfig: {
           chunk_token_num: 2000,
           delimiter: "\n",
-          layout_recognize: true,
+          layout_recognize: "True",
           html4excel: false,
           raptor: { use_raptor: false },
         },
@@ -425,7 +425,7 @@ describe("knowledge routes", () => {
       parserConfig: {
         chunk_token_num: 2000,
         delimiter: "\n",
-        layout_recognize: true,
+        layout_recognize: "True",
         html4excel: false,
         raptor: { use_raptor: false },
       },

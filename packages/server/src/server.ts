@@ -4659,7 +4659,7 @@ function buildDefaultKnowledgeParserConfig(): Record<string, unknown> {
   return {
     chunk_token_num: 2000,
     delimiter: "\n",
-    layout_recognize: true,
+    layout_recognize: "True",
     html4excel: false,
     raptor: { use_raptor: false },
   };
@@ -4675,6 +4675,9 @@ function normalizeKnowledgeParserConfig(value: unknown, chunkMethod: string): Re
   const parserConfig = { ...(value as Record<string, unknown>) };
   if (chunkMethod === "naive" && typeof parserConfig.chunk_token_num !== "number") {
     parserConfig.chunk_token_num = 2000;
+  }
+  if (typeof parserConfig.layout_recognize === "boolean") {
+    parserConfig.layout_recognize = parserConfig.layout_recognize ? "True" : "False";
   }
   return parserConfig;
 }

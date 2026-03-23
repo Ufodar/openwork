@@ -63,6 +63,7 @@ describe("provisionSessionWorkspace", () => {
     });
     expect(parsed.instructions).toContain(".opencode/openwork-knowledge.md");
     expect(instructionRaw).toContain("openwork_knowledge_search");
+    expect(instructionRaw).toContain("Never use `memory_search_nodes` or `memory_read_graph`");
     expect(instructionRaw).toContain("(none attached yet)");
   });
 

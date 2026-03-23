@@ -185,7 +185,7 @@ export async function handleKnowledgeMcpRequest(input: {
         {
           name: KNOWLEDGE_SEARCH_TOOL,
           title: "Search Attached Knowledge",
-          description: "Search the knowledge bases attached to this OpenWork session. Optionally narrow the search to a subset of attached knowledge_ids.",
+          description: "Primary search tool for facts stored in the knowledge bases attached to this OpenWork session. Do not substitute graph-memory tools for this. Optionally narrow the search to a subset of attached knowledge_ids.",
           inputSchema: {
             type: "object",
             properties: {

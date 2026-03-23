@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { buildKnowledgeSearchContextText, buildRagflowContextText } from "./ragflow-context";
+import { buildRagflowContextText } from "./ragflow-context";
 
 describe("buildRagflowContextText", () => {
   test("formats selected datasets and retrieved chunks into a prompt prelude", () => {
@@ -45,36 +45,5 @@ describe("buildRagflowContextText", () => {
 
     expect(text).toContain("Selected datasets: Policies");
     expect(text).toContain("No matching passages were retrieved");
-  });
-
-  test("formats attached knowledge search results into a prompt prelude", () => {
-    const text = buildKnowledgeSearchContextText({
-      knowledgeIds: ["kb_1"],
-      knowledgeTitles: ["wjw产品信息验收-0323"],
-      question: "海滨医院的交换机型号有哪些？",
-      items: [
-        {
-          id: "chunk_1",
-          content: "海滨医院 交换机 CE6855-48XS8CQ；海滨医院 交换机 S5755-H24T4Y2CZ",
-          similarity: 0.82,
-          vectorSimilarity: 0.91,
-          termSimilarity: 0.73,
-          datasetId: "ds_1",
-          documentId: "doc_1",
-          documentName: "设备型号.xlsx",
-          positions: [],
-          imageId: null,
-          knowledgeId: "kb_1",
-          knowledgeTitle: "wjw产品信息验收-0323",
-          ownerUserId: "user_1",
-          ownerDisplayName: "fuda",
-        },
-      ],
-    });
-
-    expect(text).toContain("Selected datasets: wjw产品信息验收-0323");
-    expect(text).toContain("Search query: 海滨医院的交换机型号有哪些？");
-    expect(text).toContain("[1] dataset=wjw产品信息验收-0323 | document=设备型号.xlsx | score=0.82");
-    expect(text).toContain("海滨医院 交换机 CE6855-48XS8CQ");
   });
 });

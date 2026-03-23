@@ -60,7 +60,7 @@ import {
   resolveStoredRagflowSelection,
   resolveSessionPreferences,
 } from "./lib/session-preferences";
-import { buildKnowledgeSearchContextText } from "./lib/ragflow-context";
+import { buildRagflowContextText } from "./lib/ragflow-context";
 import {
   isDocumentSessionView,
   resolveAppRouteView,
@@ -1339,11 +1339,7 @@ export default function App() {
 
       const model = selectedSessionModel();
       const agent = selectedSessionAgent();
-      const knowledgeContextText =
-        resolvedDraft.mode === "prompt" && !resolvedDraft.command && !compactCommand
-          ? await buildSessionRagflowContextText(sessionID, content)
-          : null;
-      const parts = buildPromptParts(resolvedDraft, { knowledgeContextText });
+      const parts = buildPromptParts(resolvedDraft);
 
       if (resolvedDraft.mode === "shell") {
         await shellInSession(c, sessionID, content);
@@ -3643,28 +3639,32 @@ export default function App() {
   const buildSessionRagflowContextText = async (sessionId: string, question: string): Promise<string | null> => {
     const query = question.trim();
     if (!query) return null;
-    const openworkClient = openworkServerClient();
-    const workspaceId = openworkServerWorkspaceId()?.trim() ?? "";
-    if (openworkServerStatus() !== "connected" || !openworkClient || !workspaceId) {
+    try {
+      await ensureOpenworkSessionPrefsLoaded();
+    } catch {
+      // ignore
+    }
+    const selection = getStoredSessionRagflowSelection(sessionId);
+    if (!selection?.datasetIds.length) {
+      setSessionRagflowRetrievalError(sessionId, null);
+      return null;
+    }
+    const context = await ensureRagflowWorkspaceContext();
+    if (!context) {
       setSessionRagflowRetrievalError(sessionId, null);
       return null;
     }
     try {
-      const attached = await openworkClient.getSessionKnowledge(workspaceId, sessionId);
-      if (!attached.knowledgeIds.length) {
-        setSessionRagflowRetrievalError(sessionId, null);
-        return null;
-      }
-      const result = await openworkClient.searchKnowledge(workspaceId, {
-        sessionId,
+      const result = await context.client.retrieveRagflow(context.workspaceId, {
         question: query,
-        knowledgeIds: attached.knowledgeIds,
+        datasetIds: selection.datasetIds,
+        topK: selection.topK ?? 8,
+        pageSize: Math.min(selection.topK ?? 8, 8),
       });
       setSessionRagflowRetrievalError(sessionId, null);
-      return buildKnowledgeSearchContextText({
-        knowledgeIds: attached.knowledgeIds,
-        knowledgeTitles: attached.items.map((item) => item.title),
-        items: result.items,
+      return buildRagflowContextText({
+        selection,
+        chunks: result.chunks,
         question: result.question,
       });
     } catch (error) {

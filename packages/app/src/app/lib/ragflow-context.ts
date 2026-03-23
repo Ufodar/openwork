@@ -1,4 +1,4 @@
-import type { OpenworkRagflowChunk } from "./openwork-server";
+import type { OpenworkKnowledgeSearchItem, OpenworkRagflowChunk } from "./openwork-server";
 
 export type RagflowContextSelection = {
   datasetIds: string[];
@@ -65,3 +65,33 @@ export const buildRagflowContextText = (input: {
 
   return [...header, "", ...body].join("\n");
 };
+
+export const buildKnowledgeSearchContextText = (input: {
+  knowledgeIds: string[];
+  knowledgeTitles?: string[];
+  items: OpenworkKnowledgeSearchItem[];
+  question: string;
+}): string | null =>
+  buildRagflowContextText({
+    selection: {
+      datasetIds: input.knowledgeIds,
+      datasetNames: input.knowledgeTitles,
+    },
+    question: input.question,
+    chunks: input.items.map((item) => ({
+      id: item.id,
+      content: item.content,
+      datasetId: item.datasetId,
+      datasetName: item.knowledgeTitle,
+      documentId: item.documentId,
+      documentName: item.documentName,
+      similarity: item.similarity,
+      vectorSimilarity: item.vectorSimilarity,
+      termSimilarity: item.termSimilarity,
+      positions:
+        Array.isArray(item.positions) && item.positions.every((value) => typeof value === "number")
+          ? item.positions
+          : null,
+      imageId: item.imageId,
+    })),
+  });

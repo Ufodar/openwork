@@ -45,3 +45,12 @@ test("knowledge page uses i18n keys for visible copy", () => {
   expect(source).toContain('tr("knowledge.mine_title")');
   expect(source).toContain('tr("knowledge.others_title")');
 });
+
+test("knowledge page uses stable reload keys and ignores stale async results", () => {
+  const source = readPage("knowledge.tsx");
+  expect(source).toContain("const knowledgeLoadKey = createMemo");
+  expect(source).toContain("let knowledgeLoadRequestSeq = 0");
+  expect(source).toContain("const requestId = ++knowledgeLoadRequestSeq");
+  expect(source).toContain("if (requestId !== knowledgeLoadRequestSeq) return");
+  expect(source).not.toContain("() => [props.client, props.workspaceId] as const");
+});

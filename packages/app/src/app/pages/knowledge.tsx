@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createSignal, on } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, on } from "solid-js";
 import { Loader2, Plus, RefreshCw } from "lucide-solid";
 
 import { currentLocale, t as i18n } from "../../i18n";
@@ -55,6 +55,7 @@ function formatChunkMethod(method: string | null | undefined, tr: (key: string) 
 
 export default function KnowledgeView(props: KnowledgeViewProps) {
   let uploadInputEl: HTMLInputElement | undefined;
+  let knowledgeLoadRequestSeq = 0;
   const tr = (key: string) => i18n(key, currentLocale());
 
   const [mineItems, setMineItems] = createSignal<OpenworkKnowledgeItem[]>([]);
@@ -68,14 +69,22 @@ export default function KnowledgeView(props: KnowledgeViewProps) {
   const [uploadBusyKnowledgeId, setUploadBusyKnowledgeId] = createSignal<string | null>(null);
   const [uploadError, setUploadError] = createSignal<string | null>(null);
   const [pendingUploadKnowledgeId, setPendingUploadKnowledgeId] = createSignal<string | null>(null);
+  const knowledgeLoadKey = createMemo(() => {
+    const workspaceId = props.workspaceId?.trim() ?? "";
+    if (!workspaceId) return props.client ? "connected:" : "";
+    return `${props.client ? "connected" : "disconnected"}:${workspaceId}`;
+  });
 
   const loadKnowledge = async () => {
+    const requestId = ++knowledgeLoadRequestSeq;
     const client = props.client;
     const workspaceId = props.workspaceId?.trim() ?? "";
     if (!client || !workspaceId) {
+      if (requestId !== knowledgeLoadRequestSeq) return;
       setMineItems([]);
       setOthersItems([]);
       setError(tr("knowledge.connect_required"));
+      setLoading(false);
       return;
     }
 
@@ -86,18 +95,22 @@ export default function KnowledgeView(props: KnowledgeViewProps) {
         client.listKnowledge(workspaceId, "mine"),
         client.listKnowledge(workspaceId, "others"),
       ]);
+      if (requestId !== knowledgeLoadRequestSeq) return;
       setMineItems(mine.items);
       setOthersItems(others.items);
     } catch (nextError) {
+      if (requestId !== knowledgeLoadRequestSeq) return;
       setError(nextError instanceof Error ? nextError.message : tr("knowledge.load_failed"));
     } finally {
-      setLoading(false);
+      if (requestId === knowledgeLoadRequestSeq) {
+        setLoading(false);
+      }
     }
   };
 
   createEffect(
     on(
-      () => [props.client, props.workspaceId] as const,
+      knowledgeLoadKey,
       () => {
         void loadKnowledge();
       },

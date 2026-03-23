@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { provisionSessionWorkspace } from "./session-workspaces.js";
+import { provisionSessionWorkspace, writeRuntimeKnowledgeCarrierConfig } from "./session-workspaces.js";
 import { exists } from "./utils.js";
 
 describe("provisionSessionWorkspace", () => {
@@ -18,5 +18,46 @@ describe("provisionSessionWorkspace", () => {
     expect(result.runtimeDir.startsWith(join(workspacePath, "documents", "sessions"))).toBe(true);
     expect(await exists(join(result.runtimeDir, "opencode.json"))).toBe(false);
     expect(await exists(join(result.runtimeDir, ".opencode", "commands", "hello.md"))).toBe(false);
+  });
+
+  test("writes a runtime knowledge carrier config by preserving parent config and adding the MCP", async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), "openwork-session-workspace-overlay-"));
+    const runtime = await provisionSessionWorkspace(workspacePath);
+    await writeFile(
+      join(workspacePath, "opencode.jsonc"),
+      JSON.stringify({
+        model: "test-model",
+        mcp: {
+          filesystem: {
+            type: "local",
+            command: ["npx", "-y", "@modelcontextprotocol/server-filesystem", "."],
+          },
+        },
+      }, null, 2),
+      "utf8",
+    );
+
+    const configPath = await writeRuntimeKnowledgeCarrierConfig({
+      workspacePath,
+      runtimeDir: runtime.runtimeDir,
+      mcpUrl: "http://127.0.0.1:8789/workspace/ws_1/knowledge/mcp",
+      runtimeToken: "owkrt_test",
+    });
+
+    const raw = await readFile(configPath, "utf8");
+    const parsed = JSON.parse(raw) as {
+      model?: string;
+      mcp?: Record<string, unknown>;
+    };
+
+    expect(parsed.model).toBe("test-model");
+    expect(parsed.mcp?.filesystem).toBeTruthy();
+    expect(parsed.mcp?.["openwork-knowledge"]).toMatchObject({
+      type: "remote",
+      url: "http://127.0.0.1:8789/workspace/ws_1/knowledge/mcp",
+      headers: {
+        Authorization: "Bearer owkrt_test",
+      },
+    });
   });
 });

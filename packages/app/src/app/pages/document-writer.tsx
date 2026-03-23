@@ -8,6 +8,7 @@ import type { SessionViewProps } from "./session";
 import OnlyOfficeEditor from "../components/onlyoffice-editor";
 import MessageList from "../components/session/message-list";
 import Composer from "../components/session/composer";
+import SessionKnowledgeSurface from "../components/session/session-knowledge-surface";
 import ToolMonitorPanel from "../components/tool-monitor/tool-monitor-panel";
 import { DOCUMENT_UPLOAD_ACCEPT } from "../lib/documents";
 import { MARKDOWN_PREVIEW_CLASS, renderMarkdownPreview } from "../lib/markdown-preview";
@@ -2562,6 +2563,15 @@ export default function DocumentWriterView(props: SessionViewProps) {
             </div>
           </div>
         </Show>
+
+        <SessionKnowledgeSurface
+          client={props.openworkServerClient}
+          workspaceId={props.openworkServerWorkspaceId}
+          sessionId={props.selectedSessionId}
+          editingLocked={isAgentRunning()}
+          tr={tr}
+          onToast={(message) => setToastMessage(message)}
+        />
 
         <Composer
           prompt={props.prompt}

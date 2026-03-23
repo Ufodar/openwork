@@ -236,7 +236,6 @@ export class AuthService {
       workspace,
     };
   }
-
   private async ensureUserWorkspace(user: AuthUserRecord) {
     const templateDir = await resolveUserWorkspaceTemplateDir(this.config);
     const provisioned = await provisionUserWorkspace({

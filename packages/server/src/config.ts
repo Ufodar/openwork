@@ -40,6 +40,11 @@ interface FileConfig {
   opencodePassword?: string;
   logFormat?: LogFormat;
   logRequests?: boolean;
+  ragflow?: {
+    baseUrl?: string;
+    apiKey?: string;
+    mcpUrl?: string;
+  };
 }
 
 const DEFAULT_PORT = 8787;
@@ -303,6 +308,18 @@ export async function resolveServerConfig(cli: CliArgs): Promise<ServerConfig> {
   const envLogRequests = parseBoolean(process.env.OPENWORK_LOG_REQUESTS);
   const logRequests = cli.logRequests ?? envLogRequests ?? fileConfig.logRequests ?? DEFAULT_LOG_REQUESTS;
 
+  const ragflowBaseUrl =
+    process.env.RAGFLOW_BASE_URL ??
+    process.env.RAGFLOW_URL ??
+    process.env.RAGFLOW_APP_URL ??
+    fileConfig.ragflow?.baseUrl;
+  const ragflowApiKey =
+    process.env.RAGFLOW_API_KEY ??
+    fileConfig.ragflow?.apiKey;
+  const ragflowMcpUrl =
+    process.env.RAGFLOW_MCP_URL ??
+    fileConfig.ragflow?.mcpUrl;
+
   const authorizedRoots =
     fileConfig.authorizedRoots?.length
       ? fileConfig.authorizedRoots.map((root) => resolve(configDir, root))
@@ -327,5 +344,13 @@ export async function resolveServerConfig(cli: CliArgs): Promise<ServerConfig> {
     hostTokenSource,
     logFormat,
     logRequests,
+    ragflow:
+      ragflowBaseUrl || ragflowApiKey || ragflowMcpUrl
+        ? {
+          ...(ragflowBaseUrl ? { baseUrl: ragflowBaseUrl } : {}),
+          ...(ragflowApiKey ? { apiKey: ragflowApiKey } : {}),
+          ...(ragflowMcpUrl ? { mcpUrl: ragflowMcpUrl } : {}),
+        }
+        : undefined,
   };
 }

@@ -10,6 +10,7 @@ import { deleteSkill, listSkills, upsertSkill } from "./skills.js";
 import { installHubSkill, listHubSkills } from "./skill-hub.js";
 import { deleteCommand, listCommands, upsertCommand } from "./commands.js";
 import { deleteScheduledJob, listScheduledJobs, resolveScheduledJob } from "./scheduler.js";
+import { getRagflowStatus, listRagflowDatasets, retrieveFromRagflow } from "./ragflow.js";
 import { ApiError, formatError } from "./errors.js";
 import { readJsoncFile, updateJsoncTopLevel, writeJsoncFile } from "./jsonc.js";
 import { recordAudit, readAuditEntries, readLastAudit } from "./audit.js";
@@ -21,8 +22,13 @@ import { workspaceIdForPath } from "./workspaces.js";
 import { sanitizeCommandName, validateMcpName } from "./validators.js";
 import { TokenService } from "./tokens.js";
 import { AuthService, type AuthIdentity } from "./auth.js";
+import { KnowledgeAttachmentService } from "./knowledge-attachments.js";
+import { KnowledgeRegistryService, type KnowledgeRegistryRecord } from "./knowledge-registry.js";
+import { handleKnowledgeMcpRequest } from "./knowledge-mcp.js";
+import { createConfiguredRagflowClient, type RagflowClient } from "./ragflow.js";
+import { RuntimeKnowledgeTokenService } from "./runtime-knowledge-tokens.js";
 import { SessionOwnershipService } from "./session-ownership.js";
-import { buildSessionPermissionRules, provisionSessionWorkspace, SessionWorkspaceService, sessionDirectoryBelongsToWorkspace } from "./session-workspaces.js";
+import { buildSessionPermissionRules, provisionSessionWorkspace, SessionWorkspaceService, sessionDirectoryBelongsToWorkspace, writeRuntimeKnowledgeCarrierConfig } from "./session-workspaces.js";
 import { RuntimeMaintenanceService, isRuntimeMaintenanceBlockingNewWork, type RuntimeMaintenanceState } from "./runtime-maintenance.js";
 import { SessionActivityService } from "./session-activity.js";
 import { TOY_UI_CSS, TOY_UI_HTML, TOY_UI_JS, cssResponse, htmlResponse, jsResponse } from "./toy-ui.js";
@@ -272,6 +278,10 @@ export function startServer(config: ServerConfig) {
   const auth = new AuthService(config, tokens);
   const sessionOwnership = new SessionOwnershipService();
   const sessionWorkspaces = new SessionWorkspaceService();
+  const knowledgeRegistry = new KnowledgeRegistryService();
+  const knowledgeAttachments = new KnowledgeAttachmentService();
+  const ragflow = createConfiguredRagflowClient(config);
+  const runtimeKnowledgeTokens = new RuntimeKnowledgeTokenService();
   const logger = createServerLogger(config);
   const runtimeMaintenance = new RuntimeMaintenanceService();
   const sessionActivity = new SessionActivityService(logger);
@@ -283,6 +293,10 @@ export function startServer(config: ServerConfig) {
     auth,
     sessionOwnership,
     sessionWorkspaces,
+    knowledgeRegistry,
+    knowledgeAttachments,
+    ragflow,
+    runtimeKnowledgeTokens,
     runtimeMaintenance,
     sessionActivity,
     logger,
@@ -351,6 +365,8 @@ export function startServer(config: ServerConfig) {
             actor,
             sessionOwnership,
             sessionWorkspaces,
+            runtimeKnowledgeTokens,
+            openworkBaseUrl: resolveServerLoopbackBaseUrl(config),
             runtimeMaintenance,
             sessionActivity,
           });
@@ -423,6 +439,8 @@ export function startServer(config: ServerConfig) {
             actor,
             sessionOwnership,
             sessionWorkspaces,
+            runtimeKnowledgeTokens,
+            openworkBaseUrl: resolveServerLoopbackBaseUrl(config),
             runtimeMaintenance,
             sessionActivity,
           });
@@ -516,7 +534,7 @@ export function startServer(config: ServerConfig) {
   return server;
 }
 
-function matchRoute(routes: Route[], method: string, path: string) {
+export function matchRoute(routes: Route[], method: string, path: string) {
   for (const route of routes) {
     if (route.method !== method) continue;
     const match = path.match(route.regex);
@@ -921,6 +939,8 @@ export async function proxyOpencodeRequest(input: {
   actor?: Actor;
   sessionOwnership: SessionOwnershipService;
   sessionWorkspaces: SessionWorkspaceService;
+  runtimeKnowledgeTokens: RuntimeKnowledgeTokenService;
+  openworkBaseUrl: string;
   runtimeMaintenance?: RuntimeMaintenanceService;
   sessionActivity?: SessionActivityService;
 }) {
@@ -1112,6 +1132,24 @@ export async function proxyOpencodeRequest(input: {
             runtimeDir: provisionedRuntime.runtimeDir,
             createdAt: Date.now(),
           });
+          if (workspace) {
+            try {
+              const issued = await input.runtimeKnowledgeTokens.issue({
+                workspaceId,
+                sessionId: createdSessionId,
+                runtimeId: provisionedRuntime.runtimeId,
+              });
+              await writeRuntimeKnowledgeCarrierConfig({
+                workspacePath: workspace.path,
+                runtimeDir: provisionedRuntime.runtimeDir,
+                mcpUrl: `${input.openworkBaseUrl}/workspace/${encodeURIComponent(workspaceId)}/knowledge/mcp`,
+                runtimeToken: issued.token,
+              });
+            } catch (error) {
+              console.warn("[openwork-server] Failed to provision runtime knowledge carrier:", error);
+              await input.runtimeKnowledgeTokens.revokeRuntime(workspaceId, createdSessionId, provisionedRuntime.runtimeId);
+            }
+          }
         }
       }
       return new Response(raw, { status: response.status, headers: response.headers });
@@ -1120,6 +1158,9 @@ export async function proxyOpencodeRequest(input: {
     if (workspaceId && method === "DELETE" && pathSessionId && response.ok) {
       await input.sessionOwnership.removeOwner(workspaceId, pathSessionId);
       await input.sessionWorkspaces.removeWorkspace(workspaceId, pathSessionId);
+      if (runtimeWorkspace?.runtimeId) {
+        await input.runtimeKnowledgeTokens.revokeRuntime(workspaceId, pathSessionId, runtimeWorkspace.runtimeId);
+      }
       input.sessionActivity?.removeSession(workspaceId, pathSessionId);
       if (runtimeDirectory) {
         await rm(runtimeDirectory, { recursive: true, force: true }).catch(() => undefined);
@@ -1248,7 +1289,7 @@ function logOpenCodeRouterDebug(message: string, details?: Record<string, unknow
   console.log(`[opencodeRouter] ${message}${payload}`);
 }
 
-function withCors(response: Response, request: Request, config: ServerConfig) {
+export function withCors(response: Response, request: Request, config: ServerConfig) {
   const origin = request.headers.get("origin");
   const allowedOrigins = config.corsOrigins;
   let allowOrigin: string | null = null;
@@ -1265,7 +1306,7 @@ function withCors(response: Response, request: Request, config: ServerConfig) {
     "Access-Control-Allow-Headers",
     "Authorization, Content-Type, X-OpenWork-Host-Token, X-OpenWork-Client-Id, X-OpenCode-Directory, X-Opencode-Directory, x-opencode-directory",
   );
-  headers.set("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS");
+  headers.set("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
   headers.set("Vary", "Origin");
   return new Response(response.body, { status: response.status, headers });
 }
@@ -1845,13 +1886,17 @@ function preloadPersistedUserWorkspaces(
     });
 }
 
-function createRoutes(
+export function createRoutes(
   config: ServerConfig,
   approvals: ApprovalService,
   tokens: TokenService,
   auth: AuthService,
   sessionOwnership: SessionOwnershipService,
   sessionWorkspaces: SessionWorkspaceService,
+  knowledgeRegistry: KnowledgeRegistryService,
+  knowledgeAttachments: KnowledgeAttachmentService,
+  ragflow: RagflowClient,
+  runtimeKnowledgeTokens: RuntimeKnowledgeTokenService,
   runtimeMaintenance: RuntimeMaintenanceService,
   sessionActivity: SessionActivityService,
   logger: ServerLogger,
@@ -2253,11 +2298,273 @@ function createRoutes(
 
     await sessionOwnership.removeOwner(workspace.id, sessionId);
     await sessionWorkspaces.removeWorkspace(workspace.id, sessionId);
+    await knowledgeAttachments.remove(workspace.id, sessionId);
+    if (runtimeWorkspace?.runtimeId) {
+      await runtimeKnowledgeTokens.revokeRuntime(workspace.id, sessionId, runtimeWorkspace.runtimeId);
+    }
     if (runtimeWorkspace?.runtimeDir) {
       await rm(runtimeWorkspace.runtimeDir, { recursive: true, force: true }).catch(() => undefined);
     }
 
     return jsonResponse({ ok: true });
+  });
+
+  addRoute(routes, "GET", "/workspace/:id/knowledge", "client", async (ctx) => {
+    await resolveWorkspace(config, ctx.params.id);
+    const user = await resolveKnowledgeCaller(auth, ctx);
+    const scopeRaw = (ctx.url.searchParams.get("scope") ?? "mine").trim().toLowerCase();
+    if (scopeRaw !== "mine" && scopeRaw !== "others") {
+      throw new ApiError(400, "invalid_scope", "scope must be mine or others");
+    }
+    const items = scopeRaw === "others"
+      ? await knowledgeRegistry.listOthers(user.id)
+      : await knowledgeRegistry.listMine(user.id);
+    const refreshed = await refreshKnowledgeRecordsFromRagflow(knowledgeRegistry, ragflow, items);
+    return jsonResponse({
+      scope: scopeRaw,
+      items: refreshed.filter(isKnowledgeVisible).map(serializeKnowledgeRecord),
+    });
+  });
+
+  addRoute(routes, "POST", "/workspace/:id/knowledge", "client", async (ctx) => {
+    ensureWritable(config);
+    requireClientScope(ctx, "collaborator");
+    await resolveWorkspace(config, ctx.params.id);
+    const user = await resolveKnowledgeCaller(auth, ctx);
+    const body = await readJsonBody(ctx.request);
+    const title = normalizeKnowledgeTitle(body.title);
+    const description = normalizeOptionalKnowledgeDescription(body.description);
+    const chunkMethod = normalizeKnowledgeChunkMethod(body.chunkMethod);
+    const parserConfig = normalizeKnowledgeParserConfig(body.parserConfig, chunkMethod);
+
+    const dataset = await ragflow.createDataset({
+      name: title,
+      ...(description ? { description } : {}),
+      permission: "me",
+      chunkMethod,
+      parserConfig,
+    });
+
+    const knowledgeId = createKnowledgeId();
+    const record = await knowledgeRegistry.upsert({
+      knowledgeId,
+      ragflowDatasetId: dataset.id,
+      ownerUserId: user.id,
+      ownerDisplayName: user.username,
+      title,
+      ...(description ? { description } : {}),
+      source: "openwork",
+      visibility: "visible_to_all_users",
+      ingestionPreset: "ragflow_default",
+      chunkMethod,
+      parserConfig,
+      embeddingModel: dataset.embeddingModel,
+      status: "ready",
+      documentCount: dataset.documentCount ?? 0,
+      chunkCount: dataset.chunkCount ?? 0,
+    });
+
+    return jsonResponse({
+      ok: true,
+      item: serializeKnowledgeRecord(record),
+    }, 201);
+  });
+
+  addRoute(routes, "GET", "/workspace/:id/sessions/:sessionId/knowledge", "client", async (ctx) => {
+    const workspace = await resolveWorkspace(config, ctx.params.id);
+    const sessionId = normalizeRequiredSessionId(ctx.params.sessionId);
+    const runtimeWorkspace = await requireKnowledgeSessionAccess({
+      workspace,
+      sessionId,
+      ctx,
+      sessionOwnership,
+      sessionWorkspaces,
+    });
+    const knowledgeIds = await knowledgeAttachments.get(workspace.id, sessionId);
+    const items = await listKnowledgeRecordsByIds(knowledgeRegistry, knowledgeIds);
+    return jsonResponse({
+      sessionId,
+      runtimeId: runtimeWorkspace.runtimeId,
+      knowledgeIds,
+      items: items.map(serializeKnowledgeRecord),
+    });
+  });
+
+  addRoute(routes, "PUT", "/workspace/:id/sessions/:sessionId/knowledge", "client", async (ctx) => {
+    ensureWritable(config);
+    requireClientScope(ctx, "collaborator");
+    const workspace = await resolveWorkspace(config, ctx.params.id);
+    const sessionId = normalizeRequiredSessionId(ctx.params.sessionId);
+    const runtimeWorkspace = await requireKnowledgeSessionAccess({
+      workspace,
+      sessionId,
+      ctx,
+      sessionOwnership,
+      sessionWorkspaces,
+    });
+    const body = await readJsonBody(ctx.request);
+    const knowledgeIds = normalizeKnowledgeIdList(body.knowledgeIds);
+    if (body.knowledgeIds !== undefined && !Array.isArray(body.knowledgeIds)) {
+      throw new ApiError(400, "invalid_payload", "knowledgeIds must be an array");
+    }
+    const records = await requireKnowledgeRecordsForAttachment(knowledgeRegistry, knowledgeIds);
+    await knowledgeAttachments.set(workspace.id, sessionId, runtimeWorkspace.runtimeId, knowledgeIds);
+    return jsonResponse({
+      ok: true,
+      sessionId,
+      runtimeId: runtimeWorkspace.runtimeId,
+      knowledgeIds,
+      items: records.map(serializeKnowledgeRecord),
+    });
+  });
+
+  addRoute(routes, "POST", "/workspace/:id/knowledge/search", "client", async (ctx) => {
+    const workspace = await resolveWorkspace(config, ctx.params.id);
+    const body = await readJsonBody(ctx.request);
+    const sessionId = normalizeRequiredSessionId(body.sessionId);
+    const runtimeWorkspace = await requireKnowledgeSessionAccess({
+      workspace,
+      sessionId,
+      ctx,
+      sessionOwnership,
+      sessionWorkspaces,
+    });
+    const question = typeof body.question === "string" ? body.question.trim() : "";
+    if (!question) {
+      throw new ApiError(400, "invalid_payload", "question is required");
+    }
+
+    const attachedKnowledgeIds = await knowledgeAttachments.get(workspace.id, sessionId);
+    const overrideProvided = body.knowledgeIds !== undefined;
+    if (overrideProvided && !Array.isArray(body.knowledgeIds)) {
+      throw new ApiError(400, "invalid_payload", "knowledgeIds must be an array");
+    }
+    const requestedKnowledgeIds = overrideProvided
+      ? normalizeKnowledgeIdList(body.knowledgeIds)
+      : attachedKnowledgeIds;
+    if (!requestedKnowledgeIds.length) {
+      throw new ApiError(400, "no_attached_knowledge", "No knowledge bases are attached to this session.");
+    }
+    const attachedSet = new Set(attachedKnowledgeIds);
+    if (overrideProvided && requestedKnowledgeIds.some((knowledgeId) => !attachedSet.has(knowledgeId))) {
+      throw new ApiError(403, "knowledge_scope_forbidden", "Requested knowledgeIds must already be attached to this session.");
+    }
+
+    const records = await requireKnowledgeRecordsForSearch(knowledgeRegistry, requestedKnowledgeIds);
+    const recordByDatasetId = new Map(records.map((record) => [record.ragflowDatasetId, record]));
+    const result = await ragflow.retrieve({
+      question,
+      datasetIds: records.map((record) => record.ragflowDatasetId),
+    });
+
+    const items = result.chunks.map((chunk) => {
+      const knowledge = chunk.datasetId ? recordByDatasetId.get(chunk.datasetId) ?? null : null;
+      return {
+        id: chunk.id,
+        content: chunk.content,
+        similarity: chunk.similarity,
+        vectorSimilarity: chunk.vectorSimilarity,
+        termSimilarity: chunk.termSimilarity,
+        datasetId: chunk.datasetId,
+        documentId: chunk.documentId,
+        documentName: chunk.documentName,
+        positions: chunk.positions,
+        imageId: chunk.imageId,
+        knowledgeId: knowledge?.knowledgeId ?? null,
+        knowledgeTitle: knowledge?.title ?? null,
+        ownerUserId: knowledge?.ownerUserId ?? null,
+        ownerDisplayName: knowledge?.ownerDisplayName ?? null,
+      };
+    });
+
+    return jsonResponse({
+      sessionId,
+      runtimeId: runtimeWorkspace.runtimeId,
+      question: result.question,
+      knowledgeIds: requestedKnowledgeIds,
+      total: result.total,
+      page: result.page,
+      pageSize: result.pageSize,
+      items,
+    });
+  });
+
+  addRoute(routes, "POST", "/workspace/:id/knowledge/mcp", "none", async (ctx) => {
+    const workspace = await resolveWorkspace(config, ctx.params.id);
+    return handleKnowledgeMcpRequest({
+      request: ctx.request,
+      workspaceId: workspace.id,
+      runtimeTokens: runtimeKnowledgeTokens,
+      knowledgeAttachments,
+      knowledgeRegistry,
+      ragflow,
+      serverVersion: SERVER_VERSION,
+    });
+  });
+
+  addRoute(routes, "POST", "/workspace/:id/knowledge/:knowledgeId/documents", "client", async (ctx) => {
+    ensureWritable(config);
+    requireClientScope(ctx, "collaborator");
+    await resolveWorkspace(config, ctx.params.id);
+    const user = await resolveKnowledgeCaller(auth, ctx);
+    const knowledgeId = normalizeKnowledgeId(ctx.params.knowledgeId);
+    const record = await knowledgeRegistry.get(knowledgeId);
+    if (!record || !isKnowledgeVisible(record)) {
+      throw new ApiError(404, "knowledge_not_found", "Knowledge base not found");
+    }
+    if (!user.isAdmin && record.ownerUserId !== user.id) {
+      throw new ApiError(403, "knowledge_write_forbidden", "Only the knowledge base owner can upload documents.");
+    }
+
+    const contentType = ctx.request.headers.get("content-type") ?? "";
+    if (!contentType.toLowerCase().includes("multipart/form-data")) {
+      throw new ApiError(400, "invalid_payload", "Expected multipart/form-data");
+    }
+    const form = await ctx.request.formData();
+    const files = form.getAll("file").filter((entry): entry is File => entry instanceof File);
+    if (!files.length) {
+      throw new ApiError(400, "file_required", "Form field 'file' is required");
+    }
+
+    const uploaded = await ragflow.uploadDocuments({
+      datasetId: record.ragflowDatasetId,
+      files,
+    });
+    const documentIds = uploaded
+      .map((item) => item.id)
+      .filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+    if (documentIds.length) {
+      await ragflow.startParse({
+        datasetId: record.ragflowDatasetId,
+        documentIds,
+      });
+    }
+
+    const nextRecord = await knowledgeRegistry.upsert({
+      knowledgeId: record.knowledgeId,
+      ragflowDatasetId: record.ragflowDatasetId,
+      ownerUserId: record.ownerUserId,
+      ownerDisplayName: record.ownerDisplayName,
+      title: record.title,
+      ...(record.description ? { description: record.description } : {}),
+      source: record.source,
+      visibility: record.visibility,
+      ...(record.ingestionPreset ? { ingestionPreset: record.ingestionPreset } : {}),
+      ...(record.chunkMethod ? { chunkMethod: record.chunkMethod } : {}),
+      parserConfig: record.parserConfig,
+      ...(record.embeddingModel ? { embeddingModel: record.embeddingModel } : {}),
+      status: documentIds.length ? "processing" : record.status,
+      documentCount: Math.max(record.documentCount ?? 0, 0) + uploaded.length,
+      chunkCount: record.chunkCount ?? 0,
+    });
+
+    return jsonResponse({
+      ok: true,
+      knowledgeId: record.knowledgeId,
+      uploadedCount: uploaded.length,
+      documentIds,
+      item: serializeKnowledgeRecord(nextRecord),
+    });
   });
 
   addRoute(routes, "PATCH", "/workspace/:id/config", "client", async (ctx) => {
@@ -3849,6 +4156,38 @@ function createRoutes(
     return jsonResponse({ ok: true });
   });
 
+  addRoute(routes, "GET", "/workspace/:id/ragflow", "client", async (ctx) => {
+    await resolveWorkspace(config, ctx.params.id);
+    return jsonResponse(getRagflowStatus());
+  });
+
+  addRoute(routes, "GET", "/workspace/:id/ragflow/datasets", "client", async (ctx) => {
+    await resolveWorkspace(config, ctx.params.id);
+    const query = ctx.url.searchParams.get("query");
+    const limitRaw = ctx.url.searchParams.get("limit");
+    const limit = limitRaw ? Number.parseInt(limitRaw, 10) : undefined;
+    const items = await listRagflowDatasets({ query, limit: Number.isFinite(limit) ? limit : undefined });
+    return jsonResponse({ items });
+  });
+
+  addRoute(routes, "POST", "/workspace/:id/ragflow/retrieve", "client", async (ctx) => {
+    await resolveWorkspace(config, ctx.params.id);
+    const body = await readJsonBody(ctx.request);
+    const question = typeof body.question === "string" ? body.question : "";
+    const datasetIds = Array.isArray(body.datasetIds) ? body.datasetIds.filter((value): value is string => typeof value === "string") : [];
+    const result = await retrieveFromRagflow({
+      question,
+      datasetIds,
+      page: typeof body.page === "number" ? body.page : null,
+      pageSize: typeof body.pageSize === "number" ? body.pageSize : null,
+      topK: typeof body.topK === "number" ? body.topK : null,
+      similarityThreshold: typeof body.similarityThreshold === "number" ? body.similarityThreshold : null,
+      vectorSimilarityWeight: typeof body.vectorSimilarityWeight === "number" ? body.vectorSimilarityWeight : null,
+      keyword: body.keyword === true,
+    });
+    return jsonResponse(result);
+  });
+
   addRoute(routes, "GET", "/workspace/:id/commands", "client", async (ctx) => {
     const scope = ctx.url.searchParams.get("scope") === "global" ? "global" : "workspace";
     if (scope === "global") {
@@ -4257,6 +4596,255 @@ async function resolveWorkspace(config: ServerConfig, id: string): Promise<Works
     throw new ApiError(403, "workspace_unauthorized", "Workspace is not authorized");
   }
   return { ...workspace, path: resolvedWorkspace };
+}
+
+function resolveServerLoopbackBaseUrl(config: ServerConfig): string {
+  return `http://127.0.0.1:${config.port}`;
+}
+
+function normalizeKnowledgeIdList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const next: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "string") continue;
+    const trimmed = entry.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    next.push(trimmed);
+  }
+  return next;
+}
+
+function normalizeRequiredSessionId(value: unknown): string {
+  const sessionId = typeof value === "string" ? value.trim() : "";
+  if (!sessionId) {
+    throw new ApiError(400, "invalid_payload", "sessionId is required");
+  }
+  return sessionId;
+}
+
+function normalizeKnowledgeId(value: unknown): string {
+  const knowledgeId = typeof value === "string" ? value.trim() : "";
+  if (!knowledgeId) {
+    throw new ApiError(400, "invalid_payload", "knowledgeId is required");
+  }
+  return knowledgeId;
+}
+
+function normalizeKnowledgeTitle(value: unknown): string {
+  const title = typeof value === "string" ? value.trim() : "";
+  if (!title) {
+    throw new ApiError(400, "invalid_payload", "title is required");
+  }
+  if (title.length > 120) {
+    throw new ApiError(400, "invalid_payload", "title must be 120 characters or fewer");
+  }
+  return title;
+}
+
+function normalizeOptionalKnowledgeDescription(value: unknown): string | null {
+  if (value == null) return null;
+  const description = typeof value === "string" ? value.trim() : "";
+  if (!description) return null;
+  return description.slice(0, 500);
+}
+
+function normalizeKnowledgeChunkMethod(value: unknown): string {
+  const chunkMethod = typeof value === "string" ? value.trim() : "";
+  return chunkMethod || "naive";
+}
+
+function buildDefaultKnowledgeParserConfig(): Record<string, unknown> {
+  return {
+    chunk_token_num: 2000,
+    delimiter: "\n",
+    layout_recognize: true,
+    html4excel: false,
+    raptor: { use_raptor: false },
+  };
+}
+
+function normalizeKnowledgeParserConfig(value: unknown, chunkMethod: string): Record<string, unknown> {
+  if (value == null) {
+    return chunkMethod === "naive" ? buildDefaultKnowledgeParserConfig() : {};
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new ApiError(400, "invalid_payload", "parserConfig must be an object");
+  }
+  const parserConfig = { ...(value as Record<string, unknown>) };
+  if (chunkMethod === "naive" && typeof parserConfig.chunk_token_num !== "number") {
+    parserConfig.chunk_token_num = 2000;
+  }
+  return parserConfig;
+}
+
+function createKnowledgeId(): string {
+  return `kb_${shortId()}`;
+}
+
+function isKnowledgeVisible(record: KnowledgeRegistryRecord): boolean {
+  return record.visibility === "visible_to_all_users" && record.status !== "deleted";
+}
+
+function serializeKnowledgeRecord(record: KnowledgeRegistryRecord) {
+  return {
+    knowledgeId: record.knowledgeId,
+    ragflowDatasetId: record.ragflowDatasetId,
+    ownerUserId: record.ownerUserId,
+    ownerDisplayName: record.ownerDisplayName,
+    title: record.title,
+    description: record.description ?? null,
+    source: record.source,
+    visibility: record.visibility,
+    ingestionPreset: record.ingestionPreset ?? null,
+    chunkMethod: record.chunkMethod ?? null,
+    parserConfig: record.parserConfig ?? {},
+    embeddingModel: record.embeddingModel ?? null,
+    status: record.status,
+    documentCount: record.documentCount ?? 0,
+    chunkCount: record.chunkCount ?? 0,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+  };
+}
+
+async function listKnowledgeRecordsByIds(
+  knowledgeRegistry: KnowledgeRegistryService,
+  knowledgeIds: string[],
+): Promise<KnowledgeRegistryRecord[]> {
+  const items: KnowledgeRegistryRecord[] = [];
+  for (const knowledgeId of knowledgeIds) {
+    const record = await knowledgeRegistry.get(knowledgeId);
+    if (!record || !isKnowledgeVisible(record)) continue;
+    items.push(record);
+  }
+  return items;
+}
+
+function deriveKnowledgeStatusFromDocuments(
+  currentStatus: KnowledgeRegistryRecord["status"],
+  documents: Array<{ run: string | null }>,
+): KnowledgeRegistryRecord["status"] {
+  if (!documents.length) return currentStatus === "deleted" ? "deleted" : "ready";
+  const runs = documents
+    .map((document) => (typeof document.run === "string" ? document.run.trim().toUpperCase() : ""))
+    .filter(Boolean);
+  if (runs.some((run) => run === "FAIL")) return "degraded";
+  if (runs.some((run) => run !== "DONE")) return "processing";
+  return "ready";
+}
+
+async function refreshKnowledgeRecordsFromRagflow(
+  knowledgeRegistry: KnowledgeRegistryService,
+  ragflow: RagflowClient,
+  records: KnowledgeRegistryRecord[],
+): Promise<KnowledgeRegistryRecord[]> {
+  const next: KnowledgeRegistryRecord[] = [];
+  for (const record of records) {
+    if (!isKnowledgeVisible(record)) {
+      next.push(record);
+      continue;
+    }
+    try {
+      const documents = await ragflow.listDocuments({ datasetId: record.ragflowDatasetId, limit: 500 });
+      const documentCount = documents.length;
+      const chunkCount = documents.reduce((sum, document) => sum + (document.chunkCount ?? 0), 0);
+      const status = deriveKnowledgeStatusFromDocuments(record.status, documents);
+      if (
+        record.documentCount === documentCount &&
+        record.chunkCount === chunkCount &&
+        record.status === status
+      ) {
+        next.push(record);
+        continue;
+      }
+      const updated = await knowledgeRegistry.upsert({
+        knowledgeId: record.knowledgeId,
+        ragflowDatasetId: record.ragflowDatasetId,
+        ownerUserId: record.ownerUserId,
+        ownerDisplayName: record.ownerDisplayName,
+        title: record.title,
+        ...(record.description ? { description: record.description } : {}),
+        source: record.source,
+        visibility: record.visibility,
+        ...(record.ingestionPreset ? { ingestionPreset: record.ingestionPreset } : {}),
+        ...(record.chunkMethod ? { chunkMethod: record.chunkMethod } : {}),
+        parserConfig: record.parserConfig,
+        ...(record.embeddingModel ? { embeddingModel: record.embeddingModel } : {}),
+        status,
+        documentCount,
+        chunkCount,
+      });
+      next.push(updated);
+    } catch {
+      next.push(record);
+    }
+  }
+  return next;
+}
+
+async function requireKnowledgeRecordsForAttachment(
+  knowledgeRegistry: KnowledgeRegistryService,
+  knowledgeIds: string[],
+): Promise<KnowledgeRegistryRecord[]> {
+  const items: KnowledgeRegistryRecord[] = [];
+  for (const knowledgeId of knowledgeIds) {
+    const record = await knowledgeRegistry.get(knowledgeId);
+    if (!record || !isKnowledgeVisible(record)) {
+      throw new ApiError(400, "invalid_knowledge_ids", `Knowledge base ${knowledgeId} is unavailable.`);
+    }
+    items.push(record);
+  }
+  return items;
+}
+
+async function requireKnowledgeRecordsForSearch(
+  knowledgeRegistry: KnowledgeRegistryService,
+  knowledgeIds: string[],
+): Promise<KnowledgeRegistryRecord[]> {
+  const items = await requireKnowledgeRecordsForAttachment(knowledgeRegistry, knowledgeIds);
+  if (!items.length) {
+    throw new ApiError(400, "no_attached_knowledge", "No knowledge bases are attached to this session.");
+  }
+  return items;
+}
+
+async function resolveKnowledgeCaller(auth: AuthService, ctx: RequestContext): Promise<AuthIdentity> {
+  const ownerKey = ctx.actor?.tokenHash?.trim() ?? "";
+  if (!ownerKey) {
+    throw new ApiError(403, "knowledge_user_context_required", "Knowledge routes require a user-bound client token.");
+  }
+  const user = await auth.getUserByOwnerKey(ownerKey);
+  if (!user) {
+    throw new ApiError(403, "knowledge_user_context_required", "Knowledge routes require a user-bound client token.");
+  }
+  return user;
+}
+
+async function requireKnowledgeSessionAccess(input: {
+  workspace: WorkspaceInfo;
+  sessionId: string;
+  ctx: RequestContext;
+  sessionOwnership: SessionOwnershipService;
+  sessionWorkspaces: SessionWorkspaceService;
+}) {
+  const scope = input.ctx.actor?.scope ?? "viewer";
+  const requesterKey = input.ctx.actor?.tokenHash?.trim() ?? "";
+  if (scope !== "owner") {
+    if (!requesterKey) {
+      throw new ApiError(403, "forbidden", "Missing requester identity");
+    }
+    const knownOwner = await input.sessionOwnership.getOwner(input.workspace.id, input.sessionId);
+    if (!knownOwner || knownOwner !== requesterKey) {
+      throw new ApiError(404, "session_not_found", "Session not found");
+    }
+  }
+  const runtimeWorkspace = await input.sessionWorkspaces.getWorkspace(input.workspace.id, input.sessionId);
+  if (!runtimeWorkspace) {
+    throw new ApiError(404, "session_not_found", "Session not found");
+  }
+  return runtimeWorkspace;
 }
 
 async function isAuthorizedRoot(workspacePath: string, roots: string[]): Promise<boolean> {

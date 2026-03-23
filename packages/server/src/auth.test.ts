@@ -138,7 +138,6 @@ describe("AuthService", () => {
 
     expect(await readFile(missingAgentPath, "utf8")).toContain("agent");
   });
-
   test("resolving a bound user repairs an existing workspace without requiring a new login", async () => {
     const root = join(tmpdir(), `openwork-auth-bound-user-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     const blankWorkspace = join(root, "blank-workspace");

@@ -128,6 +128,88 @@ export type OpenworkWorkspaceList = {
   activeId?: string | null;
 };
 
+export type OpenworkKnowledgeScope = "mine" | "others";
+
+export type OpenworkKnowledgeItem = {
+  knowledgeId: string;
+  ragflowDatasetId: string;
+  ownerUserId: string;
+  ownerDisplayName: string;
+  title: string;
+  description: string | null;
+  source: string;
+  visibility: string;
+  ingestionPreset: string | null;
+  chunkMethod: string | null;
+  parserConfig: Record<string, unknown>;
+  embeddingModel: string | null;
+  status: string;
+  documentCount: number;
+  chunkCount: number;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type OpenworkKnowledgeListResponse = {
+  scope: OpenworkKnowledgeScope;
+  items: OpenworkKnowledgeItem[];
+};
+
+export type OpenworkKnowledgeCreateInput = {
+  title: string;
+  description?: string | null;
+  chunkMethod?: string | null;
+  parserConfig?: Record<string, unknown> | null;
+};
+
+export type OpenworkKnowledgeCreateResponse = {
+  ok: boolean;
+  item: OpenworkKnowledgeItem;
+};
+
+export type OpenworkKnowledgeUploadResponse = {
+  ok: boolean;
+  knowledgeId: string;
+  uploadedCount: number;
+  documentIds: string[];
+  item: OpenworkKnowledgeItem;
+};
+
+export type OpenworkSessionKnowledgeResponse = {
+  sessionId: string;
+  runtimeId: string;
+  knowledgeIds: string[];
+  items: OpenworkKnowledgeItem[];
+};
+
+export type OpenworkKnowledgeSearchItem = {
+  id: string;
+  content: string;
+  similarity: number | null;
+  vectorSimilarity: number | null;
+  termSimilarity: number | null;
+  datasetId: string | null;
+  documentId: string | null;
+  documentName: string | null;
+  positions: unknown[];
+  imageId: string | null;
+  knowledgeId: string | null;
+  knowledgeTitle: string | null;
+  ownerUserId: string | null;
+  ownerDisplayName: string | null;
+};
+
+export type OpenworkKnowledgeSearchResponse = {
+  sessionId: string;
+  runtimeId: string;
+  question: string;
+  knowledgeIds: string[];
+  total: number;
+  page: number;
+  pageSize: number;
+  items: OpenworkKnowledgeSearchItem[];
+};
+
 export type OpenworkPluginItem = {
   spec: string;
   source: "config" | "dir.project" | "dir.global";
@@ -189,6 +271,47 @@ export type OpenworkMcpItem = {
   config: Record<string, unknown>;
   source: "config.project" | "config.global" | "config.remote";
   disabledByTools?: boolean;
+};
+
+export type OpenworkRagflowStatus = {
+  configured: boolean;
+  available: boolean;
+  baseUrl: string | null;
+  mcpUrl: string | null;
+  reason: string | null;
+};
+
+export type OpenworkRagflowDataset = {
+  id: string;
+  name: string;
+  description: string;
+  documentCount: number | null;
+  chunkCount: number | null;
+  embeddingModel: string | null;
+  permission: string | null;
+};
+
+export type OpenworkRagflowChunk = {
+  id: string | null;
+  content: string;
+  datasetId: string | null;
+  datasetName: string | null;
+  documentId: string | null;
+  documentName: string | null;
+  similarity: number | null;
+  vectorSimilarity: number | null;
+  termSimilarity: number | null;
+  positions: number[] | null;
+  imageId: string | null;
+};
+
+export type OpenworkRagflowRetrieveResult = {
+  chunks: OpenworkRagflowChunk[];
+  total: number;
+  page: number;
+  pageSize: number;
+  question: string;
+  datasetIds: string[];
 };
 
 export type OpenworkOpenCodeRouterTelegramResult = {
@@ -1007,6 +1130,28 @@ async function requestMultipartRaw(
   return { ok: response.ok, status: response.status, text };
 }
 
+async function requestMultipartJson<T>(
+  baseUrl: string,
+  path: string,
+  options: { method?: string; token?: string; hostToken?: string; body?: FormData; timeoutMs?: number } = {},
+): Promise<T> {
+  const response = await requestMultipartRaw(baseUrl, path, options);
+  let json: any = null;
+  try {
+    json = response.text ? JSON.parse(response.text) : null;
+  } catch {
+    json = null;
+  }
+
+  if (!response.ok) {
+    const code = typeof json?.code === "string" ? json.code : "request_failed";
+    const message = typeof json?.message === "string" ? json.message : "Request failed";
+    throw new OpenworkServerError(response.status, code, message, json?.details);
+  }
+
+  return json as T;
+}
+
 async function requestBinary(
   baseUrl: string,
   path: string,
@@ -1063,6 +1208,7 @@ export function createOpenworkServerClient(options: { baseUrl: string; token?: s
     activateWorkspace: 10_000,
     deleteWorkspace: 10_000,
     deleteSession: 12_000,
+    knowledge: 12_000,
     status: 6_000,
     admin: 12_000,
     config: 10_000,
@@ -1137,6 +1283,50 @@ export function createOpenworkServerClient(options: { baseUrl: string; token?: s
         baseUrl,
         `/workspace/${encodeURIComponent(workspaceId)}/sessions/${encodeURIComponent(sessionId)}`,
         { token, hostToken, method: "DELETE", timeoutMs: timeouts.deleteSession },
+      ),
+    listKnowledge: (workspaceId: string, scope: OpenworkKnowledgeScope = "mine") =>
+      requestJson<OpenworkKnowledgeListResponse>(
+        baseUrl,
+        `/workspace/${encodeURIComponent(workspaceId)}/knowledge?scope=${encodeURIComponent(scope)}`,
+        { token, hostToken, timeoutMs: timeouts.knowledge },
+      ),
+    createKnowledge: (workspaceId: string, input: OpenworkKnowledgeCreateInput) =>
+      requestJson<OpenworkKnowledgeCreateResponse>(
+        baseUrl,
+        `/workspace/${encodeURIComponent(workspaceId)}/knowledge`,
+        { token, hostToken, method: "POST", body: input, timeoutMs: timeouts.knowledge },
+      ),
+    uploadKnowledgeDocuments: (workspaceId: string, knowledgeId: string, files: File[]) => {
+      const form = new FormData();
+      for (const file of files) {
+        form.append("file", file, file.name);
+      }
+      return requestMultipartJson<OpenworkKnowledgeUploadResponse>(
+        baseUrl,
+        `/workspace/${encodeURIComponent(workspaceId)}/knowledge/${encodeURIComponent(knowledgeId)}/documents`,
+        { token, hostToken, method: "POST", body: form, timeoutMs: timeouts.binary },
+      );
+    },
+    getSessionKnowledge: (workspaceId: string, sessionId: string) =>
+      requestJson<OpenworkSessionKnowledgeResponse>(
+        baseUrl,
+        `/workspace/${encodeURIComponent(workspaceId)}/sessions/${encodeURIComponent(sessionId)}/knowledge`,
+        { token, hostToken, timeoutMs: timeouts.knowledge },
+      ),
+    setSessionKnowledge: (workspaceId: string, sessionId: string, knowledgeIds: string[]) =>
+      requestJson<OpenworkSessionKnowledgeResponse>(
+        baseUrl,
+        `/workspace/${encodeURIComponent(workspaceId)}/sessions/${encodeURIComponent(sessionId)}/knowledge`,
+        { token, hostToken, method: "PUT", body: { knowledgeIds }, timeoutMs: timeouts.knowledge },
+      ),
+    searchKnowledge: (
+      workspaceId: string,
+      input: { sessionId: string; question: string; knowledgeIds?: string[] },
+    ) =>
+      requestJson<OpenworkKnowledgeSearchResponse>(
+        baseUrl,
+        `/workspace/${encodeURIComponent(workspaceId)}/knowledge/search`,
+        { token, hostToken, method: "POST", body: input, timeoutMs: timeouts.knowledge },
       ),
     exportWorkspace: (workspaceId: string) =>
       requestJson<OpenworkWorkspaceExport>(baseUrl, `/workspace/${encodeURIComponent(workspaceId)}/export`, {
@@ -1637,6 +1827,45 @@ export function createOpenworkServerClient(options: { baseUrl: string; token?: s
         hostToken,
         method: "DELETE",
       }),
+    getRagflowStatus: (workspaceId: string) =>
+      requestJson<OpenworkRagflowStatus>(baseUrl, `/workspace/${workspaceId}/ragflow`, {
+        token,
+        hostToken,
+      }),
+    listRagflowDatasets: (workspaceId: string, options?: { query?: string; limit?: number }) => {
+      const search = new URLSearchParams();
+      if (options?.query?.trim()) search.set("query", options.query.trim());
+      if (typeof options?.limit === "number" && Number.isFinite(options.limit)) search.set("limit", String(options.limit));
+      const suffix = search.toString();
+      return requestJson<{ items: OpenworkRagflowDataset[] }>(
+        baseUrl,
+        `/workspace/${workspaceId}/ragflow/datasets${suffix ? `?${suffix}` : ""}`,
+        { token, hostToken },
+      );
+    },
+    retrieveRagflow: (
+      workspaceId: string,
+      payload: {
+        question: string;
+        datasetIds: string[];
+        page?: number;
+        pageSize?: number;
+        topK?: number;
+        similarityThreshold?: number;
+        vectorSimilarityWeight?: number;
+        keyword?: boolean;
+      },
+    ) =>
+      requestJson<OpenworkRagflowRetrieveResult>(
+        baseUrl,
+        `/workspace/${workspaceId}/ragflow/retrieve`,
+        {
+          token,
+          hostToken,
+          method: "POST",
+          body: payload,
+        },
+      ),
 
     listCommands: (workspaceId: string, scope: "workspace" | "global" = "workspace") =>
       requestJson<{ items: OpenworkCommandItem[] }>(

@@ -74,7 +74,8 @@ describe("provisionSessionWorkspace", () => {
     expect(parsed.instructions).toContain(".opencode/openwork-knowledge.md");
     expect(instructionRaw).toContain("openwork_knowledge_search");
     expect(instructionRaw).toContain("Never use `memory_search_nodes` or `memory_read_graph`");
-    expect(instructionRaw).toContain("(none attached yet)");
+    expect(instructionRaw).toContain("do not use `memory_search_nodes` or `memory_read_graph` as a substitute for knowledge retrieval");
+    expect(instructionRaw).toContain("(none attached yet; do not substitute session memory for knowledge retrieval)");
   });
 
   test("updates the runtime knowledge instructions with the current attached titles", async () => {

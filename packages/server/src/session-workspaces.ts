@@ -129,13 +129,14 @@ function buildRuntimeKnowledgeInstructions(attachedKnowledge: RuntimeKnowledgeIn
     "5. Never use `memory_search_nodes` or `memory_read_graph` to search attached knowledge bases. Those tools are only for session memory and graph memory, not document knowledge recall.",
     "6. Do not conclude that information is missing just because the current session workspace has no uploaded files. Attached knowledge bases can still contain the answer.",
     "7. If the knowledge results are relevant, use them first. If exact wording, numbers, tables, clauses, or citations matter, then read the original files afterwards.",
-    "8. If no knowledge bases are attached or the search results are insufficient, say so briefly and continue with other tools.",
+    "8. If no knowledge bases are attached, say that clearly and do not use `memory_search_nodes` or `memory_read_graph` as a substitute for knowledge retrieval.",
+    "9. If attached knowledge search results are insufficient, say so briefly and then continue with other appropriate tools.",
     "",
     "Currently attached knowledge bases:",
   ];
 
   if (!attachedKnowledge.length) {
-    header.push("- (none attached yet)");
+    header.push("- (none attached yet; do not substitute session memory for knowledge retrieval)");
     return header.join("\n") + "\n";
   }
 

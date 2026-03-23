@@ -164,52 +164,56 @@ export async function handleKnowledgeMcpRequest(input: {
   }
 
   if (payload.method === "tools/list") {
-    return jsonRpcResult(id, {
-      tools: [
-        {
-          name: KNOWLEDGE_LIST_TOOL,
-          title: "List Attached Knowledge",
-          description: "List the knowledge bases currently attached to this OpenWork session runtime.",
-          inputSchema: {
-            type: "object",
-            properties: {},
-            additionalProperties: false,
-          },
-          annotations: {
-            readOnlyHint: true,
-            destructiveHint: false,
-            idempotentHint: true,
-            openWorldHint: true,
-          },
+    const attachedKnowledgeIds = await input.knowledgeAttachments.get(runtime.workspaceId, runtime.sessionId);
+    const tools = [
+      {
+        name: KNOWLEDGE_LIST_TOOL,
+        title: "List Attached Knowledge",
+        description: "List the knowledge bases currently attached to this OpenWork session runtime.",
+        inputSchema: {
+          type: "object",
+          properties: {},
+          additionalProperties: false,
         },
-        {
-          name: KNOWLEDGE_SEARCH_TOOL,
-          title: "Search Attached Knowledge",
-          description: "Primary search tool for facts stored in the knowledge bases attached to this OpenWork session. Do not substitute graph-memory tools for this. Optionally narrow the search to a subset of attached knowledge_ids.",
-          inputSchema: {
-            type: "object",
-            properties: {
-              question: {
-                type: "string",
-                description: "The search question to run against the attached knowledge bases.",
-              },
-              knowledge_ids: {
-                type: "array",
-                items: { type: "string" },
-                description: "Optional subset of attached knowledge IDs to search for this call only.",
-              },
+        annotations: {
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: true,
+        },
+      },
+    ];
+    if (attachedKnowledgeIds.length > 0) {
+      tools.push({
+        name: KNOWLEDGE_SEARCH_TOOL,
+        title: "Search Attached Knowledge",
+        description: "Primary search tool for facts stored in the knowledge bases attached to this OpenWork session. Do not substitute graph-memory tools for this. Optionally narrow the search to a subset of attached knowledge_ids.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            question: {
+              type: "string",
+              description: "The search question to run against the attached knowledge bases.",
             },
-            required: ["question"],
-            additionalProperties: false,
+            knowledge_ids: {
+              type: "array",
+              items: { type: "string" },
+              description: "Optional subset of attached knowledge IDs to search for this call only.",
+            },
           },
-          annotations: {
-            readOnlyHint: true,
-            destructiveHint: false,
-            idempotentHint: true,
-            openWorldHint: true,
-          },
+          required: ["question"],
+          additionalProperties: false,
         },
-      ],
+        annotations: {
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: true,
+        },
+      });
+    }
+    return jsonRpcResult(id, {
+      tools,
     });
   }
 

@@ -88,7 +88,7 @@ describe("knowledge MCP handler", () => {
     });
   }
 
-  test("lists only the knowledge tools", async () => {
+  test("tools/list only exposes attachment inspection when no knowledge is attached", async () => {
     const issued = await runtimeTokens.issue({ workspaceId: "ws_1", sessionId: "ses_1", runtimeId: "rt_1" });
 
     const response = await invoke(issued.token, {
@@ -100,6 +100,37 @@ describe("knowledge MCP handler", () => {
     await expect(response.json()).resolves.toMatchObject({
       jsonrpc: "2.0",
       id: 1,
+      result: {
+        tools: [
+          { name: "openwork_knowledge_list_attached" },
+        ],
+      },
+    });
+  });
+
+  test("tools/list exposes search once knowledge is attached", async () => {
+    await registry.upsert({
+      knowledgeId: "kb_a",
+      ragflowDatasetId: "ds_a",
+      ownerUserId: "user_a",
+      ownerDisplayName: "alice",
+      title: "Alice Docs",
+      source: "openwork",
+      visibility: "visible_to_all_users",
+      status: "ready",
+    });
+    await attachments.set("ws_1", "ses_1", "rt_1", ["kb_a"]);
+    const issued = await runtimeTokens.issue({ workspaceId: "ws_1", sessionId: "ses_1", runtimeId: "rt_1" });
+
+    const response = await invoke(issued.token, {
+      jsonrpc: "2.0",
+      id: 11,
+      method: "tools/list",
+    });
+
+    await expect(response.json()).resolves.toMatchObject({
+      jsonrpc: "2.0",
+      id: 11,
       result: {
         tools: [
           { name: "openwork_knowledge_list_attached" },

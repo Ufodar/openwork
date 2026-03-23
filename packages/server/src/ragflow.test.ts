@@ -19,11 +19,27 @@ describe("ragflow config", () => {
         RAGFLOW_BASE_URL: "http://127.0.0.1:32473/",
         RAGFLOW_API_KEY: "secret",
         RAGFLOW_MCP_URL: "http://127.0.0.1:30467/sse/",
+        RAGFLOW_INSECURE_TLS: "true",
       }),
     ).toEqual({
       baseUrl: "http://127.0.0.1:32473",
       apiKey: "secret",
       mcpUrl: "http://127.0.0.1:30467/sse",
+      insecureTls: true,
+    });
+  });
+
+  test("defaults insecure tls to false when not configured", () => {
+    expect(
+      resolveRagflowServerConfig(undefined, {
+        RAGFLOW_BASE_URL: "http://127.0.0.1:32473/",
+        RAGFLOW_API_KEY: "secret",
+      }),
+    ).toEqual({
+      baseUrl: "http://127.0.0.1:32473",
+      apiKey: "secret",
+      mcpUrl: null,
+      insecureTls: false,
     });
   });
 });
@@ -267,5 +283,35 @@ describe("ragflow client", () => {
         cause: "The socket connection was closed unexpectedly.",
       },
     });
+  });
+
+  test("uses the dedicated request transport when insecure TLS is enabled", async () => {
+    let transportCalls = 0;
+    let fetchCalls = 0;
+    const client = createRagflowClient({
+      baseUrl: "https://ragflow.local",
+      apiKey: "test",
+      allowInsecureTls: true,
+      fetchImpl: async () => {
+        fetchCalls += 1;
+        throw new Error("fetch should not run");
+      },
+      requestImpl: async ({ url, allowInsecureTls }) => {
+        transportCalls += 1;
+        expect(url).toBe("https://ragflow.local/api/v1/datasets?page=1&page_size=200&orderby=create_time&desc=true");
+        expect(allowInsecureTls).toBe(true);
+        return new Response(
+          JSON.stringify({
+            code: 0,
+            data: [],
+          }),
+          { status: 200 },
+        );
+      },
+    });
+
+    await expect(client.listDatasets()).resolves.toEqual([]);
+    expect(transportCalls).toBe(1);
+    expect(fetchCalls).toBe(0);
   });
 });

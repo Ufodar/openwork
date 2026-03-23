@@ -1,3 +1,5 @@
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
 import { ApiError } from "./errors.js";
 import type { ServerConfig } from "./types.js";
 
@@ -5,6 +7,7 @@ export type RagflowServerConfig = {
   baseUrl: string | null;
   apiKey: string | null;
   mcpUrl: string | null;
+  insecureTls: boolean;
 };
 
 export type RagflowDatasetSummary = {
@@ -103,6 +106,7 @@ type RagflowApiEnvelope<T> = {
 };
 
 type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
+type RequestTransport = (input: { url: string; init?: RequestInit; allowInsecureTls: boolean }) => Promise<Response>;
 
 function normalizeBaseUrl(value: string | null | undefined): string | null {
   if (typeof value !== "string") return null;
@@ -115,6 +119,15 @@ function normalizeToken(value: string | null | undefined): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   return trimmed || null;
+}
+
+function parseBoolean(value: string | boolean | null | undefined): boolean | undefined {
+  if (typeof value === "boolean") return value;
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (["true", "1", "yes", "on"].includes(normalized)) return true;
+  if (["false", "0", "no", "off"].includes(normalized)) return false;
+  return undefined;
 }
 
 function stringValue(value: unknown): string | null {
@@ -184,6 +197,14 @@ function getConfigValue(
   return typeof value === "string" ? value : undefined;
 }
 
+function getConfigBoolean(
+  config: Pick<ServerConfig, "ragflow"> | undefined,
+  key: "insecureTls",
+): boolean | undefined {
+  const value = config?.ragflow?.[key];
+  return typeof value === "boolean" ? value : undefined;
+}
+
 export function resolveRagflowServerConfig(
   config?: Pick<ServerConfig, "ragflow">,
   env: Record<string, string | undefined> = process.env,
@@ -199,7 +220,12 @@ export function resolveRagflowServerConfig(
   const mcpUrl =
     normalizeBaseUrl(getConfigValue(config, "mcpUrl")) ??
     normalizeBaseUrl(env.RAGFLOW_MCP_URL);
-  return { baseUrl, apiKey, mcpUrl };
+  const insecureTls =
+    getConfigBoolean(config, "insecureTls") ??
+    parseBoolean(env.RAGFLOW_INSECURE_TLS) ??
+    parseBoolean(env.RAGFLOW_SKIP_TLS_VERIFY) ??
+    false;
+  return { baseUrl, apiKey, mcpUrl, insecureTls };
 }
 
 export function getRagflowStatus(
@@ -254,6 +280,8 @@ async function fetchRagflowEnvelope<T>(
   apiKey: string,
   path: string,
   fetchImpl: FetchLike,
+  requestImpl: RequestTransport | undefined,
+  allowInsecureTls: boolean,
   init?: RequestInit,
 ): Promise<{ url: string; response: Response; payload: RagflowApiEnvelope<T> | null }> {
   const url = `${baseUrl}/api/v1${path}`;
@@ -265,10 +293,20 @@ async function fetchRagflowEnvelope<T>(
     if (init?.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
       headers.set("Content-Type", "application/json");
     }
-    response = await fetchImpl(url, {
+    const nextInit = {
       ...init,
       headers,
-    });
+    };
+    const shouldUseRequestTransport = allowInsecureTls && new URL(url).protocol === "https:";
+    if (shouldUseRequestTransport) {
+      response = await (requestImpl ?? nodeRequestTransport)({
+        url,
+        init: nextInit,
+        allowInsecureTls,
+      });
+    } else {
+      response = await fetchImpl(url, nextInit);
+    }
   } catch (error) {
     const failure = describeFetchFailure(error);
     throw new ApiError(502, "ragflow_request_failed", failure.message, {
@@ -310,9 +348,11 @@ async function fetchRagflowJson<T>(
   apiKey: string,
   path: string,
   fetchImpl: FetchLike,
+  requestImpl: RequestTransport | undefined,
+  allowInsecureTls: boolean,
   init?: RequestInit,
 ): Promise<T> {
-  const result = await fetchRagflowEnvelope<T>(baseUrl, apiKey, path, fetchImpl, init);
+  const result = await fetchRagflowEnvelope<T>(baseUrl, apiKey, path, fetchImpl, requestImpl, allowInsecureTls, init);
   assertRagflowEnvelopeOk(result);
   if (result.payload.data === undefined) {
     throw new ApiError(502, "ragflow_invalid_response", "RAGFlow returned an unexpected response.", {
@@ -327,10 +367,87 @@ async function fetchRagflowOk(
   apiKey: string,
   path: string,
   fetchImpl: FetchLike,
+  requestImpl: RequestTransport | undefined,
+  allowInsecureTls: boolean,
   init?: RequestInit,
 ): Promise<void> {
-  const result = await fetchRagflowEnvelope<unknown>(baseUrl, apiKey, path, fetchImpl, init);
+  const result = await fetchRagflowEnvelope<unknown>(
+    baseUrl,
+    apiKey,
+    path,
+    fetchImpl,
+    requestImpl,
+    allowInsecureTls,
+    init,
+  );
   assertRagflowEnvelopeOk(result);
+}
+
+function toHeadersInit(input: Record<string, string | string[] | undefined>): [string, string][] {
+  const next: [string, string][] = [];
+  for (const [key, value] of Object.entries(input)) {
+    if (typeof value === "string" && value.length > 0) {
+      next.push([key, value]);
+      continue;
+    }
+    if (Array.isArray(value) && value.length > 0) {
+      next.push([key, value.join(", ")]);
+    }
+  }
+  return next;
+}
+
+async function nodeRequestTransport(input: {
+  url: string;
+  init?: RequestInit;
+  allowInsecureTls: boolean;
+}): Promise<Response> {
+  const request = new Request(input.url, input.init);
+  const url = new URL(request.url);
+  const requestBodyAllowed = request.method !== "GET" && request.method !== "HEAD";
+  const body = requestBodyAllowed ? Buffer.from(await request.arrayBuffer()) : null;
+  const headers = new Headers(request.headers);
+  if (body && body.length > 0 && !headers.has("Content-Length")) {
+    headers.set("Content-Length", String(body.length));
+  }
+
+  return await new Promise<Response>((resolve, reject) => {
+    const transport = url.protocol === "https:" ? httpsRequest : httpRequest;
+    const req = transport(
+      url,
+      {
+        method: request.method,
+        headers: Object.fromEntries(headers.entries()),
+        ...(url.protocol === "https:" ? { rejectUnauthorized: !input.allowInsecureTls } : {}),
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk) => {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        });
+        res.on("end", () => {
+          resolve(
+            new Response(Buffer.concat(chunks), {
+              status: res.statusCode ?? 500,
+              headers: toHeadersInit(res.headers),
+            }),
+          );
+        });
+      },
+    );
+
+    req.on("error", reject);
+    req.setTimeout(15000, () => {
+      const error = new Error("RAGFlow request timed out.");
+      Object.assign(error, { code: "ETIMEDOUT" });
+      req.destroy(error);
+    });
+
+    if (body && body.length > 0) {
+      req.write(body);
+    }
+    req.end();
+  });
 }
 
 function mapDatasetSummary(entry: Record<string, unknown>): RagflowDatasetSummary | null {
@@ -381,6 +498,8 @@ export function createRagflowClient(input: {
   baseUrl: string;
   apiKey: string;
   fetchImpl?: FetchLike;
+  requestImpl?: RequestTransport;
+  allowInsecureTls?: boolean;
 }): RagflowClient {
   const baseUrl = normalizeBaseUrl(input.baseUrl);
   const apiKey = normalizeToken(input.apiKey);
@@ -388,6 +507,8 @@ export function createRagflowClient(input: {
     throw new Error("RAGFlow baseUrl and apiKey are required");
   }
   const fetchImpl = input.fetchImpl ?? globalThis.fetch;
+  const requestImpl = input.requestImpl;
+  const allowInsecureTls = input.allowInsecureTls === true;
 
   return {
     async listDatasets(options) {
@@ -405,6 +526,8 @@ export function createRagflowClient(input: {
         apiKey,
         `/datasets?${search.toString()}`,
         fetchImpl,
+        requestImpl,
+        allowInsecureTls,
         { method: "GET" },
       );
 
@@ -433,6 +556,8 @@ export function createRagflowClient(input: {
         apiKey,
         "/datasets",
         fetchImpl,
+        requestImpl,
+        allowInsecureTls,
         {
           method: "POST",
           body: JSON.stringify(payload),
@@ -466,6 +591,8 @@ export function createRagflowClient(input: {
         apiKey,
         `/datasets/${encodeURIComponent(datasetId)}/documents`,
         fetchImpl,
+        requestImpl,
+        allowInsecureTls,
         {
           method: "POST",
           body: form,
@@ -494,6 +621,8 @@ export function createRagflowClient(input: {
         apiKey,
         `/datasets/${encodeURIComponent(datasetId)}/documents?${search.toString()}`,
         fetchImpl,
+        requestImpl,
+        allowInsecureTls,
         { method: "GET" },
       );
 
@@ -520,6 +649,8 @@ export function createRagflowClient(input: {
         apiKey,
         `/datasets/${encodeURIComponent(datasetId)}/chunks`,
         fetchImpl,
+        requestImpl,
+        allowInsecureTls,
         {
           method: "POST",
           body: JSON.stringify({ document_ids: documentIds }),
@@ -548,6 +679,8 @@ export function createRagflowClient(input: {
         apiKey,
         "/retrieval",
         fetchImpl,
+        requestImpl,
+        allowInsecureTls,
         {
           method: "POST",
           body: JSON.stringify({

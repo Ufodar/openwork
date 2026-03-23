@@ -44,6 +44,7 @@ interface FileConfig {
     baseUrl?: string;
     apiKey?: string;
     mcpUrl?: string;
+    insecureTls?: boolean;
   };
 }
 
@@ -319,6 +320,10 @@ export async function resolveServerConfig(cli: CliArgs): Promise<ServerConfig> {
   const ragflowMcpUrl =
     process.env.RAGFLOW_MCP_URL ??
     fileConfig.ragflow?.mcpUrl;
+  const ragflowInsecureTls =
+    parseBoolean(process.env.RAGFLOW_INSECURE_TLS) ??
+    parseBoolean(process.env.RAGFLOW_SKIP_TLS_VERIFY) ??
+    fileConfig.ragflow?.insecureTls;
 
   const authorizedRoots =
     fileConfig.authorizedRoots?.length
@@ -345,11 +350,12 @@ export async function resolveServerConfig(cli: CliArgs): Promise<ServerConfig> {
     logFormat,
     logRequests,
     ragflow:
-      ragflowBaseUrl || ragflowApiKey || ragflowMcpUrl
+      ragflowBaseUrl || ragflowApiKey || ragflowMcpUrl || ragflowInsecureTls !== undefined
         ? {
           ...(ragflowBaseUrl ? { baseUrl: ragflowBaseUrl } : {}),
           ...(ragflowApiKey ? { apiKey: ragflowApiKey } : {}),
           ...(ragflowMcpUrl ? { mcpUrl: ragflowMcpUrl } : {}),
+          ...(ragflowInsecureTls !== undefined ? { insecureTls: ragflowInsecureTls } : {}),
         }
         : undefined,
   };

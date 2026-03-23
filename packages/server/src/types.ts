@@ -62,6 +62,7 @@ export interface ServerConfig {
     baseUrl?: string;
     apiKey?: string;
     mcpUrl?: string;
+    insecureTls?: boolean;
   };
 }
 

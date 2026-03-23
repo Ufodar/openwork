@@ -482,7 +482,7 @@ function mapDocumentSummary(entry: Record<string, unknown>): RagflowDocumentSumm
   };
 }
 
-function assertConfigured(config: RagflowServerConfig): { baseUrl: string; apiKey: string } {
+function assertConfigured(config: RagflowServerConfig): { baseUrl: string; apiKey: string; insecureTls: boolean } {
   if (!config.baseUrl || !config.apiKey) {
     const reason = !config.baseUrl && !config.apiKey
       ? "Set RAGFLOW_BASE_URL and RAGFLOW_API_KEY on the OpenWork server."
@@ -491,7 +491,7 @@ function assertConfigured(config: RagflowServerConfig): { baseUrl: string; apiKe
         : "RAGFLOW_API_KEY is missing.";
     throw new ApiError(503, "ragflow_unavailable", reason);
   }
-  return { baseUrl: config.baseUrl, apiKey: config.apiKey };
+  return { baseUrl: config.baseUrl, apiKey: config.apiKey, insecureTls: config.insecureTls };
 }
 
 export function createRagflowClient(input: {
@@ -738,31 +738,71 @@ export function createRagflowClient(input: {
 export function createConfiguredRagflowClient(
   config?: Pick<ServerConfig, "ragflow">,
   env: Record<string, string | undefined> = process.env,
+  clientOptions?: {
+    fetchImpl?: FetchLike;
+    requestImpl?: RequestTransport;
+  },
 ): RagflowClient {
   return {
-    async listDatasets(options) {
+    async listDatasets(listOptions) {
       const resolved = assertConfigured(resolveRagflowServerConfig(config, env));
-      return createRagflowClient(resolved).listDatasets(options);
+      return createRagflowClient({
+        baseUrl: resolved.baseUrl,
+        apiKey: resolved.apiKey,
+        allowInsecureTls: resolved.insecureTls,
+        fetchImpl: clientOptions?.fetchImpl,
+        requestImpl: clientOptions?.requestImpl,
+      }).listDatasets(listOptions);
     },
     async createDataset(input) {
       const resolved = assertConfigured(resolveRagflowServerConfig(config, env));
-      return createRagflowClient(resolved).createDataset(input);
+      return createRagflowClient({
+        baseUrl: resolved.baseUrl,
+        apiKey: resolved.apiKey,
+        allowInsecureTls: resolved.insecureTls,
+        fetchImpl: clientOptions?.fetchImpl,
+        requestImpl: clientOptions?.requestImpl,
+      }).createDataset(input);
     },
     async uploadDocuments(input) {
       const resolved = assertConfigured(resolveRagflowServerConfig(config, env));
-      return createRagflowClient(resolved).uploadDocuments(input);
+      return createRagflowClient({
+        baseUrl: resolved.baseUrl,
+        apiKey: resolved.apiKey,
+        allowInsecureTls: resolved.insecureTls,
+        fetchImpl: clientOptions?.fetchImpl,
+        requestImpl: clientOptions?.requestImpl,
+      }).uploadDocuments(input);
     },
     async listDocuments(input) {
       const resolved = assertConfigured(resolveRagflowServerConfig(config, env));
-      return createRagflowClient(resolved).listDocuments(input);
+      return createRagflowClient({
+        baseUrl: resolved.baseUrl,
+        apiKey: resolved.apiKey,
+        allowInsecureTls: resolved.insecureTls,
+        fetchImpl: clientOptions?.fetchImpl,
+        requestImpl: clientOptions?.requestImpl,
+      }).listDocuments(input);
     },
     async startParse(input) {
       const resolved = assertConfigured(resolveRagflowServerConfig(config, env));
-      return createRagflowClient(resolved).startParse(input);
+      return createRagflowClient({
+        baseUrl: resolved.baseUrl,
+        apiKey: resolved.apiKey,
+        allowInsecureTls: resolved.insecureTls,
+        fetchImpl: clientOptions?.fetchImpl,
+        requestImpl: clientOptions?.requestImpl,
+      }).startParse(input);
     },
     async retrieve(input) {
       const resolved = assertConfigured(resolveRagflowServerConfig(config, env));
-      return createRagflowClient(resolved).retrieve(input);
+      return createRagflowClient({
+        baseUrl: resolved.baseUrl,
+        apiKey: resolved.apiKey,
+        allowInsecureTls: resolved.insecureTls,
+        fetchImpl: clientOptions?.fetchImpl,
+        requestImpl: clientOptions?.requestImpl,
+      }).retrieve(input);
     },
   };
 }

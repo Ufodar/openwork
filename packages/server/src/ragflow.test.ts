@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
-import { createRagflowClient, getRagflowStatus, resolveRagflowServerConfig } from "./ragflow.js";
+import { createConfiguredRagflowClient, createRagflowClient, getRagflowStatus, resolveRagflowServerConfig } from "./ragflow.js";
 
 describe("ragflow config", () => {
   test("reports unavailable when base url and api key are missing", () => {
@@ -309,6 +309,41 @@ describe("ragflow client", () => {
         );
       },
     });
+
+    await expect(client.listDatasets()).resolves.toEqual([]);
+    expect(transportCalls).toBe(1);
+    expect(fetchCalls).toBe(0);
+  });
+
+  test("configured client forwards insecure tls from env to the request transport", async () => {
+    let transportCalls = 0;
+    let fetchCalls = 0;
+    const client = createConfiguredRagflowClient(
+      undefined,
+      {
+        RAGFLOW_BASE_URL: "https://ragflow.local",
+        RAGFLOW_API_KEY: "test",
+        RAGFLOW_INSECURE_TLS: "1",
+      },
+      {
+        fetchImpl: async () => {
+          fetchCalls += 1;
+          throw new Error("fetch should not run");
+        },
+        requestImpl: async ({ url, allowInsecureTls }) => {
+          transportCalls += 1;
+          expect(url).toBe("https://ragflow.local/api/v1/datasets?page=1&page_size=200&orderby=create_time&desc=true");
+          expect(allowInsecureTls).toBe(true);
+          return new Response(
+            JSON.stringify({
+              code: 0,
+              data: [],
+            }),
+            { status: 200 },
+          );
+        },
+      },
+    );
 
     await expect(client.listDatasets()).resolves.toEqual([]);
     expect(transportCalls).toBe(1);

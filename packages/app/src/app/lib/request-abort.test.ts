@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { isAbortLikeError, resolveAbortLikeError } from "./request-abort";
+import { isAbortLikeError, isTransientRequestError, resolveAbortLikeError } from "./request-abort";
 
 describe("resolveAbortLikeError", () => {
   test("maps timed out aborts to a timeout error", () => {
@@ -44,7 +44,22 @@ describe("isAbortLikeError", () => {
     expect(isAbortLikeError(error)).toBe(true);
   });
 
-  test("does not treat generic errors as aborts", () => {
+  test("does not treat timeout errors as aborts", () => {
     expect(isAbortLikeError(new Error("Request timed out."))).toBe(false);
+  });
+});
+
+describe("isTransientRequestError", () => {
+  test("treats abort-like errors as transient", () => {
+    const error = Object.assign(new Error("The operation was aborted."), { name: "AbortError" });
+    expect(isTransientRequestError(error)).toBe(true);
+  });
+
+  test("treats timeout errors as transient", () => {
+    expect(isTransientRequestError(new Error("Request timed out."))).toBe(true);
+  });
+
+  test("does not treat generic errors as transient", () => {
+    expect(isTransientRequestError(new Error("boom"))).toBe(false);
   });
 });

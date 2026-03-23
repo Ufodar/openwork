@@ -7,6 +7,11 @@ export function isAbortLikeError(error: unknown): boolean {
   return false;
 }
 
+export function isTransientRequestError(error: unknown): boolean {
+  if (isAbortLikeError(error)) return true;
+  return error instanceof Error && error.message === "Request timed out.";
+}
+
 export function resolveAbortLikeError(
   error: unknown,
   options: { didTimeout: boolean; upstreamAborted: boolean },

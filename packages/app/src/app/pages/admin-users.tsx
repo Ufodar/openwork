@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createSignal, on } from "solid-js";
+import { For, Show, createEffect, createSignal, on, onCleanup } from "solid-js";
 
 import Button from "../components/button";
 import type {
@@ -7,7 +7,7 @@ import type {
   OpenworkAdminWarning,
   OpenworkServerClient,
 } from "../lib/openwork-server";
-import { isAbortLikeError } from "../lib/request-abort";
+import { isTransientRequestError } from "../lib/request-abort";
 
 type SessionStatus = "idle" | "loading" | "ready" | "error";
 
@@ -45,6 +45,38 @@ export default function AdminUsersView(props: AdminUsersViewProps) {
   const [sessionStatusByUserId, setSessionStatusByUserId] = createSignal<Record<string, SessionStatus>>({});
   const [sessionErrorByUserId, setSessionErrorByUserId] = createSignal<Record<string, string | null>>({});
   const [openingSessionId, setOpeningSessionId] = createSignal<string | null>(null);
+  let usersRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  const sessionRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  const clearUsersRetryTimer = () => {
+    if (!usersRetryTimer) return;
+    clearTimeout(usersRetryTimer);
+    usersRetryTimer = null;
+  };
+
+  const clearSessionRetryTimer = (userId: string) => {
+    const timer = sessionRetryTimers.get(userId);
+    if (!timer) return;
+    clearTimeout(timer);
+    sessionRetryTimers.delete(userId);
+  };
+
+  const scheduleUsersRetry = () => {
+    if (usersRetryTimer || !props.active || !props.enabled || !props.client) return;
+    usersRetryTimer = setTimeout(() => {
+      usersRetryTimer = null;
+      void loadUsers(true);
+    }, 750);
+  };
+
+  const scheduleSessionRetry = (userId: string) => {
+    if (sessionRetryTimers.has(userId) || !props.active || !props.enabled || !props.client) return;
+    const timer = setTimeout(() => {
+      sessionRetryTimers.delete(userId);
+      void loadSessions(userId, true);
+    }, 750);
+    sessionRetryTimers.set(userId, timer);
+  };
 
   const loadUsers = async (force = false) => {
     if (!props.enabled) return;
@@ -58,10 +90,16 @@ export default function AdminUsersView(props: AdminUsersViewProps) {
     setError(null);
     try {
       const response = await props.client.adminListUsers();
+      clearUsersRetryTimer();
       setUsers(Array.isArray(response.items) ? response.items : []);
       setWarnings(Array.isArray(response.warnings) ? response.warnings : []);
     } catch (err) {
-      if (isAbortLikeError(err)) return;
+      if (isTransientRequestError(err)) {
+        if (!force && users().length === 0) {
+          scheduleUsersRetry();
+        }
+        return;
+      }
       setError(err instanceof Error ? err.message : "读取用户列表失败。");
     } finally {
       setBusy(false);
@@ -84,6 +122,7 @@ export default function AdminUsersView(props: AdminUsersViewProps) {
     setError(null);
     try {
       const response = await props.client.adminListUserSessions(id);
+      clearSessionRetryTimer(id);
       setSessionsByUserId((prev) => ({
         ...prev,
         [id]: Array.isArray(response.items) ? response.items : [],
@@ -94,8 +133,11 @@ export default function AdminUsersView(props: AdminUsersViewProps) {
       }));
       setSessionStatusByUserId((prev) => ({ ...prev, [id]: "ready" }));
     } catch (err) {
-      if (isAbortLikeError(err)) {
+      if (isTransientRequestError(err)) {
         setSessionStatusByUserId((prev) => ({ ...prev, [id]: "idle" }));
+        if (!force && (sessionsByUserId()[id]?.length ?? 0) === 0) {
+          scheduleSessionRetry(id);
+        }
         return;
       }
       setSessionErrorByUserId((prev) => ({
@@ -147,6 +189,13 @@ export default function AdminUsersView(props: AdminUsersViewProps) {
     if (initialLoadAttempted()) return;
     setInitialLoadAttempted(true);
     void loadUsers();
+  });
+
+  onCleanup(() => {
+    clearUsersRetryTimer();
+    for (const userId of sessionRetryTimers.keys()) {
+      clearSessionRetryTimer(userId);
+    }
   });
 
   return (

@@ -209,6 +209,25 @@ describe("ragflow client", () => {
     ]);
   });
 
+  test("accepts parse-start responses that return only code 0", async () => {
+    const client = createRagflowClient({
+      baseUrl: "http://ragflow.local",
+      apiKey: "test",
+      fetchImpl: async () =>
+        new Response(
+          JSON.stringify({
+            code: 0,
+          }),
+          { status: 200 },
+        ),
+    });
+
+    await expect(client.startParse({
+      datasetId: "ds_1",
+      documentIds: ["doc_1"],
+    })).resolves.toBeUndefined();
+  });
+
   test("maps retrieval chunks and preserves selected datasets", async () => {
     const client = createRagflowClient({
       baseUrl: "http://ragflow.local",

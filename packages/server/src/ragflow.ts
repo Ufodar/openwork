@@ -325,7 +325,7 @@ async function fetchRagflowEnvelope<T>(
   return { url, response, payload };
 }
 
-function assertRagflowEnvelopeOk<T>(
+function assertRagflowEnvelopeSucceeded<T>(
   input: { url: string; response: Response; payload: RagflowApiEnvelope<T> | null },
 ): asserts input is { url: string; response: Response; payload: RagflowApiEnvelope<T> } {
   const { url, response, payload } = input;
@@ -336,7 +336,7 @@ function assertRagflowEnvelopeOk<T>(
     });
   }
 
-  if (!payload || payload.code !== 0 || payload.data === undefined) {
+  if (!payload || payload.code !== 0) {
     throw new ApiError(502, "ragflow_invalid_response", payload?.message ?? "RAGFlow returned an unexpected response.", {
       url,
     });
@@ -353,7 +353,7 @@ async function fetchRagflowJson<T>(
   init?: RequestInit,
 ): Promise<T> {
   const result = await fetchRagflowEnvelope<T>(baseUrl, apiKey, path, fetchImpl, requestImpl, allowInsecureTls, init);
-  assertRagflowEnvelopeOk(result);
+  assertRagflowEnvelopeSucceeded(result);
   if (result.payload.data === undefined) {
     throw new ApiError(502, "ragflow_invalid_response", "RAGFlow returned an unexpected response.", {
       url: result.url,
@@ -380,7 +380,7 @@ async function fetchRagflowOk(
     allowInsecureTls,
     init,
   );
-  assertRagflowEnvelopeOk(result);
+  assertRagflowEnvelopeSucceeded(result);
 }
 
 function toHeadersInit(input: Record<string, string | string[] | undefined>): [string, string][] {

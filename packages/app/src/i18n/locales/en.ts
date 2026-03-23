@@ -573,7 +573,7 @@ export default {
   "session.knowledge_empty_title": "No knowledge attached",
   "session.knowledge_empty_body": "The agent will rely on its regular tools until you attach one or more knowledge bases.",
   "session.knowledge_selected_count": "{count} attached",
-  "session.knowledge_edit_locked": "Finish the current run before changing attached knowledge bases.",
+  "session.knowledge_edit_locked": "To avoid stale knowledge mixing, you cannot change attached knowledge bases while a run is active or after the session already has message history. Start a new session to switch knowledge scope.",
   "session.knowledge_picker_title": "Select knowledge bases",
   "session.knowledge_picker_description": "Attach knowledge bases to this session. The agent can search them whenever it needs evidence.",
   "session.knowledge_picker_scope_mine": "Mine",

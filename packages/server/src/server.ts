@@ -586,7 +586,12 @@ function buildOpencodeProxyUrl(baseUrl: string, path: string, search: string) {
 async function fetchOpencodeJson(
   workspace: WorkspaceInfo,
   path: string,
-  init: { method: string; body?: unknown; directory?: string | null },
+  init: {
+    method: string;
+    body?: unknown;
+    directory?: string | null;
+    query?: Record<string, string | number | boolean | null | undefined>;
+  },
 ) {
   const baseUrl = workspace.baseUrl?.trim() ?? "";
   if (!baseUrl) {
@@ -596,6 +601,12 @@ async function fetchOpencodeJson(
   const url = new URL(baseUrl);
   url.pathname = path.startsWith("/") ? path : `/${path}`;
   url.search = "";
+  if (init.query) {
+    for (const [key, rawValue] of Object.entries(init.query)) {
+      if (rawValue == null) continue;
+      url.searchParams.set(key, String(rawValue));
+    }
+  }
 
   const headers = new Headers();
   headers.set("Content-Type", "application/json");
@@ -631,6 +642,41 @@ async function fetchOpencodeJson(
     });
   }
   return json;
+}
+
+function sameKnowledgeIdSelection(left: string[], right: string[]): boolean {
+  if (left.length !== right.length) return false;
+  const leftSorted = [...left].sort();
+  const rightSorted = [...right].sort();
+  return leftSorted.every((value, index) => value === rightSorted[index]);
+}
+
+function normalizeSessionMessagePayload(value: unknown): Array<Record<string, unknown>> {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object");
+  }
+  if (value && typeof value === "object" && Array.isArray((value as Record<string, unknown>).items)) {
+    return ((value as Record<string, unknown>).items as unknown[])
+      .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object");
+  }
+  return [];
+}
+
+async function sessionHasConversationHistory(workspace: WorkspaceInfo, sessionId: string): Promise<boolean> {
+  const payload = await fetchOpencodeJson(workspace, `/session/${encodeURIComponent(sessionId)}/message`, {
+    method: "GET",
+    query: { limit: 20 },
+  });
+  const messages = normalizeSessionMessagePayload(payload);
+  return messages.some((message) => {
+    const info = message.info && typeof message.info === "object"
+      ? (message.info as Record<string, unknown>)
+      : null;
+    const role = typeof info?.role === "string" ? info.role.trim() : "";
+    if (role !== "user" && role !== "assistant") return false;
+    const parts = Array.isArray(message.parts) ? message.parts : [];
+    return parts.length > 0;
+  });
 }
 
 function workspaceWithDirectory(workspace: WorkspaceInfo, directory: string | null | undefined): WorkspaceInfo {
@@ -2407,6 +2453,17 @@ export function createRoutes(
     const knowledgeIds = normalizeKnowledgeIdList(body.knowledgeIds);
     if (body.knowledgeIds !== undefined && !Array.isArray(body.knowledgeIds)) {
       throw new ApiError(400, "invalid_payload", "knowledgeIds must be an array");
+    }
+    const currentKnowledgeIds = await knowledgeAttachments.get(workspace.id, sessionId);
+    if (!sameKnowledgeIdSelection(currentKnowledgeIds, knowledgeIds)) {
+      const sessionWorkspace = workspaceWithDirectory(workspace, runtimeWorkspace.runtimeDir);
+      if (await sessionHasConversationHistory(sessionWorkspace, sessionId)) {
+        throw new ApiError(
+          409,
+          "knowledge_scope_locked",
+          "This session already has message history. Create a new session to use a different knowledge set.",
+        );
+      }
     }
     const records = await requireKnowledgeRecordsForAttachment(knowledgeRegistry, knowledgeIds);
     await knowledgeAttachments.set(workspace.id, sessionId, runtimeWorkspace.runtimeId, knowledgeIds);

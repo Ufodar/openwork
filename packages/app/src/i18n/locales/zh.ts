@@ -574,7 +574,7 @@ export default {
   "session.knowledge_empty_title": "未挂载知识库",
   "session.knowledge_empty_body": "当前会话还没有挂载知识库，智能体会先依赖常规工具继续工作。",
   "session.knowledge_selected_count": "已挂载 {count} 个",
-  "session.knowledge_edit_locked": "请等待当前运行结束后再修改挂载的知识库。",
+  "session.knowledge_edit_locked": "为避免串库，当前运行中的会话或已有历史消息的会话不能修改挂载的知识库。请新建会话后再切换知识范围。",
   "session.knowledge_picker_title": "选择知识库",
   "session.knowledge_picker_description": "将知识库挂载到当前会话。智能体会在需要证据时自行检索它们。",
   "session.knowledge_picker_scope_mine": "我的",

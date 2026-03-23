@@ -539,9 +539,62 @@ describe("knowledge routes", () => {
     expect(runtimeConfig.mcp?.["openwork-knowledge"]).toBeTruthy();
     expect(instructionRaw).toContain("Alice Docs");
     expect(instructionRaw).toContain("Bob Docs");
-    expect(disposeCalls).toHaveLength(1);
-    expect(disposeCalls[0]).toContain("/instance/dispose");
-    expect(disposeCalls[0]).toContain(encodeURIComponent(runtimeDir));
+    const disposeOnlyCalls = disposeCalls.filter((url) => url.includes("/instance/dispose"));
+    expect(disposeOnlyCalls).toHaveLength(1);
+    expect(disposeOnlyCalls[0]).toContain(encodeURIComponent(runtimeDir));
+  });
+
+  test("rejects changing attached knowledge after the session already has history", async () => {
+    await registry.upsert({
+      knowledgeId: "kb_alice",
+      ragflowDatasetId: "ds_alice",
+      ownerUserId: "user_alice",
+      ownerDisplayName: "alice",
+      title: "Alice Docs",
+      source: "openwork",
+      visibility: "visible_to_all_users",
+      status: "ready",
+    });
+    await registry.upsert({
+      knowledgeId: "kb_bob",
+      ragflowDatasetId: "ds_bob",
+      ownerUserId: "user_bob",
+      ownerDisplayName: "bob",
+      title: "Bob Docs",
+      source: "openwork",
+      visibility: "visible_to_all_users",
+      status: "ready",
+    });
+    await attachments.set(workspace.id, "ses_1", "runtime_1", ["kb_alice"]);
+
+    globalThis.fetch = (async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes("/session/ses_1/message")) {
+        return new Response(JSON.stringify([
+          {
+            id: "msg_1",
+            info: { role: "user" },
+            parts: [{ type: "text", text: "hello" }],
+          },
+        ]), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      disposeCalls.push(url);
+      return new Response(null, { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await expect(
+      invokeRoute("PUT", "/workspace/ws_1/sessions/ses_1/knowledge", {
+        body: { knowledgeIds: ["kb_bob"] },
+      }),
+    ).rejects.toMatchObject({
+      status: 409,
+      code: "knowledge_scope_locked",
+    });
+
+    expect(await attachments.get(workspace.id, "ses_1")).toEqual(["kb_alice"]);
   });
 
   test("searches only within the attached knowledge set and returns registry labels", async () => {

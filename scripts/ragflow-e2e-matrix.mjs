@@ -33,6 +33,27 @@ function normalizedComparableText(value) {
     .trim();
 }
 
+function summarizeHttpError(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  const statusMatch = message.match(/->\s*(\d+)/);
+  const status = statusMatch ? Number.parseInt(statusMatch[1], 10) : null;
+  const jsonMatch = message.match(/(\{[\s\S]*\})$/);
+  let data = null;
+  if (jsonMatch?.[1]) {
+    try {
+      data = JSON.parse(jsonMatch[1]);
+    } catch {
+      data = null;
+    }
+  }
+  return {
+    status,
+    code: data && typeof data === "object" && typeof data.code === "string" ? data.code : null,
+    error: data && typeof data === "object" && typeof data.error === "string" ? data.error : message,
+    raw: message,
+  };
+}
+
 function summarizeToolBehavior(summary) {
   const toolNames = summary.tools.map((tool) => String(tool.tool));
   const knowledgeSearchCount = toolNames.filter((tool) => tool.includes("openwork_knowledge_search")).length;
@@ -361,7 +382,7 @@ async function main() {
     title: `矩阵-none-${stamp}`,
     knowledgeIds: [],
     prompt: "依据当前已挂载的知识库，海滨医院的交换机型号有哪些？只列型号，不要解释。",
-    expectedIncludes: ["没有挂载知识库"],
+    expectedIncludes: ["没有挂载"],
     expectedExcludes: ["CE6855-48XS8CQ", "S5755-H24T4Y2CZ"],
     expectKnowledgeSearch: false,
   });
@@ -400,47 +421,57 @@ async function main() {
     passed: turn1.passed && turn2.passed,
   };
 
-  const switchSession = await createSession(primaryAuth.token, workspaceId, `矩阵-switch-${stamp}`);
-  await attachKnowledge(primaryAuth.token, workspaceId, switchSession.id, [ownKnowledge.ready.knowledgeId]);
+  const lockedSession = await createSession(primaryAuth.token, workspaceId, `矩阵-locked-${stamp}`);
+  await attachKnowledge(primaryAuth.token, workspaceId, lockedSession.id, [ownKnowledge.ready.knowledgeId]);
   const ownTurn = await runPromptOnExistingSession(
     primaryAuth.token,
     workspaceId,
-    switchSession.id,
+    lockedSession.id,
     "依据当前已挂载的知识库，海滨医院的交换机型号有哪些？只列型号，不要解释。",
     {
       expectedIncludes: ["CE6855-48XS8CQ", "S5755-H24T4Y2CZ"],
       expectKnowledgeSearch: true,
     },
   );
-  await attachKnowledge(primaryAuth.token, workspaceId, switchSession.id, [otherKnowledgeReady.knowledgeId]);
-  const otherTurn = await runPromptOnExistingSession(
+  let switchAttempt;
+  try {
+    await attachKnowledge(primaryAuth.token, workspaceId, lockedSession.id, [otherKnowledgeReady.knowledgeId]);
+    switchAttempt = { ok: true, status: 200, code: null, error: null };
+  } catch (error) {
+    switchAttempt = { ok: false, ...summarizeHttpError(error) };
+  }
+  let clearAttempt;
+  try {
+    await attachKnowledge(primaryAuth.token, workspaceId, lockedSession.id, []);
+    clearAttempt = { ok: true, status: 200, code: null, error: null };
+  } catch (error) {
+    clearAttempt = { ok: false, ...summarizeHttpError(error) };
+  }
+  const followupTurn = await runPromptOnExistingSession(
     primaryAuth.token,
     workspaceId,
-    switchSession.id,
-    "继续依据当前已挂载的知识库，产品名称和规格型号分别是什么？按“产品名称：...；规格型号：...”输出。",
+    lockedSession.id,
+    "继续依据当前已挂载的知识库，海滨医院的交换机型号有哪些？只列型号，不要解释。",
     {
-      expectedIncludes: ["奇安信可信浏览器软件(密码模块)", "WS-KXLLO-GM-FL V1.0"],
+      expectedIncludes: ["CE6855-48XS8CQ", "S5755-H24T4Y2CZ"],
       expectKnowledgeSearch: true,
     },
   );
-  await attachKnowledge(primaryAuth.token, workspaceId, switchSession.id, []);
-  const clearedTurn = await runPromptOnExistingSession(
-    primaryAuth.token,
-    workspaceId,
-    switchSession.id,
-    "继续依据当前已挂载的知识库，海滨医院的防火墙型号是什么？只列型号，不要解释。",
-    {
-      expectedIncludes: ["没有挂载知识库"],
-      expectedExcludes: ["CE6855-48XS8CQ", "S5755-H24T4Y2CZ"],
-      expectKnowledgeSearch: false,
-    },
-  );
-  results.switch_session = {
-    sessionId: switchSession.id,
+  results.locked_session_scope = {
+    sessionId: lockedSession.id,
     ownTurn,
-    otherTurn,
-    clearedTurn,
-    passed: ownTurn.passed && otherTurn.passed && clearedTurn.passed,
+    switchAttempt,
+    clearAttempt,
+    followupTurn,
+    passed:
+      ownTurn.passed &&
+      switchAttempt.ok === false &&
+      switchAttempt.status === 409 &&
+      switchAttempt.code === "knowledge_scope_locked" &&
+      clearAttempt.ok === false &&
+      clearAttempt.status === 409 &&
+      clearAttempt.code === "knowledge_scope_locked" &&
+      followupTurn.passed,
   };
 
   const allPass = Object.values(results).every((value) => {

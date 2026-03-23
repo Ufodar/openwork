@@ -37,7 +37,12 @@ export default function KnowledgeStrip(props: KnowledgeStripProps) {
             </Show>
           </div>
 
-          <Button variant="outline" class="h-8 shrink-0 px-3 py-0 text-xs" onClick={props.onManage}>
+          <Button
+            variant="outline"
+            class="h-8 shrink-0 px-3 py-0 text-xs"
+            onClick={props.onManage}
+            disabled={props.editingLocked}
+          >
             {props.tr("session.knowledge_manage")}
           </Button>
         </div>

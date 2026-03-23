@@ -156,7 +156,7 @@ export default function SessionKnowledgeSurface(props: SessionKnowledgeSurfacePr
   };
 
   const openKnowledgePicker = () => {
-    if (!knowledgeAvailable()) return;
+    if (!knowledgeAvailable() || knowledgeEditingLocked()) return;
     setKnowledgeDraftIds(attachedKnowledgeIds());
     setKnowledgePickerScope("mine");
     setKnowledgePickerError(null);

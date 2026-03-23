@@ -11,18 +11,21 @@ test("session view wires the shared session knowledge surface", () => {
   const source = readPage("session.tsx");
   expect(source).toContain('import SessionKnowledgeSurface from "../components/session/session-knowledge-surface"');
   expect(source).toContain("<SessionKnowledgeSurface");
+  expect(source).toContain('editingLocked={showRunIndicator() || messages().some((message) => message.info?.role === "user" || message.info?.role === "assistant")}');
 });
 
 test("document agent view wires the shared session knowledge surface", () => {
   const source = readPage("document-agent.tsx");
   expect(source).toContain('import SessionKnowledgeSurface from "../components/session/session-knowledge-surface"');
   expect(source).toContain("<SessionKnowledgeSurface");
+  expect(source).toContain('editingLocked={isAgentRunning() || messages().some((message) => message.info?.role === "user" || message.info?.role === "assistant")}');
 });
 
 test("document writer view wires the shared session knowledge surface", () => {
   const source = readPage("document-writer.tsx");
   expect(source).toContain('import SessionKnowledgeSurface from "../components/session/session-knowledge-surface"');
   expect(source).toContain("<SessionKnowledgeSurface");
+  expect(source).toContain('editingLocked={isAgentRunning() || messages().some((message) => message.info?.role === "user" || message.info?.role === "assistant")}');
   expect(source).not.toContain('import SessionKnowledgeStrip from "../components/session-knowledge-strip"');
 });
 
@@ -53,4 +56,11 @@ test("knowledge page uses stable reload keys and ignores stale async results", (
   expect(source).toContain("const requestId = ++knowledgeLoadRequestSeq");
   expect(source).toContain("if (requestId !== knowledgeLoadRequestSeq) return");
   expect(source).not.toContain("() => [props.client, props.workspaceId] as const");
+});
+
+test("knowledge strip disables editing actions when the scope is locked", () => {
+  const strip = readFileSync(join(here, "..", "components", "session", "knowledge-strip.tsx"), "utf8");
+  const surface = readFileSync(join(here, "..", "components", "session", "session-knowledge-surface.tsx"), "utf8");
+  expect(strip).toContain("disabled={props.editingLocked}");
+  expect(surface).toContain("if (!knowledgeAvailable() || knowledgeEditingLocked()) return;");
 });

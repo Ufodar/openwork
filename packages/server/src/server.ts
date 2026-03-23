@@ -2650,6 +2650,95 @@ export function createRoutes(
     });
   });
 
+  addRoute(routes, "GET", "/workspace/:id/knowledge/:knowledgeId/documents", "client", async (ctx) => {
+    await resolveWorkspace(config, ctx.params.id);
+    const knowledgeId = normalizeKnowledgeId(ctx.params.knowledgeId);
+    const record = await knowledgeRegistry.get(knowledgeId);
+    if (!record || !isKnowledgeVisible(record)) {
+      throw new ApiError(404, "knowledge_not_found", "Knowledge base not found");
+    }
+
+    const [refreshedRecord] = await refreshKnowledgeRecordsFromRagflow(knowledgeRegistry, ragflow, [record]);
+    const documents = await ragflow.listDocuments({ datasetId: record.ragflowDatasetId, limit: 500 });
+
+    return jsonResponse({
+      knowledgeId: record.knowledgeId,
+      item: serializeKnowledgeRecord(refreshedRecord),
+      documents: documents.map(serializeKnowledgeDocument),
+    });
+  });
+
+  addRoute(routes, "DELETE", "/workspace/:id/knowledge/:knowledgeId/documents/:documentId", "client", async (ctx) => {
+    ensureWritable(config);
+    requireClientScope(ctx, "collaborator");
+    await resolveWorkspace(config, ctx.params.id);
+    const user = await resolveKnowledgeCaller(auth, ctx);
+    const knowledgeId = normalizeKnowledgeId(ctx.params.knowledgeId);
+    const documentId = normalizeKnowledgeDocumentId(ctx.params.documentId);
+    const record = await knowledgeRegistry.get(knowledgeId);
+    if (!record || !isKnowledgeVisible(record)) {
+      throw new ApiError(404, "knowledge_not_found", "Knowledge base not found");
+    }
+    if (!user.isAdmin && record.ownerUserId !== user.id) {
+      throw new ApiError(403, "knowledge_write_forbidden", "Only the knowledge base owner can delete documents.");
+    }
+
+    await ragflow.deleteDocuments({
+      datasetId: record.ragflowDatasetId,
+      documentIds: [documentId],
+    });
+    const documents = await ragflow.listDocuments({ datasetId: record.ragflowDatasetId, limit: 500 });
+    const nextRecord = await knowledgeRegistry.upsert({
+      knowledgeId: record.knowledgeId,
+      ragflowDatasetId: record.ragflowDatasetId,
+      ownerUserId: record.ownerUserId,
+      ownerDisplayName: record.ownerDisplayName,
+      title: record.title,
+      ...(record.description ? { description: record.description } : {}),
+      source: record.source,
+      visibility: record.visibility,
+      ...(record.ingestionPreset ? { ingestionPreset: record.ingestionPreset } : {}),
+      ...(record.chunkMethod ? { chunkMethod: record.chunkMethod } : {}),
+      parserConfig: record.parserConfig,
+      ...(record.embeddingModel ? { embeddingModel: record.embeddingModel } : {}),
+      status: deriveKnowledgeStatusFromDocuments(record.status, documents),
+      documentCount: documents.length,
+      chunkCount: documents.reduce((sum, document) => sum + (document.chunkCount ?? 0), 0),
+    });
+
+    return jsonResponse({
+      ok: true,
+      knowledgeId: record.knowledgeId,
+      documentId,
+      item: serializeKnowledgeRecord(nextRecord),
+    });
+  });
+
+  addRoute(routes, "DELETE", "/workspace/:id/knowledge/:knowledgeId", "client", async (ctx) => {
+    ensureWritable(config);
+    requireClientScope(ctx, "collaborator");
+    const workspace = await resolveWorkspace(config, ctx.params.id);
+    const user = await resolveKnowledgeCaller(auth, ctx);
+    const knowledgeId = normalizeKnowledgeId(ctx.params.knowledgeId);
+    const record = await knowledgeRegistry.get(knowledgeId);
+    if (!record || !isKnowledgeVisible(record)) {
+      throw new ApiError(404, "knowledge_not_found", "Knowledge base not found");
+    }
+    if (!user.isAdmin && record.ownerUserId !== user.id) {
+      throw new ApiError(403, "knowledge_write_forbidden", "Only the knowledge base owner can delete the knowledge base.");
+    }
+
+    await ragflow.deleteDataset({ datasetId: record.ragflowDatasetId });
+    await knowledgeRegistry.delete(record.knowledgeId);
+    await knowledgeAttachments.pruneKnowledgeId(workspace.id, record.knowledgeId);
+
+    return jsonResponse({
+      ok: true,
+      deleted: true,
+      knowledgeId: record.knowledgeId,
+    });
+  });
+
   addRoute(routes, "PATCH", "/workspace/:id/config", "client", async (ctx) => {
     ensureWritable(config);
     requireClientScope(ctx, "collaborator");
@@ -4715,6 +4804,14 @@ function normalizeKnowledgeId(value: unknown): string {
   return knowledgeId;
 }
 
+function normalizeKnowledgeDocumentId(value: unknown): string {
+  const documentId = typeof value === "string" ? value.trim() : "";
+  if (!documentId) {
+    throw new ApiError(400, "invalid_payload", "documentId is required");
+  }
+  return documentId;
+}
+
 function normalizeKnowledgeTitle(value: unknown): string {
   const title = typeof value === "string" ? value.trim() : "";
   if (!title) {
@@ -4792,6 +4889,30 @@ function serializeKnowledgeRecord(record: KnowledgeRegistryRecord) {
     chunkCount: record.chunkCount ?? 0,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
+  };
+}
+
+function serializeKnowledgeDocument(document: {
+  id: string | null;
+  datasetId: string | null;
+  name: string;
+  size: number | null;
+  chunkCount: number | null;
+  chunkMethod: string | null;
+  parserConfig: Record<string, unknown> | null;
+  run: string | null;
+  type: string | null;
+}) {
+  return {
+    documentId: document.id,
+    datasetId: document.datasetId,
+    name: document.name,
+    size: document.size,
+    chunkCount: document.chunkCount ?? 0,
+    chunkMethod: document.chunkMethod,
+    parserConfig: document.parserConfig ?? {},
+    run: document.run,
+    type: document.type,
   };
 }
 

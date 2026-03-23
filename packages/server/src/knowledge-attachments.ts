@@ -134,4 +134,21 @@ export class KnowledgeAttachmentService {
     delete store.attachments[sid];
     await writeStore(resolveKnowledgeAttachmentPath(ws), store.attachments);
   }
+
+  async pruneKnowledgeId(workspaceId: string, knowledgeId: string): Promise<void> {
+    const ws = normalizeString(workspaceId);
+    const kid = normalizeString(knowledgeId);
+    if (!ws || !kid) return;
+    const store = await this.ensureLoaded(ws);
+    let changed = false;
+    for (const entry of Object.values(store.attachments)) {
+      const nextIds = entry.knowledgeIds.filter((value) => value !== kid);
+      if (nextIds.length === entry.knowledgeIds.length) continue;
+      entry.knowledgeIds = nextIds;
+      entry.updatedAt = Date.now();
+      changed = true;
+    }
+    if (!changed) return;
+    await writeStore(resolveKnowledgeAttachmentPath(ws), store.attachments);
+  }
 }

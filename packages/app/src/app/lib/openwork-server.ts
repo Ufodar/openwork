@@ -175,6 +175,37 @@ export type OpenworkKnowledgeUploadResponse = {
   item: OpenworkKnowledgeItem;
 };
 
+export type OpenworkKnowledgeDocumentItem = {
+  documentId: string | null;
+  datasetId: string | null;
+  name: string;
+  size: number | null;
+  chunkCount: number;
+  chunkMethod: string | null;
+  parserConfig: Record<string, unknown>;
+  run: string | null;
+  type: string | null;
+};
+
+export type OpenworkKnowledgeDocumentsResponse = {
+  knowledgeId: string;
+  item: OpenworkKnowledgeItem;
+  documents: OpenworkKnowledgeDocumentItem[];
+};
+
+export type OpenworkKnowledgeDocumentDeleteResponse = {
+  ok: boolean;
+  knowledgeId: string;
+  documentId: string;
+  item: OpenworkKnowledgeItem;
+};
+
+export type OpenworkKnowledgeDeleteResponse = {
+  ok: boolean;
+  deleted: boolean;
+  knowledgeId: string;
+};
+
 export type OpenworkSessionKnowledgeResponse = {
   sessionId: string;
   runtimeId: string;
@@ -1307,6 +1338,24 @@ export function createOpenworkServerClient(options: { baseUrl: string; token?: s
         { token, hostToken, method: "POST", body: form, timeoutMs: timeouts.binary },
       );
     },
+    listKnowledgeDocuments: (workspaceId: string, knowledgeId: string) =>
+      requestJson<OpenworkKnowledgeDocumentsResponse>(
+        baseUrl,
+        `/workspace/${encodeURIComponent(workspaceId)}/knowledge/${encodeURIComponent(knowledgeId)}/documents`,
+        { token, hostToken, timeoutMs: timeouts.knowledge },
+      ),
+    deleteKnowledgeDocument: (workspaceId: string, knowledgeId: string, documentId: string) =>
+      requestJson<OpenworkKnowledgeDocumentDeleteResponse>(
+        baseUrl,
+        `/workspace/${encodeURIComponent(workspaceId)}/knowledge/${encodeURIComponent(knowledgeId)}/documents/${encodeURIComponent(documentId)}`,
+        { token, hostToken, method: "DELETE", timeoutMs: timeouts.knowledge },
+      ),
+    deleteKnowledge: (workspaceId: string, knowledgeId: string) =>
+      requestJson<OpenworkKnowledgeDeleteResponse>(
+        baseUrl,
+        `/workspace/${encodeURIComponent(workspaceId)}/knowledge/${encodeURIComponent(knowledgeId)}`,
+        { token, hostToken, method: "DELETE", timeoutMs: timeouts.knowledge },
+      ),
     getSessionKnowledge: (workspaceId: string, sessionId: string) =>
       requestJson<OpenworkSessionKnowledgeResponse>(
         baseUrl,

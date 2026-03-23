@@ -205,6 +205,16 @@ export class KnowledgeRegistryService {
     return record;
   }
 
+  async delete(knowledgeId: string): Promise<boolean> {
+    const key = normalizeString(knowledgeId);
+    if (!key) return false;
+    const store = await this.ensureLoaded();
+    if (!store.items[key]) return false;
+    delete store.items[key];
+    await writeStore(resolveKnowledgeRegistryPath(), store.items);
+    return true;
+  }
+
   async listMine(ownerUserId: string): Promise<KnowledgeRegistryRecord[]> {
     const owner = normalizeString(ownerUserId);
     if (!owner) return [];

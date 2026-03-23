@@ -41,6 +41,8 @@ describe("knowledge routes", () => {
     datasetId: string;
     files: Array<{ name: string; size: number; type: string; text: string }>;
   }> = [];
+  let ragflowDeleteDocumentCalls: Array<{ datasetId: string; documentIds: string[] }> = [];
+  let ragflowDeleteDatasetCalls: string[] = [];
   let ragflowDocumentsByDataset: Map<string, Array<{
     id: string;
     datasetId: string | null;
@@ -111,6 +113,8 @@ describe("knowledge routes", () => {
     ragflowCalls = [];
     ragflowCreateDatasetCalls = [];
     ragflowUploadCalls = [];
+    ragflowDeleteDocumentCalls = [];
+    ragflowDeleteDatasetCalls = [];
     ragflowDocumentsByDataset = new Map();
     ragflowParseCalls = [];
     disposeCalls = [];
@@ -170,6 +174,20 @@ describe("knowledge routes", () => {
           datasetId: input.datasetId,
           documentIds: [...input.documentIds],
         });
+      },
+      deleteDocuments: async (input) => {
+        ragflowDeleteDocumentCalls.push({
+          datasetId: input.datasetId,
+          documentIds: [...input.documentIds],
+        });
+        const next = (ragflowDocumentsByDataset.get(input.datasetId) ?? []).filter(
+          (document) => !input.documentIds.includes(document.id),
+        );
+        ragflowDocumentsByDataset.set(input.datasetId, next);
+      },
+      deleteDataset: async (input) => {
+        ragflowDeleteDatasetCalls.push(input.datasetId);
+        ragflowDocumentsByDataset.delete(input.datasetId);
       },
       retrieve: async (input) => {
         ragflowCalls.push({ question: input.question, datasetIds: [...input.datasetIds] });
@@ -486,6 +504,151 @@ describe("knowledge routes", () => {
       status: "processing",
       documentCount: 2,
     });
+  });
+
+  test("lists knowledge documents for a visible knowledge base", async () => {
+    await registry.upsert({
+      knowledgeId: "kb_alice",
+      ragflowDatasetId: "ds_alice",
+      ownerUserId: "user_alice",
+      ownerDisplayName: "alice",
+      title: "商业资质库",
+      source: "openwork",
+      visibility: "visible_to_all_users",
+      chunkMethod: "naive",
+      parserConfig: { chunk_token_num: 2000 },
+      status: "processing",
+      documentCount: 0,
+      chunkCount: 0,
+    });
+    ragflowDocumentsByDataset.set("ds_alice", [
+      {
+        id: "doc_1",
+        datasetId: "ds_alice",
+        name: "license.pdf",
+        size: 15,
+        chunkMethod: "naive",
+        parserConfig: { chunk_token_num: 2000 },
+        run: "DONE",
+        type: "doc",
+        chunkCount: 4,
+      },
+      {
+        id: "doc_2",
+        datasetId: "ds_alice",
+        name: "social.txt",
+        size: 14,
+        chunkMethod: "naive",
+        parserConfig: { chunk_token_num: 2000 },
+        run: "UNSTART",
+        type: "doc",
+        chunkCount: 0,
+      },
+    ]);
+
+    const response = await invokeRoute("GET", "/workspace/ws_1/knowledge/kb_alice/documents");
+
+    await expect(response.json()).resolves.toMatchObject({
+      knowledgeId: "kb_alice",
+      item: {
+        knowledgeId: "kb_alice",
+        documentCount: 2,
+        chunkCount: 4,
+        status: "processing",
+      },
+      documents: [
+        { documentId: "doc_1", name: "license.pdf", run: "DONE", chunkCount: 4 },
+        { documentId: "doc_2", name: "social.txt", run: "UNSTART", chunkCount: 0 },
+      ],
+    });
+  });
+
+  test("deletes a document from an owned knowledge base and refreshes counts", async () => {
+    await registry.upsert({
+      knowledgeId: "kb_alice",
+      ragflowDatasetId: "ds_alice",
+      ownerUserId: "user_alice",
+      ownerDisplayName: "alice",
+      title: "商业资质库",
+      source: "openwork",
+      visibility: "visible_to_all_users",
+      chunkMethod: "naive",
+      parserConfig: { chunk_token_num: 2000 },
+      status: "ready",
+      documentCount: 2,
+      chunkCount: 7,
+    });
+    ragflowDocumentsByDataset.set("ds_alice", [
+      {
+        id: "doc_1",
+        datasetId: "ds_alice",
+        name: "license.pdf",
+        size: 15,
+        chunkMethod: "naive",
+        parserConfig: { chunk_token_num: 2000 },
+        run: "DONE",
+        type: "doc",
+        chunkCount: 4,
+      },
+      {
+        id: "doc_2",
+        datasetId: "ds_alice",
+        name: "social.txt",
+        size: 14,
+        chunkMethod: "naive",
+        parserConfig: { chunk_token_num: 2000 },
+        run: "DONE",
+        type: "doc",
+        chunkCount: 3,
+      },
+    ]);
+
+    const response = await invokeRoute("DELETE", "/workspace/ws_1/knowledge/kb_alice/documents/doc_1");
+
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      knowledgeId: "kb_alice",
+      documentId: "doc_1",
+      item: {
+        knowledgeId: "kb_alice",
+        documentCount: 1,
+        chunkCount: 3,
+        status: "ready",
+      },
+    });
+    expect(ragflowDeleteDocumentCalls).toEqual([
+      { datasetId: "ds_alice", documentIds: ["doc_1"] },
+    ]);
+    expect(await registry.get("kb_alice")).toMatchObject({
+      documentCount: 1,
+      chunkCount: 3,
+      status: "ready",
+    });
+  });
+
+  test("deletes an owned knowledge base and prunes session attachments", async () => {
+    await registry.upsert({
+      knowledgeId: "kb_alice",
+      ragflowDatasetId: "ds_alice",
+      ownerUserId: "user_alice",
+      ownerDisplayName: "alice",
+      title: "商业资质库",
+      source: "openwork",
+      visibility: "visible_to_all_users",
+      status: "ready",
+    });
+    await attachments.set(workspace.id, "ses_1", "runtime_1", ["kb_alice", "kb_other"]);
+
+    const response = await invokeRoute("DELETE", "/workspace/ws_1/knowledge/kb_alice");
+
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      deleted: true,
+      knowledgeId: "kb_alice",
+    });
+    expect(ragflowDeleteDatasetCalls).toEqual(["ds_alice"]);
+    expect(await registry.get("kb_alice")).toBeNull();
+    expect(await attachments.get(workspace.id, "ses_1")).toEqual(["kb_other"]);
   });
 
   test("saves and reads session knowledge attachments", async () => {

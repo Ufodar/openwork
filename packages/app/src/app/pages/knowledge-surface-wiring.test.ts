@@ -47,6 +47,9 @@ test("knowledge page uses i18n keys for visible copy", () => {
   expect(source).toContain('tr("knowledge.create_title")');
   expect(source).toContain('tr("knowledge.mine_title")');
   expect(source).toContain('tr("knowledge.others_title")');
+  expect(source).toContain('tr("knowledge.files_title")');
+  expect(source).toContain('tr("knowledge.delete_knowledge_action")');
+  expect(source).toContain('tr("knowledge.delete_document_action")');
 });
 
 test("knowledge page uses stable reload keys and ignores stale async results", () => {
@@ -56,6 +59,13 @@ test("knowledge page uses stable reload keys and ignores stale async results", (
   expect(source).toContain("const requestId = ++knowledgeLoadRequestSeq");
   expect(source).toContain("if (requestId !== knowledgeLoadRequestSeq) return");
   expect(source).not.toContain("() => [props.client, props.workspaceId] as const");
+});
+
+test("knowledge page wires document listing and delete actions through the server client", () => {
+  const source = readPage("knowledge.tsx");
+  expect(source).toContain("client.listKnowledgeDocuments");
+  expect(source).toContain("client.deleteKnowledgeDocument");
+  expect(source).toContain("client.deleteKnowledge");
 });
 
 test("knowledge strip disables editing actions when the scope is locked", () => {

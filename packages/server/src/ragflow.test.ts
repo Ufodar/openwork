@@ -228,6 +228,67 @@ describe("ragflow client", () => {
     })).resolves.toBeUndefined();
   });
 
+  test("deletes dataset documents with explicit ids", async () => {
+    const calls: Array<{ method: string | undefined; body: unknown }> = [];
+    const client = createRagflowClient({
+      baseUrl: "http://ragflow.local",
+      apiKey: "test",
+      fetchImpl: async (_url, init) => {
+        calls.push({
+          method: init?.method,
+          body: JSON.parse(String(init?.body ?? "{}")),
+        });
+        return new Response(
+          JSON.stringify({
+            code: 0,
+          }),
+          { status: 200 },
+        );
+      },
+    });
+
+    await expect(client.deleteDocuments({
+      datasetId: "ds_1",
+      documentIds: ["doc_1", "doc_2"],
+    })).resolves.toBeUndefined();
+
+    expect(calls).toEqual([
+      {
+        method: "DELETE",
+        body: { ids: ["doc_1", "doc_2"] },
+      },
+    ]);
+  });
+
+  test("deletes datasets with explicit ids", async () => {
+    const calls: Array<{ method: string | undefined; body: unknown }> = [];
+    const client = createRagflowClient({
+      baseUrl: "http://ragflow.local",
+      apiKey: "test",
+      fetchImpl: async (_url, init) => {
+        calls.push({
+          method: init?.method,
+          body: JSON.parse(String(init?.body ?? "{}")),
+        });
+        return new Response(
+          JSON.stringify({
+            code: 0,
+          }),
+          { status: 200 },
+        );
+      },
+    });
+
+    await expect(client.deleteDataset({ datasetId: "ds_1" })).resolves.toBeUndefined();
+
+    expect(calls).toEqual([
+      {
+        method: "DELETE",
+        body: { ids: ["ds_1"] },
+      },
+    ]);
+  });
+
   test("maps retrieval chunks and preserves selected datasets", async () => {
     const client = createRagflowClient({
       baseUrl: "http://ragflow.local",

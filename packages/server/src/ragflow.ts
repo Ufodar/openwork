@@ -56,6 +56,15 @@ export type RagflowListDocumentsInput = {
   limit?: number | null;
 };
 
+export type RagflowDeleteDocumentsInput = {
+  datasetId: string;
+  documentIds: string[];
+};
+
+export type RagflowDeleteDatasetInput = {
+  datasetId: string;
+};
+
 export type RagflowRetrievalChunk = {
   id: string | null;
   content: string;
@@ -96,6 +105,8 @@ export type RagflowClient = {
   uploadDocuments: (input: RagflowUploadDocumentsInput) => Promise<RagflowDocumentSummary[]>;
   listDocuments: (input: RagflowListDocumentsInput) => Promise<RagflowDocumentSummary[]>;
   startParse: (input: RagflowStartParseInput) => Promise<void>;
+  deleteDocuments: (input: RagflowDeleteDocumentsInput) => Promise<void>;
+  deleteDataset: (input: RagflowDeleteDatasetInput) => Promise<void>;
   retrieve: (input: RagflowRetrieveInput) => Promise<RagflowRetrievalResult>;
 };
 
@@ -658,6 +669,48 @@ export function createRagflowClient(input: {
       );
     },
 
+    async deleteDocuments(input) {
+      const datasetId = stringValue(input.datasetId);
+      const documentIds = arrayOfStrings(input.documentIds);
+      if (!datasetId) {
+        throw new ApiError(400, "invalid_ragflow_dataset", "A dataset id is required.");
+      }
+      if (!documentIds.length) {
+        throw new ApiError(400, "invalid_ragflow_documents", "At least one document id is required.");
+      }
+      await fetchRagflowOk(
+        baseUrl,
+        apiKey,
+        `/datasets/${encodeURIComponent(datasetId)}/documents`,
+        fetchImpl,
+        requestImpl,
+        allowInsecureTls,
+        {
+          method: "DELETE",
+          body: JSON.stringify({ ids: documentIds }),
+        },
+      );
+    },
+
+    async deleteDataset(input) {
+      const datasetId = stringValue(input.datasetId);
+      if (!datasetId) {
+        throw new ApiError(400, "invalid_ragflow_dataset", "A dataset id is required.");
+      }
+      await fetchRagflowOk(
+        baseUrl,
+        apiKey,
+        "/datasets",
+        fetchImpl,
+        requestImpl,
+        allowInsecureTls,
+        {
+          method: "DELETE",
+          body: JSON.stringify({ ids: [datasetId] }),
+        },
+      );
+    },
+
     async retrieve(input) {
       const question = stringValue(input.question);
       const datasetIds = arrayOfStrings(input.datasetIds);
@@ -793,6 +846,26 @@ export function createConfiguredRagflowClient(
         fetchImpl: clientOptions?.fetchImpl,
         requestImpl: clientOptions?.requestImpl,
       }).startParse(input);
+    },
+    async deleteDocuments(input) {
+      const resolved = assertConfigured(resolveRagflowServerConfig(config, env));
+      return createRagflowClient({
+        baseUrl: resolved.baseUrl,
+        apiKey: resolved.apiKey,
+        allowInsecureTls: resolved.insecureTls,
+        fetchImpl: clientOptions?.fetchImpl,
+        requestImpl: clientOptions?.requestImpl,
+      }).deleteDocuments(input);
+    },
+    async deleteDataset(input) {
+      const resolved = assertConfigured(resolveRagflowServerConfig(config, env));
+      return createRagflowClient({
+        baseUrl: resolved.baseUrl,
+        apiKey: resolved.apiKey,
+        allowInsecureTls: resolved.insecureTls,
+        fetchImpl: clientOptions?.fetchImpl,
+        requestImpl: clientOptions?.requestImpl,
+      }).deleteDataset(input);
     },
     async retrieve(input) {
       const resolved = assertConfigured(resolveRagflowServerConfig(config, env));

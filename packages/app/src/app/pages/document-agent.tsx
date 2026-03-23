@@ -2471,6 +2471,7 @@ export default function DocumentAgentView(props: SessionViewProps) {
               showThinking={props.showThinking}
               expandedStepIds={props.expandedStepIds}
               setExpandedStepIds={props.setExpandedStepIds}
+              scrollContainer={() => chatContainerEl}
               compact
             />
             <div

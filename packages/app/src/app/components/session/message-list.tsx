@@ -6,6 +6,7 @@ import { Check, ChevronDown, ChevronRight, Copy, Eye, File, FileEdit, FolderSear
 import type { MessageGroup, MessageInfo, MessageWithParts } from "../../types";
 import { groupMessageParts, summarizeStep } from "../../utils";
 import PartView from "../part-view";
+import { preserveScrollPositionOnToggle } from "../../lib/chat-scroll";
 import { perfNow, recordPerfLog } from "../../lib/perf-log";
 import { isToolPartActive, resolveToolPartDisplayStatus } from "../../lib/tool-part-status";
 import { currentLocale, t } from "../../../i18n";
@@ -25,6 +26,7 @@ export type MessageListProps = {
   workspaceRoot?: string;
   footer?: JSX.Element;
   compact?: boolean;
+  scrollContainer?: () => HTMLElement | undefined;
 };
 
 type StepClusterBlock = {
@@ -300,17 +302,19 @@ export default function MessageList(props: MessageListProps) {
   };
 
   const toggleSteps = (id: string, relatedIds: string[] = []) => {
-    props.setExpandedStepIds((current) => {
-      const next = new Set(current);
-      const isExpanded = next.has(id) || relatedIds.some((relatedId) => next.has(relatedId));
-      if (isExpanded) {
-        next.delete(id);
-        relatedIds.forEach((relatedId) => next.delete(relatedId));
-      } else {
-        next.add(id);
-        relatedIds.forEach((relatedId) => next.add(relatedId));
-      }
-      return next;
+    preserveScrollPositionOnToggle(props.scrollContainer?.(), () => {
+      props.setExpandedStepIds((current) => {
+        const next = new Set(current);
+        const isExpanded = next.has(id) || relatedIds.some((relatedId) => next.has(relatedId));
+        if (isExpanded) {
+          next.delete(id);
+          relatedIds.forEach((relatedId) => next.delete(relatedId));
+        } else {
+          next.add(id);
+          relatedIds.forEach((relatedId) => next.add(relatedId));
+        }
+        return next;
+      });
     });
   };
 
@@ -946,6 +950,7 @@ export default function MessageList(props: MessageListProps) {
       <div class={containerProps.isInline ? (containerProps.isUser ? "mt-2" : "mt-3 pt-3") : ""}>
         {/* Toggle button - clean, compact */}
         <button
+          type="button"
           class={`flex items-center ${props.compact ? "gap-1.5 py-1 text-[12px]" : "gap-2 py-1.5 text-[13px]"} transition-colors ${containerProps.isUser
               ? "text-gray-10 hover:text-gray-11"
               : "text-gray-10 hover:text-gray-12"

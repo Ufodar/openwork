@@ -4267,6 +4267,7 @@ export default function App() {
       !shouldAutoConnectWebClient({
         isTauri: isTauriRuntime(),
         hasClient: Boolean(client()),
+        connectingWorkspace: Boolean(workspaceStore.connectingWorkspaceId()),
         openworkServerStatus: openworkServerStatus(),
         openworkUrlOverride: settings.urlOverride ?? "",
         token: settings.token ?? "",

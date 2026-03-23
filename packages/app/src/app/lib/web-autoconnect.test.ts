@@ -8,6 +8,7 @@ describe("shouldAutoConnectWebClient", () => {
       shouldAutoConnectWebClient({
         isTauri: true,
         hasClient: false,
+        connectingWorkspace: false,
         openworkServerStatus: "connected",
         openworkUrlOverride: "http://example.com",
         token: "token",
@@ -22,6 +23,7 @@ describe("shouldAutoConnectWebClient", () => {
       shouldAutoConnectWebClient({
         isTauri: false,
         hasClient: false,
+        connectingWorkspace: false,
         openworkServerStatus: "connected",
         openworkUrlOverride: "http://example.com",
         token: "token",
@@ -36,6 +38,7 @@ describe("shouldAutoConnectWebClient", () => {
       shouldAutoConnectWebClient({
         isTauri: false,
         hasClient: false,
+        connectingWorkspace: false,
         openworkServerStatus: "connected",
         openworkUrlOverride: "http://example.com",
         token: "token",
@@ -43,5 +46,20 @@ describe("shouldAutoConnectWebClient", () => {
         tab: "agents",
       }),
     ).toBe(true);
+  });
+
+  test("skips autoconnect while another workspace connection is already running", () => {
+    expect(
+      shouldAutoConnectWebClient({
+        isTauri: false,
+        hasClient: false,
+        connectingWorkspace: true,
+        openworkServerStatus: "connected",
+        openworkUrlOverride: "http://example.com",
+        token: "token",
+        view: "document-agent",
+        tab: "agents",
+      }),
+    ).toBe(false);
   });
 });

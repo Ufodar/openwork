@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -60,6 +60,11 @@ describe("knowledge routes", () => {
     workspacePath = await mkdtemp(join(tmpdir(), "openwork-knowledge-workspace-"));
     runtimeDir = join(workspacePath, "documents", "sessions", "runtime_1");
     await mkdir(runtimeDir, { recursive: true });
+    await writeFile(
+      join(workspacePath, "opencode.jsonc"),
+      JSON.stringify({ model: "test-model" }, null, 2),
+      "utf8",
+    );
 
     workspace = {
       id: "ws_1",
@@ -515,6 +520,16 @@ describe("knowledge routes", () => {
         { knowledgeId: "kb_bob", ownerDisplayName: "bob" },
       ],
     });
+
+    const runtimeConfig = JSON.parse(await readFile(join(runtimeDir, "opencode.jsonc"), "utf8")) as {
+      instructions?: string[];
+      mcp?: Record<string, unknown>;
+    };
+    const instructionRaw = await readFile(join(runtimeDir, ".opencode", "openwork-knowledge.md"), "utf8");
+    expect(runtimeConfig.instructions).toContain(".opencode/openwork-knowledge.md");
+    expect(runtimeConfig.mcp?.["openwork-knowledge"]).toBeTruthy();
+    expect(instructionRaw).toContain("Alice Docs");
+    expect(instructionRaw).toContain("Bob Docs");
   });
 
   test("searches only within the attached knowledge set and returns registry labels", async () => {

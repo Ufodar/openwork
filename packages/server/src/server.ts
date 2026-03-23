@@ -1144,6 +1144,7 @@ export async function proxyOpencodeRequest(input: {
                 runtimeDir: provisionedRuntime.runtimeDir,
                 mcpUrl: `${input.openworkBaseUrl}/workspace/${encodeURIComponent(workspaceId)}/knowledge/mcp`,
                 runtimeToken: issued.token,
+                attachedKnowledge: [],
               });
             } catch (error) {
               console.warn("[openwork-server] Failed to provision runtime knowledge carrier:", error);
@@ -2409,6 +2410,27 @@ export function createRoutes(
     }
     const records = await requireKnowledgeRecordsForAttachment(knowledgeRegistry, knowledgeIds);
     await knowledgeAttachments.set(workspace.id, sessionId, runtimeWorkspace.runtimeId, knowledgeIds);
+    try {
+      const issued = await runtimeKnowledgeTokens.issue({
+        workspaceId: workspace.id,
+        sessionId,
+        runtimeId: runtimeWorkspace.runtimeId,
+      });
+      await writeRuntimeKnowledgeCarrierConfig({
+        workspacePath: workspace.path,
+        runtimeDir: runtimeWorkspace.runtimeDir,
+        mcpUrl: `${resolveServerLoopbackBaseUrl(config)}/workspace/${encodeURIComponent(workspace.id)}/knowledge/mcp`,
+        runtimeToken: issued.token,
+        attachedKnowledge: records.map((record) => ({
+          knowledgeId: record.knowledgeId,
+          title: record.title,
+          ownerDisplayName: record.ownerDisplayName,
+          description: record.description ?? null,
+        })),
+      });
+    } catch (error) {
+      console.warn("[openwork-server] Failed to refresh runtime knowledge instructions:", error);
+    }
     return jsonResponse({
       ok: true,
       sessionId,

@@ -48,7 +48,9 @@ describe("provisionSessionWorkspace", () => {
     const parsed = JSON.parse(raw) as {
       model?: string;
       mcp?: Record<string, unknown>;
+      instructions?: string[];
     };
+    const instructionRaw = await readFile(join(runtime.runtimeDir, ".opencode", "openwork-knowledge.md"), "utf8");
 
     expect(parsed.model).toBe("test-model");
     expect(parsed.mcp?.filesystem).toBeTruthy();
@@ -59,5 +61,33 @@ describe("provisionSessionWorkspace", () => {
         Authorization: "Bearer owkrt_test",
       },
     });
+    expect(parsed.instructions).toContain(".opencode/openwork-knowledge.md");
+    expect(instructionRaw).toContain("openwork_knowledge_search");
+    expect(instructionRaw).toContain("(none attached yet)");
+  });
+
+  test("updates the runtime knowledge instructions with the current attached titles", async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), "openwork-session-workspace-knowledge-state-"));
+    const runtime = await provisionSessionWorkspace(workspacePath);
+
+    await writeRuntimeKnowledgeCarrierConfig({
+      workspacePath,
+      runtimeDir: runtime.runtimeDir,
+      mcpUrl: "http://127.0.0.1:8789/workspace/ws_1/knowledge/mcp",
+      runtimeToken: "owkrt_test",
+      attachedKnowledge: [
+        {
+          knowledgeId: "kb_alpha",
+          title: "商业资质库",
+          ownerDisplayName: "alice",
+          description: "企业证照与资质材料",
+        },
+      ],
+    });
+
+    const instructionRaw = await readFile(join(runtime.runtimeDir, ".opencode", "openwork-knowledge.md"), "utf8");
+    expect(instructionRaw).toContain("商业资质库");
+    expect(instructionRaw).toContain("knowledge_id=kb_alpha");
+    expect(instructionRaw).toContain("owner=alice");
   });
 });

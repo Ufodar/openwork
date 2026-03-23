@@ -85,10 +85,14 @@ describe("proxyOpencodeRequest session creation", () => {
     const parsed = JSON.parse(raw) as {
       model?: string;
       mcp?: Record<string, unknown>;
+      instructions?: string[];
     };
+    const instructionRaw = await readFile(join(runtime?.runtimeDir ?? "", ".opencode", "openwork-knowledge.md"), "utf8");
 
     expect(parsed.model).toBe("test-model");
     expect(parsed.mcp?.filesystem).toBeTruthy();
     expect(parsed.mcp?.["openwork-knowledge"]).toBeTruthy();
+    expect(parsed.instructions).toContain(".opencode/openwork-knowledge.md");
+    expect(instructionRaw).toContain("openwork_knowledge_list_attached");
   });
 });

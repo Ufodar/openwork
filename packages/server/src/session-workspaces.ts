@@ -28,6 +28,15 @@ export type SessionWorkspaceEntry = {
   createdAt: number;
 };
 
+type RuntimeKnowledgeInstructionRecord = {
+  knowledgeId: string;
+  title: string;
+  ownerDisplayName?: string | null;
+  description?: string | null;
+};
+
+const KNOWLEDGE_INSTRUCTIONS_RELATIVE_PATH = ".opencode/openwork-knowledge.md";
+
 function expandHome(value: string): string {
   if (value.startsWith("~/")) return join(homedir(), value.slice(2));
   return value;
@@ -86,11 +95,62 @@ export async function provisionSessionWorkspace(workspacePath: string): Promise<
   return { runtimeId, runtimeDir };
 }
 
+function normalizeInstructionEntries(value: unknown): string[] {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed ? [trimmed] : [];
+  }
+  if (!Array.isArray(value)) return [];
+  const next: string[] = [];
+  const seen = new Set<string>();
+  for (const entry of value) {
+    if (typeof entry !== "string") continue;
+    const trimmed = entry.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    next.push(trimmed);
+  }
+  return next;
+}
+
+function buildRuntimeKnowledgeInstructions(attachedKnowledge: RuntimeKnowledgeInstructionRecord[]): string {
+  const header = [
+    "# OpenWork Knowledge Routing",
+    "",
+    "This session can use OpenWork-managed knowledge tools:",
+    "- `openwork_knowledge_list_attached`",
+    "- `openwork_knowledge_search`",
+    "",
+    "Rules:",
+    "1. For requests that may depend on project, bid, product, qualification, company, or document facts, first inspect the attached knowledge bases.",
+    "2. Call `openwork_knowledge_list_attached` if you need to confirm the currently attached knowledge bases.",
+    "3. If one or more knowledge bases are attached, call `openwork_knowledge_search` at least once before answering.",
+    "4. You may call `openwork_knowledge_search` multiple times to narrow or refine recall.",
+    "5. Use knowledge search for fast recall and scope reduction. If exact wording, numbers, tables, clauses, or citations matter, read the original files afterwards.",
+    "6. If no knowledge bases are attached or the search results are insufficient, say so briefly and continue with other tools.",
+    "",
+    "Currently attached knowledge bases:",
+  ];
+
+  if (!attachedKnowledge.length) {
+    header.push("- (none attached yet)");
+    return header.join("\n") + "\n";
+  }
+
+  for (const item of attachedKnowledge) {
+    const owner = item.ownerDisplayName?.trim() ? ` · owner=${item.ownerDisplayName.trim()}` : "";
+    const description = item.description?.trim() ? ` — ${item.description.trim()}` : "";
+    header.push(`- ${item.title} (knowledge_id=${item.knowledgeId})${owner}${description}`);
+  }
+  return header.join("\n") + "\n";
+}
+
 export async function writeRuntimeKnowledgeCarrierConfig(input: {
   workspacePath: string;
   runtimeDir: string;
   mcpUrl: string;
   runtimeToken: string;
+  attachedKnowledge?: RuntimeKnowledgeInstructionRecord[];
 }): Promise<string> {
   const workspaceConfigPath = opencodeConfigPath(input.workspacePath);
   const runtimeConfigPath = opencodeConfigPath(input.runtimeDir);
@@ -108,6 +168,15 @@ export async function writeRuntimeKnowledgeCarrierConfig(input: {
     },
   };
   baseConfig.mcp = existingMcp;
+  const existingInstructions = normalizeInstructionEntries(baseConfig.instructions);
+  baseConfig.instructions = [...existingInstructions.filter((entry) => entry !== KNOWLEDGE_INSTRUCTIONS_RELATIVE_PATH), KNOWLEDGE_INSTRUCTIONS_RELATIVE_PATH];
+  const instructionPath = join(input.runtimeDir, KNOWLEDGE_INSTRUCTIONS_RELATIVE_PATH);
+  await ensureDir(dirname(instructionPath));
+  await writeFile(
+    instructionPath,
+    buildRuntimeKnowledgeInstructions(input.attachedKnowledge ?? []),
+    "utf8",
+  );
   await writeJsoncFile(runtimeConfigPath, baseConfig);
   return runtimeConfigPath;
 }

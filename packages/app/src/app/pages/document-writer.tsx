@@ -16,6 +16,7 @@ import {
   resolveOnlyOfficeContainerId,
   resolveOnlyOfficeEditorKey,
 } from "../lib/onlyoffice-editor-key";
+import { equalOnlyOfficeEditorSource } from "../lib/onlyoffice-editor-source";
 import { isSessionHydrating } from "../lib/session-hydration";
 import { currentLocale, t as i18n } from "../../i18n";
 import {
@@ -924,17 +925,21 @@ export default function DocumentWriterView(props: SessionViewProps) {
     paneResizeCleanup?.();
   });
 
-  const editorSource = createMemo(() => {
-    const cfg = apiConfig();
-    const doc = activeDoc();
-    if (!cfg || !doc || activeDocKind() !== "onlyoffice") return null;
-    return {
-      ...cfg,
-      doc,
-      seq: configSeq(),
-      readonly: isAgentRunning(),
-    } satisfies EditorSource;
-  });
+  const editorSource = createMemo<EditorSource | null>(
+    () => {
+      const cfg = apiConfig();
+      const doc = activeDoc();
+      if (!cfg || !doc || activeDocKind() !== "onlyoffice") return null;
+      return {
+        ...cfg,
+        doc,
+        seq: configSeq(),
+        readonly: isAgentRunning(),
+      } satisfies EditorSource;
+    },
+    null,
+    { equals: equalOnlyOfficeEditorSource },
+  );
 
   const [editorPayload] = createResource(editorSource, async (input): Promise<OnlyOfficePayload | null> => {
     if (!input) return null;
@@ -1068,7 +1073,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
       setToastMessage(skippedHiddenCount > 0 ? `${message}\n${hiddenSkipMessage(skippedHiddenCount)}` : message);
     } finally {
       if (completedUploads > 0 && !refreshedDocuments) {
-        await refetchDocuments().catch(() => undefined);
+        await Promise.resolve(refetchDocuments()).catch(() => undefined);
       }
       setUploadProgress(null);
       setUploadBusy(false);
@@ -2359,14 +2364,16 @@ export default function DocumentWriterView(props: SessionViewProps) {
                     </div>
                   }
                 >
-                  <Show when={onlyOfficeEditorKey()} keyed>
-                    {() => (
+                  <Show when={onlyOfficeEditorKey()}>
+                    <Show when={currentEditorPayload()} keyed>
+                      {(payload) => (
                       <OnlyOfficeEditor
                         id={onlyOfficeContainerId()}
-                        documentServerUrl={currentEditorPayload()!.documentServerUrl}
-                        config={currentEditorPayload()!.config}
+                        documentServerUrl={payload.documentServerUrl ?? "http://localhost:8080"}
+                        config={payload.config ?? {}}
                       />
-                    )}
+                      )}
+                    </Show>
                   </Show>
                 </Show>
               </Show>

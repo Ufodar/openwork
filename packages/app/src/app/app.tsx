@@ -46,6 +46,7 @@ import {
 } from "./lib/opencode-session";
 import { clearPerfLogs, finishPerf, perfNow, recordPerfLog } from "./lib/perf-log";
 import { clearBusyState } from "./lib/busy-state";
+import { resolveClientWorkspaceDirectory } from "./lib/client-workspace-directory";
 import { reconcileOpenworkServerProbe } from "./lib/openwork-server-status";
 import {
   type OpenworkSessionPrefs,
@@ -921,9 +922,19 @@ export default function App() {
     }
   });
 
+  const resolveActiveClientWorkspaceRoot = () => {
+    const activeWorkspace = workspaceStore.activeWorkspaceDisplay();
+    return resolveClientWorkspaceDirectory({
+      workspaceType: activeWorkspace.workspaceType,
+      clientDirectory: clientDirectory(),
+      workspaceDirectory: activeWorkspace.directory ?? activeWorkspace.path ?? "",
+      workspaceRoot: workspaceStore.activeWorkspaceRoot().trim(),
+    }).trim();
+  };
+
   const sessionStore = createSessionStore({
     client,
-    activeWorkspaceRoot: () => workspaceStore.activeWorkspaceRoot().trim(),
+    activeWorkspaceRoot: () => resolveActiveClientWorkspaceRoot(),
     selectedSessionId,
     setSelectedSessionId,
     sessionModelState: () => ({
@@ -1602,7 +1613,7 @@ export default function App() {
       throw new Error("Not connected to a server");
     }
 
-    const root = workspaceStore.activeWorkspaceRoot().trim();
+    const root = resolveActiveClientWorkspaceRoot();
     const params = root ? { sessionID: trimmed, directory: root } : { sessionID: trimmed };
     unwrap(await c.session.delete(params));
 
@@ -1683,7 +1694,7 @@ export default function App() {
   async function listCommands(): Promise<{ id: string; name: string; description?: string; source?: "command" | "mcp" | "skill" }[]> {
     const c = client();
     if (!c) return [];
-    const list = await listCommandsTyped(c, workspaceStore.activeWorkspaceRoot().trim() || undefined);
+    const list = await listCommandsTyped(c, resolveActiveClientWorkspaceRoot() || undefined);
     if (list.some((entry) => entry.name === "compact")) {
       return list;
     }
@@ -1948,7 +1959,7 @@ export default function App() {
   const extensionsStore = createExtensionsStore({
     client,
     projectDir: () => workspaceProjectDir(),
-    activeWorkspaceRoot: () => workspaceStore.activeWorkspaceRoot(),
+    activeWorkspaceRoot: () => resolveActiveClientWorkspaceRoot(),
     workspaceType: () => workspaceStore.activeWorkspaceDisplay().workspaceType,
     openworkServerClient,
     openworkServerStatus,
@@ -2573,7 +2584,7 @@ export default function App() {
           const response = await client.listWorkspaces();
           if (cancelled) return;
           const items = Array.isArray(response.items) ? response.items : [];
-          const directoryHint = normalizeDirectoryPath(active.directory?.trim() ?? active.path?.trim() ?? "");
+          const directoryHint = normalizeDirectoryPath(resolveActiveClientWorkspaceRoot());
           const match = directoryHint
             ? items.find((entry) => {
               const entryPath = normalizeDirectoryPath((entry.opencode?.directory ?? entry.directory ?? entry.path ?? "").trim());
@@ -2594,7 +2605,7 @@ export default function App() {
     }
 
     if (active.workspaceType === "local") {
-      const root = normalizeDirectoryPath(workspaceStore.activeWorkspaceRoot().trim());
+      const root = normalizeDirectoryPath(resolveActiveClientWorkspaceRoot());
       if (!root) {
         setOpenworkServerWorkspaceId(null);
         return;
@@ -2909,7 +2920,7 @@ export default function App() {
     const activeWorkspaceId = untrack(() => workspaceStore.activeWorkspaceId());
     const activeDisplay = untrack(() => workspaceStore.activeWorkspaceDisplay());
     const openworkUrl = untrack(() => openworkServerUrl().trim());
-    const localRootHint = untrack(() => normalizeDirectoryPath(workspaceStore.activeWorkspaceRoot().trim()));
+    const localRootHint = untrack(() => normalizeDirectoryPath(resolveActiveClientWorkspaceRoot()));
 
     const task = (async () => {
       try {
@@ -2932,7 +2943,7 @@ export default function App() {
         if (!items.length) return response.activeId ?? null;
 
         if (activeDisplay.workspaceType === "remote" && activeDisplay.remoteType === "openwork") {
-          const directoryHint = normalizeDirectoryPath(activeDisplay.directory?.trim() ?? activeDisplay.path?.trim() ?? "");
+          const directoryHint = normalizeDirectoryPath(localRootHint);
           const match = directoryHint
             ? items.find((entry) => {
               const entryPath = normalizeDirectoryPath((entry.opencode?.directory ?? entry.directory ?? entry.path ?? "").trim());
@@ -3732,9 +3743,8 @@ export default function App() {
       }
     }
 
-    await openSessionInPreferredView(sessionId, { title: session.title });
-
     setOpenworkServerWorkspaceId(targetWorkspaceId);
+    await openSessionInPreferredView(sessionId, { title: session.title });
     const activeWorkspaceId = workspaceStore.activeWorkspaceId().trim();
     if (activeWorkspaceId) {
       void refreshSidebarWorkspaceSessions(activeWorkspaceId).catch(() => undefined);
@@ -5100,7 +5110,7 @@ export default function App() {
 
     mark("start", {
       baseUrl: baseUrl(),
-      workspace: workspaceStore.activeWorkspaceRoot().trim() || null,
+      workspace: resolveActiveClientWorkspaceRoot() || null,
     });
 
     // Abort any in-flight refresh operations to free up connection resources
@@ -5146,7 +5156,7 @@ export default function App() {
       try {
         mark("session:create:start");
         rawResult = await c.session.create({
-          directory: workspaceStore.activeWorkspaceRoot().trim(),
+          directory: resolveActiveClientWorkspaceRoot(),
           title: title || undefined,
         });
         mark("session:create:ok");
@@ -5527,7 +5537,7 @@ export default function App() {
 
     setWorkspaceDefaultModelReady(false);
     const workspaceType = workspaceStore.activeWorkspaceDisplay().workspaceType;
-    const workspaceRoot = workspaceStore.activeWorkspacePath().trim();
+    const workspaceRoot = resolveActiveClientWorkspaceRoot();
     const activeClient = client();
     const openworkClient = openworkServerClient();
     const openworkWorkspaceId = openworkServerWorkspaceId();
@@ -6166,7 +6176,7 @@ export default function App() {
       soulError: soulError(),
       refreshSoulData: (options?: { force?: boolean }) => refreshSoulData(options).catch(() => undefined),
       runSoulPrompt,
-      activeWorkspaceRoot: workspaceStore.activeWorkspaceRoot().trim(),
+      activeWorkspaceRoot: resolveActiveClientWorkspaceRoot(),
       refreshSkills: (options?: { force?: boolean }) => refreshSkills(options).catch(() => undefined),
       refreshHubSkills: (options?: { force?: boolean }) => refreshHubSkills(options).catch(() => undefined),
       refreshPlugins: (scopeOverride?: PluginScope) =>
@@ -6321,7 +6331,7 @@ export default function App() {
     setTab,
     setSettingsTab,
     activeWorkspaceDisplay: activeWorkspaceDisplay(),
-    activeWorkspaceRoot: workspaceStore.activeWorkspaceRoot().trim(),
+    activeWorkspaceRoot: resolveActiveClientWorkspaceRoot(),
     workspaces: workspaceStore.workspaces(),
     activeWorkspaceId: workspaceStore.activeWorkspaceId(),
     connectingWorkspaceId: workspaceStore.connectingWorkspaceId(),

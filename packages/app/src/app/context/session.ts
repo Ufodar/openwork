@@ -629,10 +629,9 @@ export function createSessionStore(options: {
         }
         mark("health ok");
       } catch (error) {
-        mark("health FAILED", {
+        mark("health skipped", {
           error: error instanceof Error ? error.message : safeStringify(error),
         });
-        throw new Error("Server connection lost. Please reload.");
       }
       if (abortIfStale("selection changed after health")) return;
 

@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createSignal } from "solid-js";
+import { For, Show, createEffect, createSignal, on } from "solid-js";
 
 import Button from "../components/button";
 import type {
@@ -122,14 +122,18 @@ export default function AdminUsersView(props: AdminUsersViewProps) {
     }
   };
 
-  createEffect(() => {
-    props.client;
-    if (!props.enabled) {
-      setInitialLoadAttempted(false);
-      return;
-    }
-    setInitialLoadAttempted(false);
-  });
+  createEffect(
+    on(
+      () => [props.enabled, props.client, props.active] as const,
+      ([enabled, client]) => {
+        if (!enabled || !client) {
+          setInitialLoadAttempted(false);
+          return;
+        }
+        setInitialLoadAttempted(false);
+      },
+    ),
+  );
 
   createEffect(() => {
     if (!props.active || !props.enabled || !props.client) return;

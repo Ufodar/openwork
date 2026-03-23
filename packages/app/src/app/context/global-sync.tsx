@@ -169,7 +169,7 @@ export function GlobalSyncProvider(props: ParentProps) {
     setGlobalStore("config", result);
   };
 
-  const refreshProviders = async () => {
+  const refreshProviders = async (options?: { full?: boolean }) => {
     let seededFromConfig = false;
     try {
       const fallback = unwrap(
@@ -187,6 +187,13 @@ export function GlobalSyncProvider(props: ParentProps) {
       seededFromConfig = true;
     } catch {
       // Keep current provider state if the lightweight source fails.
+    }
+
+    if (!options?.full) {
+      if (!seededFromConfig && !globalStore.provider.all.length) {
+        setGlobalStore("provider", defaultProvider);
+      }
+      return;
     }
 
     try {
@@ -337,7 +344,7 @@ export function GlobalSyncProvider(props: ParentProps) {
     };
 
     scheduleBackground(() => {
-      void Promise.allSettled([refreshMcp(), refreshLsp(), refreshProjects()]).then((results) => {
+      void Promise.allSettled([refreshProviders({ full: true }), refreshMcp(), refreshLsp(), refreshProjects()]).then((results) => {
         for (const result of results) {
           if (result.status === "rejected") setError(result.reason);
         }
@@ -416,4 +423,3 @@ export function useGlobalSync() {
   }
   return context;
 }
-

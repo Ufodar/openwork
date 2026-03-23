@@ -1288,34 +1288,34 @@ export function createWorkspaceStore(options: {
           const providersAt = Date.now();
           wsDebug("connect:providers:start", { baseUrl: nextBaseUrl });
           try {
-            const providerList = unwrap(await nextClient.provider.list());
+            const cfg = unwrap(await nextClient.config.providers());
+            const mapped = mapConfigProvidersToList(cfg.providers);
             wsDebug("connect:providers:done", {
               ms: Date.now() - providersAt,
-              source: "provider.list",
-              available: providerList.all?.length ?? 0,
-              connected: providerList.connected?.length ?? 0,
+              source: "config.providers",
+              available: mapped.length,
+              connected: 0,
             });
             return {
-              providers: providerList.all,
-              defaults: providerList.default,
-              connectedIds: providerList.connected,
+              providers: mapped,
+              defaults: cfg.default,
+              connectedIds: [],
             };
           } catch (error) {
             const message = error instanceof Error ? error.message : safeStringify(error);
             wsDebug("connect:providers:fallback", { ms: Date.now() - providersAt, message });
             try {
-              const cfg = unwrap(await nextClient.config.providers());
-              const mapped = mapConfigProvidersToList(cfg.providers);
+              const providerList = unwrap(await nextClient.provider.list());
               wsDebug("connect:providers:done", {
                 ms: Date.now() - providersAt,
-                source: "config.providers",
-                available: mapped.length,
-                connected: 0,
+                source: "provider.list",
+                available: providerList.all?.length ?? 0,
+                connected: providerList.connected?.length ?? 0,
               });
               return {
-                providers: mapped,
-                defaults: cfg.default,
-                connectedIds: [],
+                providers: providerList.all,
+                defaults: providerList.default,
+                connectedIds: providerList.connected,
               };
             } catch (fallbackError) {
               const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : safeStringify(fallbackError);
@@ -1345,6 +1345,20 @@ export function createWorkspaceStore(options: {
         options.setProviders(providerState.providers);
         options.setProviderDefaults(providerState.defaults);
         options.setProviderConnectedIds(providerState.connectedIds);
+        setTimeout(() => {
+          if (options.client() !== nextClient) return;
+          void (async () => {
+            try {
+              const providerList = unwrap(await nextClient.provider.list());
+              if (options.client() !== nextClient) return;
+              options.setProviders(providerList.all);
+              options.setProviderDefaults(providerList.default);
+              options.setProviderConnectedIds(providerList.connected);
+            } catch {
+              // Keep the lightweight provider state.
+            }
+          })();
+        }, 0);
 
         options.refreshSkills({ force: true }).catch(() => undefined);
         options.refreshPlugins().catch(() => undefined);
@@ -2539,6 +2553,7 @@ export function createWorkspaceStore(options: {
       setEngineAuth(null);
 
       options.setClient(null);
+      options.setClientDirectory("");
       options.setConnectedVersion(null);
       options.setSelectedSessionId(null);
       options.setMessages([]);
@@ -2566,6 +2581,7 @@ export function createWorkspaceStore(options: {
 
     setEngineAuth(null);
     options.setClient(null);
+    options.setClientDirectory("");
     options.setConnectedVersion(null);
     options.setSseConnected(false);
     options.setSelectedSessionId(null);

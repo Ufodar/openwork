@@ -3391,7 +3391,7 @@ export default function SessionView(props: SessionViewProps) {
         client={props.openworkServerClient}
         workspaceId={props.openworkServerWorkspaceId}
         sessionId={props.selectedSessionId}
-        editingLocked={showRunIndicator() || messages().some((message) => message.info?.role === "user" || message.info?.role === "assistant")}
+        editingLocked={showRunIndicator() || props.messages.some((message) => message.info?.role === "user" || message.info?.role === "assistant")}
         tr={tr}
         onToast={(message) => setToastMessage(message)}
       />

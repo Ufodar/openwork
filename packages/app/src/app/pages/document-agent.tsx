@@ -2568,7 +2568,7 @@ export default function DocumentAgentView(props: SessionViewProps) {
           client={props.openworkServerClient}
           workspaceId={props.openworkServerWorkspaceId}
           sessionId={props.selectedSessionId}
-          editingLocked={isAgentRunning() || messages().some((message) => message.info?.role === "user" || message.info?.role === "assistant")}
+          editingLocked={isAgentRunning() || props.messages.some((message) => message.info?.role === "user" || message.info?.role === "assistant")}
           tr={tr}
           onToast={(message) => setToastMessage(message)}
         />

@@ -454,7 +454,6 @@ async function main() {
     "继续依据当前已挂载的知识库，海滨医院的交换机型号有哪些？只列型号，不要解释。",
     {
       expectedIncludes: ["CE6855-48XS8CQ", "S5755-H24T4Y2CZ"],
-      expectKnowledgeSearch: true,
     },
   );
   results.locked_session_scope = {

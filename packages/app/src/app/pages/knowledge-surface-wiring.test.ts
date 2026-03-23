@@ -11,21 +11,21 @@ test("session view wires the shared session knowledge surface", () => {
   const source = readPage("session.tsx");
   expect(source).toContain('import SessionKnowledgeSurface from "../components/session/session-knowledge-surface"');
   expect(source).toContain("<SessionKnowledgeSurface");
-  expect(source).toContain('editingLocked={showRunIndicator() || messages().some((message) => message.info?.role === "user" || message.info?.role === "assistant")}');
+  expect(source).toContain('editingLocked={showRunIndicator() || props.messages.some((message) => message.info?.role === "user" || message.info?.role === "assistant")}');
 });
 
 test("document agent view wires the shared session knowledge surface", () => {
   const source = readPage("document-agent.tsx");
   expect(source).toContain('import SessionKnowledgeSurface from "../components/session/session-knowledge-surface"');
   expect(source).toContain("<SessionKnowledgeSurface");
-  expect(source).toContain('editingLocked={isAgentRunning() || messages().some((message) => message.info?.role === "user" || message.info?.role === "assistant")}');
+  expect(source).toContain('editingLocked={isAgentRunning() || props.messages.some((message) => message.info?.role === "user" || message.info?.role === "assistant")}');
 });
 
 test("document writer view wires the shared session knowledge surface", () => {
   const source = readPage("document-writer.tsx");
   expect(source).toContain('import SessionKnowledgeSurface from "../components/session/session-knowledge-surface"');
   expect(source).toContain("<SessionKnowledgeSurface");
-  expect(source).toContain('editingLocked={isAgentRunning() || messages().some((message) => message.info?.role === "user" || message.info?.role === "assistant")}');
+  expect(source).toContain('editingLocked={isAgentRunning() || props.messages.some((message) => message.info?.role === "user" || message.info?.role === "assistant")}');
   expect(source).not.toContain('import SessionKnowledgeStrip from "../components/session-knowledge-strip"');
 });
 

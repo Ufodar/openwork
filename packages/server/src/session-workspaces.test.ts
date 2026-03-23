@@ -32,6 +32,14 @@ describe("provisionSessionWorkspace", () => {
             type: "local",
             command: ["npx", "-y", "@modelcontextprotocol/server-filesystem", "."],
           },
+          memory: {
+            type: "local",
+            command: ["npx", "-y", "@modelcontextprotocol/server-memory"],
+          },
+          ragflow: {
+            type: "remote",
+            url: "https://ragflow.example.invalid",
+          },
         },
       }, null, 2),
       "utf8",
@@ -54,6 +62,8 @@ describe("provisionSessionWorkspace", () => {
 
     expect(parsed.model).toBe("test-model");
     expect(parsed.mcp?.filesystem).toBeTruthy();
+    expect(parsed.mcp?.memory).toBeTruthy();
+    expect(parsed.mcp?.ragflow).toBeUndefined();
     expect(parsed.mcp?.["openwork-knowledge"]).toMatchObject({
       type: "remote",
       url: "http://127.0.0.1:8789/workspace/ws_1/knowledge/mcp",
@@ -70,8 +80,25 @@ describe("provisionSessionWorkspace", () => {
   test("updates the runtime knowledge instructions with the current attached titles", async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), "openwork-session-workspace-knowledge-state-"));
     const runtime = await provisionSessionWorkspace(workspacePath);
+    await writeFile(
+      join(workspacePath, "opencode.jsonc"),
+      JSON.stringify({
+        model: "test-model",
+        mcp: {
+          memory: {
+            type: "local",
+            command: ["npx", "-y", "@modelcontextprotocol/server-memory"],
+          },
+          ragflow: {
+            type: "remote",
+            url: "https://ragflow.example.invalid",
+          },
+        },
+      }, null, 2),
+      "utf8",
+    );
 
-    await writeRuntimeKnowledgeCarrierConfig({
+    const configPath = await writeRuntimeKnowledgeCarrierConfig({
       workspacePath,
       runtimeDir: runtime.runtimeDir,
       mcpUrl: "http://127.0.0.1:8789/workspace/ws_1/knowledge/mcp",
@@ -86,7 +113,13 @@ describe("provisionSessionWorkspace", () => {
       ],
     });
 
+    const raw = await readFile(configPath, "utf8");
+    const parsed = JSON.parse(raw) as {
+      mcp?: Record<string, unknown>;
+    };
     const instructionRaw = await readFile(join(runtime.runtimeDir, ".opencode", "openwork-knowledge.md"), "utf8");
+    expect(parsed.mcp?.ragflow).toBeUndefined();
+    expect(parsed.mcp?.memory).toMatchObject({ enabled: false });
     expect(instructionRaw).toContain("商业资质库");
     expect(instructionRaw).toContain("knowledge_id=kb_alpha");
     expect(instructionRaw).toContain("owner=alice");

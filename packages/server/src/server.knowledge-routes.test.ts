@@ -19,6 +19,7 @@ type TestUser = {
 };
 
 describe("knowledge routes", () => {
+  const originalFetch = globalThis.fetch;
   const originalOpenworkDataDir = process.env.OPENWORK_DATA_DIR;
 
   let workspacePath = "";
@@ -54,6 +55,7 @@ describe("knowledge routes", () => {
   let ragflowParseCalls: Array<{ datasetId: string; documentIds: string[] }> = [];
   let usersByOwnerKey: Map<string, TestUser>;
   let routes: ReturnType<typeof createRoutes>;
+  let disposeCalls: string[] = [];
 
   beforeEach(async () => {
     process.env.OPENWORK_DATA_DIR = await mkdtemp(join(tmpdir(), "openwork-knowledge-data-"));
@@ -111,6 +113,12 @@ describe("knowledge routes", () => {
     ragflowUploadCalls = [];
     ragflowDocumentsByDataset = new Map();
     ragflowParseCalls = [];
+    disposeCalls = [];
+    globalThis.fetch = (async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      disposeCalls.push(url);
+      return new Response(null, { status: 200 });
+    }) as unknown as typeof fetch;
     const ragflow = {
       listDatasets: async () => [],
       createDataset: async (input) => {
@@ -220,12 +228,13 @@ describe("knowledge routes", () => {
       ragflow,
       new RuntimeKnowledgeTokenService(),
       { getState: () => null } as any,
-      {} as any,
+      { listActiveSessions: () => [] } as any,
       { log: () => undefined } as any,
     );
   });
 
   afterEach(() => {
+    globalThis.fetch = originalFetch;
     if (typeof originalOpenworkDataDir === "string") {
       process.env.OPENWORK_DATA_DIR = originalOpenworkDataDir;
     } else {
@@ -530,6 +539,9 @@ describe("knowledge routes", () => {
     expect(runtimeConfig.mcp?.["openwork-knowledge"]).toBeTruthy();
     expect(instructionRaw).toContain("Alice Docs");
     expect(instructionRaw).toContain("Bob Docs");
+    expect(disposeCalls).toHaveLength(1);
+    expect(disposeCalls[0]).toContain("/instance/dispose");
+    expect(disposeCalls[0]).toContain(encodeURIComponent(runtimeDir));
   });
 
   test("searches only within the attached knowledge set and returns registry labels", async () => {

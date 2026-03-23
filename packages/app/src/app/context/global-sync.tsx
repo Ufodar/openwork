@@ -18,6 +18,7 @@ import type {
 
 import type { McpStatusMap, TodoItem } from "../types";
 import { unwrap } from "../lib/opencode";
+import { resolveAbortLikeError } from "../lib/request-abort";
 import { safeStringify } from "../utils";
 import { mapConfigProvidersToList } from "../utils/providers";
 import { useGlobalSDK } from "./global-sdk";
@@ -109,9 +110,15 @@ const withAbortTimeout = async <T,>(
   try {
     return await runner(controller.signal);
   } catch (error) {
-    const name = (error && typeof error === "object" && "name" in error ? (error as any).name : "") as string;
-    if (didTimeout || name === "AbortError") {
-      throw new Error(`${label} timed out.`);
+    const next = resolveAbortLikeError(error, {
+      didTimeout,
+      upstreamAborted: Boolean(controller.signal.aborted && !didTimeout),
+    });
+    if (next !== error) {
+      if (next instanceof Error && next.message === "Request timed out.") {
+        throw new Error(`${label} timed out.`);
+      }
+      throw next;
     }
     throw error;
   } finally {

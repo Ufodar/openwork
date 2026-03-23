@@ -1,6 +1,7 @@
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import { formatBytes, isTauriRuntime } from "../utils";
 import type { ScheduledJob } from "./tauri";
+import { resolveAbortLikeError } from "./request-abort";
 
 export type OpenworkServerCapabilities = {
   skills: { read: boolean; write: boolean; source: "openwork" | "opencode" };
@@ -895,7 +896,9 @@ async function fetchWithTimeout(
     }
 
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let didTimeout = false;
     timeoutId = setTimeout(() => {
+      didTimeout = true;
       try {
         timeoutController.abort(new Error("Request timed out."));
       } catch {
@@ -915,10 +918,10 @@ async function fetchWithTimeout(
   } catch (error) {
     const name = (error && typeof error === "object" && "name" in error ? (error as any).name : "") as string;
     if (name === "AbortError") {
-      if (upstreamSignal?.aborted) {
-        throw error;
-      }
-      throw new Error("Request timed out.");
+      throw resolveAbortLikeError(error, {
+        didTimeout,
+        upstreamAborted: Boolean(upstreamSignal?.aborted),
+      });
     }
     throw error;
   }

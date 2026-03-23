@@ -660,33 +660,44 @@ export function createSessionStore(options: {
         });
       }
 
-      try {
-        mark("calling session.todo");
-        const list = unwrap(await c.session.todo(
-          { sessionID },
-          { signal: AbortSignal.timeout(8_000) },
-        ));
-        mark("session.todo done");
+      const [todoResult, permissionResult] = await Promise.allSettled([
+        (async () => {
+          mark("calling session.todo");
+          const list = unwrap(await c.session.todo(
+            { sessionID },
+            { signal: AbortSignal.timeout(8_000) },
+          ));
+          mark("session.todo done");
+          return list;
+        })(),
+        (async () => {
+          mark("calling permission.list");
+          await refreshPendingPermissions({ signal: AbortSignal.timeout(6_000) });
+          mark("permission.list done");
+        })(),
+      ]);
+
+      if (todoResult.status === "fulfilled") {
         if (abortIfStale("selection changed before todos applied")) return;
-        setStore("todos", sessionID, list);
-      } catch (error) {
+        setStore("todos", sessionID, todoResult.value);
+      } else {
         mark("session.todo failed/timeout", {
-          error: error instanceof Error ? error.message : safeStringify(error),
+          error: todoResult.reason instanceof Error ? todoResult.reason.message : safeStringify(todoResult.reason),
         });
         if (abortIfStale("selection changed before todo fallback")) return;
         setStore("todos", sessionID, []);
       }
 
-      try {
-        mark("calling permission.list");
-        await refreshPendingPermissions({ signal: AbortSignal.timeout(6_000) });
-        mark("permission.list done");
-        if (abortIfStale("selection changed before permissions applied")) return;
-      } catch (error) {
+      if (permissionResult.status !== "fulfilled") {
         mark("permission.list failed/timeout", {
-          error: error instanceof Error ? error.message : safeStringify(error),
+          error:
+            permissionResult.reason instanceof Error
+              ? permissionResult.reason.message
+              : safeStringify(permissionResult.reason),
         });
         if (abortIfStale("selection changed after permission failure")) return;
+      } else if (abortIfStale("selection changed before permissions applied")) {
+        return;
       }
 
       finishPerf(perfEnabled, "session.select", "complete", startedAt, {

@@ -47,6 +47,7 @@ import {
 import { clearPerfLogs, finishPerf, perfNow, recordPerfLog } from "./lib/perf-log";
 import { clearBusyState } from "./lib/busy-state";
 import { resolveClientWorkspaceDirectory } from "./lib/client-workspace-directory";
+import { resolveDashboardClientConnected } from "./lib/dashboard-client-status";
 import { reconcileOpenworkServerProbe } from "./lib/openwork-server-status";
 import {
   type OpenworkSessionPrefs,
@@ -3674,6 +3675,7 @@ export default function App() {
   };
 
   const openAdminSession = async (session: OpenworkAdminSession) => {
+    setError(null);
     const openworkClient = openworkServerClient();
     if (!openworkClient) {
       throw new Error("OpenWork 服务未连接。");
@@ -6073,6 +6075,12 @@ export default function App() {
             ? null
             : "OpenWork server is read-only for plugins."
       : null;
+    const dashboardClientConnected = resolveDashboardClientConnected({
+      clientConnected: Boolean(client()),
+      globalReady: globalSync.data.ready,
+      openworkServerStatus: openworkStatus,
+      tab: tab(),
+    });
 
     return {
       tab: tab(),
@@ -6095,7 +6103,7 @@ export default function App() {
       openSessionInPreferredView,
       startupPreference: startupPreference(),
       baseUrl: baseUrl(),
-      clientConnected: Boolean(client()),
+      clientConnected: dashboardClientConnected,
       busy: busy(),
       busyHint: busyHint(),
       busyLabel: busyLabel(),

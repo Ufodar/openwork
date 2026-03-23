@@ -7,6 +7,7 @@ import type {
   OpenworkAdminWarning,
   OpenworkServerClient,
 } from "../lib/openwork-server";
+import { isAbortLikeError } from "../lib/request-abort";
 
 type SessionStatus = "idle" | "loading" | "ready" | "error";
 
@@ -60,6 +61,7 @@ export default function AdminUsersView(props: AdminUsersViewProps) {
       setUsers(Array.isArray(response.items) ? response.items : []);
       setWarnings(Array.isArray(response.warnings) ? response.warnings : []);
     } catch (err) {
+      if (isAbortLikeError(err)) return;
       setError(err instanceof Error ? err.message : "读取用户列表失败。");
     } finally {
       setBusy(false);
@@ -79,6 +81,7 @@ export default function AdminUsersView(props: AdminUsersViewProps) {
 
     setSessionStatusByUserId((prev) => ({ ...prev, [id]: "loading" }));
     setSessionErrorByUserId((prev) => ({ ...prev, [id]: null }));
+    setError(null);
     try {
       const response = await props.client.adminListUserSessions(id);
       setSessionsByUserId((prev) => ({
@@ -91,6 +94,10 @@ export default function AdminUsersView(props: AdminUsersViewProps) {
       }));
       setSessionStatusByUserId((prev) => ({ ...prev, [id]: "ready" }));
     } catch (err) {
+      if (isAbortLikeError(err)) {
+        setSessionStatusByUserId((prev) => ({ ...prev, [id]: "idle" }));
+        return;
+      }
       setSessionErrorByUserId((prev) => ({
         ...prev,
         [id]: err instanceof Error ? err.message : "读取会话失败。",
@@ -102,6 +109,7 @@ export default function AdminUsersView(props: AdminUsersViewProps) {
   const toggleUser = async (userId: string) => {
     const id = userId.trim();
     if (!id) return;
+    setError(null);
     if (expandedUserId() === id) {
       setExpandedUserId(null);
       return;
@@ -112,6 +120,7 @@ export default function AdminUsersView(props: AdminUsersViewProps) {
 
   const openSession = async (session: OpenworkAdminSession) => {
     if (openingSessionId()) return;
+    setError(null);
     setOpeningSessionId(session.id);
     try {
       await props.onOpenSession(session);
@@ -124,13 +133,11 @@ export default function AdminUsersView(props: AdminUsersViewProps) {
 
   createEffect(
     on(
-      () => [props.enabled, props.client, props.active] as const,
+      () => [props.enabled, props.client] as const,
       ([enabled, client]) => {
         if (!enabled || !client) {
           setInitialLoadAttempted(false);
-          return;
         }
-        setInitialLoadAttempted(false);
       },
     ),
   );

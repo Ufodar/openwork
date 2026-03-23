@@ -164,8 +164,7 @@ export async function writeRuntimeKnowledgeCarrierConfig(input: {
     ? { ...(baseConfig.mcp as Record<string, unknown>) }
     : {};
   delete existingMcp.ragflow;
-  const hasAttachedKnowledge = (input.attachedKnowledge?.length ?? 0) > 0;
-  if (hasAttachedKnowledge && existingMcp.memory && typeof existingMcp.memory === "object") {
+  if (existingMcp.memory && typeof existingMcp.memory === "object") {
     existingMcp.memory = {
       ...(existingMcp.memory as Record<string, unknown>),
       enabled: false,

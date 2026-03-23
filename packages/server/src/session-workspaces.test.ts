@@ -62,7 +62,7 @@ describe("provisionSessionWorkspace", () => {
 
     expect(parsed.model).toBe("test-model");
     expect(parsed.mcp?.filesystem).toBeTruthy();
-    expect(parsed.mcp?.memory).toBeTruthy();
+    expect(parsed.mcp?.memory).toMatchObject({ enabled: false });
     expect(parsed.mcp?.ragflow).toBeUndefined();
     expect(parsed.mcp?.["openwork-knowledge"]).toMatchObject({
       type: "remote",

@@ -1,5 +1,447 @@
 {
   "$schema": "https://opencode.ai/config.json",
+  "instructions": [
+    ".opencode/references/doc-state-schema.md"
+  ],
+  "agent": {
+    "doc-orchestrator": {
+      "description": "Supervises long document tasks by reading state first and delegating source work to hidden doc-* subagents",
+      "mode": "primary",
+      "color": "#0F766E",
+      "temperature": 0.1,
+      "steps": 24,
+      "prompt": "{file:./.opencode/prompts/doc-orchestrator.md}",
+      "tools": {
+        "*": false,
+        "task": true,
+        "todoread": true,
+        "todowrite": true,
+        "read": true,
+        "list": true,
+        "glob": true,
+        "doc_state_*": true,
+        "state_get_*": true,
+        "openwork_knowledge*": true,
+        "openwork-knowledge*": true
+      },
+      "permission": {
+        "task": {
+          "*": "deny",
+          "doc-*": "allow"
+        },
+        "read": {
+          "*": "deny",
+          ".worktree/index.json": "allow",
+          "**/.worktree/index.json": "allow",
+          ".worktree/sources/manifest.json": "allow",
+          "**/.worktree/sources/manifest.json": "allow",
+          ".worktree/facts.json": "allow",
+          "**/.worktree/facts.json": "allow",
+          ".worktree/merge/conflicts.json": "allow",
+          "**/.worktree/merge/conflicts.json": "allow",
+          ".worktree/plan/solution-plan.json": "allow",
+          "**/.worktree/plan/solution-plan.json": "allow",
+          ".worktree/coverage.json": "allow",
+          "**/.worktree/coverage.json": "allow",
+          ".worktree/verify/coverage.json": "allow",
+          "**/.worktree/verify/coverage.json": "allow",
+          ".bid/**": "allow",
+          "**/.bid/**": "allow",
+          "requirements.csv": "allow",
+          "**/requirements.csv": "allow",
+          "reports/**": "allow",
+          "**/reports/**": "allow"
+        },
+        "list": {
+          "*": "deny",
+          ".worktree": "allow",
+          ".worktree/**": "allow",
+          "**/.worktree": "allow",
+          "**/.worktree/**": "allow",
+          ".bid": "allow",
+          ".bid/**": "allow",
+          "**/.bid": "allow",
+          "**/.bid/**": "allow",
+          "reports": "allow",
+          "reports/**": "allow",
+          "**/reports": "allow",
+          "**/reports/**": "allow"
+        },
+        "glob": {
+          "*": "deny",
+          ".worktree/**": "allow",
+          ".bid/**": "allow",
+          "reports/**": "allow",
+          "**/.worktree/**": "allow",
+          "**/.bid/**": "allow",
+          "**/reports/**": "allow"
+        },
+        "edit": "deny",
+        "bash": "deny",
+        "grep": "deny",
+        "skill": {
+          "*": "deny"
+        },
+        "todoread": "allow",
+        "todowrite": "allow"
+      }
+    },
+    "doc-intake": {
+      "description": "Builds initial document-state artifacts from the current workspace without drafting the final deliverable",
+      "mode": "subagent",
+      "hidden": true,
+      "color": "#1D4ED8",
+      "temperature": 0.1,
+      "steps": 24,
+      "prompt": "{file:./.opencode/prompts/doc-intake.md}",
+      "tools": {
+        "*": false,
+        "read": true,
+        "list": true,
+        "glob": true,
+        "write": true,
+        "edit": true
+      },
+      "permission": {
+        "task": "deny",
+        "read": {
+          "*": "allow"
+        },
+        "list": "allow",
+        "glob": "allow",
+        "write": {
+          "*": "deny",
+          ".worktree/index.json": "allow",
+          ".worktree/sources/manifest.json": "allow",
+          ".worktree/conventions.md": "allow"
+        },
+        "edit": {
+          "*": "deny",
+          ".worktree/index.json": "allow",
+          ".worktree/sources/manifest.json": "allow",
+          ".worktree/conventions.md": "allow"
+        },
+        "bash": "deny"
+      }
+    },
+    "doc-reader": {
+      "description": "Compiles one source document into a structured document-state artifact with traceable claims and facts",
+      "mode": "subagent",
+      "hidden": true,
+      "color": "#2563EB",
+      "temperature": 0.1,
+      "steps": 32,
+      "prompt": "{file:./.opencode/prompts/doc-reader.md}",
+      "tools": {
+        "*": false,
+        "read": true,
+        "list": true,
+        "glob": true,
+        "bash": true,
+        "write": true,
+        "edit": true,
+        "skill": true
+      },
+      "permission": {
+        "task": "deny",
+        "read": {
+          "*": "allow"
+        },
+        "list": "allow",
+        "glob": "allow",
+        "write": {
+          "*": "deny",
+          ".worktree/sources/*.json": "allow"
+        },
+        "edit": {
+          "*": "deny",
+          ".worktree/sources/*.json": "allow"
+        },
+        "bash": "allow",
+        "skill": {
+          "*": "deny",
+          "xlsx": "allow",
+          "pptx": "allow"
+        }
+      }
+    },
+    "doc-merger": {
+      "description": "Merges compiled source artifacts into canonical facts, conflicts, and durable task context",
+      "mode": "subagent",
+      "hidden": true,
+      "color": "#0369A1",
+      "temperature": 0.1,
+      "steps": 20,
+      "prompt": "{file:./.opencode/prompts/doc-merger.md}",
+      "tools": {
+        "*": false,
+        "read": true,
+        "list": true,
+        "glob": true,
+        "bash": true,
+        "write": true,
+        "edit": true
+      },
+      "permission": {
+        "task": "deny",
+        "read": {
+          "*": "deny",
+          ".worktree/index.json": "allow",
+          ".worktree/sources/manifest.json": "allow",
+          ".worktree/sources/*.json": "allow",
+          ".bid/**": "allow",
+          "requirements.csv": "allow",
+          "reports/**": "allow"
+        },
+        "list": {
+          "*": "deny",
+          ".worktree": "allow",
+          ".worktree/**": "allow",
+          ".bid": "allow",
+          ".bid/**": "allow",
+          "reports": "allow",
+          "reports/**": "allow"
+        },
+        "glob": {
+          "*": "deny",
+          ".worktree/**": "allow",
+          ".bid/**": "allow",
+          "reports/**": "allow"
+        },
+        "write": {
+          "*": "deny",
+          ".worktree/facts.json": "allow",
+          ".worktree/merge/conflicts.json": "allow"
+        },
+        "edit": {
+          "*": "deny",
+          ".worktree/facts.json": "allow",
+          ".worktree/merge/conflicts.json": "allow"
+        },
+        "bash": "allow"
+      }
+    },
+    "doc-planner": {
+      "description": "Turns canonical document state into a drafting and coverage plan for the target deliverable",
+      "mode": "subagent",
+      "hidden": true,
+      "color": "#7C3AED",
+      "temperature": 0.1,
+      "steps": 20,
+      "prompt": "{file:./.opencode/prompts/doc-planner.md}",
+      "tools": {
+        "*": false,
+        "read": true,
+        "list": true,
+        "glob": true,
+        "bash": true,
+        "write": true,
+        "edit": true
+      },
+      "permission": {
+        "task": "deny",
+        "read": {
+          "*": "deny",
+          ".worktree/index.json": "allow",
+          ".worktree/sources/manifest.json": "allow",
+          ".worktree/facts.json": "allow",
+          ".worktree/merge/conflicts.json": "allow",
+          ".bid/**": "allow",
+          "requirements.csv": "allow",
+          "reports/**": "allow"
+        },
+        "list": {
+          "*": "deny",
+          ".worktree": "allow",
+          ".worktree/**": "allow",
+          ".bid": "allow",
+          ".bid/**": "allow",
+          "reports": "allow",
+          "reports/**": "allow"
+        },
+        "glob": {
+          "*": "deny",
+          ".worktree/**": "allow",
+          ".bid/**": "allow",
+          "reports/**": "allow"
+        },
+        "write": {
+          "*": "deny",
+          ".worktree/plan/solution-plan.json": "allow",
+          ".worktree/coverage.json": "allow"
+        },
+        "edit": {
+          "*": "deny",
+          ".worktree/plan/solution-plan.json": "allow",
+          ".worktree/coverage.json": "allow"
+        },
+        "bash": "allow"
+      }
+    },
+    "doc-writer": {
+      "description": "Drafts or revises the target document from the plan and evidence map, then updates coverage state",
+      "mode": "subagent",
+      "hidden": true,
+      "color": "#B45309",
+      "temperature": 0.2,
+      "steps": 28,
+      "prompt": "{file:./.opencode/prompts/doc-writer.md}",
+      "tools": {
+        "*": false,
+        "read": true,
+        "list": true,
+        "glob": true,
+        "write": true,
+        "edit": true,
+        "skill": true
+      },
+      "permission": {
+        "task": "deny",
+        "read": {
+          "*": "deny",
+          ".worktree/index.json": "allow",
+          "**/.worktree/index.json": "allow",
+          ".worktree/sources/manifest.json": "allow",
+          "**/.worktree/sources/manifest.json": "allow",
+          ".worktree/facts.json": "allow",
+          "**/.worktree/facts.json": "allow",
+          ".worktree/merge/conflicts.json": "allow",
+          "**/.worktree/merge/conflicts.json": "allow",
+          ".worktree/plan/solution-plan.json": "allow",
+          "**/.worktree/plan/solution-plan.json": "allow",
+          ".worktree/coverage.json": "allow",
+          "**/.worktree/coverage.json": "allow",
+          "outputs/**": "allow",
+          "**/outputs/**": "allow",
+          "*.md": "allow",
+          "**/*.md": "allow",
+          "*.doc": "allow",
+          "**/*.doc": "allow",
+          "*.docx": "allow",
+          "**/*.docx": "allow"
+        },
+        "list": {
+          "*": "allow"
+        },
+        "glob": {
+          "*": "allow"
+        },
+        "write": {
+          "*": "deny",
+          "outputs/**": "allow",
+          "**/outputs/**": "allow",
+          "*.doc": "allow",
+          "**/*.doc": "allow",
+          "*.docx": "allow",
+          "**/*.docx": "allow",
+          "*.md": "allow",
+          "**/*.md": "allow",
+          ".worktree/coverage.json": "allow",
+          "**/.worktree/coverage.json": "allow",
+          "reports/doc-writer/**": "allow"
+          ,
+          "**/reports/doc-writer/**": "allow"
+        },
+        "edit": {
+          "*": "deny",
+          "outputs/**": "allow",
+          "**/outputs/**": "allow",
+          "*.doc": "allow",
+          "**/*.doc": "allow",
+          "*.docx": "allow",
+          "**/*.docx": "allow",
+          "*.md": "allow",
+          "**/*.md": "allow",
+          ".worktree/coverage.json": "allow",
+          "**/.worktree/coverage.json": "allow",
+          "reports/doc-writer/**": "allow"
+          ,
+          "**/reports/doc-writer/**": "allow"
+        },
+        "bash": "deny",
+        "skill": {
+          "*": "deny",
+          "docx": "allow",
+          "pdf": "allow",
+          "xlsx": "allow",
+          "pptx": "allow"
+        }
+      }
+    },
+    "doc-verifier": {
+      "description": "Checks the drafted deliverable against plan and facts, then records coverage gaps and next actions",
+      "mode": "subagent",
+      "hidden": true,
+      "color": "#BE123C",
+      "temperature": 0.1,
+      "steps": 24,
+      "prompt": "{file:./.opencode/prompts/doc-verifier.md}",
+      "tools": {
+        "*": false,
+        "read": true,
+        "list": true,
+        "glob": true,
+        "bash": true,
+        "write": true,
+        "edit": true,
+        "skill": true
+      },
+      "permission": {
+        "task": "deny",
+        "read": {
+          "*": "deny",
+          ".worktree/facts.json": "allow",
+          "**/.worktree/facts.json": "allow",
+          ".worktree/merge/conflicts.json": "allow",
+          "**/.worktree/merge/conflicts.json": "allow",
+          ".worktree/plan/solution-plan.json": "allow",
+          "**/.worktree/plan/solution-plan.json": "allow",
+          ".worktree/coverage.json": "allow",
+          "**/.worktree/coverage.json": "allow",
+          ".worktree/verify/coverage.json": "allow",
+          "**/.worktree/verify/coverage.json": "allow",
+          "outputs/**": "allow",
+          "**/outputs/**": "allow",
+          "*.md": "allow",
+          "**/*.md": "allow",
+          "*.doc": "allow",
+          "**/*.doc": "allow",
+          "*.docx": "allow",
+          "**/*.docx": "allow"
+        },
+        "list": {
+          "*": "allow"
+        },
+        "glob": {
+          "*": "allow"
+        },
+        "write": {
+          "*": "deny",
+          ".worktree/verify/coverage.json": "allow",
+          "**/.worktree/verify/coverage.json": "allow",
+          "reports/doc-verifier/**": "allow"
+          ,
+          "**/reports/doc-verifier/**": "allow"
+        },
+        "edit": {
+          "*": "deny",
+          ".worktree/verify/coverage.json": "allow",
+          "**/.worktree/verify/coverage.json": "allow",
+          "reports/doc-verifier/**": "allow"
+          ,
+          "**/reports/doc-verifier/**": "allow"
+        },
+        "bash": "allow",
+        "skill": {
+          "*": "deny",
+          "docx": "allow",
+          "pdf": "allow",
+          "xlsx": "allow",
+          "pptx": "allow"
+        }
+      }
+    }
+  },
   "mcp": {
     "control-chrome": {
       "type": "local",

@@ -24,12 +24,21 @@ import { TokenService } from "./tokens.js";
 import { AuthService, type AuthIdentity } from "./auth.js";
 import { KnowledgeAttachmentService } from "./knowledge-attachments.js";
 import { KnowledgeRegistryService, type KnowledgeRegistryRecord } from "./knowledge-registry.js";
+import { handleDocumentStateMcpRequest } from "./document-state-mcp.js";
 import { handleKnowledgeMcpRequest } from "./knowledge-mcp.js";
 import { createConfiguredRagflowClient, type RagflowClient } from "./ragflow.js";
+import { RuntimeDocumentStateTokenService } from "./runtime-document-state-tokens.js";
 import { RuntimeKnowledgeTokenService } from "./runtime-knowledge-tokens.js";
 import { SessionOwnershipService } from "./session-ownership.js";
 import { recoverWorkspaceSessionRecords } from "./session-history-recovery.js";
-import { buildSessionPermissionRules, provisionSessionWorkspace, SessionWorkspaceService, sessionDirectoryBelongsToWorkspace, writeRuntimeKnowledgeCarrierConfig } from "./session-workspaces.js";
+import {
+  buildSessionPermissionRules,
+  provisionSessionWorkspace,
+  SessionWorkspaceService,
+  sessionDirectoryBelongsToWorkspace,
+  writeRuntimeDocumentStateCarrierConfig,
+  writeRuntimeKnowledgeCarrierConfig,
+} from "./session-workspaces.js";
 import { RuntimeMaintenanceService, isRuntimeMaintenanceBlockingNewWork, type RuntimeMaintenanceState } from "./runtime-maintenance.js";
 import { SessionActivityService } from "./session-activity.js";
 import { TOY_UI_CSS, TOY_UI_HTML, TOY_UI_JS, cssResponse, htmlResponse, jsResponse } from "./toy-ui.js";
@@ -283,6 +292,7 @@ export function startServer(config: ServerConfig) {
   const knowledgeAttachments = new KnowledgeAttachmentService();
   const ragflow = createConfiguredRagflowClient(config);
   const runtimeKnowledgeTokens = new RuntimeKnowledgeTokenService();
+  const runtimeDocumentStateTokens = new RuntimeDocumentStateTokenService();
   const logger = createServerLogger(config);
   const runtimeMaintenance = new RuntimeMaintenanceService();
   const sessionActivity = new SessionActivityService(logger);
@@ -298,6 +308,7 @@ export function startServer(config: ServerConfig) {
     knowledgeAttachments,
     ragflow,
     runtimeKnowledgeTokens,
+    runtimeDocumentStateTokens,
     runtimeMaintenance,
     sessionActivity,
     logger,
@@ -367,6 +378,7 @@ export function startServer(config: ServerConfig) {
             sessionOwnership,
             sessionWorkspaces,
             runtimeKnowledgeTokens,
+            runtimeDocumentStateTokens,
             openworkBaseUrl: resolveServerLoopbackBaseUrl(config),
             runtimeMaintenance,
             sessionActivity,
@@ -441,6 +453,7 @@ export function startServer(config: ServerConfig) {
             sessionOwnership,
             sessionWorkspaces,
             runtimeKnowledgeTokens,
+            runtimeDocumentStateTokens,
             openworkBaseUrl: resolveServerLoopbackBaseUrl(config),
             runtimeMaintenance,
             sessionActivity,
@@ -1042,6 +1055,7 @@ export async function proxyOpencodeRequest(input: {
   sessionOwnership: SessionOwnershipService;
   sessionWorkspaces: SessionWorkspaceService;
   runtimeKnowledgeTokens: RuntimeKnowledgeTokenService;
+  runtimeDocumentStateTokens: RuntimeDocumentStateTokenService;
   openworkBaseUrl: string;
   runtimeMaintenance?: RuntimeMaintenanceService;
   sessionActivity?: SessionActivityService;
@@ -1248,9 +1262,21 @@ export async function proxyOpencodeRequest(input: {
                 runtimeToken: issued.token,
                 attachedKnowledge: [],
               });
+              const docStateIssued = await input.runtimeDocumentStateTokens.issue({
+                workspaceId,
+                sessionId: createdSessionId,
+                runtimeId: provisionedRuntime.runtimeId,
+              });
+              await writeRuntimeDocumentStateCarrierConfig({
+                workspacePath: workspace.path,
+                runtimeDir: provisionedRuntime.runtimeDir,
+                mcpUrl: `${input.openworkBaseUrl}/workspace/${encodeURIComponent(workspaceId)}/doc-state/mcp`,
+                runtimeToken: docStateIssued.token,
+              });
             } catch (error) {
               console.warn("[openwork-server] Failed to provision runtime knowledge carrier:", error);
               await input.runtimeKnowledgeTokens.revokeRuntime(workspaceId, createdSessionId, provisionedRuntime.runtimeId);
+              await input.runtimeDocumentStateTokens.revokeRuntime(workspaceId, createdSessionId, provisionedRuntime.runtimeId);
             }
           }
         }
@@ -1263,6 +1289,7 @@ export async function proxyOpencodeRequest(input: {
       await input.sessionWorkspaces.removeWorkspace(workspaceId, pathSessionId);
       if (runtimeWorkspace?.runtimeId) {
         await input.runtimeKnowledgeTokens.revokeRuntime(workspaceId, pathSessionId, runtimeWorkspace.runtimeId);
+        await input.runtimeDocumentStateTokens.revokeRuntime(workspaceId, pathSessionId, runtimeWorkspace.runtimeId);
       }
       input.sessionActivity?.removeSession(workspaceId, pathSessionId);
       if (runtimeDirectory) {
@@ -2000,6 +2027,7 @@ export function createRoutes(
   knowledgeAttachments: KnowledgeAttachmentService,
   ragflow: RagflowClient,
   runtimeKnowledgeTokens: RuntimeKnowledgeTokenService,
+  runtimeDocumentStateTokens: RuntimeDocumentStateTokenService,
   runtimeMaintenance: RuntimeMaintenanceService,
   sessionActivity: SessionActivityService,
   logger: ServerLogger,
@@ -2419,6 +2447,7 @@ export function createRoutes(
     await knowledgeAttachments.remove(workspace.id, sessionId);
     if (runtimeWorkspace?.runtimeId) {
       await runtimeKnowledgeTokens.revokeRuntime(workspace.id, sessionId, runtimeWorkspace.runtimeId);
+      await runtimeDocumentStateTokens.revokeRuntime(workspace.id, sessionId, runtimeWorkspace.runtimeId);
     }
     if (runtimeWorkspace?.runtimeDir) {
       await rm(runtimeWorkspace.runtimeDir, { recursive: true, force: true }).catch(() => undefined);
@@ -2652,6 +2681,17 @@ export function createRoutes(
       knowledgeAttachments,
       knowledgeRegistry,
       ragflow,
+      serverVersion: SERVER_VERSION,
+    });
+  });
+
+  addRoute(routes, "POST", "/workspace/:id/doc-state/mcp", "none", async (ctx) => {
+    const workspace = await resolveWorkspace(config, ctx.params.id);
+    return handleDocumentStateMcpRequest({
+      request: ctx.request,
+      workspaceId: workspace.id,
+      workspacePath: workspace.path,
+      runtimeTokens: runtimeDocumentStateTokens,
       serverVersion: SERVER_VERSION,
     });
   });

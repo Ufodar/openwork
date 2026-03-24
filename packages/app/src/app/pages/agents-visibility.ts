@@ -16,7 +16,7 @@ export function resolveFeaturedAgentLaunch(
     return { view: "session" };
   }
   if (featuredId === "document-agent") {
-    const resolved = agent ?? "common-work";
+    const resolved = agent ?? "doc-orchestrator";
     return { agent: resolved, agentLock: resolved, view: "document-agent" };
   }
   if (featuredId === "document-writer") {

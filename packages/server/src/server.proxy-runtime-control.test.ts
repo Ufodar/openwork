@@ -71,6 +71,7 @@ describe("proxyOpencodeRequest runtime maintenance", () => {
       sessionOwnership,
       sessionWorkspaces,
       runtimeKnowledgeTokens: { revokeRuntime: async () => undefined, issue: async () => ({ token: "", expiresAt: 0 }), resolve: async () => null } as any,
+      runtimeDocumentStateTokens: { revokeRuntime: async () => undefined, issue: async () => ({ token: "", expiresAt: 0 }), resolve: async () => null } as any,
       openworkBaseUrl: "http://127.0.0.1:8789",
       runtimeMaintenance: {
         getState: () => ({ mode: "draining", requestedAt: 1, reason: "safe restart" }),
@@ -105,6 +106,7 @@ describe("proxyOpencodeRequest runtime maintenance", () => {
       sessionOwnership,
       sessionWorkspaces,
       runtimeKnowledgeTokens: { revokeRuntime: async () => undefined, issue: async () => ({ token: "", expiresAt: 0 }), resolve: async () => null } as any,
+      runtimeDocumentStateTokens: { revokeRuntime: async () => undefined, issue: async () => ({ token: "", expiresAt: 0 }), resolve: async () => null } as any,
       openworkBaseUrl: "http://127.0.0.1:8789",
       runtimeMaintenance: {
         getState: () => ({ mode: "draining", requestedAt: 1, reason: "safe restart" }),
@@ -147,6 +149,7 @@ describe("proxyOpencodeRequest runtime maintenance", () => {
       sessionOwnership,
       sessionWorkspaces,
       runtimeKnowledgeTokens: { revokeRuntime: async () => undefined, issue: async () => ({ token: "", expiresAt: 0 }), resolve: async () => null } as any,
+      runtimeDocumentStateTokens: { revokeRuntime: async () => undefined, issue: async () => ({ token: "", expiresAt: 0 }), resolve: async () => null } as any,
       openworkBaseUrl: "http://127.0.0.1:8789",
       runtimeMaintenance: {
         getState: () => ({ mode: "draining", requestedAt: 1, reason: "safe restart" }),

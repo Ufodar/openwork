@@ -3,21 +3,34 @@ import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { provisionSessionWorkspace, writeRuntimeKnowledgeCarrierConfig } from "./session-workspaces.js";
+import {
+  provisionSessionWorkspace,
+  writeRuntimeDocumentStateCarrierConfig,
+  writeRuntimeKnowledgeCarrierConfig,
+} from "./session-workspaces.js";
 import { exists } from "./utils.js";
 
 describe("provisionSessionWorkspace", () => {
-  test("creates a runtime directory without copying workspace config files", async () => {
+  test("creates a runtime directory and mirrors required .opencode support files", async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), "openwork-session-workspace-"));
+    await mkdir(join(workspacePath, ".opencode", "prompts"), { recursive: true });
+    await mkdir(join(workspacePath, ".opencode", "references"), { recursive: true });
     await mkdir(join(workspacePath, ".opencode", "commands"), { recursive: true });
+    await mkdir(join(workspacePath, ".opencode", "skills", "docx"), { recursive: true });
     await writeFile(join(workspacePath, "opencode.json"), JSON.stringify({ model: "test" }), "utf8");
+    await writeFile(join(workspacePath, ".opencode", "prompts", "doc-orchestrator.md"), "prompt", "utf8");
+    await writeFile(join(workspacePath, ".opencode", "references", "doc-state-schema.md"), "reference", "utf8");
     await writeFile(join(workspacePath, ".opencode", "commands", "hello.md"), "---\n---\nhello\n", "utf8");
+    await writeFile(join(workspacePath, ".opencode", "skills", "docx", "SKILL.md"), "# skill\n", "utf8");
 
     const result = await provisionSessionWorkspace(workspacePath);
 
     expect(result.runtimeDir.startsWith(join(workspacePath, "documents", "sessions"))).toBe(true);
     expect(await exists(join(result.runtimeDir, "opencode.json"))).toBe(false);
-    expect(await exists(join(result.runtimeDir, ".opencode", "commands", "hello.md"))).toBe(false);
+    expect(await exists(join(result.runtimeDir, ".opencode", "commands", "hello.md"))).toBe(true);
+    expect(await exists(join(result.runtimeDir, ".opencode", "prompts", "doc-orchestrator.md"))).toBe(true);
+    expect(await exists(join(result.runtimeDir, ".opencode", "references", "doc-state-schema.md"))).toBe(true);
+    expect(await exists(join(result.runtimeDir, ".opencode", "skills", "docx", "SKILL.md"))).toBe(true);
   });
 
   test("writes a runtime knowledge carrier config by preserving parent config and adding the MCP", async () => {
@@ -78,6 +91,52 @@ describe("provisionSessionWorkspace", () => {
     expect(instructionRaw).toContain("Never use `memory_search_nodes` or `memory_read_graph`");
     expect(instructionRaw).toContain("do not use `memory_search_nodes` or `memory_read_graph` as a substitute for knowledge retrieval");
     expect(instructionRaw).toContain("(none attached yet; do not substitute session memory for knowledge retrieval)");
+  });
+
+  test("writes a runtime document-state carrier config by preserving parent config and adding the MCP", async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), "openwork-session-workspace-doc-state-overlay-"));
+    const runtime = await provisionSessionWorkspace(workspacePath);
+    await writeFile(
+      join(workspacePath, "opencode.jsonc"),
+      JSON.stringify({
+        model: "test-model",
+        mcp: {
+          filesystem: {
+            type: "local",
+            command: ["npx", "-y", "@modelcontextprotocol/server-filesystem", "."],
+          },
+        },
+      }, null, 2),
+      "utf8",
+    );
+
+    const configPath = await writeRuntimeDocumentStateCarrierConfig({
+      workspacePath,
+      runtimeDir: runtime.runtimeDir,
+      mcpUrl: "http://127.0.0.1:8789/workspace/ws_1/doc-state/mcp",
+      runtimeToken: "owdst_test",
+    });
+
+    const raw = await readFile(configPath, "utf8");
+    const parsed = JSON.parse(raw) as {
+      model?: string;
+      mcp?: Record<string, unknown>;
+      instructions?: string[];
+    };
+    const instructionRaw = await readFile(join(runtime.runtimeDir, ".opencode", "doc-state.md"), "utf8");
+
+    expect(parsed.model).toBe("test-model");
+    expect(parsed.mcp?.filesystem).toBeTruthy();
+    expect(parsed.mcp?.doc_state).toMatchObject({
+      type: "remote",
+      url: "http://127.0.0.1:8789/workspace/ws_1/doc-state/mcp",
+      headers: {
+        Authorization: "Bearer owdst_test",
+      },
+    });
+    expect(parsed.instructions).toContain(".opencode/doc-state.md");
+    expect(instructionRaw).toContain("doc_state_state_get_brief");
+    expect(instructionRaw).toContain("doc_state_state_get_facts");
   });
 
   test("updates the runtime knowledge instructions with the current attached titles", async () => {

@@ -31,4 +31,12 @@ describe("agents visibility", () => {
       view: "document-writer",
     });
   });
+
+  test("routes the featured document agent card into doc-orchestrator by default", () => {
+    expect(resolveFeaturedAgentLaunch("document-agent", null)).toEqual({
+      agent: "doc-orchestrator",
+      agentLock: "doc-orchestrator",
+      view: "document-agent",
+    });
+  });
 });

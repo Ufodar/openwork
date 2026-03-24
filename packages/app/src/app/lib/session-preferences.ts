@@ -103,11 +103,11 @@ const inferLegacySessionPreferences = (title?: string | null): {
   }
 
   if (normalized.includes("document writer")) {
-    return { view: "document-writer", agent: "doc-orchestrator", agentLock: "doc-orchestrator" };
+    return { view: "document-writer", agent: "document-writer", agentLock: "document-writer" };
   }
 
   if (normalized.includes("bid writer")) {
-    return { view: "document-writer", agent: "doc-orchestrator", agentLock: "doc-orchestrator" };
+    return { view: "document-writer", agent: "document-writer", agentLock: "document-writer" };
   }
 
   if (normalized.includes("bid dedupe")) {
@@ -119,7 +119,7 @@ const inferLegacySessionPreferences = (title?: string | null): {
   }
 
   if (normalized.includes("标书写作助手")) {
-    return { view: "document-writer", agent: "doc-orchestrator", agentLock: "doc-orchestrator" };
+    return { view: "document-writer", agent: "document-writer", agentLock: "document-writer" };
   }
 
   return { view: null, agent: null, agentLock: null };
@@ -137,7 +137,7 @@ export const resolveSessionPreferences = (input: {
   const storedDocumentAgentDefault = storedView === "document-agent" && storedAgent === null && storedAgentLock === null;
   const storedDocumentWriterDefault = storedView === "document-writer" && storedAgent === null && storedAgentLock === null;
   const defaultDocumentAgent = "common-work";
-  const defaultDocumentWriter = "doc-orchestrator";
+  const defaultDocumentWriter = "document-writer";
 
   const disableLegacyAgentHints = storedView === "session";
 

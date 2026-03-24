@@ -90,7 +90,7 @@ export default function AgentsView(props: AgentsViewProps) {
       return match?.name ?? null;
     }
     if (featured.id === "document-writer") {
-      const match = agentByKey().get(normalizeAgentKey("doc-orchestrator"));
+      const match = agentByKey().get(normalizeAgentKey("document-writer"));
       return match?.name ?? null;
     }
     const match = agentByKey().get(normalizeAgentKey(featured.id));

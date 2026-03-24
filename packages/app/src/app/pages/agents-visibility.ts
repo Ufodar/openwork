@@ -20,7 +20,7 @@ export function resolveFeaturedAgentLaunch(
     return { agent: resolved, agentLock: resolved, view: "document-agent" };
   }
   if (featuredId === "document-writer") {
-    const resolved = agent ?? "doc-orchestrator";
+    const resolved = agent ?? "document-writer";
     return { agent: resolved, agentLock: resolved, view: "document-writer", enableDocumentState: true };
   }
   return agent ? { agent } : null;

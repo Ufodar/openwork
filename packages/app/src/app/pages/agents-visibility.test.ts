@@ -25,9 +25,9 @@ describe("agents visibility", () => {
   });
 
   test("routes the featured writer card into the dedicated document-writer view with a lock", () => {
-    expect(resolveFeaturedAgentLaunch("document-writer", "doc-orchestrator")).toEqual({
-      agent: "doc-orchestrator",
-      agentLock: "doc-orchestrator",
+    expect(resolveFeaturedAgentLaunch("document-writer", "document-writer")).toEqual({
+      agent: "document-writer",
+      agentLock: "document-writer",
       enableDocumentState: true,
       view: "document-writer",
     });

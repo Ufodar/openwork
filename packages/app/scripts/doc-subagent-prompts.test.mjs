@@ -14,6 +14,15 @@ test("doc-orchestrator reader tasks are anchored on the deterministic extractor 
   expect(prompt).toContain("Do not ask `doc-reader` to use the `docx` or `pdf` skills");
 });
 
+test("document-writer agent entrypoint uses orchestrator-style delegation rules", async () => {
+  const agentPrompt = await readFile(resolve(root, ".opencode/agent/document-writer.md"), "utf8");
+
+  expect(agentPrompt).toContain("Your job is to keep the control loop coherent");
+  expect(agentPrompt).toContain("call `doc-intake`");
+  expect(agentPrompt).toContain("do not call non-`doc-*` agents");
+  expect(agentPrompt).toContain("do not edit source documents or the target deliverable yourself");
+});
+
 test("writer and verifier prompts treat user-specified section titles as exact headings", async () => {
   const writerPrompt = await readFile(resolve(root, ".opencode/prompts/doc-writer.md"), "utf8");
   const verifierPrompt = await readFile(resolve(root, ".opencode/prompts/doc-verifier.md"), "utf8");

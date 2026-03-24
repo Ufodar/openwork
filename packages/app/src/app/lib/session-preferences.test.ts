@@ -24,8 +24,8 @@ describe("resolveSessionPreferences", () => {
     });
 
     expect(resolved.view).toEqual({ value: "document-writer", source: "legacy" });
-    expect(resolved.agent).toEqual({ value: "doc-orchestrator", source: "legacy" });
-    expect(resolved.agentLock).toEqual({ value: "doc-orchestrator", source: "legacy" });
+    expect(resolved.agent).toEqual({ value: "document-writer", source: "legacy" });
+    expect(resolved.agentLock).toEqual({ value: "document-writer", source: "legacy" });
   });
 
   test("keeps 文档智能体 mapped to document-agent and common-work", () => {
@@ -51,7 +51,7 @@ describe("resolveSessionPreferences", () => {
     expect(resolved.agentLock).toEqual({ value: "common-work", source: "default" });
   });
 
-  test("defaults stored document-writer sessions without explicit agent to doc-orchestrator", () => {
+  test("defaults stored document-writer sessions without explicit agent to document-writer", () => {
     const resolved = resolveSessionPreferences({
       stored: {
         view: "document-writer",
@@ -60,8 +60,8 @@ describe("resolveSessionPreferences", () => {
     });
 
     expect(resolved.view).toEqual({ value: "document-writer", source: "stored" });
-    expect(resolved.agent).toEqual({ value: "doc-orchestrator", source: "default" });
-    expect(resolved.agentLock).toEqual({ value: "doc-orchestrator", source: "default" });
+    expect(resolved.agent).toEqual({ value: "document-writer", source: "default" });
+    expect(resolved.agentLock).toEqual({ value: "document-writer", source: "default" });
   });
 
   test("normalizes stored ragflow dataset selection", () => {

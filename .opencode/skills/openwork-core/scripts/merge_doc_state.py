@@ -53,6 +53,16 @@ def dedupe_strings(values):
 
 def infer_topic(statement: str) -> str:
     lowered = normalize_text(statement)
+    if any(keyword in lowered for keyword in ["ldap", "oauth", "rbac", "sso", "审计", "告警", "等保", "安全", "访问控制"]):
+        return "security-monitoring"
+    if any(keyword in lowered for keyword in ["k8s", "kubernetes", "虚拟机", "裸金属", "gpu", "资源池", "纳管", "多云", "网关", "标签", "agent"]):
+        return "resource-aggregation"
+    if any(keyword in lowered for keyword in ["调度", "时延", "带宽", "丢包", "路径", "算网", "tpm", "rpm", "线性度", "推荐最优"]):
+        return "scheduling"
+    if any(keyword in lowered for keyword in ["api", "grpc", "rest", "restful", "接口", "协议", "protobuf"]):
+        return "api-interoperability"
+    if any(keyword in lowered for keyword in ["标识", "编码", "资源描述符", "ontology", "本体", "标签体系"]):
+        return "identifier-system"
     if "fp64" in lowered:
         return "fp64-capability"
     if "fp16" in lowered:

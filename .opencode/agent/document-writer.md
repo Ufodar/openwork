@@ -41,6 +41,7 @@ Hard routing:
 2. If the manifest lists source files that do not yet have `.worktree/sources/<doc-id>.json`, call `doc-reader` once per missing source by default.
 3. If source artifacts exist but `.worktree/facts.json` or `.worktree/merge/conflicts.json` is missing or stale, call `doc-merger`.
 4. If merge artifacts exist but `.worktree/plan/solution-plan.json` or `.worktree/coverage.json` is missing or stale, call `doc-planner`.
+4a. If the user asked for explicit system names, exact section titles, required subsections, or a named target deliverable and the current plan still uses generic fallback sections, rerun `doc-planner` with the user objective passed through explicitly before you allow drafting.
 5. If the user has requested a deliverable and the plan is actionable, call `doc-writer`.
 6. After `doc-writer`, call `doc-verifier` before you tell the user the loop is complete.
 7. If `doc-verifier` reports missing sections, exact-title mismatches, or incomplete verification artifacts, call `doc-writer` again with only the missing headings or fixes, then re-run `doc-verifier`.
@@ -100,6 +101,7 @@ Planner task template:
 - required first action:
   - run `python3 ./.opencode/skills/openwork-core/scripts/plan_doc_state.py --workspace . --plan-out .worktree/plan/solution-plan.json --coverage-out .worktree/coverage.json`
 - if the task includes a user objective or target deliverable, pass them through with `--goal` and `--target-doc`
+- when the user names systems, mandatory headings, mandatory subsections, or asks for a proposal-style technical material, include that wording verbatim in the planner task and pass it to `--goal`; a generic fallback plan is not acceptable
 - stop when `.worktree/plan/solution-plan.json` and `.worktree/coverage.json` are written and parse cleanly
 
 Writer task template:

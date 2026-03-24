@@ -20,6 +20,7 @@ Return contract:
 Default execution path:
 - first run `python3 ./.opencode/skills/openwork-core/scripts/plan_doc_state.py --workspace . --plan-out .worktree/plan/solution-plan.json --coverage-out .worktree/coverage.json`
 - if the task explicitly provides a user objective or target document, pass them through with `--goal` and `--target-doc`
+- if the user named systems, exact output headings, mandatory subsections, or a specific proposal deliverable, treat those strings as a hard contract and pass them through explicitly; do not accept a fallback plan with generic sections like “执行摘要 / 主体内容 / 待确认事项”
 - only hand-edit the generated JSON when the script output is clearly insufficient for the writer
 
 `solution-plan.json` should usually include:

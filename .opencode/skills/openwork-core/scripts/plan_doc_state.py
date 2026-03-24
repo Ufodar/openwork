@@ -1,8 +1,23 @@
 #!/usr/bin/env python3
 import argparse
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
+
+GENERIC_GOALS = {
+    "compile uploaded source documents into structured state",
+    "merge compiled source artifacts into canonical document state",
+    "prepare a structured document response from the merged fact surface",
+}
+
+SYSTEM_SUBSECTIONS = [
+    "技术架构",
+    "技术路线",
+    "互联互通机制",
+    "标识系统构建",
+    "API 调用示例",
+]
 
 
 def load_json(path: Path, default):
@@ -21,7 +36,102 @@ def iso_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
-def build_sections(goal: str):
+def normalize_text(value: str) -> str:
+    return re.sub(r"\s+", " ", (value or "").strip()).lower()
+
+
+def is_generic_goal(goal: str) -> bool:
+    cleaned = normalize_text(goal)
+    return not cleaned or cleaned in GENERIC_GOALS
+
+
+def manifest_sources(manifest: dict) -> list[dict]:
+    return manifest.get("sources") if isinstance(manifest.get("sources"), list) else []
+
+
+def joined_source_titles(manifest: dict) -> str:
+    return " ".join(
+        str(item.get("title") or "")
+        for item in manifest_sources(manifest)
+        if isinstance(item, dict)
+    )
+
+
+def infer_goal(goal: str, manifest: dict, canonical_facts: list[dict]) -> str:
+    explicit = (goal or "").strip()
+    if explicit and not is_generic_goal(explicit):
+        return explicit
+
+    titles = joined_source_titles(manifest)
+    fact_text = " ".join(
+        str(item.get("statement") or "")
+        for item in canonical_facts[:24]
+        if isinstance(item, dict)
+    )
+    context = f"{titles} {fact_text}"
+    if "算力" in context and ("监控" in context or "运维" in context or "调度" in context):
+        return "撰写三大系统技术材料文档"
+    return explicit or "Prepare a structured document response from the merged fact surface"
+
+
+def is_system_material_goal(goal: str, manifest: dict, canonical_facts: list[dict]) -> bool:
+    lowered = normalize_text(goal)
+    if any(keyword in lowered for keyword in ["项目申报", "技术材料", "api 调用示例", "三大系统"]):
+        return True
+    if all(name in goal for name in ["算力资源汇聚系统", "算力选择与调度系统", "算力运行安全监测系统"]):
+        return True
+    titles = joined_source_titles(manifest)
+    if "算力" in titles and ("监控" in titles or "运维" in titles):
+        topics = {
+            str(item.get("topic") or "")
+            for item in canonical_facts
+            if isinstance(item, dict)
+        }
+        if topics & {"resource-aggregation", "scheduling", "security-monitoring", "api-interoperability"}:
+            return True
+    return False
+
+
+def build_system_material_sections():
+    return [
+        {
+            "id": "算力资源汇聚系统",
+            "title": "算力资源汇聚系统",
+            "purpose": "说明跨中心算力纳管、异构资源池化与统一标签体系的实现方式。",
+            "acceptance": "覆盖资源接入、资源抽象、统一标签、互联互通与 API 示例。",
+            "required_subsections": SYSTEM_SUBSECTIONS,
+            "evidence_topics": ["resource-aggregation", "api-interoperability", "identifier-system", "general"],
+        },
+        {
+            "id": "算力选择与调度系统",
+            "title": "算力选择与调度系统",
+            "purpose": "说明多维指标驱动的任务-资源-路径联合调度策略。",
+            "acceptance": "覆盖网络感知、算力建模、调度算法、互联互通与 API 示例。",
+            "required_subsections": SYSTEM_SUBSECTIONS,
+            "evidence_topics": ["scheduling", "api-interoperability", "general"],
+        },
+        {
+            "id": "算力运行安全监测系统",
+            "title": "算力运行安全监测系统",
+            "purpose": "说明监控、告警、审计、身份认证与安全合规的实现方式。",
+            "acceptance": "覆盖安全监控架构、运行风险闭环、互联互通与 API 示例。",
+            "required_subsections": SYSTEM_SUBSECTIONS,
+            "evidence_topics": ["security-monitoring", "api-interoperability", "general"],
+        },
+        {
+            "id": "参考与依据",
+            "title": "参考与依据",
+            "purpose": "说明源文档、联网补充依据与行业通用假设边界。",
+            "acceptance": "明确区分来源于上传文档的事实和联网补充的行业通用信息。",
+            "evidence_topics": ["general"],
+        },
+    ]
+
+
+def build_sections(goal: str, manifest: dict, canonical_facts: list[dict]):
+    if is_system_material_goal(goal, manifest, canonical_facts):
+        return build_system_material_sections()
+
     lowered = goal.lower()
     if "点对点" in goal or "solution" in lowered or "方案" in goal:
         return [
@@ -86,6 +196,104 @@ def build_sections(goal: str):
     ]
 
 
+def build_goal_profile(goal: str, manifest: dict, canonical_facts: list[dict]) -> dict:
+    lowered = normalize_text(goal)
+    keywords = set()
+    preferred_topics = set()
+    negative_keywords = {"充值券", "二维码", "抵扣", "支付结果", "红包", "扫码支付"}
+
+    if is_system_material_goal(goal, manifest, canonical_facts):
+        keywords.update({
+            "算力", "资源", "纳管", "k8s", "虚拟机", "裸金属", "gpu", "标签", "调度", "时延", "带宽",
+            "丢包", "路径", "算网", "监控", "告警", "审计", "安全", "等保", "api", "rest", "grpc",
+            "互联互通", "标识", "认证", "ldap", "oauth", "rbac", "prometheus", "grafana", "网关",
+        })
+        preferred_topics.update({
+            "resource-aggregation", "scheduling", "security-monitoring", "api-interoperability", "identifier-system",
+        })
+    elif "点对点" in goal or "solution" in lowered or "方案" in goal:
+        keywords.update({"需求", "方案", "实施", "技术", "项目", "系统"})
+        preferred_topics.update({"general", "commercial-baseline", "timeline"})
+    else:
+        keywords.update({"项目", "技术", "系统", "平台"})
+        preferred_topics.update({"general"})
+
+    for phrase in re.findall(r"[\u4e00-\u9fffA-Za-z0-9\-]{2,}", goal):
+        if len(phrase) >= 2:
+            keywords.add(phrase.lower())
+
+    return {
+        "keywords": keywords,
+        "preferred_topics": preferred_topics,
+        "negative_keywords": negative_keywords,
+    }
+
+
+def score_fact(item: dict, profile: dict) -> int:
+    statement = str(item.get("statement") or "")
+    lowered = normalize_text(statement)
+    if not lowered:
+        return -999
+    if "@startuml" in lowered or "@enduml" in lowered or " participant " in lowered or "->" in statement:
+        return -999
+    score = 0
+    keyword_hits = sum(1 for keyword in profile["keywords"] if keyword and keyword in lowered)
+    score += keyword_hits * 3
+    topic = str(item.get("topic") or "")
+    if topic in profile["preferred_topics"]:
+        score += 6
+    source_count = len(item.get("sources") or [])
+    score += min(source_count, 3) * 2
+    if any(keyword in statement for keyword in profile["negative_keywords"]):
+        score -= 10
+    if 24 <= len(statement) <= 240:
+        score += 2
+    if re.search(r"\d", statement):
+        score += 1
+    return score
+
+
+def select_required_evidence(canonical_facts: list[dict], goal: str, manifest: dict) -> list[dict]:
+    profile = build_goal_profile(goal, manifest, canonical_facts)
+    ranked = []
+    for item in canonical_facts:
+        if not isinstance(item, dict):
+            continue
+        score = score_fact(item, profile)
+        if score < 2:
+            continue
+        ranked.append((score, item))
+    ranked.sort(key=lambda pair: (-pair[0], pair[1].get("topic") or "", pair[1].get("statement") or ""))
+
+    selected = []
+    seen = set()
+    for _, item in ranked:
+        statement = str(item.get("statement") or "").strip()
+        if not statement or statement in seen:
+            continue
+        seen.add(statement)
+        selected.append({
+            "topic": item.get("topic"),
+            "statement": statement,
+            "source_count": len(item.get("sources") or []),
+        })
+        if len(selected) >= 18:
+            break
+
+    if selected:
+        return selected
+
+    return [
+        {
+            "topic": item.get("topic"),
+            "statement": item.get("statement"),
+            "source_count": len(item.get("sources") or []),
+        }
+        for item in canonical_facts[:12]
+        if isinstance(item, dict)
+    ]
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--workspace", default=".")
@@ -120,7 +328,9 @@ def main():
     gaps = facts.get("gaps") if isinstance(facts.get("gaps"), list) else []
     open_questions = conflicts.get("open_questions") if isinstance(conflicts.get("open_questions"), list) else []
     conflict_items = conflicts.get("conflicts") if isinstance(conflicts.get("conflicts"), list) else []
-    sections = build_sections(goal)
+    goal = infer_goal(goal, manifest, canonical_facts)
+    sections = build_sections(goal, manifest, canonical_facts)
+    required_evidence = select_required_evidence(canonical_facts, goal, manifest)
 
     plan_payload = {
         "version": 1,
@@ -138,21 +348,15 @@ def main():
             ".worktree/merge/conflicts.json",
             ".worktree/sources/manifest.json",
         ],
-        "required_evidence": [
-            {
-                "topic": item.get("topic"),
-                "statement": item.get("statement"),
-                "source_count": len(item.get("sources") or []),
-            }
-            for item in canonical_facts[:24]
-            if isinstance(item, dict)
-        ],
+        "required_evidence": required_evidence,
         "open_questions": open_questions[:12],
         "writer_instructions": [
             "Use the section order in this plan unless the target document already has stable structure that must be preserved.",
             "Prefer canonical facts and conflict artifacts over reopening source artifacts.",
             "If a section cannot be fully supported, write the supported portion and mark the rest as assumptions or pending confirmation.",
             "Keep the tone practical and evidence-aware rather than speculative.",
+            "When the user asks for named systems or required headings, keep those exact titles and their required subsections visible in the deliverable.",
+            "If a fact is not directly supported by uploaded documents, label it as a network supplement or an industry-general practice instead of presenting it as a source-grounded fact.",
         ],
         "updated_at": iso_now(),
     }
@@ -162,10 +366,17 @@ def main():
         "goal": goal,
         "target_doc": target_doc,
         "targets": [
-            {
-                "id": section["id"],
-                "title": section["title"],
-            }
+            dict(
+                {
+                    "id": section["id"],
+                    "title": section["title"],
+                },
+                **(
+                    {"required_subsections": section["required_subsections"]}
+                    if isinstance(section.get("required_subsections"), list)
+                    else {}
+                ),
+            )
             for section in sections
         ],
         "covered": [],

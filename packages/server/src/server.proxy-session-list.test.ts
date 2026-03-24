@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { mkdir, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import type { WorkspaceInfo } from "./types.js";
 import { proxyOpencodeRequest } from "./server.js";
@@ -70,5 +73,135 @@ describe("proxyOpencodeRequest session listing", () => {
     expect(payload[0]?.id).toBe("ses_123");
     expect(captured.url).toBe("http://127.0.0.1:33459/session");
     expect(captured.headers?.get("x-opencode-directory")).toBe("/root/ai_staff/openwork");
+  });
+
+  test("recovers historical workspace sessions when the live opencode list is empty", async () => {
+    globalThis.fetch = (async () => new Response(JSON.stringify([]), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    })) as typeof fetch;
+
+    const workspacePath = await mkdir(join(tmpdir(), `openwork-session-history-${Date.now()}`), { recursive: true });
+    await mkdir(join(workspacePath, ".opencode"), { recursive: true });
+    await writeFile(
+      join(workspacePath, ".opencode", "openwork.json"),
+      JSON.stringify({
+        version: 1,
+        sessions: {
+          ses_hist_1: { view: "document-agent" },
+        },
+      }),
+      "utf8",
+    );
+
+    const workspace: WorkspaceInfo = {
+      id: "user-1",
+      name: "alice",
+      path: workspacePath,
+      workspaceType: "local",
+      baseUrl: "http://127.0.0.1:33459",
+    };
+
+    const sessionOwnership = {
+      listEntries: async () => ({}),
+    } as unknown as SessionOwnershipService;
+
+    const sessionWorkspaces = {
+      getWorkspace: async () => null,
+    } as unknown as SessionWorkspaceService;
+
+    const response = await proxyOpencodeRequest({
+      request: new Request(
+        `http://openwork.local/w/${workspace.id}/opencode/session?directory=${encodeURIComponent(workspace.path)}`,
+        { method: "GET" },
+      ),
+      url: new URL(
+        `http://openwork.local/w/${workspace.id}/opencode/session?directory=${encodeURIComponent(workspace.path)}`,
+      ),
+      workspace,
+      proxyPath: "/session",
+      actor: { type: "remote", scope: "collaborator", tokenHash: "owner-alice" },
+      sessionOwnership,
+      sessionWorkspaces,
+      runtimeKnowledgeTokens: { revokeRuntime: async () => undefined, issue: async () => ({ token: "", expiresAt: 0 }), resolve: async () => null } as any,
+      runtimeDocumentStateTokens: { revokeRuntime: async () => undefined, issue: async () => ({ token: "", expiresAt: 0 }), resolve: async () => null } as any,
+      openworkBaseUrl: "http://127.0.0.1:8789",
+    });
+
+    const payload = await response.json() as Array<{ id: string; directory: string | null }>;
+    expect(payload.map((item) => item.id)).toContain("ses_hist_1");
+    expect(payload.find((item) => item.id === "ses_hist_1")?.directory).toBe(workspacePath);
+  });
+
+  test("merges historical sessions from root and runtime openwork metadata", async () => {
+    globalThis.fetch = (async () => new Response(JSON.stringify([]), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    })) as typeof fetch;
+
+    const workspacePath = await mkdir(join(tmpdir(), `openwork-session-history-merged-${Date.now()}`), { recursive: true });
+    await mkdir(join(workspacePath, ".opencode"), { recursive: true });
+    await writeFile(
+      join(workspacePath, ".opencode", "openwork.json"),
+      JSON.stringify({
+        version: 1,
+        sessions: {
+          ses_root_hist_1: { view: "document-agent" },
+        },
+      }),
+      "utf8",
+    );
+
+    const runtimeDir = join(workspacePath, "documents", "sessions", "runtime-1");
+    await mkdir(join(runtimeDir, ".opencode"), { recursive: true });
+    await writeFile(
+      join(runtimeDir, ".opencode", "openwork.json"),
+      JSON.stringify({
+        version: 1,
+        sessions: {
+          ses_runtime_hist_1: { view: "document-agent" },
+        },
+      }),
+      "utf8",
+    );
+
+    const workspace: WorkspaceInfo = {
+      id: "user-1",
+      name: "alice",
+      path: workspacePath,
+      workspaceType: "local",
+      baseUrl: "http://127.0.0.1:33459",
+    };
+
+    const sessionOwnership = {
+      listEntries: async () => ({}),
+    } as unknown as SessionOwnershipService;
+
+    const sessionWorkspaces = {
+      getWorkspace: async () => null,
+    } as unknown as SessionWorkspaceService;
+
+    const response = await proxyOpencodeRequest({
+      request: new Request(
+        `http://openwork.local/w/${workspace.id}/opencode/session?directory=${encodeURIComponent(workspace.path)}`,
+        { method: "GET" },
+      ),
+      url: new URL(
+        `http://openwork.local/w/${workspace.id}/opencode/session?directory=${encodeURIComponent(workspace.path)}`,
+      ),
+      workspace,
+      proxyPath: "/session",
+      actor: { type: "remote", scope: "collaborator", tokenHash: "owner-alice" },
+      sessionOwnership,
+      sessionWorkspaces,
+      runtimeKnowledgeTokens: { revokeRuntime: async () => undefined, issue: async () => ({ token: "", expiresAt: 0 }), resolve: async () => null } as any,
+      runtimeDocumentStateTokens: { revokeRuntime: async () => undefined, issue: async () => ({ token: "", expiresAt: 0 }), resolve: async () => null } as any,
+      openworkBaseUrl: "http://127.0.0.1:8789",
+    });
+
+    const payload = await response.json() as Array<{ id: string; directory: string | null }>;
+    expect(payload.map((item) => item.id).sort()).toEqual(["ses_root_hist_1", "ses_runtime_hist_1"]);
+    expect(payload.find((item) => item.id === "ses_root_hist_1")?.directory).toBe(workspacePath);
+    expect(payload.find((item) => item.id === "ses_runtime_hist_1")?.directory).toBe(runtimeDir);
   });
 });

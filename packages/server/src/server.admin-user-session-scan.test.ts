@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { mkdir, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import type { WorkspaceInfo } from "./types.js";
 import { scanAdminSessions } from "./server.js";
@@ -78,5 +81,54 @@ describe("scanAdminSessions", () => {
 
     expect(result.items.map((item) => item.id).sort()).toEqual(["ses_alice_1", "ses_alice_2"]);
     expect(requestedPaths).toEqual(["/session"]);
+  });
+
+  test("recovers historical sessions from workspace openwork metadata when live listing is empty", async () => {
+    globalThis.fetch = (async () => new Response(JSON.stringify([]), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    })) as typeof fetch;
+
+    const workspacePath = await mkdir(join(tmpdir(), `openwork-admin-session-scan-${Date.now()}`), { recursive: true });
+    await mkdir(join(workspacePath, ".opencode"), { recursive: true });
+    await writeFile(
+      join(workspacePath, ".opencode", "openwork.json"),
+      JSON.stringify({
+        version: 1,
+        sessions: {
+          ses_hist_1: { view: "document-agent" },
+        },
+      }),
+      "utf8",
+    );
+
+    const workspace: WorkspaceInfo = {
+      id: "user-1",
+      name: "alice",
+      path: workspacePath,
+      workspaceType: "local",
+      baseUrl: "http://127.0.0.1:33459",
+    };
+
+    const sessionOwnership = {
+      listEntries: async () => ({}),
+    } as unknown as SessionOwnershipService;
+
+    const sessionWorkspaces = {
+      getWorkspace: async () => null,
+    } as unknown as SessionWorkspaceService;
+
+    const result = await scanAdminSessions(
+      {
+        workspaces: [workspace],
+        authorizedRoots: [workspace.path],
+      } as any,
+      sessionOwnership,
+      sessionWorkspaces,
+      "owner-alice",
+    );
+
+    expect(result.items.map((item) => item.id)).toEqual(["ses_hist_1"]);
+    expect(result.items[0]?.directory).toBe(workspacePath);
   });
 });

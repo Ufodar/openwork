@@ -493,6 +493,7 @@ export default {
   "session.current_with_value": "当前：{value}",
   "session.available_across_workers": "跨工作区共有 {count} 个",
   "session.create_new_session": "创建新会话",
+  "session.generated_title": "新会话",
   "session.start_fresh_task_current_worker": "在当前工作区开始一个新任务",
   "session.change_model": "切换模型",
   "session.connect_provider_action": "连接提供商",

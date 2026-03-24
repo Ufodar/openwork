@@ -492,6 +492,7 @@ export default {
   "session.current_with_value": "Current: {value}",
   "session.available_across_workers": "{count} available across workers",
   "session.create_new_session": "Create new session",
+  "session.generated_title": "New session",
   "session.start_fresh_task_current_worker": "Start a fresh task in the current worker",
   "session.change_model": "Change model",
   "session.connect_provider_action": "Connect provider",

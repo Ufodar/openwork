@@ -8,6 +8,8 @@ import type {
   OpenworkServerClient,
 } from "../lib/openwork-server";
 import { isTransientRequestError } from "../lib/request-abort";
+import { formatSessionDisplayTitle } from "../lib/session-title";
+import { currentLocale, t } from "../../i18n";
 
 type SessionStatus = "idle" | "loading" | "ready" | "error";
 
@@ -34,6 +36,12 @@ function formatDateTime(value: number | null | undefined): string {
 }
 
 export default function AdminUsersView(props: AdminUsersViewProps) {
+  const tr = (key: string) => t(key, currentLocale());
+  const displaySessionTitle = (title: string | null | undefined) =>
+    formatSessionDisplayTitle(title, {
+      generated: tr("session.generated_title"),
+      untitled: tr("common.untitled"),
+    });
   const [users, setUsers] = createSignal<OpenworkAdminUser[]>([]);
   const [warnings, setWarnings] = createSignal<OpenworkAdminWarning[]>([]);
   const [busy, setBusy] = createSignal(false);
@@ -317,28 +325,31 @@ export default function AdminUsersView(props: AdminUsersViewProps) {
 
                     <div class="space-y-2">
                       <For each={sessionList()}>
-                        {(session) => (
-                          <button
-                            class="w-full rounded-xl border border-gray-6 bg-gray-2/70 px-4 py-3 text-left hover:bg-gray-3/50 transition-colors disabled:opacity-60"
-                            onClick={() => void openSession(session)}
-                            disabled={Boolean(openingSessionId())}
-                          >
-                            <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                              <div class="space-y-1">
-                                <div class="text-sm font-medium text-gray-12">{session.title}</div>
+                        {(session) => {
+                          const sessionDisplayTitle = displaySessionTitle(session.title);
+                          return (
+                            <button
+                              class="w-full rounded-xl border border-gray-6 bg-gray-2/70 px-4 py-3 text-left hover:bg-gray-3/50 transition-colors disabled:opacity-60"
+                              onClick={() => void openSession(session)}
+                              disabled={Boolean(openingSessionId())}
+                            >
+                              <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                                <div class="space-y-1">
+                                  <div class="text-sm font-medium text-gray-12">{sessionDisplayTitle}</div>
+                                  <div class="text-xs text-gray-10">
+                                    工作区：{session.workspaceName}
+                                    <Show when={session.directory}>
+                                      <span> · 目录：{session.directory}</span>
+                                    </Show>
+                                  </div>
+                                </div>
                                 <div class="text-xs text-gray-10">
-                                  工作区：{session.workspaceName}
-                                  <Show when={session.directory}>
-                                    <span> · 目录：{session.directory}</span>
-                                  </Show>
+                                  最近更新时间：{formatDateTime(session.updatedAt ?? session.createdAt)}
                                 </div>
                               </div>
-                              <div class="text-xs text-gray-10">
-                                最近更新时间：{formatDateTime(session.updatedAt ?? session.createdAt)}
-                              </div>
-                            </div>
-                          </button>
-                        )}
+                            </button>
+                          );
+                        }}
                       </For>
                     </div>
                   </div>

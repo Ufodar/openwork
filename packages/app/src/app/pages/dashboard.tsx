@@ -23,6 +23,7 @@ import {
   isTauriRuntime,
   normalizeDirectoryPath,
 } from "../utils";
+import { formatSessionDisplayTitle } from "../lib/session-title";
 import {
   buildOpenworkConnectInviteUrl,
   buildOpenworkWorkspaceBaseUrl,
@@ -307,6 +308,11 @@ export type DashboardViewProps = {
 
 export default function DashboardView(props: DashboardViewProps) {
   const tr = (key: string) => i18n(key, currentLocale());
+  const displaySessionTitle = (title: string | null | undefined) =>
+    formatSessionDisplayTitle(title, {
+      generated: tr("session.generated_title"),
+      untitled: tr("common.untitled"),
+    });
   const title = createMemo(() => {
     switch (props.tab) {
       case "scheduled":
@@ -1127,6 +1133,7 @@ export default function DashboardView(props: DashboardViewProps) {
                             <For each={previewSessions(workspace().id, group.sessions)}>
                               {(session) => {
                                 const isSelected = () => props.selectedSessionId === session.id;
+                                const sessionDisplayTitle = displaySessionTitle(session.title);
                                 return (
                                   <div
                                     role="button"
@@ -1145,7 +1152,7 @@ export default function DashboardView(props: DashboardViewProps) {
                                     }}
                                   >
                                     <span class="text-sm text-dls-text truncate mr-2 font-medium">
-                                      {session.title}
+                                      {sessionDisplayTitle}
                                     </span>
                                     <span class="text-xs text-dls-secondary whitespace-nowrap">
                                       {formatRelativeTime(session.time?.updated ?? Date.now())}
@@ -1180,6 +1187,7 @@ export default function DashboardView(props: DashboardViewProps) {
                               <For each={previewSessions(workspace().id, group.sessions)}>
                                 {(session) => {
                                   const isSelected = () => props.selectedSessionId === session.id;
+                                  const sessionDisplayTitle = displaySessionTitle(session.title);
                                   return (
                                     <div
                                       role="button"
@@ -1198,7 +1206,7 @@ export default function DashboardView(props: DashboardViewProps) {
                                       }}
                                     >
                                       <span class="text-sm text-dls-text truncate mr-2 font-medium">
-                                        {session.title}
+                                        {sessionDisplayTitle}
                                       </span>
                                       <span class="text-xs text-dls-secondary whitespace-nowrap">
                                         {formatRelativeTime(session.time?.updated ?? Date.now())}

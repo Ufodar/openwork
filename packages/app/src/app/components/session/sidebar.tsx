@@ -4,6 +4,7 @@ import { Check, ChevronDown, GripVertical, Loader2, Plus, RefreshCcw, Settings, 
 import type { TodoItem, WorkspaceConnectionState } from "../../types";
 import type { WorkspaceInfo } from "../../lib/tauri";
 import { currentLocale, t } from "../../../i18n";
+import { formatSessionDisplayTitle } from "../../lib/session-title";
 
 type SessionSummary = {
   id: string;
@@ -54,6 +55,11 @@ export type SidebarProps = {
 
 export default function SessionSidebar(props: SidebarProps) {
   const tr = (key: string) => t(key, currentLocale());
+  const displaySessionTitle = (title: string | null | undefined) =>
+    formatSessionDisplayTitle(title, {
+      generated: tr("session.generated_title"),
+      untitled: tr("common.untitled"),
+    });
   const MAX_SESSIONS_PREVIEW = 8;
   const realTodos = createMemo(() => props.todos.filter((todo) => todo.content.trim()));
   const WORKSPACE_COLLAPSE_KEY = "openwork.workspace-collapse.v1";
@@ -478,48 +484,53 @@ export default function SessionSidebar(props: SidebarProps) {
                           >
                             <For each={visibleSessions()}>
                               {(session) => (
-                                <button
-                                  class={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
-                                    session.id === props.selectedSessionId
-                                      ? "bg-gray-3 text-gray-12 font-medium"
-                                      : "text-gray-11 hover:text-gray-12 hover:bg-gray-2"
-                                  } ${!allowActions() ? "opacity-70" : ""}`}
-                                  onClick={() => {
-                                    if (!allowActions()) return;
-                                    props.onSelectSession(group.workspace.id, session.id);
-                                  }}
-                                  onContextMenu={(event) => {
-                                    if (!isActive()) return;
-                                    openContextMenu(event, session.id);
-                                  }}
-                                  disabled={!allowActions()}
-                                >
-                                  <div class="flex items-center justify-between gap-2 w-full overflow-hidden">
-                                    <div class="truncate">{session.title}</div>
-                                    <Show
-                                      when={
-                                        props.sessionStatusById[session.id] &&
-                                        props.sessionStatusById[session.id] !== "idle"
-                                      }
+                                {(() => {
+                                  const sessionDisplayTitle = displaySessionTitle(session.title);
+                                  return (
+                                    <button
+                                      class={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
+                                        session.id === props.selectedSessionId
+                                          ? "bg-gray-3 text-gray-12 font-medium"
+                                          : "text-gray-11 hover:text-gray-12 hover:bg-gray-2"
+                                      } ${!allowActions() ? "opacity-70" : ""}`}
+                                      onClick={() => {
+                                        if (!allowActions()) return;
+                                        props.onSelectSession(group.workspace.id, session.id);
+                                      }}
+                                      onContextMenu={(event) => {
+                                        if (!isActive()) return;
+                                        openContextMenu(event, session.id);
+                                      }}
+                                      disabled={!allowActions()}
                                     >
-                                      <span
-                                        class={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full border flex items-center gap-1 ${
-                                          props.sessionStatusById[session.id] === "running"
-                                            ? "border-amber-7/50 text-amber-11 bg-amber-2/50"
-                                            : "border-gray-7/50 text-gray-10 bg-gray-2/50"
-                                        }`}
-                                      >
-                                        <div
-                                          class={`w-1 h-1 rounded-full ${
-                                            props.sessionStatusById[session.id] === "running"
-                                              ? "bg-amber-9 animate-pulse"
-                                              : "bg-gray-9"
-                                          }`}
-                                        />
-                                      </span>
-                                    </Show>
-                                  </div>
-                                </button>
+                                      <div class="flex items-center justify-between gap-2 w-full overflow-hidden">
+                                        <div class="truncate">{sessionDisplayTitle}</div>
+                                        <Show
+                                          when={
+                                            props.sessionStatusById[session.id] &&
+                                            props.sessionStatusById[session.id] !== "idle"
+                                          }
+                                        >
+                                          <span
+                                            class={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full border flex items-center gap-1 ${
+                                              props.sessionStatusById[session.id] === "running"
+                                                ? "border-amber-7/50 text-amber-11 bg-amber-2/50"
+                                                : "border-gray-7/50 text-gray-10 bg-gray-2/50"
+                                            }`}
+                                          >
+                                            <div
+                                              class={`w-1 h-1 rounded-full ${
+                                                props.sessionStatusById[session.id] === "running"
+                                                  ? "bg-amber-9 animate-pulse"
+                                                  : "bg-gray-9"
+                                              }`}
+                                            />
+                                          </span>
+                                        </Show>
+                                      </div>
+                                    </button>
+                                  );
+                                })()}
                               )}
                             </For>
                             <Show when={hasMoreSessions()}>

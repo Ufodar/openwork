@@ -77,6 +77,7 @@ import {
   normalizeDirectoryPath,
   parseTemplateFrontmatter,
 } from "../utils";
+import { formatSessionDisplayTitle } from "../lib/session-title";
 import { finishPerf, perfNow, recordPerfLog } from "../lib/perf-log";
 
 import browserSetupTemplate from "../data/commands/browser-setup.md?raw";
@@ -252,6 +253,11 @@ type CommandPaletteMode = "root" | "sessions";
 
 export default function SessionView(props: SessionViewProps) {
   const tr = (key: string) => t(key, currentLocale());
+  const displaySessionTitle = (title: string | null | undefined) =>
+    formatSessionDisplayTitle(title, {
+      generated: tr("session.generated_title"),
+      untitled: tr("common.untitled"),
+    });
   let messagesEndEl: HTMLDivElement | undefined;
   let bottomVisibilityEl: HTMLDivElement | undefined;
   let chatContainerEl: HTMLDivElement | undefined;
@@ -342,7 +348,8 @@ export default function SessionView(props: SessionViewProps) {
       for (const session of group.sessions) {
         const sessionId = session.id?.trim() ?? "";
         if (!sessionId) continue;
-        const title = session.title?.trim() || "Untitled session";
+        const title = displaySessionTitle(session.title);
+        const rawTitle = session.title?.trim() ?? "";
         const slug = session.slug?.trim() ?? "";
         const updatedAt = session.time?.updated ?? session.time?.created ?? 0;
         out.push({
@@ -351,7 +358,7 @@ export default function SessionView(props: SessionViewProps) {
           title,
           workspaceTitle,
           updatedAt,
-          searchText: [title, workspaceTitle, slug].join(" ").toLowerCase(),
+          searchText: [title, rawTitle, workspaceTitle, slug].join(" ").toLowerCase(),
         });
       }
     }
@@ -1779,6 +1786,7 @@ export default function SessionView(props: SessionViewProps) {
     }
     return "";
   });
+  const selectedSessionDisplayTitle = createMemo(() => displaySessionTitle(selectedSessionTitle()));
 
   const renameCanSave = createMemo(() => {
     if (renameBusy()) return false;
@@ -2241,7 +2249,7 @@ export default function SessionView(props: SessionViewProps) {
         return;
       }
     }
-    const label = (sessionTitle ?? "").trim() || sid;
+    const label = displaySessionTitle(sessionTitle) || sid;
     if (typeof window !== "undefined") {
       const ok = window.confirm(`Delete session "${label}"?`);
       if (!ok) return;
@@ -2751,9 +2759,9 @@ export default function SessionView(props: SessionViewProps) {
                                       event.preventDefault();
                                       openSessionFromList(workspace().id, session.id, session.title);
                                     }}
-                                  >
+                                    >
                                     <span class="text-sm text-dls-text truncate mr-2 font-medium">
-                                      {session.title}
+                                      {displaySessionTitle(session.title)}
                                     </span>
                                     <div class="flex items-center gap-1 shrink-0">
                                       <Show when={session.time?.updated}>
@@ -2826,7 +2834,7 @@ export default function SessionView(props: SessionViewProps) {
                                       }}
                                     >
                                       <span class="text-sm text-dls-text truncate mr-2 font-medium">
-                                        {session.title}
+                                        {displaySessionTitle(session.title)}
                                       </span>
                                       <div class="flex items-center gap-1 shrink-0">
                                         <Show when={session.time?.updated}>
@@ -2975,7 +2983,9 @@ export default function SessionView(props: SessionViewProps) {
               </button>
             </Show>
 
-            <h1 class="text-sm font-semibold text-dls-text truncate">{selectedSessionTitle() || tr("session.new_task")}</h1>
+            <h1 class="text-sm font-semibold text-dls-text truncate">
+              {selectedSessionDisplayTitle() || tr("session.new_task")}
+            </h1>
             <Show when={props.developerMode}>
               <span class="text-xs text-dls-secondary">{props.headerStatus}</span>
             </Show>
@@ -3694,8 +3704,8 @@ export default function SessionView(props: SessionViewProps) {
         open={deleteSessionOpen()}
         title="Delete session?"
         message={
-          selectedSessionTitle().trim()
-            ? `This will permanently delete \"${selectedSessionTitle().trim()}\" and its messages.`
+          selectedSessionDisplayTitle().trim()
+            ? `This will permanently delete \"${selectedSessionDisplayTitle().trim()}\" and its messages.`
             : "This will permanently delete the selected session and its messages."
         }
         confirmLabel={deleteSessionBusy() ? "Deleting..." : "Delete"}

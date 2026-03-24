@@ -104,3 +104,16 @@ test("knowledge strip keeps attached knowledge visible during transient refreshe
   expect(strip).toContain('class="animate-spin"');
   expect(strip).not.toContain("when={!props.loading}");
 });
+
+test("knowledge strip is collapsed by default and resets when switching sessions", () => {
+  const strip = readFileSync(join(here, "..", "components", "session", "knowledge-strip.tsx"), "utf8");
+  const surface = readFileSync(join(here, "..", "components", "session", "session-knowledge-surface.tsx"), "utf8");
+  expect(strip).toContain("expanded: boolean;");
+  expect(strip).toContain("onToggle: () => void;");
+  expect(strip).toContain("aria-expanded={props.expanded}");
+  expect(strip).toContain('when={props.expanded}');
+  expect(surface).toContain("const [knowledgeStripExpanded, setKnowledgeStripExpanded] = createSignal(false);");
+  expect(surface).toContain("setKnowledgeStripExpanded(false);");
+  expect(surface).toContain("expanded={knowledgeStripExpanded()}");
+  expect(surface).toContain("onToggle={() => setKnowledgeStripExpanded((current) => !current)}");
+});

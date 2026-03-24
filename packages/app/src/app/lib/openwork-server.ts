@@ -1100,15 +1100,37 @@ async function requestJson<T>(
   );
 
   const text = await response.text();
-  const json = text ? JSON.parse(text) : null;
+  let json: any = null;
+  let parsedJson = false;
+  try {
+    json = text ? JSON.parse(text) : null;
+    parsedJson = true;
+  } catch {
+    json = null;
+  }
 
   if (!response.ok) {
     const code = typeof json?.code === "string" ? json.code : "request_failed";
-    const message = typeof json?.message === "string" ? json.message : response.statusText;
+    const message = typeof json?.message === "string"
+      ? json.message
+      : resolvePlainTextServerErrorMessage(text, response.statusText);
     throw new OpenworkServerError(response.status, code, message, json?.details);
   }
 
+  if (text && !parsedJson) {
+    throw new OpenworkServerError(response.status, "invalid_response", "服务器返回了无效响应。");
+  }
+
   return json as T;
+}
+
+function resolvePlainTextServerErrorMessage(text: string, fallback: string): string {
+  const value = text.trim();
+  if (!value) return fallback;
+  if (/^proxy error\b/i.test(value) || /ECONNREFUSED|EHOSTUNREACH|ETIMEDOUT|ENOTFOUND/i.test(value)) {
+    return "OpenWork 服务未连接。";
+  }
+  return value;
 }
 
 async function requestJsonRaw<T>(

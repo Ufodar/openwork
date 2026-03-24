@@ -30,6 +30,7 @@ import { createConfiguredRagflowClient, type RagflowClient } from "./ragflow.js"
 import { RuntimeDocumentStateTokenService } from "./runtime-document-state-tokens.js";
 import { RuntimeKnowledgeTokenService } from "./runtime-knowledge-tokens.js";
 import { SessionOwnershipService } from "./session-ownership.js";
+import { recoverWorkspaceSessionRecords } from "./session-history-recovery.js";
 import {
   buildSessionPermissionRules,
   provisionSessionWorkspace,
@@ -727,6 +728,40 @@ function workspaceLabel(workspace: WorkspaceInfo): string {
   return pathName || workspace.id;
 }
 
+function scopeConfigToWorkspaceIds(config: ServerConfig, workspaceIds: string[]): ServerConfig {
+  const ids = new Set(
+    workspaceIds
+      .map((value) => value.trim())
+      .filter(Boolean),
+  );
+  if (ids.size === 0) {
+    return {
+      ...config,
+      workspaces: [],
+      authorizedRoots: [],
+    };
+  }
+
+  const workspaces = config.workspaces.filter((workspace) => ids.has(workspace.id));
+  if (workspaces.length === config.workspaces.length) {
+    return config;
+  }
+
+  return {
+    ...config,
+    workspaces,
+    authorizedRoots: config.authorizedRoots.filter((root) =>
+      workspaces.some((workspace) => root === workspace.path || root.startsWith(`${workspace.path}/`))
+    ),
+  };
+}
+
+function scopeConfigToUserWorkspace(config: ServerConfig, user: Pick<AuthIdentity, "workspace"> | null | undefined): ServerConfig {
+  const workspaceId = user?.workspace?.id?.trim() ?? "";
+  if (!workspaceId) return config;
+  return scopeConfigToWorkspaceIds(config, [workspaceId]);
+}
+
 function normalizeSessionListPayload(value: unknown): unknown[] {
   if (Array.isArray(value)) return value;
   if (value && typeof value === "object" && Array.isArray((value as Record<string, unknown>).items)) {
@@ -788,20 +823,31 @@ async function listWorkspaceSessions(input: {
   sessionWorkspaces: SessionWorkspaceService;
   ownerKey?: string | null;
 }): Promise<WorkspaceListedSession[]> {
+  const requestedOwnerKey = input.ownerKey?.trim() ?? "";
   const ownerEntries = await input.sessionOwnership.listEntries(input.workspace.id);
   const targetEntries = Object.entries(ownerEntries)
     .filter(([, entry]) => {
-      const ownerKey = input.ownerKey?.trim() ?? "";
-      if (!ownerKey) return true;
-      return entry.ownerKey === ownerKey;
+      if (!requestedOwnerKey) return true;
+      return entry.ownerKey === requestedOwnerKey;
     });
-  if (targetEntries.length === 0) {
+  const recoveredEntries = requestedOwnerKey
+    ? (await recoverWorkspaceSessionRecords(input.workspace.path))
+      .map((record) => ({ ...record, ownerKey: requestedOwnerKey } satisfies WorkspaceListedSession))
+    : [];
+
+  if (targetEntries.length === 0 && recoveredEntries.length === 0) {
     return [];
   }
 
   const ownersBySessionId = new Map(
     targetEntries.map(([sessionId, owner]) => [sessionId, owner]),
   );
+  for (const recovered of recoveredEntries) {
+    ownersBySessionId.set(recovered.id, {
+      ownerKey: recovered.ownerKey,
+      updatedAt: recovered.updatedAt ?? Date.now(),
+    });
+  }
   const payload = await fetchOpencodeJson(input.workspace, "/session", {
     method: "GET",
     directory: input.workspace.path,
@@ -829,8 +875,18 @@ async function listWorkspaceSessions(input: {
     }),
   );
 
-  return items
-    .filter((item): item is WorkspaceListedSession => Boolean(item))
+  const merged = new Map<string, WorkspaceListedSession>();
+  for (const item of items) {
+    if (!item) continue;
+    merged.set(item.id, item);
+  }
+  for (const recovered of recoveredEntries) {
+    if (merged.has(recovered.id)) continue;
+    if (!sessionDirectoryBelongsToWorkspace(input.workspace.path, recovered.directory)) continue;
+    merged.set(recovered.id, recovered);
+  }
+
+  return Array.from(merged.values())
     .sort((left, right) => {
       const leftTime = left.updatedAt ?? left.createdAt ?? 0;
       const rightTime = right.updatedAt ?? right.createdAt ?? 0;
@@ -2137,11 +2193,21 @@ export function createRoutes(
   });
 
   addRoute(routes, "GET", "/admin/users", "host", async () => {
-    const [users, sessionCountByOwnerKey, scanned] = await Promise.all([
+    const [users, scanned] = await Promise.all([
       auth.listUsers(),
-      countAdminSessionsByOwner(config, sessionOwnership, sessionWorkspaces),
       scanAdminSessions(config, sessionOwnership, sessionWorkspaces),
     ]);
+    const countsByUserId = new Map(
+      await Promise.all(users.map(async (user) => {
+        const userScan = await scanAdminSessions(
+          scopeConfigToUserWorkspace(config, user),
+          sessionOwnership,
+          sessionWorkspaces,
+          user.ownerKey,
+        );
+        return [user.id, userScan.items.length] as const;
+      })),
+    );
 
     const items = users
       .map((user) => ({
@@ -2150,7 +2216,7 @@ export function createRoutes(
         createdAt: user.createdAt,
         lastLoginAt: user.lastLoginAt,
         isAdmin: user.isAdmin,
-        sessionCount: sessionCountByOwnerKey.get(user.ownerKey) ?? 0,
+        sessionCount: countsByUserId.get(user.id) ?? 0,
       }))
       .sort((left, right) => {
         if (left.isAdmin !== right.isAdmin) return left.isAdmin ? -1 : 1;
@@ -2170,7 +2236,12 @@ export function createRoutes(
       throw new ApiError(404, "user_not_found", "用户不存在。");
     }
 
-    const scanned = await scanAdminSessions(config, sessionOwnership, sessionWorkspaces, user.ownerKey);
+    const scanned = await scanAdminSessions(
+      scopeConfigToUserWorkspace(config, user),
+      sessionOwnership,
+      sessionWorkspaces,
+      user.ownerKey,
+    );
     const items = scanned.items
       .map(({ ownerKey: _ownerKey, ...session }) => session);
 

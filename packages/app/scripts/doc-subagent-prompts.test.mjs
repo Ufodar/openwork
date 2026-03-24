@@ -62,6 +62,19 @@ test("doc-writer can read runtime state files and write nested outputs in sessio
   expect(writePermission["**/outputs/**"]).toBe("allow");
 });
 
+test("document-writer entry agent has orchestrator task and doc_state permissions", async () => {
+  const config = JSON.parse(await readFile(resolve(root, "opencode.json"), "utf8"));
+  const writer = config.agent?.["document-writer"] ?? {};
+
+  expect(writer?.tools?.task).toBe(true);
+  expect(writer?.tools?.["doc_state_*"]).toBe(true);
+  expect(writer?.tools?.todoread).toBe(true);
+  expect(writer?.tools?.todowrite).toBe(true);
+  expect(writer?.permission?.task?.["doc-*"]).toBe("allow");
+  expect(writer?.permission?.bash).toBe("deny");
+  expect(writer?.permission?.read?.[".worktree/index.json"]).toBe("allow");
+});
+
 test("doc-verifier can execute the verification script directly", async () => {
   const config = JSON.parse(await readFile(resolve(root, "opencode.json"), "utf8"));
   const verifier = config.agent?.["doc-verifier"];

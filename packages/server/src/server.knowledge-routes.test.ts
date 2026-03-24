@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { KnowledgeAttachmentService } from "./knowledge-attachments.js";
 import { KnowledgeRegistryService } from "./knowledge-registry.js";
 import type { RagflowClient } from "./ragflow.js";
+import { RuntimeDocumentStateTokenService } from "./runtime-document-state-tokens.js";
 import { RuntimeKnowledgeTokenService } from "./runtime-knowledge-tokens.js";
 import { createRoutes, matchRoute } from "./server.js";
 import { SessionOwnershipService } from "./session-ownership.js";
@@ -227,6 +228,7 @@ describe("knowledge routes", () => {
       attachments,
       ragflow,
       new RuntimeKnowledgeTokenService(),
+      new RuntimeDocumentStateTokenService(),
       { getState: () => null } as any,
       { listActiveSessions: () => [] } as any,
       { log: () => undefined } as any,

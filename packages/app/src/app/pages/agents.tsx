@@ -86,7 +86,7 @@ export default function AgentsView(props: AgentsViewProps) {
   const resolveFeaturedAgentName = (featured: AgentType): string | null => {
     if (featured.id === "general-assistant") return null;
     if (featured.id === "document-agent") {
-      const match = agentByKey().get(normalizeAgentKey("common-work"));
+      const match = agentByKey().get(normalizeAgentKey("doc-orchestrator"));
       return match?.name ?? null;
     }
     const match = agentByKey().get(normalizeAgentKey(featured.id));

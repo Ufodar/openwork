@@ -38,7 +38,7 @@ describe("resolveSessionPreferences", () => {
     expect(resolved.agentLock).toEqual({ value: "common-work", source: "legacy" });
   });
 
-  test("defaults stored document-agent sessions without explicit agent back to common-work", () => {
+  test("defaults stored document-agent sessions without explicit agent to doc-orchestrator", () => {
     const resolved = resolveSessionPreferences({
       stored: {
         view: "document-agent",
@@ -47,8 +47,8 @@ describe("resolveSessionPreferences", () => {
     });
 
     expect(resolved.view).toEqual({ value: "document-agent", source: "stored" });
-    expect(resolved.agent).toEqual({ value: "common-work", source: "default" });
-    expect(resolved.agentLock).toEqual({ value: "common-work", source: "default" });
+    expect(resolved.agent).toEqual({ value: "doc-orchestrator", source: "default" });
+    expect(resolved.agentLock).toEqual({ value: "doc-orchestrator", source: "default" });
   });
 
   test("normalizes stored ragflow dataset selection", () => {

@@ -62,6 +62,7 @@ describe("proxyOpencodeRequest session listing", () => {
       sessionOwnership,
       sessionWorkspaces,
       runtimeKnowledgeTokens: { revokeRuntime: async () => undefined, issue: async () => ({ token: "", expiresAt: 0 }), resolve: async () => null } as any,
+      runtimeDocumentStateTokens: { revokeRuntime: async () => undefined, issue: async () => ({ token: "", expiresAt: 0 }), resolve: async () => null } as any,
       openworkBaseUrl: "http://127.0.0.1:8789",
     });
 

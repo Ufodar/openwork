@@ -174,7 +174,7 @@ When summarizing for continuation, preserve if present:
 - the authoritative source files and the stable target document
 - the current stage: intake, authority resolution, extraction, revision, coherence check, or delivery
 - canonical filenames and workspace-relative paths
-- state files already written, such as requirements.csv, .worktree/index.json, .worktree/conventions.md, .worktree/facts.json, and reports/*
+- state files already written, such as requirements.csv, .worktree/index.json, .worktree/conventions.md, .worktree/sources/*.json, .worktree/facts.json, .worktree/merge/conflicts.json, .worktree/plan/solution-plan.json, .worktree/coverage.json, and reports/*
 - the current outline, section dependencies, terminology commitments, and unresolved cross-section issues
 - unresolved blockers, TBD facts, and the single best next action
 

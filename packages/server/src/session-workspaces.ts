@@ -1,6 +1,6 @@
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
-import { readFile, rename, writeFile } from "node:fs/promises";
+import { cp, readFile, rename, rm, writeFile } from "node:fs/promises";
 
 import { readJsoncFile, writeJsoncFile } from "./jsonc.js";
 import { opencodeConfigPath } from "./workspace-files.js";
@@ -36,6 +36,15 @@ type RuntimeKnowledgeInstructionRecord = {
 };
 
 const KNOWLEDGE_INSTRUCTIONS_RELATIVE_PATH = ".opencode/openwork-knowledge.md";
+const DOC_STATE_INSTRUCTIONS_RELATIVE_PATH = ".opencode/doc-state.md";
+const RUNTIME_MIRRORED_OPENCODE_DIRS = [
+  "agent",
+  "commands",
+  "plugins",
+  "prompts",
+  "references",
+  "skills",
+] as const;
 
 function expandHome(value: string): string {
   if (value.startsWith("~/")) return join(homedir(), value.slice(2));
@@ -92,7 +101,24 @@ export async function provisionSessionWorkspace(workspacePath: string): Promise<
   const runtimeId = shortId().replace(/-/g, "");
   const runtimeDir = join(workspacePath, "documents", "sessions", runtimeId);
   await ensureDir(runtimeDir);
+  await mirrorWorkspaceOpencodeSupportFiles(workspacePath, runtimeDir);
   return { runtimeId, runtimeDir };
+}
+
+async function mirrorWorkspaceOpencodeSupportFiles(workspacePath: string, runtimeDir: string): Promise<void> {
+  const workspaceOpencodeDir = join(workspacePath, ".opencode");
+  if (!(await exists(workspaceOpencodeDir))) return;
+
+  const runtimeOpencodeDir = join(runtimeDir, ".opencode");
+  await ensureDir(runtimeOpencodeDir);
+
+  for (const relativeDir of RUNTIME_MIRRORED_OPENCODE_DIRS) {
+    const sourceDir = join(workspaceOpencodeDir, relativeDir);
+    if (!(await exists(sourceDir))) continue;
+    const targetDir = join(runtimeOpencodeDir, relativeDir);
+    await rm(targetDir, { recursive: true, force: true }).catch(() => undefined);
+    await cp(sourceDir, targetDir, { recursive: true, force: true });
+  }
 }
 
 function normalizeInstructionEntries(value: unknown): string[] {
@@ -151,6 +177,30 @@ function buildRuntimeKnowledgeInstructions(attachedKnowledge: RuntimeKnowledgeIn
   return header.join("\n") + "\n";
 }
 
+function buildRuntimeDocumentStateInstructions(): string {
+  return [
+    "# Document State Routing",
+    "",
+    "This session can use document-state tools from the `doc_state` MCP server.",
+    "In the tool list they are normally prefixed with the server name:",
+    "- `doc_state_state_get_brief`",
+    "- `doc_state_state_list_sources`",
+    "- `doc_state_state_get_doc`",
+    "- `doc_state_state_get_facts`",
+    "- `doc_state_state_get_conflicts`",
+    "- `doc_state_state_get_plan`",
+    "- `doc_state_state_get_coverage`",
+    "",
+    "Rules:",
+    "1. For long document work, inspect state through these tools before reading raw source files.",
+    "2. Treat `.worktree/**`, `.bid/facts.json`, `requirements.csv`, and `reports/**` as the canonical persisted state surface.",
+    "3. Only fall back to raw source documents when the state layer is missing, stale, or insufficient for the current question.",
+    "4. Prefer `doc_state_state_list_sources` before `doc_state_state_get_doc` when you need to see which source summaries already exist.",
+    "5. Use `doc_state_state_get_facts`, `doc_state_state_get_conflicts`, `doc_state_state_get_plan`, and `doc_state_state_get_coverage` to recover task context after compaction or long runs.",
+    "",
+  ].join("\n");
+}
+
 export async function writeRuntimeKnowledgeCarrierConfig(input: {
   workspacePath: string;
   runtimeDir: string;
@@ -190,6 +240,40 @@ export async function writeRuntimeKnowledgeCarrierConfig(input: {
     buildRuntimeKnowledgeInstructions(input.attachedKnowledge ?? []),
     "utf8",
   );
+  await writeJsoncFile(runtimeConfigPath, baseConfig);
+  return runtimeConfigPath;
+}
+
+export async function writeRuntimeDocumentStateCarrierConfig(input: {
+  workspacePath: string;
+  runtimeDir: string;
+  mcpUrl: string;
+  runtimeToken: string;
+}): Promise<string> {
+  const workspaceConfigPath = opencodeConfigPath(input.workspacePath);
+  const runtimeConfigPath = opencodeConfigPath(input.runtimeDir);
+  const { data: workspaceConfig } = await readJsoncFile<Record<string, unknown>>(workspaceConfigPath, {});
+  const { data: runtimeConfig } = await readJsoncFile<Record<string, unknown>>(runtimeConfigPath, workspaceConfig);
+  const baseConfig = runtimeConfig && typeof runtimeConfig === "object" ? { ...runtimeConfig } : {};
+  const existingMcp = baseConfig.mcp && typeof baseConfig.mcp === "object"
+    ? { ...(baseConfig.mcp as Record<string, unknown>) }
+    : {};
+  existingMcp.doc_state = {
+    type: "remote",
+    url: input.mcpUrl,
+    headers: {
+      Authorization: `Bearer ${input.runtimeToken}`,
+    },
+  };
+  baseConfig.mcp = existingMcp;
+  const existingInstructions = normalizeInstructionEntries(baseConfig.instructions);
+  baseConfig.instructions = [
+    ...existingInstructions.filter((entry) => entry !== DOC_STATE_INSTRUCTIONS_RELATIVE_PATH),
+    DOC_STATE_INSTRUCTIONS_RELATIVE_PATH,
+  ];
+  const instructionPath = join(input.runtimeDir, DOC_STATE_INSTRUCTIONS_RELATIVE_PATH);
+  await ensureDir(dirname(instructionPath));
+  await writeFile(instructionPath, buildRuntimeDocumentStateInstructions(), "utf8");
   await writeJsoncFile(runtimeConfigPath, baseConfig);
   return runtimeConfigPath;
 }

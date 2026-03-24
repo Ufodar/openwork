@@ -106,6 +106,7 @@ Writer task template:
   - the existing target document when one already exists
 - if the user or current step names required section titles, include them under a `Required section headings` list in the task prompt
 - when you pass required section headings, say that those exact strings must appear as Markdown headings in the target document
+- if the user explicitly asks for联网补充、网络资料、政策依据、标准规范、API 参考 or similar external support, tell `doc-writer` to do a small number of targeted web searches for the missing material and label those additions as external supplements
 - do not tell `doc-writer` to "follow the plan titles" when the user has supplied newer or narrower section titles; the user-facing titles win
 - if an existing draft uses different headings, tell `doc-writer` to rename or split those headings instead of claiming semantic equivalence
 - do not invent helper scripts for coverage refresh or document maintenance; either tell `doc-writer` to update `.worktree/coverage.json` directly or reference a repo script that already exists

@@ -357,6 +357,7 @@ def main():
             "Keep the tone practical and evidence-aware rather than speculative.",
             "When the user asks for named systems or required headings, keep those exact titles and their required subsections visible in the deliverable.",
             "If a fact is not directly supported by uploaded documents, label it as a network supplement or an industry-general practice instead of presenting it as a source-grounded fact.",
+            "If the task explicitly requests联网 research, policy references, standards, or API exemplars beyond the uploaded corpus, do a small number of targeted web searches and label the imported facts as external supplements.",
         ],
         "updated_at": iso_now(),
     }

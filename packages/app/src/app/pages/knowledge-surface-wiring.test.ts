@@ -60,6 +60,8 @@ test("knowledge page uses stable reload keys and ignores stale async results", (
   expect(source).toContain("let knowledgeLoadRequestSeq = 0");
   expect(source).toContain("const requestId = ++knowledgeLoadRequestSeq");
   expect(source).toContain("if (requestId !== knowledgeLoadRequestSeq) return");
+  expect(source).toContain("const nextSelection = pickKnowledgeSelection(selectedKnowledgeRef(), mine.items, others.items)");
+  expect(source).toContain("setSelectedKnowledgeRef(nextSelection)");
   expect(source).not.toContain("() => [props.client, props.workspaceId] as const");
 });
 
@@ -74,9 +76,11 @@ test("knowledge page drives a focused detail pane from a selected knowledge item
   const source = readPage("knowledge.tsx");
   expect(source).toContain("const [selectedKnowledgeRef, setSelectedKnowledgeRef] = createSignal");
   expect(source).toContain("pickKnowledgeSelection(");
-  expect(source).toContain("selectedKnowledgeItem = createMemo");
+  expect(source).toContain("selectedKnowledgeDetails = createMemo");
   expect(source).toContain("xl:grid-cols-[360px_minmax(0,1fr)]");
-  expect(source).toContain("when={selectedKnowledgeItem()}");
+  expect(source).toContain("when={selectedKnowledgeDetails()}");
+  expect(source).toContain("selectedKnowledgeDetails()?.item.title");
+  expect(source).toContain("selectedKnowledgeDetails()?.scope === \"mine\"");
   expect(source).not.toContain("when={selectedKnowledgeItem() && selectedKnowledgeScope()}");
 });
 

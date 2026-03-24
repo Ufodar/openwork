@@ -132,17 +132,23 @@ export default function KnowledgeView(props: KnowledgeViewProps) {
     return `${props.client ? "connected" : "disconnected"}:${workspaceId}`;
   });
 
-  const selectedKnowledgeItem = createMemo(() => {
+  const selectedKnowledgeDetails = createMemo<{
+    item: OpenworkKnowledgeItem;
+    scope: OpenworkKnowledgeScope;
+  } | null>(() => {
     const selected = selectedKnowledgeRef();
     if (!selected) return null;
-    return findKnowledgeItem(selected.scope, selected.knowledgeId, mineItems(), othersItems());
+    const item = findKnowledgeItem(selected.scope, selected.knowledgeId, mineItems(), othersItems());
+    if (!item) return null;
+    return {
+      item,
+      scope: selected.scope,
+    };
   });
-
-  const selectedKnowledgeScope = createMemo<OpenworkKnowledgeScope | null>(() => selectedKnowledgeRef()?.scope ?? null);
   const selectedKnowledgeLoading = createMemo(() => {
-    const selected = selectedKnowledgeRef();
+    const selected = selectedKnowledgeDetails();
     if (!selected) return false;
-    return documentsLoadingByKnowledgeId()[selected.knowledgeId] === true;
+    return documentsLoadingByKnowledgeId()[selected.item.knowledgeId] === true;
   });
   const updateKnowledgeItem = (scope: OpenworkKnowledgeScope, item: OpenworkKnowledgeItem) => {
     if (scope === "mine") {
@@ -191,8 +197,10 @@ export default function KnowledgeView(props: KnowledgeViewProps) {
         client.listKnowledge(workspaceId, "others"),
       ]);
       if (requestId !== knowledgeLoadRequestSeq) return;
+      const nextSelection = pickKnowledgeSelection(selectedKnowledgeRef(), mine.items, others.items);
       setMineItems(mine.items);
       setOthersItems(others.items);
+      setSelectedKnowledgeRef(nextSelection);
     } catch (nextError) {
       if (requestId !== knowledgeLoadRequestSeq) return;
       setError(nextError instanceof Error ? nextError.message : tr("knowledge.load_failed"));
@@ -247,9 +255,9 @@ export default function KnowledgeView(props: KnowledgeViewProps) {
   };
 
   createEffect(() => {
-    const selected = selectedKnowledgeRef();
+    const selected = selectedKnowledgeDetails();
     if (!selected) return;
-    void loadKnowledgeDocuments(selected.knowledgeId, selected.scope);
+    void loadKnowledgeDocuments(selected.item.knowledgeId, selected.scope);
   });
 
   const handleCreateKnowledge = async () => {
@@ -365,15 +373,16 @@ export default function KnowledgeView(props: KnowledgeViewProps) {
   };
 
   const renderKnowledgeListItem = (item: OpenworkKnowledgeItem, scope: OpenworkKnowledgeScope) => {
-    const selected = selectedKnowledgeRef()?.scope === scope && selectedKnowledgeRef()?.knowledgeId === item.knowledgeId;
     return (
       <button
         type="button"
-        class={`w-full rounded-2xl border px-3 py-3 text-left transition ${
-          selected
-            ? "border-dls-accent bg-dls-accent/8 shadow-sm"
-            : "border-dls-border bg-dls-background hover:border-dls-accent/50 hover:bg-dls-surface"
-        }`}
+        class="w-full rounded-2xl border px-3 py-3 text-left transition"
+        classList={{
+          "border-dls-accent bg-dls-accent/8 shadow-sm":
+            selectedKnowledgeRef()?.scope === scope && selectedKnowledgeRef()?.knowledgeId === item.knowledgeId,
+          "border-dls-border bg-dls-background hover:border-dls-accent/50 hover:bg-dls-surface":
+            !(selectedKnowledgeRef()?.scope === scope && selectedKnowledgeRef()?.knowledgeId === item.knowledgeId),
+        }}
         onClick={() => setSelectedKnowledgeRef({ scope, knowledgeId: item.knowledgeId })}
       >
         <div class="flex items-start justify-between gap-3">
@@ -613,7 +622,7 @@ export default function KnowledgeView(props: KnowledgeViewProps) {
 
         <section class="rounded-3xl border border-dls-border bg-dls-surface p-5 shadow-sm space-y-4 xl:min-h-[48rem]">
           <Show
-            when={selectedKnowledgeItem()}
+            when={selectedKnowledgeDetails()}
             fallback={
               <div class="flex h-full min-h-[22rem] items-center justify-center rounded-3xl border border-dashed border-dls-border bg-dls-background/70 px-6 py-10 text-center">
                 <div class="max-w-md space-y-2">
@@ -623,92 +632,116 @@ export default function KnowledgeView(props: KnowledgeViewProps) {
               </div>
             }
           >
-            {(selectedItemAccessor) => {
-              const item = selectedItemAccessor();
-              const scope = selectedKnowledgeScope() ?? "mine";
-              const writable = scope === "mine";
-              const uploadBusy = uploadBusyKnowledgeId() === item.knowledgeId;
-              const deletingKnowledge = deletingKnowledgeId() === item.knowledgeId;
-              return (
-                <>
-                  <div class="flex flex-wrap items-start justify-between gap-4">
-                    <div class="min-w-0 flex-1 space-y-2">
-                      <div class="flex flex-wrap items-center gap-2">
-                        <div class="inline-flex items-center rounded-full border border-dls-border bg-dls-background px-2.5 py-1 text-xs font-medium text-dls-secondary">
-                          {scope === "mine" ? tr("knowledge.mine_title") : tr("knowledge.others_title")}
-                        </div>
-                        <div class={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${statusTone(item.status)}`}>
-                          {formatStatus(item.status, tr)}
-                        </div>
-                      </div>
-                      <div class="text-2xl font-semibold text-dls-text">{item.title}</div>
-                      <Show when={scope === "others"}>
-                        <div class="text-sm text-dls-secondary">
-                          {tr("knowledge.owner").replace("{name}", item.ownerDisplayName)}
-                        </div>
-                      </Show>
-                      <div class="text-sm leading-6 text-dls-secondary">
-                        {item.description?.trim() || (writable ? tr("knowledge.session_external_hint") : tr("knowledge.details_shared_hint"))}
-                      </div>
+            <>
+              <div class="flex flex-wrap items-start justify-between gap-4">
+                <div class="min-w-0 flex-1 space-y-2">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <div class="inline-flex items-center rounded-full border border-dls-border bg-dls-background px-2.5 py-1 text-xs font-medium text-dls-secondary">
+                      {selectedKnowledgeDetails()?.scope === "mine" ? tr("knowledge.mine_title") : tr("knowledge.others_title")}
                     </div>
-                    <div class="flex flex-wrap items-center gap-2">
-                      <Button
-                        variant="outline"
-                        class="px-3 py-2 text-xs"
-                        disabled={selectedKnowledgeLoading()}
-                        onClick={() => void loadKnowledgeDocuments(item.knowledgeId, scope, true)}
-                      >
-                        <Show when={selectedKnowledgeLoading()} fallback={<RefreshCw size={14} />}>
-                          <Loader2 size={14} class="animate-spin" />
-                        </Show>
-                        <span>{tr("knowledge.refresh_files")}</span>
-                      </Button>
-                      <Show when={writable}>
-                        <Button
-                          variant="outline"
-                          class="px-3 py-2 text-xs"
-                          onClick={() => openUploadPicker(item.knowledgeId)}
-                          disabled={uploadBusy}
-                        >
-                          <Show when={uploadBusy} fallback={<Upload size={14} />}>
-                            <Loader2 size={14} class="animate-spin" />
-                          </Show>
-                          <span>{uploadBusy ? tr("knowledge.uploading") : tr("knowledge.upload_action")}</span>
-                        </Button>
-                        <Button
-                          variant="danger"
-                          class="px-3 py-2 text-xs"
-                          onClick={() => void handleDeleteKnowledge(item.knowledgeId, item.title)}
-                          disabled={deletingKnowledge}
-                        >
-                          <Show when={deletingKnowledge} fallback={<Trash2 size={14} />}>
-                            <Loader2 size={14} class="animate-spin" />
-                          </Show>
-                          <span>{deletingKnowledge ? tr("knowledge.deleting_knowledge") : tr("knowledge.delete_knowledge_action")}</span>
-                        </Button>
-                      </Show>
+                    <div class={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${statusTone(selectedKnowledgeDetails()?.item.status ?? "unknown")}`}>
+                      {formatStatus(selectedKnowledgeDetails()?.item.status ?? "unknown", tr)}
                     </div>
                   </div>
-
-                  <div class="grid gap-3 sm:grid-cols-3">
-                    <div class="rounded-2xl border border-dls-border bg-dls-background px-4 py-3">
-                      <div class="text-xs font-medium text-dls-secondary">{tr("knowledge.details_docs_label")}</div>
-                      <div class="mt-1 text-lg font-semibold text-dls-text">{item.documentCount.toLocaleString()}</div>
+                  <div class="text-2xl font-semibold text-dls-text">{selectedKnowledgeDetails()?.item.title}</div>
+                  <Show when={selectedKnowledgeDetails()?.scope === "others"}>
+                    <div class="text-sm text-dls-secondary">
+                      {tr("knowledge.owner").replace("{name}", selectedKnowledgeDetails()?.item.ownerDisplayName ?? "")}
                     </div>
-                    <div class="rounded-2xl border border-dls-border bg-dls-background px-4 py-3">
-                      <div class="text-xs font-medium text-dls-secondary">{tr("knowledge.details_chunks_label")}</div>
-                      <div class="mt-1 text-lg font-semibold text-dls-text">{item.chunkCount.toLocaleString()}</div>
-                    </div>
-                    <div class="rounded-2xl border border-dls-border bg-dls-background px-4 py-3">
-                      <div class="text-xs font-medium text-dls-secondary">{tr("knowledge.details_chunk_method_label")}</div>
-                      <div class="mt-1 text-lg font-semibold text-dls-text">{formatChunkMethod(item.chunkMethod, tr)}</div>
-                    </div>
+                  </Show>
+                  <div class="text-sm leading-6 text-dls-secondary">
+                    {selectedKnowledgeDetails()?.item.description?.trim() ||
+                      (selectedKnowledgeDetails()?.scope === "mine"
+                        ? tr("knowledge.session_external_hint")
+                        : tr("knowledge.details_shared_hint"))}
                   </div>
+                </div>
+                <div class="flex flex-wrap items-center gap-2">
+                  <Button
+                    variant="outline"
+                    class="px-3 py-2 text-xs"
+                    disabled={selectedKnowledgeLoading()}
+                    onClick={() => {
+                      const selected = selectedKnowledgeDetails();
+                      if (!selected) return;
+                      void loadKnowledgeDocuments(selected.item.knowledgeId, selected.scope, true);
+                    }}
+                  >
+                    <Show when={selectedKnowledgeLoading()} fallback={<RefreshCw size={14} />}>
+                      <Loader2 size={14} class="animate-spin" />
+                    </Show>
+                    <span>{tr("knowledge.refresh_files")}</span>
+                  </Button>
+                  <Show when={selectedKnowledgeDetails()?.scope === "mine"}>
+                    <Button
+                      variant="outline"
+                      class="px-3 py-2 text-xs"
+                      onClick={() => {
+                        const selected = selectedKnowledgeDetails();
+                        if (!selected) return;
+                        openUploadPicker(selected.item.knowledgeId);
+                      }}
+                      disabled={uploadBusyKnowledgeId() === selectedKnowledgeDetails()?.item.knowledgeId}
+                    >
+                      <Show when={uploadBusyKnowledgeId() === selectedKnowledgeDetails()?.item.knowledgeId} fallback={<Upload size={14} />}>
+                        <Loader2 size={14} class="animate-spin" />
+                      </Show>
+                      <span>
+                        {uploadBusyKnowledgeId() === selectedKnowledgeDetails()?.item.knowledgeId
+                          ? tr("knowledge.uploading")
+                          : tr("knowledge.upload_action")}
+                      </span>
+                    </Button>
+                    <Button
+                      variant="danger"
+                      class="px-3 py-2 text-xs"
+                      onClick={() => {
+                        const selected = selectedKnowledgeDetails();
+                        if (!selected) return;
+                        void handleDeleteKnowledge(selected.item.knowledgeId, selected.item.title);
+                      }}
+                      disabled={deletingKnowledgeId() === selectedKnowledgeDetails()?.item.knowledgeId}
+                    >
+                      <Show when={deletingKnowledgeId() === selectedKnowledgeDetails()?.item.knowledgeId} fallback={<Trash2 size={14} />}>
+                        <Loader2 size={14} class="animate-spin" />
+                      </Show>
+                      <span>
+                        {deletingKnowledgeId() === selectedKnowledgeDetails()?.item.knowledgeId
+                          ? tr("knowledge.deleting_knowledge")
+                          : tr("knowledge.delete_knowledge_action")}
+                      </span>
+                    </Button>
+                  </Show>
+                </div>
+              </div>
 
-                  {renderKnowledgeDocuments(item.knowledgeId, scope, writable)}
-                </>
-              );
-            }}
+              <div class="grid gap-3 sm:grid-cols-3">
+                <div class="rounded-2xl border border-dls-border bg-dls-background px-4 py-3">
+                  <div class="text-xs font-medium text-dls-secondary">{tr("knowledge.details_docs_label")}</div>
+                  <div class="mt-1 text-lg font-semibold text-dls-text">
+                    {selectedKnowledgeDetails()?.item.documentCount.toLocaleString()}
+                  </div>
+                </div>
+                <div class="rounded-2xl border border-dls-border bg-dls-background px-4 py-3">
+                  <div class="text-xs font-medium text-dls-secondary">{tr("knowledge.details_chunks_label")}</div>
+                  <div class="mt-1 text-lg font-semibold text-dls-text">
+                    {selectedKnowledgeDetails()?.item.chunkCount.toLocaleString()}
+                  </div>
+                </div>
+                <div class="rounded-2xl border border-dls-border bg-dls-background px-4 py-3">
+                  <div class="text-xs font-medium text-dls-secondary">{tr("knowledge.details_chunk_method_label")}</div>
+                  <div class="mt-1 text-lg font-semibold text-dls-text">
+                    {formatChunkMethod(selectedKnowledgeDetails()?.item.chunkMethod, tr)}
+                  </div>
+                </div>
+              </div>
+
+              {renderKnowledgeDocuments(
+                selectedKnowledgeDetails()?.item.knowledgeId ?? "",
+                selectedKnowledgeDetails()?.scope ?? "mine",
+                selectedKnowledgeDetails()?.scope === "mine",
+              )}
+            </>
           </Show>
         </section>
       </div>

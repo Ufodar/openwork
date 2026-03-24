@@ -60,6 +60,7 @@ export default function SessionKnowledgeSurface(props: SessionKnowledgeSurfacePr
   const [knowledgePickerError, setKnowledgePickerError] = createSignal<string | null>(null);
   const [knowledgeDraftIds, setKnowledgeDraftIds] = createSignal<string[]>([]);
   const [knowledgeSaveBusy, setKnowledgeSaveBusy] = createSignal(false);
+  const [knowledgeStripExpanded, setKnowledgeStripExpanded] = createSignal(false);
 
   const sessionKnowledgeContext = createMemo(() =>
     resolveSessionKnowledgeContext(props.client, props.workspaceId, props.sessionId)
@@ -248,6 +249,7 @@ export default function SessionKnowledgeSurface(props: SessionKnowledgeSurfacePr
       () => {
         setKnowledgePickerOpen(false);
         setKnowledgePickerError(null);
+        setKnowledgeStripExpanded(false);
       }
     )
   );
@@ -270,7 +272,9 @@ export default function SessionKnowledgeSurface(props: SessionKnowledgeSurfacePr
           loading={knowledgeAttachmentsLoading()}
           error={knowledgeAttachmentsError()}
           editingLocked={knowledgeEditingLocked()}
+          expanded={knowledgeStripExpanded()}
           onManage={openKnowledgePicker}
+          onToggle={() => setKnowledgeStripExpanded((current) => !current)}
           tr={props.tr}
         />
       </Show>

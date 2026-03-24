@@ -96,3 +96,11 @@ test("knowledge strip disables editing actions when the scope is locked", () => 
   expect(strip).toContain("disabled={props.editingLocked}");
   expect(surface).toContain("if (!knowledgeAvailable() || knowledgeEditingLocked()) return;");
 });
+
+test("knowledge strip keeps attached knowledge visible during transient refreshes", () => {
+  const strip = readFileSync(join(here, "..", "components", "session", "knowledge-strip.tsx"), "utf8");
+  expect(strip).toContain('when={props.attachedItems.length > 0}');
+  expect(strip).toContain('when={props.loading && props.attachedItems.length === 0}');
+  expect(strip).toContain('class="animate-spin"');
+  expect(strip).not.toContain("when={!props.loading}");
+});

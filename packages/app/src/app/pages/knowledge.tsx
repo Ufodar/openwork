@@ -613,7 +613,7 @@ export default function KnowledgeView(props: KnowledgeViewProps) {
 
         <section class="rounded-3xl border border-dls-border bg-dls-surface p-5 shadow-sm space-y-4 xl:min-h-[48rem]">
           <Show
-            when={selectedKnowledgeItem() && selectedKnowledgeScope()}
+            when={selectedKnowledgeItem()}
             fallback={
               <div class="flex h-full min-h-[22rem] items-center justify-center rounded-3xl border border-dashed border-dls-border bg-dls-background/70 px-6 py-10 text-center">
                 <div class="max-w-md space-y-2">
@@ -625,7 +625,7 @@ export default function KnowledgeView(props: KnowledgeViewProps) {
           >
             {(selectedItemAccessor) => {
               const item = selectedItemAccessor();
-              const scope = selectedKnowledgeScope()!;
+              const scope = selectedKnowledgeScope() ?? "mine";
               const writable = scope === "mine";
               const uploadBusy = uploadBusyKnowledgeId() === item.knowledgeId;
               const deletingKnowledge = deletingKnowledgeId() === item.knowledgeId;

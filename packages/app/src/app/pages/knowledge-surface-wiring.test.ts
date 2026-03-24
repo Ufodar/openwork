@@ -76,6 +76,8 @@ test("knowledge page drives a focused detail pane from a selected knowledge item
   expect(source).toContain("pickKnowledgeSelection(");
   expect(source).toContain("selectedKnowledgeItem = createMemo");
   expect(source).toContain("xl:grid-cols-[360px_minmax(0,1fr)]");
+  expect(source).toContain("when={selectedKnowledgeItem()}");
+  expect(source).not.toContain("when={selectedKnowledgeItem() && selectedKnowledgeScope()}");
 });
 
 test("knowledge strip disables editing actions when the scope is locked", () => {

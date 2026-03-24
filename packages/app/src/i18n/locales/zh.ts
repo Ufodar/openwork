@@ -641,6 +641,8 @@ export default {
   "knowledge.others_description": "这些知识库可以在会话里挂载使用。界面会显示归属，便于确认当前检索的是谁的资料。",
   "knowledge.others_empty": "当前还没有可见的共享知识库。",
   "knowledge.owner": "归属：{name}",
+  "knowledge.owner_unknown": "未知用户",
+  "knowledge.group_count": "{count} 个知识库",
   "knowledge.status_ready": "可用",
   "knowledge.status_processing": "解析中",
   "knowledge.status_degraded": "异常",

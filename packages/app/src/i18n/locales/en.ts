@@ -640,6 +640,8 @@ export default {
   "knowledge.others_description": "These knowledge bases are visible for attachment in sessions. Ownership is shown so users know whose corpus they are using.",
   "knowledge.others_empty": "No shared knowledge bases are visible yet.",
   "knowledge.owner": "Owner: {name}",
+  "knowledge.owner_unknown": "Unknown user",
+  "knowledge.group_count": "{count} knowledge bases",
   "knowledge.status_ready": "ready",
   "knowledge.status_processing": "processing",
   "knowledge.status_degraded": "degraded",

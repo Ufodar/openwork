@@ -3,6 +3,7 @@ import { For, Show, createEffect, createMemo, createSignal, on } from "solid-js"
 
 import { currentLocale, t as i18n } from "../../i18n";
 import Button from "../components/button";
+import { groupKnowledgeItemsByOwner } from "../lib/knowledge-grouping";
 import type {
   OpenworkKnowledgeDocumentItem,
   OpenworkKnowledgeItem,
@@ -115,6 +116,9 @@ export default function KnowledgeView(props: KnowledgeViewProps) {
   const [documentErrorsByKnowledgeId, setDocumentErrorsByKnowledgeId] = createSignal<Record<string, string | null>>({});
   const [deletingDocumentKey, setDeletingDocumentKey] = createSignal<string | null>(null);
   const [deletingKnowledgeId, setDeletingKnowledgeId] = createSignal<string | null>(null);
+  const groupedOthersItems = createMemo(() =>
+    groupKnowledgeItemsByOwner(othersItems(), tr("knowledge.owner_unknown"))
+  );
 
   const knowledgeLoadKey = createMemo(() => {
     const workspaceId = props.workspaceId?.trim() ?? "";
@@ -624,8 +628,24 @@ export default function KnowledgeView(props: KnowledgeViewProps) {
             }
           >
             <div class="space-y-3">
-              <For each={othersItems()}>
-                {(item) => renderKnowledgeCard(item, "others")}
+              <For each={groupedOthersItems()}>
+                {(group) => (
+                  <div class="rounded-2xl border border-dls-border bg-dls-background/60 p-3 space-y-3">
+                    <div class="flex items-center justify-between gap-3">
+                      <div class="min-w-0">
+                        <div class="truncate text-sm font-semibold text-dls-text">{group.ownerLabel}</div>
+                        <div class="text-xs text-dls-secondary">
+                          {tr("knowledge.group_count").replace("{count}", group.items.length.toLocaleString())}
+                        </div>
+                      </div>
+                    </div>
+                    <div class="space-y-3">
+                      <For each={group.items}>
+                        {(item) => renderKnowledgeCard(item, "others")}
+                      </For>
+                    </div>
+                  </div>
+                )}
               </For>
             </div>
           </Show>

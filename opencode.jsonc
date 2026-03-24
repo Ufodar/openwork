@@ -86,6 +86,88 @@
         "todowrite": "allow"
       }
     },
+    "document-writer": {
+      "description": "User-facing bid-writing entrypoint that runs the doc-orchestrator control loop over doc-* subagents",
+      "mode": "primary",
+      "color": "#0EA5E9",
+      "temperature": 0.1,
+      "steps": 24,
+      "prompt": "{file:./.opencode/agent/document-writer.md}",
+      "tools": {
+        "*": false,
+        "task": true,
+        "todoread": true,
+        "todowrite": true,
+        "read": true,
+        "list": true,
+        "glob": true,
+        "doc_state_*": true,
+        "state_get_*": true,
+        "openwork_knowledge*": true,
+        "openwork-knowledge*": true
+      },
+      "permission": {
+        "task": {
+          "*": "deny",
+          "doc-*": "allow"
+        },
+        "read": {
+          "*": "deny",
+          ".worktree/index.json": "allow",
+          "**/.worktree/index.json": "allow",
+          ".worktree/sources/manifest.json": "allow",
+          "**/.worktree/sources/manifest.json": "allow",
+          ".worktree/facts.json": "allow",
+          "**/.worktree/facts.json": "allow",
+          ".worktree/merge/conflicts.json": "allow",
+          "**/.worktree/merge/conflicts.json": "allow",
+          ".worktree/plan/solution-plan.json": "allow",
+          "**/.worktree/plan/solution-plan.json": "allow",
+          ".worktree/coverage.json": "allow",
+          "**/.worktree/coverage.json": "allow",
+          ".worktree/verify/coverage.json": "allow",
+          "**/.worktree/verify/coverage.json": "allow",
+          ".bid/**": "allow",
+          "**/.bid/**": "allow",
+          "requirements.csv": "allow",
+          "**/requirements.csv": "allow",
+          "reports/**": "allow",
+          "**/reports/**": "allow"
+        },
+        "list": {
+          "*": "deny",
+          ".worktree": "allow",
+          ".worktree/**": "allow",
+          "**/.worktree": "allow",
+          "**/.worktree/**": "allow",
+          ".bid": "allow",
+          ".bid/**": "allow",
+          "**/.bid": "allow",
+          "**/.bid/**": "allow",
+          "reports": "allow",
+          "reports/**": "allow",
+          "**/reports": "allow",
+          "**/reports/**": "allow"
+        },
+        "glob": {
+          "*": "deny",
+          ".worktree/**": "allow",
+          ".bid/**": "allow",
+          "reports/**": "allow",
+          "**/.worktree/**": "allow",
+          "**/.bid/**": "allow",
+          "**/reports/**": "allow"
+        },
+        "edit": "deny",
+        "bash": "deny",
+        "grep": "deny",
+        "skill": {
+          "*": "deny"
+        },
+        "todoread": "allow",
+        "todowrite": "allow"
+      }
+    },
     "doc-intake": {
       "description": "Builds initial document-state artifacts from the current workspace without drafting the final deliverable",
       "mode": "subagent",

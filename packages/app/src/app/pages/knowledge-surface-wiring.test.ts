@@ -84,6 +84,12 @@ test("knowledge page drives a focused detail pane from a selected knowledge item
   expect(source).not.toContain("when={selectedKnowledgeItem() && selectedKnowledgeScope()}");
 });
 
+test("knowledge page reselects another knowledge base after deleting the current one", () => {
+  const source = readPage("knowledge.tsx");
+  expect(source).toContain("const nextMineItems = removeKnowledgeItem(mineItems(), knowledgeId)");
+  expect(source).toContain("setSelectedKnowledgeRef(pickKnowledgeSelection(selectedKnowledgeRef(), nextMineItems, othersItems()))");
+});
+
 test("knowledge strip disables editing actions when the scope is locked", () => {
   const strip = readFileSync(join(here, "..", "components", "session", "knowledge-strip.tsx"), "utf8");
   const surface = readFileSync(join(here, "..", "components", "session", "session-knowledge-surface.tsx"), "utf8");

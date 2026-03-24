@@ -363,8 +363,10 @@ export default function KnowledgeView(props: KnowledgeViewProps) {
     setUploadError(null);
     try {
       await client.deleteKnowledge(workspaceId, knowledgeId);
-      setMineItems((current) => removeKnowledgeItem(current, knowledgeId));
+      const nextMineItems = removeKnowledgeItem(mineItems(), knowledgeId);
+      setMineItems(nextMineItems);
       clearKnowledgeLocalState(knowledgeId);
+      setSelectedKnowledgeRef(pickKnowledgeSelection(selectedKnowledgeRef(), nextMineItems, othersItems()));
     } catch (nextError) {
       setUploadError(nextError instanceof Error ? nextError.message : tr("knowledge.delete_knowledge_failed"));
     } finally {

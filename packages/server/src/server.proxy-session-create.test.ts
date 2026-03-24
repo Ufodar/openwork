@@ -51,7 +51,7 @@ describe("proxyOpencodeRequest session creation", () => {
     };
   });
 
-  test("provisions runtime knowledge and document-state overlays after creating a session", async () => {
+  test("provisions only the runtime knowledge overlay for a standard session", async () => {
     globalThis.fetch = (async () =>
       new Response(JSON.stringify({ id: "ses_created", title: "Created Session" }), {
         status: 200,
@@ -91,15 +91,56 @@ describe("proxyOpencodeRequest session creation", () => {
       instructions?: string[];
     };
     const instructionRaw = await readFile(join(runtime?.runtimeDir ?? "", ".opencode", "openwork-knowledge.md"), "utf8");
-    const docStateInstructionRaw = await readFile(join(runtime?.runtimeDir ?? "", ".opencode", "doc-state.md"), "utf8");
-
     expect(parsed.model).toBe("test-model");
     expect(parsed.mcp?.filesystem).toBeTruthy();
     expect(parsed.mcp?.["openwork-knowledge"]).toBeTruthy();
-    expect(parsed.mcp?.doc_state).toBeTruthy();
     expect(parsed.instructions).toContain(".opencode/openwork-knowledge.md");
-    expect(parsed.instructions).toContain(".opencode/doc-state.md");
+    expect(parsed.instructions ?? []).not.toContain(".opencode/doc-state.md");
     expect(instructionRaw).toContain("openwork_knowledge_list_attached");
+    expect(parsed.mcp?.doc_state).toBeUndefined();
+    await expect(readFile(join(runtime?.runtimeDir ?? "", ".opencode", "doc-state.md"), "utf8")).rejects.toThrow();
+  });
+
+  test("provisions document-state overlays when the session requests the bid-writer runtime profile", async () => {
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ id: "ses_bid", title: "Bid Session" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })) as unknown as typeof fetch;
+
+    const sessionOwnership = new SessionOwnershipService();
+    const sessionWorkspaces = new SessionWorkspaceService();
+    const runtimeKnowledgeTokens = new RuntimeKnowledgeTokenService();
+    const runtimeDocumentStateTokens = new RuntimeDocumentStateTokenService();
+
+    const response = await proxyOpencodeRequest({
+      request: new Request("http://openwork.local/w/ws_1/opencode/session", {
+        method: "POST",
+        body: JSON.stringify({ title: "Bid Session", openworkEnableDocState: true }),
+      }),
+      url: new URL("http://openwork.local/w/ws_1/opencode/session"),
+      workspace,
+      proxyPath: "/session",
+      actor: { type: "remote", scope: "collaborator", tokenHash: "owner-alice" },
+      sessionOwnership,
+      sessionWorkspaces,
+      runtimeKnowledgeTokens,
+      runtimeDocumentStateTokens,
+      openworkBaseUrl: "http://127.0.0.1:8789",
+    });
+
+    expect(response.status).toBe(200);
+
+    const runtime = await sessionWorkspaces.getWorkspace(workspace.id, "ses_bid");
+    const raw = await readFile(join(runtime?.runtimeDir ?? "", "opencode.jsonc"), "utf8");
+    const parsed = JSON.parse(raw) as {
+      mcp?: Record<string, unknown>;
+      instructions?: string[];
+    };
+    const docStateInstructionRaw = await readFile(join(runtime?.runtimeDir ?? "", ".opencode", "doc-state.md"), "utf8");
+
+    expect(parsed.mcp?.doc_state).toBeTruthy();
+    expect(parsed.instructions).toContain(".opencode/doc-state.md");
     expect(docStateInstructionRaw).toContain("doc_state_state_get_brief");
   });
 });

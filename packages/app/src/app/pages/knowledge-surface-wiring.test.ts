@@ -27,6 +27,7 @@ test("document writer view wires the shared session knowledge surface", () => {
   expect(source).toContain("<SessionKnowledgeSurface");
   expect(source).toContain('editingLocked={isAgentRunning() || props.messages.some((message) => message.info?.role === "user" || message.info?.role === "assistant")}');
   expect(source).not.toContain('import SessionKnowledgeStrip from "../components/session-knowledge-strip"');
+  expect(source).toContain('const desiredAgent = (props.selectedSessionAgentLock ?? props.selectedSessionAgent ?? "document-writer").trim();');
 });
 
 test("dashboard exposes a dedicated knowledge tab", () => {

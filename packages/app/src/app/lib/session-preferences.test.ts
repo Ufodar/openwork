@@ -24,8 +24,8 @@ describe("resolveSessionPreferences", () => {
     });
 
     expect(resolved.view).toEqual({ value: "document-writer", source: "legacy" });
-    expect(resolved.agent).toEqual({ value: "document-writer", source: "legacy" });
-    expect(resolved.agentLock).toEqual({ value: "document-writer", source: "legacy" });
+    expect(resolved.agent).toEqual({ value: "doc-orchestrator", source: "legacy" });
+    expect(resolved.agentLock).toEqual({ value: "doc-orchestrator", source: "legacy" });
   });
 
   test("keeps 文档智能体 mapped to document-agent and common-work", () => {
@@ -38,7 +38,7 @@ describe("resolveSessionPreferences", () => {
     expect(resolved.agentLock).toEqual({ value: "common-work", source: "legacy" });
   });
 
-  test("defaults stored document-agent sessions without explicit agent to doc-orchestrator", () => {
+  test("defaults stored document-agent sessions without explicit agent back to common-work", () => {
     const resolved = resolveSessionPreferences({
       stored: {
         view: "document-agent",
@@ -47,6 +47,19 @@ describe("resolveSessionPreferences", () => {
     });
 
     expect(resolved.view).toEqual({ value: "document-agent", source: "stored" });
+    expect(resolved.agent).toEqual({ value: "common-work", source: "default" });
+    expect(resolved.agentLock).toEqual({ value: "common-work", source: "default" });
+  });
+
+  test("defaults stored document-writer sessions without explicit agent to doc-orchestrator", () => {
+    const resolved = resolveSessionPreferences({
+      stored: {
+        view: "document-writer",
+      },
+      title: "New session - 2026-03-18T00:00:00.000Z",
+    });
+
+    expect(resolved.view).toEqual({ value: "document-writer", source: "stored" });
     expect(resolved.agent).toEqual({ value: "doc-orchestrator", source: "default" });
     expect(resolved.agentLock).toEqual({ value: "doc-orchestrator", source: "default" });
   });

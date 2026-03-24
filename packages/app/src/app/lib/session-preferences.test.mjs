@@ -41,7 +41,7 @@ describe("resolveSessionPreferences", () => {
     });
 
     expect(resolved.view).toEqual({ value: "document-agent", source: "stored" });
-    expect(resolved.agentLock).toEqual({ value: "document-writer", source: "legacy" });
-    expect(resolved.agent).toEqual({ value: "document-writer", source: "legacy" });
+    expect(resolved.agentLock).toEqual({ value: "common-work", source: "default" });
+    expect(resolved.agent).toEqual({ value: "common-work", source: "default" });
   });
 });

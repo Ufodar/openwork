@@ -25,17 +25,18 @@ describe("agents visibility", () => {
   });
 
   test("routes the featured writer card into the dedicated document-writer view with a lock", () => {
-    expect(resolveFeaturedAgentLaunch("document-writer", "document-writer")).toEqual({
-      agent: "document-writer",
-      agentLock: "document-writer",
+    expect(resolveFeaturedAgentLaunch("document-writer", "doc-orchestrator")).toEqual({
+      agent: "doc-orchestrator",
+      agentLock: "doc-orchestrator",
+      enableDocumentState: true,
       view: "document-writer",
     });
   });
 
-  test("routes the featured document agent card into doc-orchestrator by default", () => {
+  test("routes the featured document agent card back to common-work by default", () => {
     expect(resolveFeaturedAgentLaunch("document-agent", null)).toEqual({
-      agent: "doc-orchestrator",
-      agentLock: "doc-orchestrator",
+      agent: "common-work",
+      agentLock: "common-work",
       view: "document-agent",
     });
   });

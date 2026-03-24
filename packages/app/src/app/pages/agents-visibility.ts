@@ -16,11 +16,12 @@ export function resolveFeaturedAgentLaunch(
     return { view: "session" };
   }
   if (featuredId === "document-agent") {
-    const resolved = agent ?? "doc-orchestrator";
+    const resolved = agent ?? "common-work";
     return { agent: resolved, agentLock: resolved, view: "document-agent" };
   }
   if (featuredId === "document-writer") {
-    return { agent: "document-writer", agentLock: "document-writer", view: "document-writer" };
+    const resolved = agent ?? "doc-orchestrator";
+    return { agent: resolved, agentLock: resolved, view: "document-writer", enableDocumentState: true };
   }
   return agent ? { agent } : null;
 }

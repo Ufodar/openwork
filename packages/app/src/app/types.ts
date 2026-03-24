@@ -132,6 +132,7 @@ export type CreateSessionOptions = {
   agent?: string | null;
   agentLock?: string | null;
   view?: View;
+  enableDocumentState?: boolean;
 };
 
 export type StartupPreference = "local" | "server";

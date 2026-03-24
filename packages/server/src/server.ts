@@ -1157,6 +1157,7 @@ export async function proxyOpencodeRequest(input: {
   }
 
   let provisionedRuntime: { runtimeId: string; runtimeDir: string } | null = null;
+  let enableDocumentStateForProvisionedSession = false;
   let body: BodyInit | undefined = method === "GET" || method === "HEAD" ? undefined : (input.request.body ?? undefined);
   const startsSessionRun = method === "POST" && /^\/session\/[^/]+\/(prompt|prompt_async|command|shell)$/.test(normalizedProxyPath);
   if (workspace && workspaceId && pathSessionId && startsSessionRun) {
@@ -1173,6 +1174,8 @@ export async function proxyOpencodeRequest(input: {
     } catch {
       throw new ApiError(400, "invalid_json", "Invalid JSON body");
     }
+    enableDocumentStateForProvisionedSession = payload.openworkEnableDocState === true;
+    delete payload.openworkEnableDocState;
     const existingPermissions = Array.isArray(payload.permission) ? payload.permission : [];
     const nextPermissions = [
       ...existingPermissions.filter((entry) => {
@@ -1262,17 +1265,19 @@ export async function proxyOpencodeRequest(input: {
                 runtimeToken: issued.token,
                 attachedKnowledge: [],
               });
-              const docStateIssued = await input.runtimeDocumentStateTokens.issue({
-                workspaceId,
-                sessionId: createdSessionId,
-                runtimeId: provisionedRuntime.runtimeId,
-              });
-              await writeRuntimeDocumentStateCarrierConfig({
-                workspacePath: workspace.path,
-                runtimeDir: provisionedRuntime.runtimeDir,
-                mcpUrl: `${input.openworkBaseUrl}/workspace/${encodeURIComponent(workspaceId)}/doc-state/mcp`,
-                runtimeToken: docStateIssued.token,
-              });
+              if (enableDocumentStateForProvisionedSession) {
+                const docStateIssued = await input.runtimeDocumentStateTokens.issue({
+                  workspaceId,
+                  sessionId: createdSessionId,
+                  runtimeId: provisionedRuntime.runtimeId,
+                });
+                await writeRuntimeDocumentStateCarrierConfig({
+                  workspacePath: workspace.path,
+                  runtimeDir: provisionedRuntime.runtimeDir,
+                  mcpUrl: `${input.openworkBaseUrl}/workspace/${encodeURIComponent(workspaceId)}/doc-state/mcp`,
+                  runtimeToken: docStateIssued.token,
+                });
+              }
             } catch (error) {
               console.warn("[openwork-server] Failed to provision runtime knowledge carrier:", error);
               await input.runtimeKnowledgeTokens.revokeRuntime(workspaceId, createdSessionId, provisionedRuntime.runtimeId);

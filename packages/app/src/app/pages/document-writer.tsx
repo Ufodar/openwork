@@ -388,8 +388,10 @@ export default function DocumentWriterView(props: SessionViewProps) {
   createEffect(() => {
     const sid = sessionId();
     if (!sid) return;
-    if (props.selectedSessionAgent === "document-writer") return;
-    props.setSessionAgent(sid, "document-writer");
+    const desiredAgent = (props.selectedSessionAgentLock ?? props.selectedSessionAgent ?? "document-writer").trim();
+    if (!desiredAgent) return;
+    if (props.selectedSessionAgent === desiredAgent) return;
+    props.setSessionAgent(sid, desiredAgent);
   });
 
   const serverReady = createMemo(

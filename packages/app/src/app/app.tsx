@@ -5491,9 +5491,10 @@ export default function App() {
       let rawResult: Awaited<ReturnType<typeof c.session.create>>;
       try {
         mark("session:create:start");
-        rawResult = await c.session.create({
+        rawResult = await (c.session.create as (payload: Record<string, unknown>) => Promise<Awaited<ReturnType<typeof c.session.create>>> )({
           directory: resolveActiveClientWorkspaceRoot(),
           title: title || undefined,
+          openworkEnableDocState: options?.enableDocumentState === true ? true : undefined,
         });
         mark("session:create:ok");
       } catch (createErr) {

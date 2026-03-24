@@ -1,9 +1,10 @@
-import { ChevronDown, ChevronRight, FileText, Loader2, Plus, RefreshCw, Trash2, Upload } from "lucide-solid";
+import { FileText, Loader2, Plus, RefreshCw, Trash2, Upload } from "lucide-solid";
 import { For, Show, createEffect, createMemo, createSignal, on } from "solid-js";
 
 import { currentLocale, t as i18n } from "../../i18n";
 import Button from "../components/button";
 import { groupKnowledgeItemsByOwner } from "../lib/knowledge-grouping";
+import { findKnowledgeItem, pickKnowledgeSelection, type KnowledgeSelection } from "../lib/knowledge-selection";
 import type {
   OpenworkKnowledgeDocumentItem,
   OpenworkKnowledgeItem,
@@ -94,6 +95,10 @@ function formatBytes(size: number | null | undefined, tr: (key: string) => strin
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function selectionEquals(a: KnowledgeSelection | null, b: KnowledgeSelection | null) {
+  return a?.scope === b?.scope && a?.knowledgeId === b?.knowledgeId;
+}
+
 export default function KnowledgeView(props: KnowledgeViewProps) {
   let uploadInputEl: HTMLInputElement | undefined;
   let knowledgeLoadRequestSeq = 0;
@@ -110,12 +115,13 @@ export default function KnowledgeView(props: KnowledgeViewProps) {
   const [uploadBusyKnowledgeId, setUploadBusyKnowledgeId] = createSignal<string | null>(null);
   const [uploadError, setUploadError] = createSignal<string | null>(null);
   const [pendingUploadKnowledgeId, setPendingUploadKnowledgeId] = createSignal<string | null>(null);
-  const [expandedKnowledgeIds, setExpandedKnowledgeIds] = createSignal<string[]>([]);
   const [documentsByKnowledgeId, setDocumentsByKnowledgeId] = createSignal<Record<string, OpenworkKnowledgeDocumentItem[]>>({});
   const [documentsLoadingByKnowledgeId, setDocumentsLoadingByKnowledgeId] = createSignal<Record<string, boolean>>({});
   const [documentErrorsByKnowledgeId, setDocumentErrorsByKnowledgeId] = createSignal<Record<string, string | null>>({});
   const [deletingDocumentKey, setDeletingDocumentKey] = createSignal<string | null>(null);
   const [deletingKnowledgeId, setDeletingKnowledgeId] = createSignal<string | null>(null);
+  const [selectedKnowledgeRef, setSelectedKnowledgeRef] = createSignal<KnowledgeSelection | null>(null);
+
   const groupedOthersItems = createMemo(() =>
     groupKnowledgeItemsByOwner(othersItems(), tr("knowledge.owner_unknown"))
   );
@@ -126,6 +132,18 @@ export default function KnowledgeView(props: KnowledgeViewProps) {
     return `${props.client ? "connected" : "disconnected"}:${workspaceId}`;
   });
 
+  const selectedKnowledgeItem = createMemo(() => {
+    const selected = selectedKnowledgeRef();
+    if (!selected) return null;
+    return findKnowledgeItem(selected.scope, selected.knowledgeId, mineItems(), othersItems());
+  });
+
+  const selectedKnowledgeScope = createMemo<OpenworkKnowledgeScope | null>(() => selectedKnowledgeRef()?.scope ?? null);
+  const selectedKnowledgeLoading = createMemo(() => {
+    const selected = selectedKnowledgeRef();
+    if (!selected) return false;
+    return documentsLoadingByKnowledgeId()[selected.knowledgeId] === true;
+  });
   const updateKnowledgeItem = (scope: OpenworkKnowledgeScope, item: OpenworkKnowledgeItem) => {
     if (scope === "mine") {
       setMineItems((current) => replaceKnowledgeItem(current, item));
@@ -135,7 +153,6 @@ export default function KnowledgeView(props: KnowledgeViewProps) {
   };
 
   const clearKnowledgeLocalState = (knowledgeId: string) => {
-    setExpandedKnowledgeIds((current) => current.filter((item) => item !== knowledgeId));
     setDocumentsByKnowledgeId((current) => {
       const next = { ...current };
       delete next[knowledgeId];
@@ -196,6 +213,13 @@ export default function KnowledgeView(props: KnowledgeViewProps) {
     ),
   );
 
+  createEffect(() => {
+    const nextSelection = pickKnowledgeSelection(selectedKnowledgeRef(), mineItems(), othersItems());
+    if (!selectionEquals(selectedKnowledgeRef(), nextSelection)) {
+      setSelectedKnowledgeRef(nextSelection);
+    }
+  });
+
   const loadKnowledgeDocuments = async (
     knowledgeId: string,
     scope: OpenworkKnowledgeScope,
@@ -222,14 +246,11 @@ export default function KnowledgeView(props: KnowledgeViewProps) {
     }
   };
 
-  const toggleKnowledgeDocuments = async (knowledgeId: string, scope: OpenworkKnowledgeScope) => {
-    if (expandedKnowledgeIds().includes(knowledgeId)) {
-      setExpandedKnowledgeIds((current) => current.filter((item) => item !== knowledgeId));
-      return;
-    }
-    setExpandedKnowledgeIds((current) => [...current, knowledgeId]);
-    await loadKnowledgeDocuments(knowledgeId, scope);
-  };
+  createEffect(() => {
+    const selected = selectedKnowledgeRef();
+    if (!selected) return;
+    void loadKnowledgeDocuments(selected.knowledgeId, selected.scope);
+  });
 
   const handleCreateKnowledge = async () => {
     const client = props.client;
@@ -249,6 +270,7 @@ export default function KnowledgeView(props: KnowledgeViewProps) {
         description: createDescription().trim() || null,
       });
       setMineItems((current) => replaceKnowledgeItem(current, result.item));
+      setSelectedKnowledgeRef({ scope: "mine", knowledgeId: result.item.knowledgeId });
       setCreateTitle("");
       setCreateDescription("");
     } catch (nextError) {
@@ -278,9 +300,8 @@ export default function KnowledgeView(props: KnowledgeViewProps) {
     try {
       const result = await client.uploadKnowledgeDocuments(workspaceId, knowledgeId, files);
       setMineItems((current) => replaceKnowledgeItem(current, result.item));
-      if (expandedKnowledgeIds().includes(knowledgeId)) {
-        await loadKnowledgeDocuments(knowledgeId, "mine", true);
-      }
+      setSelectedKnowledgeRef({ scope: "mine", knowledgeId });
+      await loadKnowledgeDocuments(knowledgeId, "mine", true);
     } catch (nextError) {
       setUploadError(nextError instanceof Error ? nextError.message : tr("knowledge.upload_failed"));
     } finally {
@@ -311,9 +332,7 @@ export default function KnowledgeView(props: KnowledgeViewProps) {
         ...current,
         [knowledgeId]: (current[knowledgeId] ?? []).filter((item) => item.documentId !== documentId),
       }));
-      if (expandedKnowledgeIds().includes(knowledgeId)) {
-        await loadKnowledgeDocuments(knowledgeId, "mine", true);
-      }
+      await loadKnowledgeDocuments(knowledgeId, "mine", true);
     } catch (nextError) {
       setUploadError(nextError instanceof Error ? nextError.message : tr("knowledge.delete_document_failed"));
     } finally {
@@ -345,30 +364,76 @@ export default function KnowledgeView(props: KnowledgeViewProps) {
     }
   };
 
+  const renderKnowledgeListItem = (item: OpenworkKnowledgeItem, scope: OpenworkKnowledgeScope) => {
+    const selected = selectedKnowledgeRef()?.scope === scope && selectedKnowledgeRef()?.knowledgeId === item.knowledgeId;
+    return (
+      <button
+        type="button"
+        class={`w-full rounded-2xl border px-3 py-3 text-left transition ${
+          selected
+            ? "border-dls-accent bg-dls-accent/8 shadow-sm"
+            : "border-dls-border bg-dls-background hover:border-dls-accent/50 hover:bg-dls-surface"
+        }`}
+        onClick={() => setSelectedKnowledgeRef({ scope, knowledgeId: item.knowledgeId })}
+      >
+        <div class="flex items-start justify-between gap-3">
+          <div class="min-w-0 flex-1 space-y-1">
+            <div class="flex items-center gap-2">
+              <div class="truncate text-sm font-semibold text-dls-text">{item.title}</div>
+              <div class={`inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${statusTone(item.status)}`}>
+                {formatStatus(item.status, tr)}
+              </div>
+            </div>
+            <Show when={scope === "others"}>
+              <div class="text-xs text-dls-secondary">
+                {tr("knowledge.owner").replace("{name}", item.ownerDisplayName)}
+              </div>
+            </Show>
+            <Show when={item.description}>
+              <div class="line-clamp-2 text-xs leading-5 text-dls-secondary">{item.description}</div>
+            </Show>
+          </div>
+          <div class="shrink-0 text-right text-[11px] text-dls-secondary">
+            <div>{tr("knowledge.docs_count").replace("{count}", item.documentCount.toLocaleString())}</div>
+            <div>{tr("knowledge.chunks_count").replace("{count}", item.chunkCount.toLocaleString())}</div>
+          </div>
+        </div>
+      </button>
+    );
+  };
+
   const renderKnowledgeDocuments = (knowledgeId: string, scope: OpenworkKnowledgeScope, writable: boolean) => {
     const documents = documentsByKnowledgeId()[knowledgeId] ?? [];
     const loadingState = documentsLoadingByKnowledgeId()[knowledgeId] === true;
     const errorMessage = documentErrorsByKnowledgeId()[knowledgeId];
 
     return (
-      <div class="rounded-xl border border-dls-border bg-dls-surface px-3 py-3 space-y-2">
+      <div class="rounded-3xl border border-dls-border bg-dls-background p-4 space-y-3">
         <div class="flex items-center justify-between gap-2">
-          <div class="text-xs font-medium text-dls-secondary">{tr("knowledge.files_title")}</div>
-          <Show when={loadingState}>
-            <span class="inline-flex items-center gap-1 text-xs text-dls-secondary">
-              <Loader2 size={12} class="animate-spin" />
-              {tr("knowledge.files_loading")}
-            </span>
-          </Show>
+          <div>
+            <div class="text-base font-semibold text-dls-text">{tr("knowledge.files_title")}</div>
+            <div class="mt-1 text-sm text-dls-secondary">{tr("knowledge.files_panel_description")}</div>
+          </div>
+          <Button
+            variant="outline"
+            class="px-3 py-1.5 text-xs"
+            disabled={loadingState}
+            onClick={() => void loadKnowledgeDocuments(knowledgeId, scope, true)}
+          >
+            <Show when={loadingState} fallback={<RefreshCw size={14} />}>
+              <Loader2 size={14} class="animate-spin" />
+            </Show>
+            <span>{tr("knowledge.refresh_files")}</span>
+          </Button>
         </div>
         <Show when={errorMessage}>
-          <div class="rounded-xl border border-red-7 bg-red-3/60 px-3 py-2 text-xs text-red-11">{errorMessage}</div>
+          <div class="rounded-2xl border border-red-7 bg-red-3/60 px-3 py-2 text-sm text-red-11">{errorMessage}</div>
         </Show>
         <Show
           when={!loadingState && documents.length > 0}
           fallback={
             <Show when={!loadingState && !errorMessage}>
-              <div class="rounded-xl border border-dls-border bg-dls-background px-3 py-3 text-xs text-dls-secondary">
+              <div class="rounded-2xl border border-dls-border bg-dls-surface px-4 py-6 text-sm text-dls-secondary">
                 {tr("knowledge.files_empty")}
               </div>
             </Show>
@@ -379,7 +444,7 @@ export default function KnowledgeView(props: KnowledgeViewProps) {
               {(document) => {
                 const busyKey = `${knowledgeId}:${document.documentId ?? ""}`;
                 return (
-                  <div class="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-dls-border bg-dls-background px-3 py-2">
+                  <div class="flex flex-wrap items-start justify-between gap-3 rounded-2xl border border-dls-border bg-dls-surface px-4 py-3">
                     <div class="min-w-0 flex-1 space-y-1">
                       <div class="flex items-center gap-2 min-w-0">
                         <FileText size={14} class="shrink-0 text-dls-secondary" />
@@ -400,13 +465,10 @@ export default function KnowledgeView(props: KnowledgeViewProps) {
                           variant="danger"
                           class="px-2.5 py-1.5"
                           title={tr("knowledge.delete_document_action")}
-                          disabled={deletingDocumentKey() === busyKey}
+                          disabled={!document.documentId || deletingDocumentKey() === busyKey}
                           onClick={() => void handleDeleteDocument(knowledgeId, document)}
                         >
-                          <Show
-                            when={deletingDocumentKey() === busyKey}
-                            fallback={<Trash2 size={14} />}
-                          >
+                          <Show when={deletingDocumentKey() === busyKey} fallback={<Trash2 size={14} />}>
                             <Loader2 size={14} class="animate-spin" />
                           </Show>
                         </Button>
@@ -422,96 +484,8 @@ export default function KnowledgeView(props: KnowledgeViewProps) {
     );
   };
 
-  const renderKnowledgeCard = (item: OpenworkKnowledgeItem, scope: OpenworkKnowledgeScope) => {
-    const writable = scope === "mine";
-    const expanded = expandedKnowledgeIds().includes(item.knowledgeId);
-    const uploadBusy = uploadBusyKnowledgeId() === item.knowledgeId;
-    const deletingKnowledge = deletingKnowledgeId() === item.knowledgeId;
-
-    return (
-      <div class="rounded-2xl border border-dls-border bg-dls-background p-4 space-y-3">
-        <div class="flex flex-wrap items-start justify-between gap-3">
-          <div class="min-w-0 flex-1 space-y-1">
-            <div class="flex flex-wrap items-center gap-2">
-              <div class="truncate text-base font-semibold text-dls-text">{item.title}</div>
-              <div class={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${statusTone(item.status)}`}>
-                {formatStatus(item.status, tr)}
-              </div>
-            </div>
-            <Show when={scope === "others"}>
-              <div class="text-xs text-dls-secondary">
-                {tr("knowledge.owner").replace("{name}", item.ownerDisplayName)}
-              </div>
-            </Show>
-            <Show when={item.description}>
-              <div class="line-clamp-2 text-sm text-dls-secondary">{item.description}</div>
-            </Show>
-          </div>
-          <div class="flex items-center gap-2">
-            <Button
-              variant="outline"
-              class="px-3 py-1.5 text-xs"
-              onClick={() => void toggleKnowledgeDocuments(item.knowledgeId, scope)}
-            >
-              <Show when={expanded} fallback={<ChevronRight size={14} />}>
-                <ChevronDown size={14} />
-              </Show>
-              <span>{expanded ? tr("knowledge.files_hide_action") : tr("knowledge.files_action")}</span>
-            </Button>
-            <Show when={writable}>
-              <Button
-                variant="outline"
-                class="px-3 py-1.5 text-xs"
-                onClick={() => openUploadPicker(item.knowledgeId)}
-                disabled={uploadBusy}
-              >
-                <Show when={uploadBusy} fallback={<Upload size={14} />}>
-                  <Loader2 size={14} class="animate-spin" />
-                </Show>
-                <span>{uploadBusy ? tr("knowledge.uploading") : tr("knowledge.upload_action")}</span>
-              </Button>
-              <Button
-                variant="danger"
-                class="px-3 py-1.5 text-xs"
-                onClick={() => void handleDeleteKnowledge(item.knowledgeId, item.title)}
-                disabled={deletingKnowledge}
-              >
-                <Show when={deletingKnowledge} fallback={<Trash2 size={14} />}>
-                  <Loader2 size={14} class="animate-spin" />
-                </Show>
-                <span>{deletingKnowledge ? tr("knowledge.deleting_knowledge") : tr("knowledge.delete_knowledge_action")}</span>
-              </Button>
-            </Show>
-          </div>
-        </div>
-
-        <div class="flex flex-wrap gap-2 text-xs text-dls-secondary">
-          <div class="rounded-full border border-dls-border bg-dls-hover px-2.5 py-1">
-            {tr("knowledge.docs_count").replace("{count}", item.documentCount.toLocaleString())}
-          </div>
-          <div class="rounded-full border border-dls-border bg-dls-hover px-2.5 py-1">
-            {tr("knowledge.chunks_count").replace("{count}", item.chunkCount.toLocaleString())}
-          </div>
-          <div class="rounded-full border border-dls-border bg-dls-hover px-2.5 py-1">
-            {formatChunkMethod(item.chunkMethod, tr)}
-          </div>
-        </div>
-
-        <Show when={writable}>
-          <div class="text-xs text-dls-secondary">
-            {tr("knowledge.session_external_hint")}
-          </div>
-        </Show>
-
-        <Show when={expanded}>
-          {renderKnowledgeDocuments(item.knowledgeId, scope, writable)}
-        </Show>
-      </div>
-    );
-  };
-
   return (
-    <div class="space-y-4">
+    <div class="space-y-5">
       <input
         ref={uploadInputEl}
         type="file"
@@ -520,134 +494,221 @@ export default function KnowledgeView(props: KnowledgeViewProps) {
         onChange={handleUploadFiles}
       />
 
-      <div class="rounded-2xl border border-dls-border bg-dls-surface p-4 shadow-sm">
-        <div class="flex flex-wrap items-start justify-between gap-4">
-          <div class="space-y-1.5">
-            <div class="text-sm font-medium text-dls-secondary">{tr("knowledge.title")}</div>
-            <div class="text-xl font-semibold text-dls-text">{tr("knowledge.subtitle")}</div>
-            <div class="max-w-3xl text-sm leading-6 text-dls-secondary">
-              {tr("knowledge.description")}
-            </div>
-            <div class="text-xs text-dls-secondary">
-              {tr("knowledge.default_chunking")}
-            </div>
-          </div>
-          <Button variant="outline" onClick={() => void loadKnowledge()} disabled={loading()}>
-            <Show when={loading()} fallback={<RefreshCw size={14} />}>
-              <Loader2 size={14} class="animate-spin" />
-            </Show>
-            <span>{tr("knowledge.refresh")}</span>
-          </Button>
+      <div class="flex flex-wrap items-start justify-between gap-4 rounded-3xl border border-dls-border bg-dls-surface px-5 py-4 shadow-sm">
+        <div class="min-w-0 space-y-1.5">
+          <div class="text-sm font-medium text-dls-secondary">{tr("knowledge.title")}</div>
+          <div class="text-2xl font-semibold text-dls-text">{tr("knowledge.subtitle")}</div>
+          <div class="max-w-3xl text-sm leading-6 text-dls-secondary">{tr("knowledge.description")}</div>
+          <div class="text-xs text-dls-secondary">{tr("knowledge.default_chunking")}</div>
         </div>
+        <Button variant="outline" onClick={() => void loadKnowledge()} disabled={loading()}>
+          <Show when={loading()} fallback={<RefreshCw size={14} />}>
+            <Loader2 size={14} class="animate-spin" />
+          </Show>
+          <span>{tr("knowledge.refresh")}</span>
+        </Button>
       </div>
 
-      <div class="rounded-2xl border border-dls-border bg-dls-surface p-4 shadow-sm space-y-3">
-        <div>
-          <div class="text-base font-semibold text-dls-text">{tr("knowledge.create_title")}</div>
-          <div class="mt-1 text-sm text-dls-secondary">
-            {tr("knowledge.create_description")}
-          </div>
-        </div>
-        <div class="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
-          <label class="space-y-1.5">
-            <div class="text-xs font-medium text-dls-secondary">{tr("knowledge.create_name_label")}</div>
-            <input
-              value={createTitle()}
-              onInput={(event) => setCreateTitle(event.currentTarget.value)}
-              placeholder={tr("knowledge.create_name_placeholder")}
-              class="w-full rounded-xl border border-dls-border bg-dls-background px-3 py-2.5 text-sm text-dls-text outline-none transition focus:border-dls-accent"
-            />
-          </label>
-          <label class="space-y-1.5">
-            <div class="text-xs font-medium text-dls-secondary">{tr("knowledge.create_description_label")}</div>
-            <input
-              value={createDescription()}
-              onInput={(event) => setCreateDescription(event.currentTarget.value)}
-              placeholder={tr("knowledge.create_description_placeholder")}
-              class="w-full rounded-xl border border-dls-border bg-dls-background px-3 py-2.5 text-sm text-dls-text outline-none transition focus:border-dls-accent"
-            />
-          </label>
-          <div class="flex items-end">
-            <Button onClick={() => void handleCreateKnowledge()} disabled={createBusy()}>
+      <Show when={error()}>
+        {(message) => <div class="rounded-2xl border border-red-7 bg-red-3/60 px-3 py-2 text-sm text-red-11">{message()}</div>}
+      </Show>
+      <Show when={createError()}>
+        {(message) => <div class="rounded-2xl border border-red-7 bg-red-3/60 px-3 py-2 text-sm text-red-11">{message()}</div>}
+      </Show>
+      <Show when={uploadError()}>
+        {(message) => <div class="rounded-2xl border border-red-7 bg-red-3/60 px-3 py-2 text-sm text-red-11">{message()}</div>}
+      </Show>
+
+      <div class="grid gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
+        <div class="space-y-4">
+          <section class="rounded-3xl border border-dls-border bg-dls-surface p-4 shadow-sm space-y-3">
+            <div>
+              <div class="text-base font-semibold text-dls-text">{tr("knowledge.create_title")}</div>
+              <div class="mt-1 text-sm leading-6 text-dls-secondary">{tr("knowledge.create_description")}</div>
+            </div>
+            <label class="space-y-1.5">
+              <div class="text-xs font-medium text-dls-secondary">{tr("knowledge.create_name_label")}</div>
+              <input
+                value={createTitle()}
+                onInput={(event) => setCreateTitle(event.currentTarget.value)}
+                placeholder={tr("knowledge.create_name_placeholder")}
+                class="w-full rounded-2xl border border-dls-border bg-dls-background px-3 py-2.5 text-sm text-dls-text outline-none transition focus:border-dls-accent"
+              />
+            </label>
+            <label class="space-y-1.5">
+              <div class="text-xs font-medium text-dls-secondary">{tr("knowledge.create_description_label")}</div>
+              <input
+                value={createDescription()}
+                onInput={(event) => setCreateDescription(event.currentTarget.value)}
+                placeholder={tr("knowledge.create_description_placeholder")}
+                class="w-full rounded-2xl border border-dls-border bg-dls-background px-3 py-2.5 text-sm text-dls-text outline-none transition focus:border-dls-accent"
+              />
+            </label>
+            <Button class="w-full justify-center" onClick={() => void handleCreateKnowledge()} disabled={createBusy()}>
               <Show when={createBusy()} fallback={<Plus size={14} />}>
                 <Loader2 size={14} class="animate-spin" />
               </Show>
               <span>{createBusy() ? tr("knowledge.creating") : tr("knowledge.create_action")}</span>
             </Button>
-          </div>
-        </div>
-        <Show when={createError()}>
-          {(message) => <div class="rounded-xl border border-red-7 bg-red-3/60 px-3 py-2 text-sm text-red-11">{message()}</div>}
-        </Show>
-      </div>
+          </section>
 
-      <Show when={error()}>
-        {(message) => <div class="rounded-xl border border-red-7 bg-red-3/60 px-3 py-2 text-sm text-red-11">{message()}</div>}
-      </Show>
-      <Show when={uploadError()}>
-        {(message) => <div class="rounded-xl border border-red-7 bg-red-3/60 px-3 py-2 text-sm text-red-11">{message()}</div>}
-      </Show>
-
-      <div class="grid gap-4 xl:grid-cols-2">
-        <section class="rounded-2xl border border-dls-border bg-dls-surface p-4 shadow-sm space-y-3">
-          <div>
-            <div class="text-base font-semibold text-dls-text">{tr("knowledge.mine_title")}</div>
-            <div class="mt-1 text-sm text-dls-secondary">
-              {tr("knowledge.mine_description")}
+          <section class="rounded-3xl border border-dls-border bg-dls-surface p-4 shadow-sm space-y-3">
+            <div>
+              <div class="text-base font-semibold text-dls-text">{tr("knowledge.mine_title")}</div>
+              <div class="mt-1 text-sm text-dls-secondary">{tr("knowledge.mine_description")}</div>
             </div>
-          </div>
-          <Show
-            when={mineItems().length > 0}
-            fallback={
-              <div class="rounded-xl border border-dls-border bg-dls-background px-3 py-4 text-sm text-dls-secondary">
-                {tr("knowledge.mine_empty").replace("{workspace}", props.workspaceName)}
+            <Show
+              when={mineItems().length > 0}
+              fallback={
+                <div class="rounded-2xl border border-dls-border bg-dls-background px-3 py-4 text-sm text-dls-secondary">
+                  {tr("knowledge.mine_empty").replace("{workspace}", props.workspaceName)}
+                </div>
+              }
+            >
+              <div class="space-y-2 max-h-[22rem] overflow-y-auto pr-1">
+                <For each={mineItems()}>
+                  {(item) => renderKnowledgeListItem(item, "mine")}
+                </For>
               </div>
-            }
-          >
-            <div class="space-y-3">
-              <For each={mineItems()}>
-                {(item) => renderKnowledgeCard(item, "mine")}
-              </For>
-            </div>
-          </Show>
-        </section>
+            </Show>
+          </section>
 
-        <section class="rounded-2xl border border-dls-border bg-dls-surface p-4 shadow-sm space-y-3">
-          <div>
-            <div class="text-base font-semibold text-dls-text">{tr("knowledge.others_title")}</div>
-            <div class="mt-1 text-sm text-dls-secondary">
-              {tr("knowledge.others_description")}
+          <section class="rounded-3xl border border-dls-border bg-dls-surface p-4 shadow-sm space-y-3">
+            <div>
+              <div class="text-base font-semibold text-dls-text">{tr("knowledge.others_title")}</div>
+              <div class="mt-1 text-sm text-dls-secondary">{tr("knowledge.others_description")}</div>
             </div>
-          </div>
-          <Show
-            when={othersItems().length > 0}
-            fallback={
-              <div class="rounded-xl border border-dls-border bg-dls-background px-3 py-4 text-sm text-dls-secondary">
-                {tr("knowledge.others_empty")}
-              </div>
-            }
-          >
-            <div class="space-y-3">
-              <For each={groupedOthersItems()}>
-                {(group) => (
-                  <div class="rounded-2xl border border-dls-border bg-dls-background/60 p-3 space-y-3">
-                    <div class="flex items-center justify-between gap-3">
-                      <div class="min-w-0">
-                        <div class="truncate text-sm font-semibold text-dls-text">{group.ownerLabel}</div>
-                        <div class="text-xs text-dls-secondary">
-                          {tr("knowledge.group_count").replace("{count}", group.items.length.toLocaleString())}
+            <Show
+              when={othersItems().length > 0}
+              fallback={
+                <div class="rounded-2xl border border-dls-border bg-dls-background px-3 py-4 text-sm text-dls-secondary">
+                  {tr("knowledge.others_empty")}
+                </div>
+              }
+            >
+              <div class="space-y-3 max-h-[26rem] overflow-y-auto pr-1">
+                <For each={groupedOthersItems()}>
+                  {(group) => (
+                    <div class="rounded-2xl border border-dls-border bg-dls-background/70 p-3 space-y-2">
+                      <div class="flex items-center justify-between gap-3">
+                        <div class="min-w-0">
+                          <div class="truncate text-sm font-semibold text-dls-text">{group.ownerLabel}</div>
+                          <div class="text-xs text-dls-secondary">
+                            {tr("knowledge.group_count").replace("{count}", group.items.length.toLocaleString())}
+                          </div>
                         </div>
                       </div>
+                      <div class="space-y-2">
+                        <For each={group.items}>
+                          {(item) => renderKnowledgeListItem(item, "others")}
+                        </For>
+                      </div>
                     </div>
-                    <div class="space-y-3">
-                      <For each={group.items}>
-                        {(item) => renderKnowledgeCard(item, "others")}
-                      </For>
+                  )}
+                </For>
+              </div>
+            </Show>
+          </section>
+        </div>
+
+        <section class="rounded-3xl border border-dls-border bg-dls-surface p-5 shadow-sm space-y-4 xl:min-h-[48rem]">
+          <Show
+            when={selectedKnowledgeItem() && selectedKnowledgeScope()}
+            fallback={
+              <div class="flex h-full min-h-[22rem] items-center justify-center rounded-3xl border border-dashed border-dls-border bg-dls-background/70 px-6 py-10 text-center">
+                <div class="max-w-md space-y-2">
+                  <div class="text-lg font-semibold text-dls-text">{tr("knowledge.details_empty_title")}</div>
+                  <div class="text-sm leading-6 text-dls-secondary">{tr("knowledge.details_empty_description")}</div>
+                </div>
+              </div>
+            }
+          >
+            {(selectedItemAccessor) => {
+              const item = selectedItemAccessor();
+              const scope = selectedKnowledgeScope()!;
+              const writable = scope === "mine";
+              const uploadBusy = uploadBusyKnowledgeId() === item.knowledgeId;
+              const deletingKnowledge = deletingKnowledgeId() === item.knowledgeId;
+              return (
+                <>
+                  <div class="flex flex-wrap items-start justify-between gap-4">
+                    <div class="min-w-0 flex-1 space-y-2">
+                      <div class="flex flex-wrap items-center gap-2">
+                        <div class="inline-flex items-center rounded-full border border-dls-border bg-dls-background px-2.5 py-1 text-xs font-medium text-dls-secondary">
+                          {scope === "mine" ? tr("knowledge.mine_title") : tr("knowledge.others_title")}
+                        </div>
+                        <div class={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${statusTone(item.status)}`}>
+                          {formatStatus(item.status, tr)}
+                        </div>
+                      </div>
+                      <div class="text-2xl font-semibold text-dls-text">{item.title}</div>
+                      <Show when={scope === "others"}>
+                        <div class="text-sm text-dls-secondary">
+                          {tr("knowledge.owner").replace("{name}", item.ownerDisplayName)}
+                        </div>
+                      </Show>
+                      <div class="text-sm leading-6 text-dls-secondary">
+                        {item.description?.trim() || (writable ? tr("knowledge.session_external_hint") : tr("knowledge.details_shared_hint"))}
+                      </div>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2">
+                      <Button
+                        variant="outline"
+                        class="px-3 py-2 text-xs"
+                        disabled={selectedKnowledgeLoading()}
+                        onClick={() => void loadKnowledgeDocuments(item.knowledgeId, scope, true)}
+                      >
+                        <Show when={selectedKnowledgeLoading()} fallback={<RefreshCw size={14} />}>
+                          <Loader2 size={14} class="animate-spin" />
+                        </Show>
+                        <span>{tr("knowledge.refresh_files")}</span>
+                      </Button>
+                      <Show when={writable}>
+                        <Button
+                          variant="outline"
+                          class="px-3 py-2 text-xs"
+                          onClick={() => openUploadPicker(item.knowledgeId)}
+                          disabled={uploadBusy}
+                        >
+                          <Show when={uploadBusy} fallback={<Upload size={14} />}>
+                            <Loader2 size={14} class="animate-spin" />
+                          </Show>
+                          <span>{uploadBusy ? tr("knowledge.uploading") : tr("knowledge.upload_action")}</span>
+                        </Button>
+                        <Button
+                          variant="danger"
+                          class="px-3 py-2 text-xs"
+                          onClick={() => void handleDeleteKnowledge(item.knowledgeId, item.title)}
+                          disabled={deletingKnowledge}
+                        >
+                          <Show when={deletingKnowledge} fallback={<Trash2 size={14} />}>
+                            <Loader2 size={14} class="animate-spin" />
+                          </Show>
+                          <span>{deletingKnowledge ? tr("knowledge.deleting_knowledge") : tr("knowledge.delete_knowledge_action")}</span>
+                        </Button>
+                      </Show>
                     </div>
                   </div>
-                )}
-              </For>
-            </div>
+
+                  <div class="grid gap-3 sm:grid-cols-3">
+                    <div class="rounded-2xl border border-dls-border bg-dls-background px-4 py-3">
+                      <div class="text-xs font-medium text-dls-secondary">{tr("knowledge.details_docs_label")}</div>
+                      <div class="mt-1 text-lg font-semibold text-dls-text">{item.documentCount.toLocaleString()}</div>
+                    </div>
+                    <div class="rounded-2xl border border-dls-border bg-dls-background px-4 py-3">
+                      <div class="text-xs font-medium text-dls-secondary">{tr("knowledge.details_chunks_label")}</div>
+                      <div class="mt-1 text-lg font-semibold text-dls-text">{item.chunkCount.toLocaleString()}</div>
+                    </div>
+                    <div class="rounded-2xl border border-dls-border bg-dls-background px-4 py-3">
+                      <div class="text-xs font-medium text-dls-secondary">{tr("knowledge.details_chunk_method_label")}</div>
+                      <div class="mt-1 text-lg font-semibold text-dls-text">{formatChunkMethod(item.chunkMethod, tr)}</div>
+                    </div>
+                  </div>
+
+                  {renderKnowledgeDocuments(item.knowledgeId, scope, writable)}
+                </>
+              );
+            }}
           </Show>
         </section>
       </div>

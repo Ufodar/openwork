@@ -48,6 +48,8 @@ test("knowledge page uses i18n keys for visible copy", () => {
   expect(source).toContain('tr("knowledge.mine_title")');
   expect(source).toContain('tr("knowledge.others_title")');
   expect(source).toContain('tr("knowledge.files_title")');
+  expect(source).toContain('tr("knowledge.refresh_files")');
+  expect(source).toContain('tr("knowledge.details_empty_title")');
   expect(source).toContain('tr("knowledge.delete_knowledge_action")');
   expect(source).toContain('tr("knowledge.delete_document_action")');
 });
@@ -66,6 +68,14 @@ test("knowledge page wires document listing and delete actions through the serve
   expect(source).toContain("client.listKnowledgeDocuments");
   expect(source).toContain("client.deleteKnowledgeDocument");
   expect(source).toContain("client.deleteKnowledge");
+});
+
+test("knowledge page drives a focused detail pane from a selected knowledge item", () => {
+  const source = readPage("knowledge.tsx");
+  expect(source).toContain("const [selectedKnowledgeRef, setSelectedKnowledgeRef] = createSignal");
+  expect(source).toContain("pickKnowledgeSelection(");
+  expect(source).toContain("selectedKnowledgeItem = createMemo");
+  expect(source).toContain("xl:grid-cols-[360px_minmax(0,1fr)]");
 });
 
 test("knowledge strip disables editing actions when the scope is locked", () => {

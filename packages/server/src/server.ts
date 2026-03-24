@@ -715,6 +715,40 @@ function workspaceLabel(workspace: WorkspaceInfo): string {
   return pathName || workspace.id;
 }
 
+function scopeConfigToWorkspaceIds(config: ServerConfig, workspaceIds: string[]): ServerConfig {
+  const ids = new Set(
+    workspaceIds
+      .map((value) => value.trim())
+      .filter(Boolean),
+  );
+  if (ids.size === 0) {
+    return {
+      ...config,
+      workspaces: [],
+      authorizedRoots: [],
+    };
+  }
+
+  const workspaces = config.workspaces.filter((workspace) => ids.has(workspace.id));
+  if (workspaces.length === config.workspaces.length) {
+    return config;
+  }
+
+  return {
+    ...config,
+    workspaces,
+    authorizedRoots: config.authorizedRoots.filter((root) =>
+      workspaces.some((workspace) => root === workspace.path || root.startsWith(`${workspace.path}/`))
+    ),
+  };
+}
+
+function scopeConfigToUserWorkspace(config: ServerConfig, user: Pick<AuthIdentity, "workspace"> | null | undefined): ServerConfig {
+  const workspaceId = user?.workspace?.id?.trim() ?? "";
+  if (!workspaceId) return config;
+  return scopeConfigToWorkspaceIds(config, [workspaceId]);
+}
+
 function normalizeSessionListPayload(value: unknown): unknown[] {
   if (Array.isArray(value)) return value;
   if (value && typeof value === "object" && Array.isArray((value as Record<string, unknown>).items)) {
@@ -2137,7 +2171,12 @@ export function createRoutes(
     ]);
     const countsByUserId = new Map(
       await Promise.all(users.map(async (user) => {
-        const userScan = await scanAdminSessions(config, sessionOwnership, sessionWorkspaces, user.ownerKey);
+        const userScan = await scanAdminSessions(
+          scopeConfigToUserWorkspace(config, user),
+          sessionOwnership,
+          sessionWorkspaces,
+          user.ownerKey,
+        );
         return [user.id, userScan.items.length] as const;
       })),
     );
@@ -2169,7 +2208,12 @@ export function createRoutes(
       throw new ApiError(404, "user_not_found", "用户不存在。");
     }
 
-    const scanned = await scanAdminSessions(config, sessionOwnership, sessionWorkspaces, user.ownerKey);
+    const scanned = await scanAdminSessions(
+      scopeConfigToUserWorkspace(config, user),
+      sessionOwnership,
+      sessionWorkspaces,
+      user.ownerKey,
+    );
     const items = scanned.items
       .map(({ ownerKey: _ownerKey, ...session }) => session);
 

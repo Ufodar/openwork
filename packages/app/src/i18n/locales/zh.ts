@@ -145,6 +145,7 @@ export default {
   "docagent.uploading_documents_progress": "正在上传文档：{done}/{total}",
   "docagent.uploading_folder_progress": "正在上传文件夹：{done}/{total}",
   "docagent.processing_uploaded_documents": "上传完成，正在刷新文档列表...",
+  "docagent.wait_until_session_ready": "会话仍在初始化，请稍候再上传或创建文件夹。",
   "docagent.create_folder": "新建文件夹",
   "docagent.refresh_documents": "刷新文档",
   "docagent.archive_other_documents": "归档其他文档",

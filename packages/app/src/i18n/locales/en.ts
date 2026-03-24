@@ -144,6 +144,7 @@ export default {
   "docagent.uploading_documents_progress": "Uploading documents: {done}/{total}",
   "docagent.uploading_folder_progress": "Uploading folder: {done}/{total}",
   "docagent.processing_uploaded_documents": "Upload complete, refreshing document list...",
+  "docagent.wait_until_session_ready": "The session is still initializing. Wait a moment before uploading or creating folders.",
   "docagent.create_folder": "Create folder",
   "docagent.refresh_documents": "Refresh documents",
   "docagent.archive_other_documents": "Archive other documents",

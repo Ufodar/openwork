@@ -652,6 +652,9 @@ export default function DocumentAgentView(props: SessionViewProps) {
       ? trf("docagent.uploading_folder_progress", { done: progress.done, total: progress.total })
       : trf("docagent.uploading_documents_progress", { done: progress.done, total: progress.total });
   });
+  const documentsPanelReady = createMemo(() => serverReady() && !sessionHydrating() && !initialDocumentsLoading());
+  const documentMutationDisabled = createMemo(() => !documentsPanelReady() || uploadBusy());
+  const documentPanelPendingMessage = () => tr("docagent.wait_until_session_ready");
 
   const fileTree = createMemo(() => buildFileTree(documentsList(), documentDirs()));
   const showDocumentListLoading = createMemo(() => serverReady() && (sessionHydrating() || initialDocumentsLoading()));
@@ -989,6 +992,10 @@ export default function DocumentAgentView(props: SessionViewProps) {
   ) => {
     const cfg = apiConfig();
     if (!cfg || !files.length) return;
+    if (!documentsPanelReady()) {
+      setToastMessage(documentPanelPendingMessage());
+      return;
+    }
     if (uploadBusy()) return;
 
     const baseDir = normalizeRelativePath(options?.baseDir ?? activeFolder(), "");
@@ -1084,6 +1091,10 @@ export default function DocumentAgentView(props: SessionViewProps) {
   const createFolder = async () => {
     const cfg = apiConfig();
     if (!cfg) return;
+    if (!documentsPanelReady()) {
+      setToastMessage(documentPanelPendingMessage());
+      return;
+    }
     if (uploadBusy()) return;
 
     const seed = activeFolder() ? `${activeFolder()}/` : "";
@@ -2027,7 +2038,7 @@ export default function DocumentAgentView(props: SessionViewProps) {
                 type="button"
                 class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
                 onClick={() => uploadInputEl?.click()}
-                disabled={!serverReady() || uploadBusy()}
+                disabled={documentMutationDisabled()}
                 title={tr("docagent.upload_documents")}
                 aria-label={tr("docagent.upload_documents")}
               >
@@ -2037,7 +2048,7 @@ export default function DocumentAgentView(props: SessionViewProps) {
                 type="button"
                 class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
                 onClick={() => uploadFolderInputEl?.click()}
-                disabled={!serverReady() || uploadBusy()}
+                disabled={documentMutationDisabled()}
                 title={tr("docagent.upload_folder")}
                 aria-label={tr("docagent.upload_folder")}
               >
@@ -2047,7 +2058,7 @@ export default function DocumentAgentView(props: SessionViewProps) {
                 type="button"
                 class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
                 onClick={() => void createFolder()}
-                disabled={!serverReady() || uploadBusy()}
+                disabled={documentMutationDisabled()}
                 title={tr("docagent.create_folder")}
                 aria-label={tr("docagent.create_folder")}
               >
@@ -2057,7 +2068,7 @@ export default function DocumentAgentView(props: SessionViewProps) {
                 type="button"
                 class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
                 onClick={() => void refreshDocumentsKeepingScroll()}
-                disabled={!serverReady() || documents.loading}
+                disabled={!documentsPanelReady() || documents.loading}
                 title={tr("docagent.refresh_documents")}
                 aria-label={tr("docagent.refresh_documents")}
               >
@@ -2100,7 +2111,7 @@ export default function DocumentAgentView(props: SessionViewProps) {
                 type="button"
                 class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
                 onClick={() => uploadInputEl?.click()}
-                disabled={!serverReady() || uploadBusy()}
+                disabled={documentMutationDisabled()}
                 title={tr("docagent.upload_documents")}
                 aria-label={tr("docagent.upload_documents")}
               >
@@ -2110,7 +2121,7 @@ export default function DocumentAgentView(props: SessionViewProps) {
                 type="button"
                 class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
                 onClick={() => uploadFolderInputEl?.click()}
-                disabled={!serverReady() || uploadBusy()}
+                disabled={documentMutationDisabled()}
                 title={tr("docagent.upload_folder")}
                 aria-label={tr("docagent.upload_folder")}
               >
@@ -2120,7 +2131,7 @@ export default function DocumentAgentView(props: SessionViewProps) {
                 type="button"
                 class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
                 onClick={() => void createFolder()}
-                disabled={!serverReady() || uploadBusy()}
+                disabled={documentMutationDisabled()}
                 title={tr("docagent.create_folder")}
                 aria-label={tr("docagent.create_folder")}
               >
@@ -2130,7 +2141,7 @@ export default function DocumentAgentView(props: SessionViewProps) {
                 type="button"
                 class="p-2 rounded hover:bg-dls-hover text-dls-secondary hover:text-dls-text disabled:opacity-50"
                 onClick={() => void refreshDocumentsKeepingScroll()}
-                disabled={!serverReady() || documents.loading}
+                disabled={!documentsPanelReady() || documents.loading}
                 title={tr("docagent.refresh_documents")}
                 aria-label={tr("docagent.refresh_documents")}
               >

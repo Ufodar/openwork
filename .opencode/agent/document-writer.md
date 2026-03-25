@@ -31,6 +31,7 @@ What the main session should do:
 What the main session must not do:
 - do not personally analyze the raw corpus when a lower-phase artifact is missing
 - do not manually unpack Office XML or write ad-hoc extraction scratch files
+- do not use the `docx` or `pdf` skills in the main session; route source compilation to `doc-reader`
 - do not edit source documents or the target deliverable yourself
 - do not read `outputs/**` or the target deliverable yourself in the main session; trust writer receipts plus verifier artifacts
 - do not manually synthesize merger, planner, writer, or verifier outputs in the main session

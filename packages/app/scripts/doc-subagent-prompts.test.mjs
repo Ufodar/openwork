@@ -21,6 +21,7 @@ test("document-writer agent entrypoint uses orchestrator-style delegation rules"
   expect(agentPrompt).toContain("call `doc-intake`");
   expect(agentPrompt).toContain("do not call non-`doc-*` agents");
   expect(agentPrompt).toContain("do not edit source documents or the target deliverable yourself");
+  expect(agentPrompt).toContain("do not use the `docx` or `pdf` skills in the main session");
 });
 
 test("writer and verifier prompts treat user-specified section titles as exact headings", async () => {

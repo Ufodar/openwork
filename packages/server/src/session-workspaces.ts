@@ -217,12 +217,6 @@ export async function writeRuntimeKnowledgeCarrierConfig(input: {
     ? { ...(baseConfig.mcp as Record<string, unknown>) }
     : {};
   delete existingMcp.ragflow;
-  if (existingMcp.memory && typeof existingMcp.memory === "object") {
-    existingMcp.memory = {
-      ...(existingMcp.memory as Record<string, unknown>),
-      enabled: false,
-    };
-  }
   existingMcp["openwork-knowledge"] = {
     type: "remote",
     url: input.mcpUrl,

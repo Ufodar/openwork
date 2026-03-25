@@ -200,7 +200,10 @@ def build_goal_profile(goal: str, manifest: dict, canonical_facts: list[dict]) -
     lowered = normalize_text(goal)
     keywords = set()
     preferred_topics = set()
-    negative_keywords = {"充值券", "二维码", "抵扣", "支付结果", "红包", "扫码支付"}
+    negative_keywords = {
+        "充值券", "二维码", "抵扣", "支付结果", "红包", "扫码支付",
+        "优惠券", "代金券", "充值", "下架", "续费", "定价模型", "营销",
+    }
 
     if is_system_material_goal(goal, manifest, canonical_facts):
         keywords.update({
@@ -242,6 +245,8 @@ def score_fact(item: dict, profile: dict) -> int:
     topic = str(item.get("topic") or "")
     if topic in profile["preferred_topics"]:
         score += 6
+    if topic in {"payment", "commercial-baseline", "bid-security"} and "resource-aggregation" in profile["preferred_topics"]:
+        score -= 12
     source_count = len(item.get("sources") or [])
     score += min(source_count, 3) * 2
     if any(keyword in statement for keyword in profile["negative_keywords"]):
@@ -358,6 +363,7 @@ def main():
             "When the user asks for named systems or required headings, keep those exact titles and their required subsections visible in the deliverable.",
             "If a fact is not directly supported by uploaded documents, label it as a network supplement or an industry-general practice instead of presenting it as a source-grounded fact.",
             "If the task explicitly requests联网 research, policy references, standards, or API exemplars beyond the uploaded corpus, do a small number of targeted web searches and label the imported facts as external supplements.",
+            "For proposal-style technical materials, drop irrelevant commercial, payment, coupon, recharge, and consumer-checkout facts unless the user explicitly asks for business operations content.",
         ],
         "updated_at": iso_now(),
     }

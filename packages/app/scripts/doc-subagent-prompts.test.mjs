@@ -41,6 +41,8 @@ test("writer and verifier prompts treat user-specified section titles as exact h
   expect(orchestratorPrompt).toContain("If `doc-verifier` reports missing sections");
   expect(orchestratorPrompt).toContain("title mismatch is a failure");
   expect(orchestratorPrompt).toContain("do not call non-`doc-*` agents");
+  expect(writerPrompt).toContain("do not pad proposal-style technical materials with unrelated commercial");
+  expect(writerPrompt).toContain("do not satisfy that requirement by leaving only a TODO-style");
 });
 
 test("doc-reader does not allow docx/pdf skills for standard source compilation", async () => {
@@ -60,6 +62,15 @@ test("doc-writer can read runtime state files and write nested outputs in sessio
   expect(readPermission["**/.worktree/plan/solution-plan.json"]).toBe("allow");
   expect(writePermission["outputs/**"]).toBe("allow");
   expect(writePermission["**/outputs/**"]).toBe("allow");
+});
+
+test("doc-writer can perform targeted web research when the task explicitly asks for external supplements", async () => {
+  for (const configName of ["opencode.json", "opencode.jsonc"]) {
+    const config = JSON.parse(await readFile(resolve(root, configName), "utf8"));
+    const writer = config.agent?.["doc-writer"] ?? {};
+
+    expect(writer?.tools?.["bocha-search*"]).toBe(true);
+  }
 });
 
 test("document-writer entry agent has orchestrator task and doc_state permissions", async () => {

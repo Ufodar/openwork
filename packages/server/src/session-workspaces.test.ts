@@ -75,7 +75,11 @@ describe("provisionSessionWorkspace", () => {
 
     expect(parsed.model).toBe("test-model");
     expect(parsed.mcp?.filesystem).toBeTruthy();
-    expect(parsed.mcp?.memory).toMatchObject({ enabled: false });
+    expect(parsed.mcp?.memory).toMatchObject({
+      type: "local",
+      command: ["npx", "-y", "@modelcontextprotocol/server-memory"],
+    });
+    expect((parsed.mcp?.memory as Record<string, unknown> | undefined)?.enabled).toBeUndefined();
     expect(parsed.mcp?.ragflow).toBeUndefined();
     expect(parsed.mcp?.["openwork-knowledge"]).toMatchObject({
       type: "remote",
@@ -181,7 +185,11 @@ describe("provisionSessionWorkspace", () => {
     };
     const instructionRaw = await readFile(join(runtime.runtimeDir, ".opencode", "openwork-knowledge.md"), "utf8");
     expect(parsed.mcp?.ragflow).toBeUndefined();
-    expect(parsed.mcp?.memory).toMatchObject({ enabled: false });
+    expect(parsed.mcp?.memory).toMatchObject({
+      type: "local",
+      command: ["npx", "-y", "@modelcontextprotocol/server-memory"],
+    });
+    expect((parsed.mcp?.memory as Record<string, unknown> | undefined)?.enabled).toBeUndefined();
     expect(instructionRaw).toContain("商业资质库");
     expect(instructionRaw).toContain("Attached knowledge count: 1");
     expect(instructionRaw).toContain("If attachments changed earlier in the conversation");

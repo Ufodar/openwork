@@ -375,7 +375,8 @@
         "glob": true,
         "write": true,
         "edit": true,
-        "skill": true
+        "skill": true,
+        "bocha-search*": true
       },
       "permission": {
         "task": "deny",

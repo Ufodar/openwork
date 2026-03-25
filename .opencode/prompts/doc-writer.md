@@ -25,7 +25,9 @@ Writing discipline:
 - when an existing draft uses different headings from the task contract, rename or split the affected sections so the required headings appear explicitly in the deliverable
 - draft from the plan and merged facts first
 - if the task explicitly asks for联网补充、网络资料、政策依据、标准规范、API 参考 or similar external support, run a small number of targeted web searches before finalizing the affected sections
+- when a web-search tool is available, do not satisfy that requirement by leaving only a TODO-style “待联网补充” list; actually perform targeted searches for the missing policy, standard, or API support and fold the results into the relevant sections with clear external-supplement labeling
 - keep uploaded-document facts and external supplements clearly separated; do not let a web search override source-backed facts without saying so
+- do not pad proposal-style technical materials with unrelated commercial, payment, coupon, recharge, consumer checkout, marketing, or product-offline operations content unless the user explicitly asked for those business topics
 - do not read `.worktree/sources/*.json` or raw source documents unless the task explicitly authorizes that fallback for a specific evidence gap
 - record coverage or evidence gaps instead of silently hallucinating
 

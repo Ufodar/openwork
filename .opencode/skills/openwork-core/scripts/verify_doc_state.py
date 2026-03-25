@@ -6,6 +6,7 @@ import json
 import os
 import re
 import sys
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -28,6 +29,24 @@ def extract_headings(markdown: str) -> list[str]:
         if match:
             headings.append(match.group(1).strip())
     return headings
+
+
+def normalize_text(value: str) -> str:
+    return re.sub(r"\s+", " ", value or "").strip()
+
+
+def looks_like_heading(value: str) -> bool:
+    text = normalize_text(value)
+    if not text:
+        return False
+    if len(text) > 90:
+        return False
+    patterns = [
+        r"^第[一二三四五六七八九十百0-9]+[章节部分篇]",
+        r"^[0-9一二三四五六七八九十]+[、.．)]",
+        r"^(项目概况|项目理解|系统架构|技术路线|接口示例|实施方案|风险与待确认项|执行摘要)",
+    ]
+    return any(re.match(pattern, text) for pattern in patterns)
 
 
 def normalize_heading(value: str) -> str:
@@ -114,6 +133,48 @@ def build_report(*, target: str, required_sections: list[str], confirmed_section
     return "\n".join(lines) + "\n"
 
 
+def extract_docx_headings(path: Path) -> tuple[list[str], bool, str | None]:
+    if not zipfile.is_zipfile(path):
+        return [], False, "目标文档不是合法的 .docx 文件，当前更像文本、脚本或其他非 Office 包格式。"
+
+    try:
+        from docx import Document
+    except Exception as exc:  # pragma: no cover
+        return [], False, f"python-docx unavailable: {exc}"
+
+    try:
+        document = Document(str(path))
+    except Exception as exc:
+        return [], False, f"目标文档不是合法的 .docx 文件，python-docx 无法打开：{exc}"
+
+    headings: list[str] = []
+    for paragraph in document.paragraphs:
+        text = normalize_text(paragraph.text)
+        if not text:
+            continue
+        style_name = normalize_text(getattr(getattr(paragraph, "style", None), "name", ""))
+        if "heading" in style_name.lower() or looks_like_heading(text):
+            headings.append(text)
+    return headings, True, None
+
+
+def read_target_headings(target_path: Path) -> tuple[list[str], str, bool, list[dict]]:
+    suffix = target_path.suffix.lower()
+    remaining_risks: list[dict] = []
+
+    if suffix == ".docx":
+        headings, is_valid, error = extract_docx_headings(target_path)
+        if not is_valid and error:
+            remaining_risks.append({
+                "topic": "target-format",
+                "reason": error,
+            })
+        return headings, "docx", is_valid, remaining_risks
+
+    markdown = target_path.read_text(encoding="utf-8")
+    return extract_headings(markdown), "markdown", True, remaining_risks
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--workspace", required=True)
@@ -128,8 +189,7 @@ def main() -> int:
     verify_out = resolve_path(workspace, args.verify_out)
     report_out = resolve_path(workspace, args.report_out) if args.report_out else None
 
-    markdown = target_path.read_text(encoding="utf-8")
-    headings = extract_headings(markdown)
+    headings, target_format, target_format_valid, format_risks = read_target_headings(target_path)
 
     plan_path = workspace / ".worktree" / "plan" / "solution-plan.json"
     coverage_path = workspace / ".worktree" / "coverage.json"
@@ -174,9 +234,12 @@ def main() -> int:
         for question in conflicts.get("open_questions", [])
         if isinstance(question, str)
     ]
-    remaining_risks = unresolved_conflicts + open_questions
+    remaining_risks = format_risks + unresolved_conflicts + open_questions
 
     next_action = (
+        "重新生成合法的 Office 文档后重新运行 verifier。"
+        if not target_format_valid
+        else
         "补齐缺失章节后重新运行 verifier。"
         if missing_sections
         else "优先处理剩余未解决风险，再决定是否可以结束当前轮次。"
@@ -184,12 +247,14 @@ def main() -> int:
         else "验证通过，可由主 agent 汇总并进入下一轮用户反馈。"
     )
 
-    ok = len(missing_sections) == 0
+    ok = target_format_valid and len(missing_sections) == 0
 
     verify_payload = {
         "version": 1,
         "ok": ok,
         "target_doc": os.path.relpath(target_path, workspace),
+        "target_format": target_format,
+        "target_format_valid": target_format_valid,
         "checked_at": now_iso(),
         "required_sections": required_sections,
         "confirmed_sections": confirmed_sections,

@@ -375,6 +375,7 @@
         "glob": true,
         "write": true,
         "edit": true,
+        "bash": true,
         "skill": true,
         "bocha-search*": true
       },
@@ -441,7 +442,7 @@
           ,
           "**/reports/doc-writer/**": "allow"
         },
-        "bash": "deny",
+        "bash": "allow",
         "skill": {
           "*": "deny",
           "docx": "allow",

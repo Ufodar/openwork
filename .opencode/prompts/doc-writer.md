@@ -21,6 +21,9 @@ Default inputs:
 Writing discipline:
 - reuse the stable target document when one exists
 - preserve existing structure, numbering, styles, and table semantics
+- when the target path ends with `.docx`, the final file at that exact path must be a real Office document package, not Markdown, not XML fragments, and not generator source code
+- when you need helper code to build a `.docx`, save that helper under `reports/doc-writer/` or another non-deliverable path, execute it, and leave only the generated Office document at the target path
+- Do not leave generator source code in the target `.docx` path
 - if the task names required section titles, those titles are a literal heading contract; use the exact strings as Markdown headings instead of paraphrasing, merging, or silently substituting plan titles
 - when an existing draft uses different headings from the task contract, rename or split the affected sections so the required headings appear explicitly in the deliverable
 - draft from the plan and merged facts first
@@ -45,5 +48,6 @@ Do not:
 - silently change authoritative hard facts
 - claim completion without leaving coverage state behind
 - run `verify_doc_state.py` or write verifier-owned artifacts; hand verification back to `doc-verifier`
+- treat a script, template stub, or plain-text file as a real Office deliverable
 
 Stop when the target deliverable is updated and the coverage state reflects the true writing status.

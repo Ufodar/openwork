@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+const repoRoot = join(import.meta.dir, "..", "..", "..");
 const scriptPath = "./.opencode/skills/openwork-core/scripts/verify_doc_state.py";
 
 test("verify_doc_state.py writes verifier state and a report for a drafted markdown deliverable", async () => {
@@ -79,7 +80,7 @@ test("verify_doc_state.py writes verifier state and a report for a drafted markd
       "--required-section", "证据来源与假设",
       "--required-section", "风险与待确认项",
     ], {
-      cwd: "/Users/storm/.config/superpowers/worktrees/openwork/doc-subagent-orchestration",
+      cwd: repoRoot,
       stdout: "pipe",
       stderr: "pipe",
     });
@@ -155,7 +156,7 @@ test("verify_doc_state.py requires exact heading matches for required sections",
       "--required-section", "点对点对应方案",
       "--required-section", "证据与约束",
     ], {
-      cwd: "/Users/storm/.config/superpowers/worktrees/openwork/doc-subagent-orchestration",
+      cwd: repoRoot,
       stdout: "pipe",
       stderr: "pipe",
     });
@@ -173,6 +174,61 @@ test("verify_doc_state.py requires exact heading matches for required sections",
     expect(verifyState.ok).toBe(false);
     expect(verifyState.confirmed_sections).toEqual(["项目理解"]);
     expect(verifyState.missing_sections).toEqual(["需求拆解", "点对点对应方案", "证据与约束"]);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("verify_doc_state.py rejects text masquerading as a .docx deliverable", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "doc-verify-fake-docx-"));
+
+  try {
+    await mkdir(join(workspace, ".worktree", "plan"), { recursive: true });
+    await mkdir(join(workspace, ".worktree", "merge"), { recursive: true });
+    await mkdir(join(workspace, "outputs"), { recursive: true });
+
+    await writeFile(
+      join(workspace, ".worktree", "plan", "solution-plan.json"),
+      JSON.stringify({ sections: [{ id: "summary", title: "执行摘要" }] }, null, 2),
+      "utf8",
+    );
+    await writeFile(join(workspace, ".worktree", "coverage.json"), JSON.stringify({ targets: [], covered: [], missing: [] }, null, 2), "utf8");
+    await writeFile(join(workspace, ".worktree", "facts.json"), JSON.stringify({ canonical_facts: [] }, null, 2), "utf8");
+    await writeFile(join(workspace, ".worktree", "merge", "conflicts.json"), JSON.stringify({ conflicts: [], open_questions: [] }, null, 2), "utf8");
+    await writeFile(
+      join(workspace, "outputs", "fake.docx"),
+      "const { Document } = require('docx');\nconsole.log('not a zip package');\n",
+      "utf8",
+    );
+
+    const proc = Bun.spawn([
+      "python3",
+      scriptPath,
+      "--workspace", workspace,
+      "--target", "outputs/fake.docx",
+      "--verify-out", ".worktree/verify/coverage.json",
+      "--required-section", "执行摘要",
+    ], {
+      cwd: repoRoot,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    const stdout = await new Response(proc.stdout).text();
+    const stderr = await new Response(proc.stderr).text();
+    const exitCode = await proc.exited;
+
+    expect(exitCode).toBe(0);
+    expect(stderr.trim()).toBe("");
+    expect(stdout).toContain("\"ok\": false");
+
+    const verifyState = JSON.parse(
+      await readFile(join(workspace, ".worktree", "verify", "coverage.json"), "utf8"),
+    );
+
+    expect(verifyState.ok).toBe(false);
+    expect(verifyState.target_format_valid).toBe(false);
+    expect(verifyState.remaining_risks.some((item) => String(item.reason || "").includes("不是合法的 .docx"))).toBe(true);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

@@ -123,7 +123,9 @@ Writer task template:
 - do not invent helper scripts for coverage refresh or document maintenance; either tell `doc-writer` to update `.worktree/coverage.json` directly or reference a repo script that already exists
 - do not ask `doc-writer` to run `verify_doc_state.py`, write `.worktree/verify/coverage.json`, or produce verifier reports
 - if the user asks for "write, then verify", split that into two subagent calls: `doc-writer` first, `doc-verifier` second
-- stop when the target document exists, coverage is updated, and any required section headings are present verbatim
+- if `<target-doc>` ends with `.docx`, require a real Office document package at that exact path before you consider the writer step complete
+- if helper code is needed to generate the `.docx`, tell `doc-writer` to store that helper outside the deliverable path; the target path must contain only the final document
+- stop when the target document exists, coverage is updated, any required section headings are present verbatim, and `.docx` targets are real Office packages instead of source-script placeholders
 
 Verifier task template:
 - allowed inputs:

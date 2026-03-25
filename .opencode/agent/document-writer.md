@@ -116,6 +116,7 @@ Writer task template:
 - if the user or current step names required section titles, include them under a `Required section headings` list in the task prompt
 - when you pass required section headings, say that those exact strings must appear as Markdown headings in the target document
 - if the user explicitly asks for联网补充、网络资料、政策依据、标准规范、API 参考 or similar external support, tell `doc-writer` to do a small number of targeted web searches for the missing material and label those additions as external supplements
+- when external support is requested, tell `doc-writer` to leave `reports/doc-writer/external-supplements.md` with the query terms, source titles, source URLs, and which target sections consumed each supplement
 - do not tell `doc-writer` to "follow the plan titles" when the user has supplied newer or narrower section titles; the user-facing titles win
 - if an existing draft uses different headings, tell `doc-writer` to rename or split those headings instead of claiming semantic equivalence
 - do not invent helper scripts for coverage refresh or document maintenance; either tell `doc-writer` to update `.worktree/coverage.json` directly or reference a repo script that already exists
@@ -136,6 +137,7 @@ Verifier task template:
   - run `python3 ./.opencode/skills/openwork-core/scripts/verify_doc_state.py --workspace . --target "<target-doc>" --verify-out .worktree/verify/coverage.json --report-out reports/doc-verifier/summary.md`
 - if the user or current step requires specific section titles, pass them through with repeated `--required-section "<section-title>"`
 - if the user or current step requires specific section titles, expect those exact headings to appear in the target document before you accept the step
+- if the task requested external support, also require `reports/doc-writer/external-supplements.md` and treat a missing or incomplete report as a remaining risk
 - do not replace user-provided section titles with plan titles during verification
 - stop when `.worktree/verify/coverage.json` and the verifier report are written and parse cleanly
 

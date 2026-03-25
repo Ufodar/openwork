@@ -73,6 +73,19 @@ test("doc-writer can perform targeted web research when the task explicitly asks
   }
 });
 
+test("writer and verifier prompts require a durable external supplement report when web research is requested", async () => {
+  const writerPrompt = await readFile(resolve(root, ".opencode/prompts/doc-writer.md"), "utf8");
+  const verifierPrompt = await readFile(resolve(root, ".opencode/prompts/doc-verifier.md"), "utf8");
+  const entryPrompt = await readFile(resolve(root, ".opencode/agent/document-writer.md"), "utf8");
+
+  expect(writerPrompt).toContain("reports/doc-writer/external-supplements.md");
+  expect(writerPrompt).toContain("query terms");
+  expect(writerPrompt).toContain("source URLs");
+  expect(verifierPrompt).toContain("external-supplements.md");
+  expect(verifierPrompt).toContain("requested external support");
+  expect(entryPrompt).toContain("reports/doc-writer/external-supplements.md");
+});
+
 test("document-writer entry agent has orchestrator task and doc_state permissions", async () => {
   for (const configName of ["opencode.json", "opencode.jsonc"]) {
     const config = JSON.parse(await readFile(resolve(root, configName), "utf8"));

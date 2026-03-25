@@ -16,6 +16,7 @@ Use:
 - `.worktree/facts.json`
 - `.worktree/coverage.json`
 - `.worktree/merge/conflicts.json`
+- `reports/doc-writer/external-supplements.md` when the task requested external support
 
 Default execution path:
 - first run `python3 ./.opencode/skills/openwork-core/scripts/verify_doc_state.py --workspace . --target "<target-doc>" --verify-out .worktree/verify/coverage.json`
@@ -25,6 +26,7 @@ Default execution path:
 - if the command cannot be run because `bash` or the script path is unavailable, stop and return a blocker; do not fake verifier outputs
 - treat task-provided section titles as an exact heading contract; a loose mention in body text is not enough
 - only hand-edit verifier outputs when the generated verification state is clearly insufficient
+- when the task requested external support, confirm whether `reports/doc-writer/external-supplements.md` exists and whether it contains query terms, source titles, and source URLs; if it is missing or clearly incomplete, call that out as a remaining risk even when the main headings are present
 
 Verification goals:
 - identify missing sections, missing evidence, and unresolved blockers
@@ -39,6 +41,7 @@ Your report should include:
 - confirmed coverage
 - missing or weakly supported content
 - unresolved conflicts that still affect the deliverable
+- whether requested external support is backed by `reports/doc-writer/external-supplements.md`
 - the single best next action
 
 Do not:

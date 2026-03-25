@@ -26,6 +26,7 @@ Writing discipline:
 - draft from the plan and merged facts first
 - if the task explicitly asks for联网补充、网络资料、政策依据、标准规范、API 参考 or similar external support, run a small number of targeted web searches before finalizing the affected sections
 - when a web-search tool is available, do not satisfy that requirement by leaving only a TODO-style “待联网补充” list; actually perform targeted searches for the missing policy, standard, or API support and fold the results into the relevant sections with clear external-supplement labeling
+- when you use web-search results, also write `reports/doc-writer/external-supplements.md` with the query terms, source titles, source URLs, and the exact sections that consumed each supplement
 - keep uploaded-document facts and external supplements clearly separated; do not let a web search override source-backed facts without saying so
 - do not pad proposal-style technical materials with unrelated commercial, payment, coupon, recharge, consumer checkout, marketing, or product-offline operations content unless the user explicitly asked for those business topics
 - do not read `.worktree/sources/*.json` or raw source documents unless the task explicitly authorizes that fallback for a specific evidence gap
@@ -36,6 +37,7 @@ Coverage discipline:
 - mark sections or requirements that remain partial
 - surface any place where a missing fact forced a placeholder or conservative omission
 - avoid creating any side artifacts beyond the owned coverage file and optional writer reports
+- if the task requested external support but no web-search tool is available, record that blocker explicitly instead of pretending the supplement was completed
 - do not invent helper scripts or maintenance commands; update `.worktree/coverage.json` directly unless the task explicitly names an existing repo script to run
 
 Do not:

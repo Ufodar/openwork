@@ -1725,23 +1725,6 @@ export default function App() {
     return [BUILTIN_COMPACT_COMMAND, ...list];
   }
 
-  const sessionCommandPaletteContext = createMemo(() => ({
-    view: (currentView() === "login" ? "dashboard" : currentView()) as View,
-    agent: selectedSessionAgent(),
-    agentLock: selectedSessionAgentLock(),
-  }));
-
-  const sessionSkills = createMemo(() =>
-    filterSessionSkillsForContext(skills(), sessionCommandPaletteContext()),
-  );
-
-  async function listSessionCommands(): Promise<
-    { id: string; name: string; description?: string; source?: "command" | "mcp" | "skill" }[]
-  > {
-    const commands = await listCommands();
-    return filterSessionSlashCommandsForContext(commands, sessionCommandPaletteContext());
-  }
-
   function setSessionAgent(sessionID: string, agent: string | null) {
     const id = sessionID.trim();
     if (!id) return;
@@ -4717,6 +4700,23 @@ export default function App() {
     const title = selectedSession()?.title ?? sessions().find((session) => session.id === id)?.title ?? null;
     return resolveSessionPreferenceState(id, { title }).agentLock.value;
   });
+
+  const sessionCommandPaletteContext = createMemo(() => ({
+    view: (currentView() === "login" ? "dashboard" : currentView()) as View,
+    agent: selectedSessionAgent(),
+    agentLock: selectedSessionAgentLock(),
+  }));
+
+  const sessionSkills = createMemo(() =>
+    filterSessionSkillsForContext(skills(), sessionCommandPaletteContext()),
+  );
+
+  async function listSessionCommands(): Promise<
+    { id: string; name: string; description?: string; source?: "command" | "mcp" | "skill" }[]
+  > {
+    const commands = await listCommands();
+    return filterSessionSlashCommandsForContext(commands, sessionCommandPaletteContext());
+  }
 
   createEffect(() => {
     const id = selectedSessionId();

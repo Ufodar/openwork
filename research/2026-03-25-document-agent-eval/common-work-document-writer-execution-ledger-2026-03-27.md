@@ -73,6 +73,168 @@ Immediate blocker:
 
 ## Latest Findings
 
+### 2026-03-27: WJW rerun after commit `dc438fc9` removed the last hosted `/tmp` first-shot detour entirely
+
+Deployment:
+- local commit:
+  - `dc438fc9` (`Harden hosted temp-path routing`)
+- pushed to:
+  - `origin/dev`
+  - `gitee/dev`
+- pod:
+  - `git pull --ff-only`
+  - `bash scripts/recover-pod-runtime.sh --force`
+- health after deploy:
+  - `http://127.0.0.1:8789/health -> ok`
+  - `http://127.0.0.1:32765/openwork/health -> ok`
+
+Rerun scenario:
+- `OPENWORK_COMPARE_SCENARIO=wjw OPENWORK_COMPARE_MODE=diagnostic QIN_ABC_LANES=raw,pod OPENWORK_COMPARE_DIAGNOSTIC_TIMEOUT_MS=300000 OPENWORK_COMPARE_DIAGNOSTIC_MAX_TOOL_CALLS=20 node tmp/qin-abc-minimax.mjs`
+
+What changed on the hosted route:
+- the earlier denied first command:
+  - `pandoc ... -o /tmp/bidding.txt`
+  is gone
+- the new hosted route starts directly with:
+  - `bash: ls -la`
+  - `bash: mkdir -p .tmp/system`
+  - `bash: pandoc ... -o .tmp/system/招标文件.txt`
+  - `bash: pandoc ... -o .tmp/system/设备参数.txt`
+  - `bash: pandoc ... -o .tmp/system/点对点应答.txt`
+- hosted routing diagnostics now show:
+  - `issueCounts = {}`
+  - `systemTempTouchCount = 0`
+  - `externalPathTouchCount = 0`
+  - `directOfficeReadCount = 0`
+
+Outcome:
+- pod `common-work` completed both deliverables:
+  - `outputs/点对点解决方案.md`
+  - `outputs/点对点解决方案.docx`
+- raw local OpenCode also completed, but the hosted route is now the cleaner of the two:
+  - pod:
+    - exact workspace-local temp handling from the first conversion command onward
+  - raw:
+    - still begins with `filesystem_list_directory`
+    - still goes through `skill`
+    - keeps rereading the same extracted Markdown
+    - still produces malformed `export` JSON and forces fallback analysis from `run-jsonl`
+
+Interpretation:
+- the remaining Stage 1 / baseline concern around wasted hosted `/tmp` first shots is now closed on the current pod build
+- the hosted path is no longer weaker than raw on temp-path handling; it is now stricter and cleaner
+
+### 2026-03-27: fresh Qin raw-vs-pod A/B on the current pod build shows `common-work` is cleaner and faster than local raw OpenCode on this document pair
+
+Scenario:
+- `OPENWORK_COMPARE_SCENARIO=qin OPENWORK_COMPARE_MODE=diagnostic QIN_ABC_LANES=raw,pod OPENWORK_COMPARE_DIAGNOSTIC_TIMEOUT_MS=300000 OPENWORK_COMPARE_DIAGNOSTIC_MAX_TOOL_CALLS=20 node tmp/qin-abc-minimax.mjs`
+
+Pod `common-work` result:
+- elapsed:
+  - `201649 ms`
+- tool route:
+  - `bash = 7`
+  - `todowrite = 5`
+  - `read = 3`
+  - `bocha-search_bocha_web_search = 3`
+  - `write = 1`
+- diagnostics:
+  - `issueCounts = {}`
+  - `externalPathTouchCount = 0`
+  - `systemTempTouchCount = 0`
+  - `directOfficeReadCount = 0`
+- output:
+  - `outputs/融合算力云平台三大系统技术材料.docx`
+
+Raw local OpenCode result:
+- elapsed:
+  - `267688 ms`
+- tool route:
+  - `filesystem_list_directory = 1`
+  - `skill = 1`
+  - `bash = 6`
+  - `filesystem_read_multiple_files = 1`
+  - `webfetch = 1`
+  - `filesystem_write_file = 2`
+- diagnostics:
+  - `issueCounts = {}`
+  - `externalPathTouchCount = 0`
+  - `systemTempTouchCount = 0`
+  - `directOfficeReadCount = 0`
+- output:
+  - `融合算力云平台技术材料.docx`
+- raw-specific weakness still present:
+  - `webfetch` hit `https://www.example.com`
+  - `export` JSON was malformed again and analysis had to fall back to `run-jsonl`
+
+Interpretation:
+- on the Qin scenario, the current pod `common-work` is now materially stronger than local raw OpenCode in the dimensions that matter for the user baseline:
+  - cleaner route
+  - no irrelevant external fetch detour
+  - no malformed export side path
+  - faster completion
+- the remaining `common-work` optimization target on Qin is no longer baseline correctness
+- it is mainly whether the three `bocha-search` calls can be reduced once local document grounding is already sufficient
+
+### 2026-03-27: long-document benchmark corpus was triaged so the next Stage 2 run can start with the highest-signal file instead of the largest file
+
+Corpus metadata snapshot:
+- `备-天河产业园一期融合算力系统建设项目CPU、GPU节点及云计算服务器采购投标文件电子版-技术部分-烽火.docx`
+  - file size:
+    - `103,815,047 bytes`
+  - `word/document.xml`:
+    - `6,178,684 bytes`
+  - zip entries:
+    - `558`
+  - embedded media:
+    - `517`
+- `备-环投数科临沂项目第一包v20250507v1.0(1)(1).docx`
+  - file size:
+    - `51,510,558 bytes`
+  - `word/document.xml`:
+    - `6,322,076 bytes`
+  - zip entries:
+    - `332`
+  - embedded media:
+    - `281`
+- `备1-品冠-技术部分V2.docx`
+  - file size:
+    - `140,810,792 bytes`
+  - `word/document.xml`:
+    - `12,247,969 bytes`
+  - zip entries:
+    - `630`
+  - embedded media:
+    - `568`
+
+Initial recommendation:
+- first large benchmark candidate:
+  - `备-环投数科临沂项目第一包v20250507v1.0(1)(1).docx`
+- why:
+  - it is still a large formal投标文件, but materially smaller than the other two container sizes
+  - it has a clear front-page title block and project metadata, which makes scope-selection and authority-resolution easier to evaluate
+  - it is large enough to stress long-context document handling without jumping straight to the most image-heavy 99MB / 134MB variants
+
+Proposed Stage 2 long-task benchmark questions:
+- benchmark A:
+  - “请基于这份技术标正文，输出一份‘投标技术方案骨架 + 关键证据矩阵’，至少覆盖总体架构、核心设备能力、交付实施、售后服务、风险与偏离、待确认问题，并给出每一节引用自原文的证据位置。”
+- benchmark B:
+  - “请把这份长文档改写成可交付的技术方案正文，保留正式投标口径，但删去供应商专属身份信息、报价信息和明显仅适用于原投标人的承诺，输出 Markdown 与 Word 两个版本。”
+- benchmark C:
+  - “请从这份长文档中抽取一份‘需求-响应-证据-风险’四列表，并额外指出原文里最容易造成后续答标遗漏的 10 个细节项。”
+
+Why these questions are high-signal:
+- they stress:
+  - authority resolution
+  - whole-document reread discipline
+  - long-range section dependency handling
+  - evidence anchoring
+  - stable output-path discipline
+- they also make it easy to compare `raw` vs `pod common-work` on:
+  - early tool routing
+  - whether the agent drifts into generic search too early
+  - whether the final artifact preserves formal delivery quality
+
 ### 2026-03-27: latest WJW raw-vs-pod A/B shows the hosted baseline is now tighter than raw on external-path behavior, and the only remaining hosted waste in the early route is a denied first `/tmp/*.txt` extraction attempt
 
 Scenario:
@@ -1280,12 +1442,12 @@ Interpretation:
 
 ## Next Actions
 
-1. Deploy the latest `/tmp`-first-route hardening, then rerun the same low-token WJW raw-vs-pod A/B to verify the denied first extraction call is gone.
+1. Move Stage 2 on to the formal long-document benchmark set under `/Users/storm/Pictures/开发参考文件/标书agent开发相关文件/`, now that the main hosted baseline issues are live-green on WJW and Qin.
 2. Focus Stage 2 on:
    - early search churn after local document grounding
    - repeated failure patterns
    - final-result quality and completion quality
-   - whether hosted `common-work` is now materially stronger than local raw OpenCode, not just “less broken”
+   - whether hosted `common-work` stays stronger than local raw OpenCode on much larger formal bid/technical files, not just the medium-size WJW / Qin scenarios
 3. For Stage 2 long-document work, use the formal benchmark docs under:
    - `/Users/storm/Pictures/开发参考文件/标书agent开发相关文件/`
 4. Keep the hosted baseline checks in the loop while doing Stage 2:

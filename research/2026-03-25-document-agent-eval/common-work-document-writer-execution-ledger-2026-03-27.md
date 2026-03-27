@@ -256,6 +256,63 @@ Interpretation:
 - the inspected common-work runtime also did not contain unrelated MCP such as `filesystem`, `memory`, or `sequential-thinking`
 - `doc_state` remains supported in the runtime pruning design and unit tests, but it was not present in this particular harness-created common-work runtime snapshot; keep that distinction clear when evaluating live session surfaces
 
+### 2026-03-27: low-token compare diagnostics now persist a compact tool trace, which exposed and then removed two local-only early detours
+
+What changed in diagnostics:
+- the low-token compare harness now records a compact `toolTrace` for the first tool calls
+- each trace row preserves:
+  - tool name
+  - status
+  - issue codes
+  - first relevant file path / pattern / command / URL
+
+Why:
+- this avoids rerunning long tasks just to find out whether a bad early turn came from `webfetch`, `bocha-search`, repo-level `.opencode` reads, or `bash` leaving the runtime workspace
+
+Verification for the diagnostics change:
+- `bun test packages/app/scripts/openwork-compare-diagnostics.test.mjs`
+- `node --check tmp/qin-abc-minimax.mjs`
+
+What the first trace exposed:
+- one local Qin diagnostic showed:
+  - `webfetch https://www.jd.com/`
+- this was a real wrong-way route:
+  - unrelated to the document task
+  - not anchored by a search result, user-provided URL, or source-document URL
+
+Prompt response:
+- `common-work` now explicitly forbids:
+  - using `webfetch` to probe unrelated consumer sites, portal homepages, search homepages, e-commerce homepages, or other generic popular sites
+  - calling `webfetch` before there is a concrete candidate URL from search results, source documents, or the user
+
+What the next trace exposed:
+- a later local Qin diagnostic removed the `jd.com` fetch, but still showed:
+  - `bash: cd /Users/storm/Documents/code/studyProject/opencode-docx/openwork && bocha-search ...`
+- this left the session runtime workspace even though it did not use `external_directory`
+
+Prompt and diagnostics response:
+- diagnostics now classify absolute `bash` `cd` targets outside `<WORKSPACE>` as `external-path-touch`
+- `common-work` now explicitly forbids leaving `<WORKSPACE>` in `bash` just to run shared CLIs, search commands, helper scripts, or inspect repo files
+
+Latest local Qin verification after both prompt updates:
+- `externalPathTouchCount = 0`
+- `systemTempTouchCount = 0`
+- `directOfficeReadCount = 0`
+- `issueCounts = {}`
+- early tool trace now looks like:
+  - `glob **/*.docx`
+  - `skill`
+  - workspace-local `pandoc` extraction into `.tmp/docx-read/`
+  - `read` extracted Markdown copies
+  - workspace-local `grep`
+  - `todowrite`
+  - no `webfetch`
+  - no repo-root `cd`
+
+Interpretation:
+- local `common-work` is now materially closer to the intended hosted behavior in the early phase
+- the remaining common-work parity question is no longer about obvious workspace escapes; it is about whether hosted search routing is still noisier than local raw OpenCode
+
 ## Files Touched In Current Stage
 
 - `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/packages/server/src/session-workspaces.ts`
@@ -278,11 +335,11 @@ Interpretation:
 
 ## Next Actions
 
-1. Commit the newest `common-work` prompt rule and refreshed ledger notes, then push to GitHub and Gitee.
+1. Commit the newest `common-work` prompt / diagnostics / ledger updates, then push to GitHub and Gitee.
 2. Keep retrying pod `git pull --ff-only` + `bash scripts/restart-pod.sh --force` until SSH is usable again.
 3. After pod deploy succeeds, confirm the live pod commit and re-run a minimal hinted document-session create check.
 4. Confirm on the updated pod:
    - runtime skill folder is physically pruned to the intended subset
    - runtime MCP surface is physically pruned to the intended subset
    - history view behavior still opens the intended TSX
-5. Then continue Stage 2 low-token `common-work` A/B work, focusing first on early search-routing drift (`bocha-search` / `webfetch`) rather than external-path drift.
+5. Then continue Stage 2 low-token `common-work` A/B work, focusing first on remaining hosted search-routing drift (`bocha-search`) rather than external-path drift.

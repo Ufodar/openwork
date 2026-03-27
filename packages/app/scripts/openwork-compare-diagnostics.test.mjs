@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  buildCompactToolTrace,
   shouldStopDiagnosticCapture,
   summarizeConversationDiagnostics,
 } from "./openwork-compare-diagnostics.mjs";
@@ -39,14 +40,15 @@ describe("summarizeConversationDiagnostics", () => {
     const summary = summarizeConversationDiagnostics([
       toolPart("glob", { path: "/root/.openwork/user-workspaces/u1/documents/sessions/rt_other" }),
       toolPart("read", { filePath: "/tmp/docx-draft.md" }),
+      toolPart("bash", { command: "cd /Users/storm/Documents/code/studyProject/opencode-docx/openwork && bocha-search --query \"算力网络\"" }),
       toolPart("read", { filePath: "/workspace/documents/sessions/rt_1/reports/brief.md" }),
     ], {
       workspaceDir: "/workspace/documents/sessions/rt_1",
     });
 
-    expect(summary.externalPathTouchCount).toBe(1);
+    expect(summary.externalPathTouchCount).toBe(2);
     expect(summary.systemTempTouchCount).toBe(1);
-    expect(summary.issueCounts["external-path-touch"]).toBe(1);
+    expect(summary.issueCounts["external-path-touch"]).toBe(2);
     expect(summary.issueCounts["system-temp-touch"]).toBe(1);
   });
 
@@ -63,6 +65,36 @@ describe("summarizeConversationDiagnostics", () => {
     expect(summary.repeatedFailureCount).toBe(1);
     expect(summary.issueCounts["direct-office-read"]).toBe(1);
     expect(summary.issueCounts["access-denied"]).toBe(2);
+  });
+});
+
+describe("buildCompactToolTrace", () => {
+  test("captures a compact sequence with tool-specific inputs and issue codes", () => {
+    const trace = buildCompactToolTrace([
+      toolPart("grep", { filePath: "/repo/.opencode/agent/common-work.md", pattern: "bocha-search|webfetch" }),
+      toolPart("webfetch", { url: "https://example.com/spec", format: "markdown" }, { error: "fetch failed" }),
+      toolPart("bash", { command: "find . -type f | head -20" }),
+    ], {
+      workspaceDir: "/workspace/documents/sessions/rt_1",
+      maxEntries: 2,
+    });
+
+    expect(trace).toHaveLength(2);
+    expect(trace[0]).toEqual({
+      index: 0,
+      tool: "grep",
+      status: "completed",
+      issueCodes: ["external-path-touch"],
+      filePath: "/repo/.opencode/agent/common-work.md",
+      pattern: "bocha-search|webfetch",
+    });
+    expect(trace[1]).toEqual({
+      index: 1,
+      tool: "webfetch",
+      status: "completed",
+      issueCodes: ["fetch-failed"],
+      url: "https://example.com/spec",
+    });
   });
 });
 

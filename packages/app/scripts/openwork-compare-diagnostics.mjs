@@ -11,6 +11,7 @@ const OFFICE_FILE_RE = /\.(docx|doc|pptx|xlsx|xls|pdf)$/i;
 const SYSTEM_TEMP_RE = /^(\/tmp\/|\/private\/tmp\/)/i;
 const BROAD_GLOB_RE = /(^|\/)\*\*(\/\*)?$/;
 const BROAD_FIND_RE = /\bfind\s+\.\s+-type\s+f\b/;
+const ABSOLUTE_CD_RE = /\bcd\s+(['"]?)(\/[^'" ;]+)\1/g;
 const FETCH_FAILED_RE = /fetch failed/i;
 const ACCESS_DENIED_RE = /access denied|prevents you from using this specific tool call/i;
 const MCP_ERROR_RE = /mcp error/i;
@@ -33,9 +34,20 @@ function pathWithinWorkspace(path, workspaceDir) {
   return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }
 
+function getBashCdTargets(command) {
+  const text = normalizePath(command);
+  if (!text) return [];
+  const targets = [];
+  for (const match of text.matchAll(ABSOLUTE_CD_RE)) {
+    const target = normalizePath(match[2]);
+    if (target) targets.push(target);
+  }
+  return targets;
+}
+
 function getPathCandidates(part) {
   const input = readStateInput(part);
-  return [
+  const paths = [
     input.filePath,
     input.path,
     input.directory,
@@ -43,6 +55,10 @@ function getPathCandidates(part) {
   ]
     .map(normalizePath)
     .filter(Boolean);
+  if (normalizePath(part?.tool).toLowerCase() === "bash") {
+    paths.push(...getBashCdTargets(input.command));
+  }
+  return [...new Set(paths)];
 }
 
 function getCommand(part) {
@@ -53,6 +69,11 @@ function getCommand(part) {
 function getPattern(part) {
   const input = readStateInput(part);
   return normalizePath(input.pattern || input.query);
+}
+
+function getUrl(part) {
+  const input = readStateInput(part);
+  return normalizePath(input.url);
 }
 
 function getErrorText(part) {
@@ -116,6 +137,31 @@ function isMeaningfulTool(part) {
 
 function increment(map, key, amount = 1) {
   map[key] = (map[key] ?? 0) + amount;
+}
+
+export function buildCompactToolTrace(parts, options = {}) {
+  const toolParts = Array.isArray(parts) ? parts.filter((part) => part?.type === "tool") : [];
+  const maxEntries = Number.isFinite(options.maxEntries) ? Number(options.maxEntries) : toolParts.length;
+
+  return toolParts.slice(0, maxEntries).map((part, index) => {
+    const entry = {
+      index,
+      tool: normalizePath(part?.tool) || "unknown",
+      status: normalizePath(part?.state?.status) || null,
+      issueCodes: classifyIssueCodes(part, options),
+    };
+    const [firstPath] = getPathCandidates(part);
+    const pattern = getPattern(part);
+    const command = getCommand(part);
+    const url = getUrl(part);
+
+    if (firstPath) entry.filePath = firstPath;
+    if (pattern) entry.pattern = pattern;
+    if (url) entry.url = url;
+    if (command) entry.command = command;
+
+    return entry;
+  });
 }
 
 export function summarizeConversationDiagnostics(parts, options = {}) {

@@ -43,6 +43,7 @@ find . -maxdepth 3 -type f \( -iname '*.docx' -o -iname '*.doc' -o -iname '*.pdf
 - 不要把其他 session、无关系统目录或仓库其他目录当成资料来源；如果出现系统临时路径，也只限于当前任务刚生成、且仍处在当前 shell 流程控制下的中间文件。
 - 不要主动调用 `external_directory`，也不要把 workspace 外绝对路径当成默认资料来源或默认输出目标；当前 session 的输入、草稿、状态和交付物都应当回到 `<WORKSPACE>` 内。
 - 不要为了查看 prompt、skill、agent 说明而去读仓库根目录、父目录或其他 workspace 外的 `.opencode/**`；如果确实需要这些参考，只读当前 `<WORKSPACE>/.opencode/**` 里的 runtime 副本。
+- 不要为了运行共享 CLI、搜索命令、辅助脚本或查看仓库文件而在 `bash` 里先 `cd` 到仓库根目录、父目录或任何 workspace 外绝对路径；默认留在当前 `<WORKSPACE>` 内执行，必要时直接调用可执行命令本身，而不是先离开 runtime workspace。
 - 写入任何索引、JSON、CSV、Markdown 状态文件前，优先转成 workspace 相对路径并落回 `<WORKSPACE>`。
 
 ### 2. Read real files early
@@ -111,6 +112,8 @@ find . -maxdepth 3 -type f \( -iname '*.docx' -o -iname '*.doc' -o -iname '*.pdf
 - 不要因为搜索工具报错、SDK 不可用、shell 环境缺模块，转而在 `bash` 脚本里硬编码一组行业实践、厂商清单、政策列表或 API 示例来冒充检索结果。
 - `webfetch` 只用于读取已经由搜索工具、其他工具结果或用户明确给出的具体 URL；不要把 `webfetch` 当成搜索工具，不要拿它自己去猜 URL、撞首页或替代检索发现。
 - 不要拿无关主页抓取、泛化 landing page、单个厂商官网首页或任意 `webfetch` 页面去替代原本应由搜索工具定位的权威依据。
+- 不要为了“试试能不能抓到点资料”而访问与当前文档主题无关的消费网站、门户首页、搜索首页、电商首页、导航页或其他泛化热门站点；像 `https://www.jd.com/` 这种与任务无关的主页探测，直接视为错误路线。
+- 如果手上还没有一个由搜索结果、来源文档或用户明确给出的具体候选 URL，就不要调用 `webfetch`；先明确缺口，再做定向搜索或直接报告当前缺口。
 - 若官方来源被拦截或无法直接获取，先明确报告阻塞和缺失，不要自动降级使用二级来源。
 - 只有在用户明确允许的情况下，才可引用二级来源，并必须明确标记为低置信背景材料。
 - 不要把低权威背景材料混成主依据。

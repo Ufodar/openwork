@@ -316,6 +316,9 @@ test("common-work prefers search-backed authoritative sources over guessed aggre
   expect(prompt).toContain("不要因为搜索工具报错");
   expect(prompt).toContain("`webfetch` 只用于读取已经由搜索工具、其他工具结果或用户明确给出的具体 URL");
   expect(prompt).toContain("不要拿无关主页抓取");
+  expect(prompt).toContain("不要为了“试试能不能抓到点资料”而访问与当前文档主题无关的消费网站");
+  expect(prompt).toContain("像 `https://www.jd.com/` 这种与任务无关的主页探测");
+  expect(prompt).toContain("如果手上还没有一个由搜索结果、来源文档或用户明确给出的具体候选 URL，就不要调用 `webfetch`");
   expect(prompt).toContain("先明确报告阻塞和缺失");
   expect(prompt).toContain("不要自动降级使用二级来源");
   expect(prompt).toContain("只有在用户明确允许的情况下");
@@ -496,6 +499,8 @@ test("common-work explicitly forbids external-directory detours for hosted docum
   expect(prompt).toContain("输入、草稿、状态和交付物都应当回到 `<WORKSPACE>` 内");
   expect(prompt).toContain("不要为了查看 prompt、skill、agent 说明而去读仓库根目录、父目录或其他 workspace 外的 `.opencode/**`");
   expect(prompt).toContain("只读当前 `<WORKSPACE>/.opencode/**` 里的 runtime 副本");
+  expect(prompt).toContain("不要为了运行共享 CLI、搜索命令、辅助脚本或查看仓库文件而在 `bash` 里先 `cd` 到仓库根目录、父目录或任何 workspace 外绝对路径");
+  expect(prompt).toContain("默认留在当前 `<WORKSPACE>` 内执行");
 });
 
 test("docx skill steers extraction artifacts into workspace-local temp paths", async () => {

@@ -18,6 +18,7 @@ import { fileURLToPath } from "node:url";
 
 import { joinVisibleAssistantText } from "../packages/app/scripts/_assistant-text.mjs";
 import {
+  buildCompactToolTrace,
   shouldStopDiagnosticCapture,
   summarizeConversationDiagnostics,
 } from "../packages/app/scripts/openwork-compare-diagnostics.mjs";
@@ -731,6 +732,7 @@ function analyzeRunJsonLines(raw, options = {}) {
     toolCounts: countToolsFromParts(toolParts),
     toolIssueCounts: summarizeToolIssues(toolIssues),
     toolIssues,
+    toolTrace: buildCompactToolTrace(toolParts, options),
     routingDiagnostics,
     taskCalls: extractTaskCallsFromParts(toolParts),
     assistantText: extractAssistantText(messages),
@@ -750,6 +752,7 @@ function analyzeExport(exportObj, options = {}) {
     toolCounts: countToolsFromParts(toolParts),
     toolIssueCounts: summarizeToolIssues(toolIssues),
     toolIssues,
+    toolTrace: buildCompactToolTrace(toolParts, options),
     routingDiagnostics,
     taskCalls: extractTaskCallsFromParts(toolParts),
     assistantText: extractTextFromParts(lastParts),
@@ -959,6 +962,9 @@ async function runOpenWorkCommonWorkLane({
     toolCounts: countToolsFromParts(toolParts),
     toolIssueCounts: summarizeToolIssues(toolIssues),
     toolIssues,
+    toolTrace: buildCompactToolTrace(toolParts, {
+      workspaceDir: runtimeDirectory,
+    }),
     routingDiagnostics,
     taskCalls: extractTaskCallsFromParts(toolParts),
     assistantText: extractAssistantText(messages),

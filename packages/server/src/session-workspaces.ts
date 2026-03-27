@@ -48,6 +48,20 @@ type RuntimeKnowledgeInstructionRecord = {
   description?: string | null;
 };
 
+export type SessionRuntimeProvisioningHints = {
+  preferredView?: string | null;
+  preferredAgent?: string | null;
+  preferredAgentLock?: string | null;
+};
+
+type RuntimeSessionProfileId = "default" | "document-agent" | "document-writer";
+
+type RuntimeSessionProfile = {
+  id: RuntimeSessionProfileId;
+  skillAllowlist: string[];
+  mcpAllowlist: string[];
+};
+
 const RUNTIME_INSTRUCTIONS_RELATIVE_PATH = ".opencode/openwork-runtime.md";
 const KNOWLEDGE_INSTRUCTIONS_RELATIVE_PATH = ".opencode/openwork-knowledge.md";
 const DOC_STATE_INSTRUCTIONS_RELATIVE_PATH = ".opencode/doc-state.md";
@@ -73,6 +87,133 @@ const RUNTIME_MIRRORED_OPENCODE_DIRS = [
   "references",
   "skills",
 ] as const;
+const DOCUMENT_SESSION_SKILL_ALLOWLIST = [
+  "content-research-writer",
+  "doc-coauthoring",
+  "doc-normalize",
+  "docx",
+  "image-enhancer",
+  "internal-comms",
+  "pdf",
+  "pptx",
+  "xlsx",
+] as const;
+const DOCUMENT_WRITER_SESSION_SKILL_ALLOWLIST = [...DOCUMENT_SESSION_SKILL_ALLOWLIST, "openwork-core"] as const;
+const DOCUMENT_SESSION_MCP_ALLOWLIST = [
+  "bocha-search",
+  "doc_state",
+  "filesystem",
+  "openwork-knowledge",
+] as const;
+
+function normalizeOptionalString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed || null;
+}
+
+function normalizeStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const next: string[] = [];
+  const seen = new Set<string>();
+  for (const entry of value) {
+    const normalized = normalizeOptionalString(entry);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    next.push(normalized);
+  }
+  return next;
+}
+
+function buildRuntimeSessionProfile(
+  id: RuntimeSessionProfileId,
+  options?: {
+    skillAllowlist?: readonly string[];
+    mcpAllowlist?: readonly string[];
+  },
+): RuntimeSessionProfile {
+  return {
+    id,
+    skillAllowlist: [...(options?.skillAllowlist ?? [])],
+    mcpAllowlist: [...(options?.mcpAllowlist ?? [])],
+  };
+}
+
+function resolveRuntimeSessionProfile(hints?: SessionRuntimeProvisioningHints | null): RuntimeSessionProfile {
+  const preferredView = normalizeOptionalString(hints?.preferredView)?.toLowerCase() ?? "";
+  const preferredAgent = normalizeOptionalString(hints?.preferredAgent)?.toLowerCase() ?? "";
+  const preferredAgentLock = normalizeOptionalString(hints?.preferredAgentLock)?.toLowerCase() ?? "";
+
+  if (
+    preferredView === "document-writer" ||
+    preferredAgent === "document-writer" ||
+    preferredAgentLock === "document-writer"
+  ) {
+    return buildRuntimeSessionProfile("document-writer", {
+      skillAllowlist: DOCUMENT_WRITER_SESSION_SKILL_ALLOWLIST,
+      mcpAllowlist: DOCUMENT_SESSION_MCP_ALLOWLIST,
+    });
+  }
+
+  if (
+    preferredView === "document-agent" ||
+    preferredAgent === "common-work" ||
+    preferredAgentLock === "common-work"
+  ) {
+    return buildRuntimeSessionProfile("document-agent", {
+      skillAllowlist: DOCUMENT_SESSION_SKILL_ALLOWLIST,
+      mcpAllowlist: DOCUMENT_SESSION_MCP_ALLOWLIST,
+    });
+  }
+
+  return buildRuntimeSessionProfile("default");
+}
+
+function parseRuntimeSessionProfile(configInput: Record<string, unknown>): RuntimeSessionProfile {
+  const openwork =
+    configInput.openwork && typeof configInput.openwork === "object"
+      ? configInput.openwork as Record<string, unknown>
+      : null;
+  const raw =
+    openwork?.runtimeSessionProfile && typeof openwork.runtimeSessionProfile === "object"
+      ? openwork.runtimeSessionProfile as Record<string, unknown>
+      : null;
+  const id = normalizeOptionalString(raw?.id);
+  if (id !== "document-agent" && id !== "document-writer") {
+    return buildRuntimeSessionProfile("default");
+  }
+  const fallback = resolveRuntimeSessionProfile({ preferredView: id });
+  return buildRuntimeSessionProfile(id, {
+    skillAllowlist: normalizeStringList(raw?.skillAllowlist).length
+      ? normalizeStringList(raw?.skillAllowlist)
+      : fallback.skillAllowlist,
+    mcpAllowlist: normalizeStringList(raw?.mcpAllowlist).length
+      ? normalizeStringList(raw?.mcpAllowlist)
+      : fallback.mcpAllowlist,
+  });
+}
+
+function applyRuntimeSessionProfile(configInput: Record<string, unknown>, profile: RuntimeSessionProfile): Record<string, unknown> {
+  const config = { ...configInput };
+  const openwork =
+    config.openwork && typeof config.openwork === "object"
+      ? { ...(config.openwork as Record<string, unknown>) }
+      : {};
+
+  if (profile.id === "default") {
+    delete openwork.runtimeSessionProfile;
+  } else {
+    openwork.runtimeSessionProfile = {
+      id: profile.id,
+      skillAllowlist: [...profile.skillAllowlist],
+      mcpAllowlist: [...profile.mcpAllowlist],
+    };
+  }
+
+  if (Object.keys(openwork).length) config.openwork = openwork;
+  else delete config.openwork;
+  return config;
+}
 
 function expandHome(value: string): string {
   if (value.startsWith("~/")) return join(homedir(), value.slice(2));
@@ -158,16 +299,24 @@ async function writeStore(path: string, workspaces: Record<string, SessionWorksp
   await rename(tmp, path);
 }
 
-export async function provisionSessionWorkspace(workspacePath: string): Promise<{ runtimeId: string; runtimeDir: string }> {
+export async function provisionSessionWorkspace(
+  workspacePath: string,
+  hints?: SessionRuntimeProvisioningHints,
+): Promise<{ runtimeId: string; runtimeDir: string }> {
   const runtimeId = shortId().replace(/-/g, "");
   const runtimeDir = join(workspacePath, "documents", "sessions", runtimeId);
+  const runtimeProfile = resolveRuntimeSessionProfile(hints);
   await ensureDir(runtimeDir);
-  await mirrorWorkspaceOpencodeSupportFiles(workspacePath, runtimeDir);
-  await writeRuntimeSessionCarrierConfig({ workspacePath, runtimeDir });
+  await mirrorWorkspaceOpencodeSupportFiles(workspacePath, runtimeDir, runtimeProfile);
+  await writeRuntimeSessionCarrierConfig({ workspacePath, runtimeDir, profile: runtimeProfile });
   return { runtimeId, runtimeDir };
 }
 
-async function mirrorWorkspaceOpencodeSupportFiles(workspacePath: string, runtimeDir: string): Promise<void> {
+async function mirrorWorkspaceOpencodeSupportFiles(
+  workspacePath: string,
+  runtimeDir: string,
+  runtimeProfile: RuntimeSessionProfile,
+): Promise<void> {
   const workspaceOpencodeDir = join(workspacePath, ".opencode");
   if (!(await exists(workspaceOpencodeDir))) return;
 
@@ -179,6 +328,15 @@ async function mirrorWorkspaceOpencodeSupportFiles(workspacePath: string, runtim
     if (!(await exists(sourceDir))) continue;
     const targetDir = join(runtimeOpencodeDir, relativeDir);
     await rm(targetDir, { recursive: true, force: true }).catch(() => undefined);
+    if (relativeDir === "skills" && runtimeProfile.id !== "default") {
+      await ensureDir(targetDir);
+      for (const skillName of runtimeProfile.skillAllowlist) {
+        const sourceSkillDir = join(sourceDir, skillName);
+        if (!(await exists(sourceSkillDir))) continue;
+        await cp(sourceSkillDir, join(targetDir, skillName), { recursive: true, force: true });
+      }
+      continue;
+    }
     await cp(sourceDir, targetDir, { recursive: true, force: true });
   }
 }
@@ -212,6 +370,23 @@ function buildRuntimeConfigBase(
   const workspaceConfig = workspaceConfigInput && typeof workspaceConfigInput === "object" ? workspaceConfigInput : {};
   const runtimeConfig = runtimeConfigInput && typeof runtimeConfigInput === "object" ? runtimeConfigInput : {};
   const baseConfig: Record<string, unknown> = { ...workspaceConfig, ...runtimeConfig };
+  const workspaceOpenwork =
+    workspaceConfig.openwork && typeof workspaceConfig.openwork === "object"
+      ? workspaceConfig.openwork as Record<string, unknown>
+      : null;
+  const runtimeOpenwork =
+    runtimeConfig.openwork && typeof runtimeConfig.openwork === "object"
+      ? runtimeConfig.openwork as Record<string, unknown>
+      : null;
+  if (workspaceOpenwork || runtimeOpenwork) {
+    baseConfig.openwork = {
+      ...(workspaceOpenwork ?? {}),
+      ...(runtimeOpenwork ?? {}),
+    };
+  } else {
+    delete baseConfig.openwork;
+  }
+  const runtimeProfile = parseRuntimeSessionProfile(baseConfig);
 
   const workspaceMcp = workspaceConfig.mcp && typeof workspaceConfig.mcp === "object"
     ? workspaceConfig.mcp as Record<string, unknown>
@@ -220,7 +395,13 @@ function buildRuntimeConfigBase(
     ? runtimeConfig.mcp as Record<string, unknown>
     : {};
   if (Object.keys(workspaceMcp).length || Object.keys(runtimeMcp).length) {
-    baseConfig.mcp = sanitizeRuntimeMcpEntries({ ...workspaceMcp, ...runtimeMcp }, options);
+    baseConfig.mcp = sanitizeRuntimeMcpEntries(
+      { ...workspaceMcp, ...runtimeMcp },
+      {
+        ...options,
+        allowlist: runtimeProfile.mcpAllowlist,
+      },
+    );
   } else {
     delete baseConfig.mcp;
   }
@@ -288,13 +469,16 @@ function shouldDropHostedFilesystemMcp(
 export function sanitizeRuntimeMcpEntries(
   mcpInput: Record<string, unknown>,
   options?: {
+    allowlist?: readonly string[];
     workspacePath?: string;
     runtimeDir?: string;
   },
 ): Record<string, unknown> {
   const sanitized: Record<string, unknown> = {};
+  const allowlist = options?.allowlist?.length ? new Set(options.allowlist) : null;
   for (const [name, entry] of Object.entries(mcpInput)) {
     if (shouldDropHostedFilesystemMcp(name, entry, options)) continue;
+    if (allowlist && !allowlist.has(name)) continue;
     sanitized[name] = entry;
   }
   return sanitized;
@@ -308,11 +492,15 @@ export function sanitizeRuntimeConfigForSession(
   },
 ): Record<string, unknown> {
   const config = configInput && typeof configInput === "object" ? { ...configInput } : {};
+  const runtimeProfile = parseRuntimeSessionProfile(config);
   const mcpInput = config.mcp && typeof config.mcp === "object"
     ? config.mcp as Record<string, unknown>
     : null;
   if (!mcpInput) return config;
-  const sanitizedMcp = sanitizeRuntimeMcpEntries(mcpInput, options);
+  const sanitizedMcp = sanitizeRuntimeMcpEntries(mcpInput, {
+    ...options,
+    allowlist: runtimeProfile.mcpAllowlist,
+  });
   if (Object.keys(sanitizedMcp).length) config.mcp = sanitizedMcp;
   else delete config.mcp;
   return config;
@@ -415,15 +603,28 @@ function buildRuntimeDocumentStateInstructions(): string {
 export async function writeRuntimeSessionCarrierConfig(input: {
   workspacePath: string;
   runtimeDir: string;
+  profile?: RuntimeSessionProfile;
 }): Promise<string> {
   const workspaceConfigPath = opencodeConfigPath(input.workspacePath);
   const runtimeConfigPath = opencodeConfigPath(input.runtimeDir);
   const { data: workspaceConfig } = await readJsoncFile<Record<string, unknown>>(workspaceConfigPath, {});
   const { data: runtimeConfig } = await readJsoncFile<Record<string, unknown>>(runtimeConfigPath, {});
-  const baseConfig = buildRuntimeConfigBase(workspaceConfig, runtimeConfig, {
+  const runtimeProfile = input.profile ?? parseRuntimeSessionProfile(runtimeConfig);
+  let baseConfig = buildRuntimeConfigBase(workspaceConfig, runtimeConfig, {
     workspacePath: input.workspacePath,
     runtimeDir: input.runtimeDir,
   });
+  if (runtimeProfile.id !== "default") {
+    baseConfig = applyRuntimeSessionProfile(baseConfig, runtimeProfile);
+    const currentMcp = baseConfig.mcp && typeof baseConfig.mcp === "object"
+      ? baseConfig.mcp as Record<string, unknown>
+      : {};
+    baseConfig.mcp = sanitizeRuntimeMcpEntries(currentMcp, {
+      workspacePath: input.workspacePath,
+      runtimeDir: input.runtimeDir,
+      allowlist: runtimeProfile.mcpAllowlist,
+    });
+  }
   const existingInstructions = normalizeInstructionEntries(baseConfig.instructions);
   baseConfig.instructions = [
     ...existingInstructions.filter((entry) => entry !== RUNTIME_INSTRUCTIONS_RELATIVE_PATH),

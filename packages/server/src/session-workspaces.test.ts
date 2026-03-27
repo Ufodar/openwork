@@ -99,6 +99,104 @@ describe("provisionSessionWorkspace", () => {
     expect(runtimeInstructionRaw).toContain("Treat `/tmp/*` and `/private/tmp/*` as shell-only transient paths");
   });
 
+  test("prunes runtime skills and unrelated MCP entries for document-agent sessions", async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), "openwork-session-workspace-doc-agent-"));
+    await mkdir(join(workspacePath, ".opencode", "skills", "docx"), { recursive: true });
+    await mkdir(join(workspacePath, ".opencode", "skills", "doc-normalize"), { recursive: true });
+    await mkdir(join(workspacePath, ".opencode", "skills", "openwork-debug"), { recursive: true });
+    await mkdir(join(workspacePath, ".opencode", "skills", "skill-creator"), { recursive: true });
+    await writeFile(join(workspacePath, ".opencode", "skills", "docx", "SKILL.md"), "# docx\n", "utf8");
+    await writeFile(join(workspacePath, ".opencode", "skills", "doc-normalize", "SKILL.md"), "# doc-normalize\n", "utf8");
+    await writeFile(join(workspacePath, ".opencode", "skills", "openwork-debug", "SKILL.md"), "# debug\n", "utf8");
+    await writeFile(join(workspacePath, ".opencode", "skills", "skill-creator", "SKILL.md"), "# skill-creator\n", "utf8");
+    await writeFile(
+      join(workspacePath, "opencode.jsonc"),
+      JSON.stringify({
+        model: "test-model",
+        mcp: {
+          filesystem: {
+            type: "local",
+            command: ["npx", "-y", "@modelcontextprotocol/server-filesystem", "."],
+          },
+          memory: {
+            type: "local",
+            command: ["npx", "-y", "@modelcontextprotocol/server-memory"],
+          },
+          "sequential-thinking": {
+            type: "local",
+            command: ["npx", "-y", "@modelcontextprotocol/server-sequential-thinking"],
+          },
+          "bocha-search": {
+            type: "local",
+            command: ["uv", "--directory", "/tmp/bocha", "run", "bocha-search-mcp"],
+          },
+          ragflow: {
+            type: "remote",
+            url: "https://ragflow.example.invalid",
+          },
+        },
+      }, null, 2),
+      "utf8",
+    );
+
+    const runtime = await provisionSessionWorkspace(workspacePath, {
+      preferredView: "document-agent",
+      preferredAgent: "common-work",
+      preferredAgentLock: "common-work",
+    });
+
+    expect(await exists(join(runtime.runtimeDir, ".opencode", "skills", "docx", "SKILL.md"))).toBe(true);
+    expect(await exists(join(runtime.runtimeDir, ".opencode", "skills", "doc-normalize", "SKILL.md"))).toBe(true);
+    expect(await exists(join(runtime.runtimeDir, ".opencode", "skills", "openwork-debug", "SKILL.md"))).toBe(false);
+    expect(await exists(join(runtime.runtimeDir, ".opencode", "skills", "skill-creator", "SKILL.md"))).toBe(false);
+
+    await writeRuntimeKnowledgeCarrierConfig({
+      workspacePath,
+      runtimeDir: runtime.runtimeDir,
+      mcpUrl: "http://127.0.0.1:8789/workspace/ws_1/knowledge/mcp",
+      runtimeToken: "owkrt_test",
+      attachedKnowledge: [],
+    });
+
+    const raw = await readFile(join(runtime.runtimeDir, "opencode.jsonc"), "utf8");
+    const parsed = JSON.parse(raw) as {
+      openwork?: Record<string, unknown>;
+      mcp?: Record<string, unknown>;
+    };
+
+    expect((parsed.openwork?.runtimeSessionProfile as Record<string, unknown> | undefined)?.id).toBe("document-agent");
+    expect(parsed.mcp?.filesystem).toBeTruthy();
+    expect(parsed.mcp?.["bocha-search"]).toBeTruthy();
+    expect(parsed.mcp?.["openwork-knowledge"]).toBeTruthy();
+    expect(parsed.mcp?.memory).toBeUndefined();
+    expect(parsed.mcp?.["sequential-thinking"]).toBeUndefined();
+    expect(parsed.mcp?.ragflow).toBeUndefined();
+  });
+
+  test("keeps openwork-core for document-writer runtime sessions", async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), "openwork-session-workspace-doc-writer-"));
+    await mkdir(join(workspacePath, ".opencode", "skills", "docx"), { recursive: true });
+    await mkdir(join(workspacePath, ".opencode", "skills", "openwork-core", "scripts"), { recursive: true });
+    await mkdir(join(workspacePath, ".opencode", "skills", "openwork-debug"), { recursive: true });
+    await writeFile(join(workspacePath, ".opencode", "skills", "docx", "SKILL.md"), "# docx\n", "utf8");
+    await writeFile(join(workspacePath, ".opencode", "skills", "openwork-core", "SKILL.md"), "# openwork-core\n", "utf8");
+    await writeFile(join(workspacePath, ".opencode", "skills", "openwork-core", "scripts", "extract_doc_state.py"), "print('ok')\n", "utf8");
+    await writeFile(join(workspacePath, ".opencode", "skills", "openwork-debug", "SKILL.md"), "# debug\n", "utf8");
+
+    const runtime = await provisionSessionWorkspace(workspacePath, {
+      preferredView: "document-writer",
+      preferredAgent: "document-writer",
+      preferredAgentLock: "document-writer",
+    });
+
+    expect(await exists(join(runtime.runtimeDir, ".opencode", "skills", "docx", "SKILL.md"))).toBe(true);
+    expect(await exists(join(runtime.runtimeDir, ".opencode", "skills", "openwork-core", "SKILL.md"))).toBe(true);
+    expect(await exists(join(runtime.runtimeDir, ".opencode", "skills", "openwork-core", "scripts", "extract_doc_state.py"))).toBe(
+      true,
+    );
+    expect(await exists(join(runtime.runtimeDir, ".opencode", "skills", "openwork-debug", "SKILL.md"))).toBe(false);
+  });
+
   test("writes a runtime knowledge carrier config by preserving parent config and adding the MCP", async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), "openwork-session-workspace-overlay-"));
     const runtime = await provisionSessionWorkspace(workspacePath);

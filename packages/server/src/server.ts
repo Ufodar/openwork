@@ -39,7 +39,7 @@ import {
   writeRuntimeDocumentStateCarrierConfig,
   writeRuntimeKnowledgeCarrierConfig,
 } from "./session-workspaces.js";
-import type { SessionWorkspaceEntry } from "./session-workspaces.js";
+import type { SessionRuntimeProvisioningHints, SessionWorkspaceEntry } from "./session-workspaces.js";
 import { SessionOpencodeRuntimeService, type StartedSessionRuntime } from "./session-opencode-runtime.js";
 import { RuntimeMaintenanceService, isRuntimeMaintenanceBlockingNewWork, type RuntimeMaintenanceState } from "./runtime-maintenance.js";
 import { SessionActivityService } from "./session-activity.js";
@@ -1259,7 +1259,27 @@ export async function proxyOpencodeRequest(input: {
       : workspaceWithDirectory(workspace, runtimeWorkspace.runtimeDir);
   }
   if (workspace && workspaceId && requesterKey && method === "POST" && normalizedProxyPath === "/session") {
-    provisionedRuntime = await provisionSessionWorkspace(workspace.path);
+    const rawBody = await input.request.text();
+    let payload: Record<string, unknown> = {};
+    try {
+      payload = rawBody.trim() ? JSON.parse(rawBody) as Record<string, unknown> : {};
+    } catch {
+      throw new ApiError(400, "invalid_json", "Invalid JSON body");
+    }
+
+    const provisioningHints: SessionRuntimeProvisioningHints = {
+      preferredView:
+        typeof payload.openworkPreferredView === "string" ? payload.openworkPreferredView.trim() || null : null,
+      preferredAgent:
+        typeof payload.openworkPreferredAgent === "string" ? payload.openworkPreferredAgent.trim() || null : null,
+      preferredAgentLock:
+        typeof payload.openworkPreferredAgentLock === "string" ? payload.openworkPreferredAgentLock.trim() || null : null,
+    };
+    delete payload.openworkPreferredView;
+    delete payload.openworkPreferredAgent;
+    delete payload.openworkPreferredAgentLock;
+
+    provisionedRuntime = await provisionSessionWorkspace(workspace.path, provisioningHints);
     provisionedRuntimeEntry = input.sessionRuntimeService?.isEnabledForWorkspace(workspace)
       ? await input.sessionRuntimeService.provisionSessionRuntime(workspace, {
           runtimeId: provisionedRuntime.runtimeId,
@@ -1280,13 +1300,6 @@ export async function proxyOpencodeRequest(input: {
       );
     } else {
       targetWorkspace = workspaceWithDirectory(workspace, provisionedRuntimeEntry.runtimeDir);
-    }
-    const rawBody = await input.request.text();
-    let payload: Record<string, unknown> = {};
-    try {
-      payload = rawBody.trim() ? JSON.parse(rawBody) as Record<string, unknown> : {};
-    } catch {
-      throw new ApiError(400, "invalid_json", "Invalid JSON body");
     }
     enableDocumentStateForProvisionedSession = payload.openworkEnableDocState === true;
     delete payload.openworkEnableDocState;

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -150,6 +150,57 @@ describe("proxyOpencodeRequest session creation", () => {
     expect(parsed.instructions).toContain(".opencode/doc-state.md");
     expect(runtimeInstructionRaw).toContain("workspace-local temp directory");
     expect(docStateInstructionRaw).toContain("doc_state_state_get_brief");
+  });
+
+  test("uses preferred session hints for runtime pruning without forwarding them to OpenCode", async () => {
+    const captured: { body?: Record<string, unknown> } = {};
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      captured.body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : {};
+      return new Response(JSON.stringify({ id: "ses_pruned", title: "Pruned Session" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+
+    await mkdir(join(workspace.path, ".opencode", "skills", "docx"), { recursive: true });
+    await mkdir(join(workspace.path, ".opencode", "skills", "openwork-debug"), { recursive: true });
+    await writeFile(join(workspace.path, ".opencode", "skills", "docx", "SKILL.md"), "# docx\n", "utf8");
+    await writeFile(join(workspace.path, ".opencode", "skills", "openwork-debug", "SKILL.md"), "# debug\n", "utf8");
+
+    const sessionOwnership = new SessionOwnershipService();
+    const sessionWorkspaces = new SessionWorkspaceService();
+    const runtimeKnowledgeTokens = new RuntimeKnowledgeTokenService();
+    const runtimeDocumentStateTokens = new RuntimeDocumentStateTokenService();
+
+    const response = await proxyOpencodeRequest({
+      request: new Request("http://openwork.local/w/ws_1/opencode/session", {
+        method: "POST",
+        body: JSON.stringify({
+          title: "Common Work Session",
+          openworkPreferredView: "document-agent",
+          openworkPreferredAgent: "common-work",
+          openworkPreferredAgentLock: "common-work",
+        }),
+      }),
+      url: new URL("http://openwork.local/w/ws_1/opencode/session"),
+      workspace,
+      proxyPath: "/session",
+      actor: { type: "remote", scope: "collaborator", tokenHash: "owner-alice" },
+      sessionOwnership,
+      sessionWorkspaces,
+      runtimeKnowledgeTokens,
+      runtimeDocumentStateTokens,
+      openworkBaseUrl: "http://127.0.0.1:8789",
+    });
+
+    expect(response.status).toBe(200);
+    expect(captured.body?.openworkPreferredView).toBeUndefined();
+    expect(captured.body?.openworkPreferredAgent).toBeUndefined();
+    expect(captured.body?.openworkPreferredAgentLock).toBeUndefined();
+
+    const runtime = await sessionWorkspaces.getWorkspace(workspace.id, "ses_pruned");
+    expect(await exists(join(runtime?.runtimeDir ?? "", ".opencode", "skills", "docx", "SKILL.md"))).toBe(true);
+    expect(await exists(join(runtime?.runtimeDir ?? "", ".opencode", "skills", "openwork-debug", "SKILL.md"))).toBe(false);
   });
 
   test("can create a session against an isolated per-session opencode runtime", async () => {

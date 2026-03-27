@@ -5521,6 +5521,9 @@ export default function App() {
           directory: resolveActiveClientWorkspaceRoot(),
           title: title || undefined,
           openworkEnableDocState: options?.enableDocumentState === true ? true : undefined,
+          openworkPreferredView: nextView,
+          openworkPreferredAgent: requestedAgent,
+          openworkPreferredAgentLock: requestedAgentLock,
         });
         mark("session:create:ok");
       } catch (createErr) {

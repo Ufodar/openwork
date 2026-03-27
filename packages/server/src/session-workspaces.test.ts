@@ -159,12 +159,13 @@ describe("provisionSessionWorkspace", () => {
     });
 
     const raw = await readFile(join(runtime.runtimeDir, "opencode.jsonc"), "utf8");
+    const profileRaw = await readFile(join(runtime.runtimeDir, ".opencode", "openwork-runtime-profile.json"), "utf8");
     const parsed = JSON.parse(raw) as {
-      openwork?: Record<string, unknown>;
       mcp?: Record<string, unknown>;
     };
+    const profile = JSON.parse(profileRaw) as { id?: string };
 
-    expect((parsed.openwork?.runtimeSessionProfile as Record<string, unknown> | undefined)?.id).toBe("document-agent");
+    expect(profile.id).toBe("document-agent");
     expect(parsed.mcp?.filesystem).toBeTruthy();
     expect(parsed.mcp?.["bocha-search"]).toBeTruthy();
     expect(parsed.mcp?.["openwork-knowledge"]).toBeTruthy();

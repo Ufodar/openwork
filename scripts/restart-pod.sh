@@ -24,6 +24,9 @@ export PATH="$HOME/.bun/bin:$HOME/.opencode/bin:$HOME/.local/bin:$PATH"
 export OPENWORK_SESSION_RUNTIME_MODE="${OPENWORK_SESSION_RUNTIME_MODE:-process}"
 export OPENWORK_MAX_ACTIVE_SESSION_RUNTIMES="${OPENWORK_MAX_ACTIVE_SESSION_RUNTIMES:-30}"
 export OPENWORK_SESSION_RUNTIME_IDLE_TTL_MS="${OPENWORK_SESSION_RUNTIME_IDLE_TTL_MS:-28800000}"
+# Keep hosted pod restarts on the last verified-good downloaded OpenCode
+# sidecar unless the operator explicitly overrides OPENCODE_VERSION.
+export OPENCODE_VERSION="${OPENCODE_VERSION:-1.3.2}"
 
 is_truthy() {
     case "${1:-}" in

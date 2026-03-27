@@ -24,6 +24,9 @@ export OPENWORK_SESSION_RUNTIME_MODE="${OPENWORK_SESSION_RUNTIME_MODE:-process}"
 export OPENWORK_MAX_ACTIVE_SESSION_RUNTIMES="${OPENWORK_MAX_ACTIVE_SESSION_RUNTIMES:-30}"
 export OPENWORK_SESSION_RUNTIME_IDLE_TTL_MS="${OPENWORK_SESSION_RUNTIME_IDLE_TTL_MS:-28800000}"
 export OPENWORK_POD_OPENCODE_SOURCE="${OPENWORK_POD_OPENCODE_SOURCE:-downloaded}"
+# Keep hosted pods on the last verified-good downloaded OpenCode sidecar until
+# newer releases are requalified against the hosted stack.
+export OPENCODE_VERSION="${OPENCODE_VERSION:-1.3.2}"
 
 # ---- Bun path ----
 export PATH=$HOME/.bun/bin:$HOME/.opencode/bin:$HOME/.local/bin:$PATH

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -199,10 +199,93 @@ describe("proxyOpencodeRequest session creation", () => {
     expect(captured.body?.openworkPreferredView).toBeUndefined();
     expect(captured.body?.openworkPreferredAgent).toBeUndefined();
     expect(captured.body?.openworkPreferredAgentLock).toBeUndefined();
+    expect(Array.isArray(captured.body?.permission)).toBe(true);
+    expect(captured.body?.permission).toEqual(expect.arrayContaining([
+      { permission: "external_directory", pattern: "*", action: "deny" },
+      { permission: "bash", pattern: "*-o /tmp/*.md*", action: "deny" },
+      { permission: "bash", pattern: "*> /private/tmp/*.docx*", action: "deny" },
+    ]));
 
     const runtime = await sessionWorkspaces.getWorkspace(workspace.id, "ses_pruned");
     expect(await exists(join(runtime?.runtimeDir ?? "", ".opencode", "skills", "docx", "SKILL.md"))).toBe(true);
     expect(await exists(join(runtime?.runtimeDir ?? "", ".opencode", "skills", "openwork-debug", "SKILL.md"))).toBe(false);
+  });
+
+  test("reduces common-work document sessions to the document runtime skill and MCP surface", async () => {
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ id: "ses_document_surface", title: "Document Surface Session" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })) as unknown as typeof fetch;
+
+    await writeFile(
+      join(workspace.path, "opencode.jsonc"),
+      JSON.stringify({
+        model: "test-model",
+        mcp: {
+          filesystem: {
+            type: "local",
+            command: ["npx", "-y", "@modelcontextprotocol/server-filesystem", "."],
+          },
+          memory: {
+            type: "local",
+            command: ["npx", "-y", "@modelcontextprotocol/server-memory"],
+          },
+          "bocha-search": {
+            type: "local",
+            command: ["uv", "--directory", "/tmp/bocha", "run", "bocha-search-mcp"],
+          },
+        },
+      }, null, 2),
+      "utf8",
+    );
+    for (const skill of ["doc-coauthoring", "doc-normalize", "docx", "pdf", "pptx", "xlsx", "internal-comms", "openwork-debug"] as const) {
+      await mkdir(join(workspace.path, ".opencode", "skills", skill), { recursive: true });
+      await writeFile(join(workspace.path, ".opencode", "skills", skill, "SKILL.md"), `# ${skill}\n`, "utf8");
+    }
+
+    const sessionOwnership = new SessionOwnershipService();
+    const sessionWorkspaces = new SessionWorkspaceService();
+    const runtimeKnowledgeTokens = new RuntimeKnowledgeTokenService();
+    const runtimeDocumentStateTokens = new RuntimeDocumentStateTokenService();
+
+    const response = await proxyOpencodeRequest({
+      request: new Request("http://openwork.local/w/ws_1/opencode/session", {
+        method: "POST",
+        body: JSON.stringify({
+          title: "Document Surface Session",
+          openworkPreferredView: "document-agent",
+          openworkPreferredAgent: "common-work",
+          openworkPreferredAgentLock: "common-work",
+        }),
+      }),
+      url: new URL("http://openwork.local/w/ws_1/opencode/session"),
+      workspace,
+      proxyPath: "/session",
+      actor: { type: "remote", scope: "collaborator", tokenHash: "owner-alice" },
+      sessionOwnership,
+      sessionWorkspaces,
+      runtimeKnowledgeTokens,
+      runtimeDocumentStateTokens,
+      openworkBaseUrl: "http://127.0.0.1:8789",
+    });
+
+    expect(response.status).toBe(200);
+
+    const runtime = await sessionWorkspaces.getWorkspace(workspace.id, "ses_document_surface");
+    const runtimeSkills = readdir(join(runtime?.runtimeDir ?? "", ".opencode", "skills"));
+    const runtimeConfigRaw = await readFile(join(runtime?.runtimeDir ?? "", "opencode.jsonc"), "utf8");
+    const runtimeConfig = JSON.parse(runtimeConfigRaw) as { mcp?: Record<string, unknown> };
+
+    expect((await runtimeSkills).sort()).toEqual([
+      "doc-coauthoring",
+      "doc-normalize",
+      "docx",
+      "pdf",
+      "pptx",
+      "xlsx",
+    ]);
+    expect(Object.keys(runtimeConfig.mcp ?? {}).sort()).toEqual(["bocha-search"]);
   });
 
   test("can create a session against an isolated per-session opencode runtime", async () => {

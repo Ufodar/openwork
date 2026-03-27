@@ -62,18 +62,14 @@ Exit criteria:
 ## Current Status
 
 Active stage:
-- Stage 1
+- Stage 2
 
 Stage 1 status:
-- in progress
+- complete
 
 Immediate blocker:
-- Stage 1 is now locally green again after a second history-reentry hardening pass:
-  - document-session runtime skill pruning is still enforced at the server/runtime layer
-  - runtime session metadata now persists `preferredView / preferredAgent / preferredAgentLock` in the session workspace store
-  - history resolution no longer depends only on root `.opencode/openwork.json`
-  - old runtime directories can now recover document-session view metadata from `.opencode/openwork-runtime-profile.json`
-- remaining blocker is live pod verification of this new fallback path plus a fresh hosted check of early `common-work` detours
+- no Stage 1 blocker remains
+- next active work is Stage 2 low-token `common-work` A/B diagnostics against local raw OpenCode
 
 ## Latest Findings
 
@@ -417,6 +413,153 @@ Local verification:
 - `git diff --check -- packages/server/src/server.ts packages/server/src/server.proxy-session-create.test.ts .opencode/agent/common-work.md packages/app/scripts/doc-subagent-prompts.test.mjs`
 - all passing
 
+### 2026-03-27: final history re-entry bug required fixing three separate overwrite points before live pod behavior matched the intended view
+
+What still failed after the first history fix:
+- the server and runtime profile did return `openworkPreferredView / openworkPreferredAgent / openworkPreferredAgentLock`
+- but live pod clicks from `/dashboard/agents` still reopened `/session/:id`
+
+Root causes found and fixed in order:
+- `dashboard.tsx` history reopen path still only forwarded `title`, while `session.tsx` had already been updated to forward session hints
+- `resolveSessionPreferences()` still let stale stored `{ view: "session" }` suppress a stronger document-session hint from the session list
+- `app.tsx` had a later sidebar sync path that rebuilt `SidebarSessionItem[]` from `sessions()` and silently dropped `openworkPreferred*`, overwriting the good metadata before the dashboard could use it
+
+What changed:
+- added a shared `buildSessionPreferenceHint()` helper in `packages/app/src/app/lib/session-preferences.ts`
+- updated both `packages/app/src/app/pages/session.tsx` and `packages/app/src/app/pages/dashboard.tsx` to use the same hint builder
+- changed `resolveSessionPreferences()` so a stale stored `session` view no longer beats a stronger `document-agent` / `document-writer` hint
+- updated the sidebar session sync in `packages/app/src/app/app.tsx` to preserve:
+  - `openworkPreferredView`
+  - `openworkPreferredAgent`
+  - `openworkPreferredAgentLock`
+
+Local verification:
+- `bun test packages/app/src/app/lib/session-preferences.test.ts packages/app/src/app/pages/dashboard.history-session-hints.test.mjs packages/app/src/app/app.sidebar-session-hints-preserved.test.mjs packages/server/src/server.proxy-session-list.test.ts`
+- source-file compile filter clean for:
+  - `packages/app/src/app/app.tsx`
+  - `packages/app/src/app/pages/dashboard.tsx`
+  - `packages/app/src/app/pages/session.tsx`
+  - `packages/app/src/app/lib/session-preferences.ts`
+- `git diff --check -- packages/app/src/app/app.tsx packages/app/src/app/app.sidebar-session-hints-preserved.test.mjs packages/app/src/app/lib/session-preferences.ts packages/app/src/app/lib/session-preferences.test.ts packages/app/src/app/pages/dashboard.tsx packages/app/src/app/pages/session.tsx packages/app/src/app/pages/dashboard.history-session-hints.test.mjs`
+
+Live pod verification after deploy:
+- pushed commits:
+  - `045b718c` (`Fix dashboard history session view hints`)
+  - `c32c0335` (`Let document history hints beat stale session prefs`)
+  - `47a04b0e` (`Preserve document history hints in sidebar sync`)
+- pod pulled from Gitee and restarted successfully after each step
+- final real browser check on `http://192.168.5.10:32765/dashboard/agents` showed:
+  - historical entry `ses_2cf999cbdffeICzOQVFR06CeUs`
+  - click target text still rendered as `历史会话 ses_2cf999cb`
+  - resulting URL now correctly becomes `/document-agent/ses_2cf999cbdffeICzOQVFR06CeUs`
+
+Interpretation:
+- Stage 1 baseline item “history sessions reopen into the correct TSX/view” is now live-green on pod
+- the remaining work should move to Stage 2 parity testing rather than more Stage 1 routing repair
+
+### 2026-03-27: a fresh live pod runtime-surface probe confirms the current baseline users actually get
+
+Scenario:
+- health check:
+  - `GET http://192.168.5.10:32765/openwork/health -> 200`
+- fresh hosted session created with:
+  - `openworkPreferredView=document-agent`
+  - `openworkPreferredAgent=common-work`
+  - `openworkPreferredAgentLock=common-work`
+- resulting live session:
+  - `ses_2cf71bb17ffeBvY6pTCsgMI481`
+
+Live pod inspection through `session-workspaces/<workspaceId>.json` and the runtime folder itself:
+- stored runtime preferences were:
+  - `preferredView = document-agent`
+  - `preferredAgent = common-work`
+  - `preferredAgentLock = common-work`
+- runtime `.opencode/skills` contained only:
+  - `doc-coauthoring`
+  - `doc-normalize`
+  - `docx`
+  - `pdf`
+  - `pptx`
+  - `xlsx`
+- runtime `opencode.jsonc` MCP keys were only:
+  - `bocha-search`
+- runtime instructions were only:
+  - `.opencode/references/doc-state-schema.md`
+  - `.opencode/openwork-runtime.md`
+
+Interpretation:
+- the user-facing baseline for “new common-work/document-agent sessions should not load irrelevant skills” is currently live-green on pod
+- the current live pod surface is even tighter than some older notes in this ledger that still mentioned `openwork-knowledge` or `doc_state` as default runtime MCPs
+- document-session runtime pruning is therefore not just a local/unit-test property; it is what real hosted sessions are loading right now
+
+### 2026-03-27: Stage 2 low-token Qin A/B now shows the remaining parity gap is search churn, not external-directory drift
+
+Scenario:
+- `OPENWORK_COMPARE_SCENARIO=qin OPENWORK_COMPARE_MODE=diagnostic QIN_ABC_LANES=raw,pod node tmp/qin-abc-minimax.mjs`
+
+Results:
+- pod `common-work` session:
+  - `ses_2cf78da14ffesi3Z4tuN7F4Ki6`
+  - `totalToolCalls = 11`
+  - `broadDiscoveryCount = 0`
+  - `externalPathTouchCount = 0`
+  - `systemTempTouchCount = 0`
+  - `directOfficeReadCount = 0`
+  - `repeatedFailureCount = 0`
+  - early route:
+    - `bash` workspace-local checks
+    - `skill`
+    - workspace-local `pandoc` extraction into `.tmp/system`
+    - `read`
+    - `bocha-search` x3
+    - `todowrite`
+    - final `write` aborted only because diagnostic mode intentionally stopped early
+- local raw OpenCode session:
+  - `ses_2cf78ebf9ffeuuB5A4r5151prT`
+  - `externalPathTouchCount = 0`
+  - `systemTempTouchCount = 0`
+  - `directOfficeReadCount = 0`
+  - notable detours:
+    - `webfetch` to a Baidu search URL
+    - malformed `export` JSON, forcing the harness to recover final output from `run-jsonl`
+
+Interpretation:
+- the hosted `common-work` parity gap is no longer about:
+  - `external_directory`
+  - `/tmp` reopen failures
+  - direct Office file reads
+  - unrelated runtime skills/MCP being loaded by default
+- the remaining hosted/common-work weakness is mainly early search routing churn after local source documents have already been extracted
+- raw local OpenCode still has its own weaknesses (`webfetch` detour and bad `export` JSON), so the parity story is now narrower and more specific than before
+
+### 2026-03-27: regression tests were added to lock the new baseline guarantees
+
+What was added:
+- `packages/server/src/server.proxy-session-create.test.ts` now explicitly checks that:
+  - preferred document-session hints are stripped before forwarding to bare OpenCode
+  - session creation injects:
+    - `external_directory -> deny`
+    - hosted `/tmp` / `/private/tmp` bash output deny rules
+  - fresh `document-agent/common-work` runtime sessions reduce to:
+    - runtime skills:
+      - `doc-coauthoring`
+      - `doc-normalize`
+      - `docx`
+      - `pdf`
+      - `pptx`
+      - `xlsx`
+    - runtime MCP:
+      - `bocha-search`
+
+Verification:
+- `bun test packages/server/src/server.proxy-session-create.test.ts packages/server/src/session-workspaces.test.ts`
+- `git diff --check -- packages/server/src/server.proxy-session-create.test.ts research/2026-03-25-document-agent-eval/common-work-document-writer-execution-ledger-2026-03-27.md`
+
+Interpretation:
+- the current user baseline is now guarded in both places:
+  - live pod evidence
+  - local regression tests that should catch future backslides before deploy
+
 ## Files Touched In Current Stage
 
 - `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/packages/server/src/session-workspaces.ts`
@@ -424,13 +567,19 @@ Local verification:
 - `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/packages/server/src/server.ts`
 - `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/packages/server/src/server.proxy-session-create.test.ts`
 - `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/packages/app/src/app/app.tsx`
+- `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/packages/app/src/app/app.sidebar-session-hints-preserved.test.mjs`
 - `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/packages/app/src/app/app.create-session-runtime-profile.test.ts`
+- `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/packages/app/src/app/lib/session-preferences.ts`
+- `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/packages/app/src/app/lib/session-preferences.test.ts`
+- `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/packages/app/src/app/pages/dashboard.tsx`
+- `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/packages/app/src/app/pages/dashboard.history-session-hints.test.mjs`
+- `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/packages/app/src/app/pages/session.tsx`
 - `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/packages/app/scripts/doc-subagent-prompts.test.mjs`
 - `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/.opencode/agent/common-work.md`
 
 ## Current Working Rules
 
-- do not start Stage 2 A/B work until the live pod regression above is fully cleared
+- Stage 1 baseline is now closed; Stage 2 can start
 - do not start `document-writer` generalization until `common-work` hosted parity is solid
 - prefer low-token diagnostics before long full-generation runs
 - for hosted regressions, isolate whether the problem is:
@@ -441,11 +590,15 @@ Local verification:
 
 ## Next Actions
 
-1. Commit the newest `common-work` prompt / proxy-session-create / ledger updates, then push to GitHub and Gitee.
-2. On pod, `git pull --ff-only` and run `bash scripts/restart-pod.sh --force`.
-3. After deploy, re-check on pod:
-   - fresh document-session runtime MCP surface no longer includes empty default `openwork-knowledge`
-   - runtime skill folder is still physically pruned to the intended subset
-   - history view behavior still opens the intended TSX
-4. Re-run the low-token hosted Qin diagnostic and verify the early denied `/tmp/*.md` conversion no longer appears.
-5. Only after that baseline is clean, continue Stage 2 `common-work` A/B work focused on hosted-vs-local quality and remaining search-routing drift.
+1. Start Stage 2 low-token `common-work` A/B diagnostics against local raw OpenCode, using the Qin benchmark and the uploaded long-form reference files.
+2. Focus comparison on:
+   - early tool-call drift
+   - repeated search churn after local-file grounding
+   - any hosted-only permission failures that still survive the current baseline
+   - whether `common-work` final outputs now beat raw local OpenCode once the early route is cleaned up
+3. Keep runtime-surface checks in the loop while doing A/B:
+   - runtime `.opencode/skills` remains physically pruned
+   - document-session MCP surface stays trimmed
+   - no `external_directory` / workspace-external reopen path appears
+4. Only if Stage 2 shows a real hosted-only weakness, patch `common-work` or the hosted runtime boundary and re-run the same low-token diagnostic before escalating to long full-generation runs.
+5. Do not begin Stage 3 / `document-writer` work until `common-work` is demonstrably at least as strong as local raw OpenCode on the chosen document benchmarks.

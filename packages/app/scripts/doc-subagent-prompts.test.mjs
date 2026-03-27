@@ -329,8 +329,12 @@ test("common-work prefers search-backed authoritative sources over guessed aggre
   expect(prompt).toContain("不要静默切回“基于常识先写一版”");
   expect(prompt).toContain("如果本地源文档已经覆盖了当前写作阶段所需的大部分事实");
   expect(prompt).toContain("只有在你能明确说出“当前还缺哪一个事实/标准/API 细节”时");
+  expect(prompt).toContain("如果当前缺口本质上仍是“这两份本地资料还没读透、还没提取完、还没把章节事实整理出来”");
   expect(prompt).toContain("读完本地核心资料后，不要连续发起多个只是复述题目或系统名的泛化搜索");
   expect(prompt).toContain("单个写作阶段最多进行 3 次有明确目标的定向搜索");
+  expect(prompt).toContain("联网补充默认一次只追 1 个已记录缺口");
+  expect(prompt).toContain("默认先进行 1 次最小定向搜索");
+  expect(prompt).toContain("才允许继续最多 2 次更窄的跟进搜索");
 });
 
 test("common-work forbids broad unfiltered workspace scans before locating real source documents", async () => {
@@ -453,6 +457,7 @@ test("common-work keeps drafting-stage routing anchored on local source document
   expect(prompt).toContain("只有出现明确缺口、明确 blocker 或新资料入口时");
   expect(prompt).toContain("已拿到本地核心资料后，直接围绕这些资料推进");
   expect(prompt).toContain("在写出至少一条明确缺口前");
+  expect(prompt).toContain("先回到本地资料继续提取");
 });
 
 test("common-work routes document sessions through a small document-focused supplement skill set", async () => {

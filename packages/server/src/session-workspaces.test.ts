@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -101,14 +101,23 @@ describe("provisionSessionWorkspace", () => {
 
   test("prunes runtime skills and unrelated MCP entries for document-agent sessions", async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), "openwork-session-workspace-doc-agent-"));
-    await mkdir(join(workspacePath, ".opencode", "skills", "docx"), { recursive: true });
-    await mkdir(join(workspacePath, ".opencode", "skills", "doc-normalize"), { recursive: true });
-    await mkdir(join(workspacePath, ".opencode", "skills", "openwork-debug"), { recursive: true });
-    await mkdir(join(workspacePath, ".opencode", "skills", "skill-creator"), { recursive: true });
-    await writeFile(join(workspacePath, ".opencode", "skills", "docx", "SKILL.md"), "# docx\n", "utf8");
-    await writeFile(join(workspacePath, ".opencode", "skills", "doc-normalize", "SKILL.md"), "# doc-normalize\n", "utf8");
-    await writeFile(join(workspacePath, ".opencode", "skills", "openwork-debug", "SKILL.md"), "# debug\n", "utf8");
-    await writeFile(join(workspacePath, ".opencode", "skills", "skill-creator", "SKILL.md"), "# skill-creator\n", "utf8");
+    const allSkills = [
+      "content-research-writer",
+      "doc-coauthoring",
+      "doc-normalize",
+      "docx",
+      "image-enhancer",
+      "internal-comms",
+      "openwork-debug",
+      "pdf",
+      "pptx",
+      "skill-creator",
+      "xlsx",
+    ] as const;
+    for (const skill of allSkills) {
+      await mkdir(join(workspacePath, ".opencode", "skills", skill), { recursive: true });
+      await writeFile(join(workspacePath, ".opencode", "skills", skill, "SKILL.md"), `# ${skill}\n`, "utf8");
+    }
     await writeFile(
       join(workspacePath, "opencode.jsonc"),
       JSON.stringify({
@@ -144,11 +153,16 @@ describe("provisionSessionWorkspace", () => {
       preferredAgent: "common-work",
       preferredAgentLock: "common-work",
     });
+    const runtimeSkillDirs = (await readdir(join(runtime.runtimeDir, ".opencode", "skills"))).sort();
 
-    expect(await exists(join(runtime.runtimeDir, ".opencode", "skills", "docx", "SKILL.md"))).toBe(true);
-    expect(await exists(join(runtime.runtimeDir, ".opencode", "skills", "doc-normalize", "SKILL.md"))).toBe(true);
-    expect(await exists(join(runtime.runtimeDir, ".opencode", "skills", "openwork-debug", "SKILL.md"))).toBe(false);
-    expect(await exists(join(runtime.runtimeDir, ".opencode", "skills", "skill-creator", "SKILL.md"))).toBe(false);
+    expect(runtimeSkillDirs).toEqual([
+      "doc-coauthoring",
+      "doc-normalize",
+      "docx",
+      "pdf",
+      "pptx",
+      "xlsx",
+    ]);
 
     await writeRuntimeKnowledgeCarrierConfig({
       workspacePath,
@@ -157,45 +171,96 @@ describe("provisionSessionWorkspace", () => {
       runtimeToken: "owkrt_test",
       attachedKnowledge: [],
     });
+    await writeRuntimeDocumentStateCarrierConfig({
+      workspacePath,
+      runtimeDir: runtime.runtimeDir,
+      mcpUrl: "http://127.0.0.1:8789/workspace/ws_1/doc-state/mcp",
+      runtimeToken: "owdst_test",
+    });
 
     const raw = await readFile(join(runtime.runtimeDir, "opencode.jsonc"), "utf8");
     const profileRaw = await readFile(join(runtime.runtimeDir, ".opencode", "openwork-runtime-profile.json"), "utf8");
     const parsed = JSON.parse(raw) as {
       mcp?: Record<string, unknown>;
     };
-    const profile = JSON.parse(profileRaw) as { id?: string };
+    const profile = JSON.parse(profileRaw) as { id?: string; skillAllowlist?: string[]; mcpAllowlist?: string[] };
 
     expect(profile.id).toBe("document-agent");
-    expect(parsed.mcp?.filesystem).toBeTruthy();
-    expect(parsed.mcp?.["bocha-search"]).toBeTruthy();
-    expect(parsed.mcp?.["openwork-knowledge"]).toBeTruthy();
+    expect(profile.skillAllowlist?.sort()).toEqual([
+      "doc-coauthoring",
+      "doc-normalize",
+      "docx",
+      "pdf",
+      "pptx",
+      "xlsx",
+    ]);
+    expect(profile.mcpAllowlist?.sort()).toEqual([
+      "bocha-search",
+      "doc_state",
+      "openwork-knowledge",
+    ]);
+    expect(Object.keys(parsed.mcp ?? {}).sort()).toEqual([
+      "bocha-search",
+      "doc_state",
+      "openwork-knowledge",
+    ]);
     expect(parsed.mcp?.memory).toBeUndefined();
-    expect(parsed.mcp?.["sequential-thinking"]).toBeUndefined();
-    expect(parsed.mcp?.ragflow).toBeUndefined();
+    expect(parsed.mcp?.filesystem).toBeUndefined();
   });
 
   test("keeps openwork-core for document-writer runtime sessions", async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), "openwork-session-workspace-doc-writer-"));
-    await mkdir(join(workspacePath, ".opencode", "skills", "docx"), { recursive: true });
+    const writerSkills = [
+      "content-research-writer",
+      "doc-coauthoring",
+      "doc-normalize",
+      "docx",
+      "image-enhancer",
+      "internal-comms",
+      "openwork-core",
+      "openwork-debug",
+      "pdf",
+      "pptx",
+      "xlsx",
+    ] as const;
+    for (const skill of writerSkills) {
+      await mkdir(join(workspacePath, ".opencode", "skills", skill), { recursive: true });
+      await writeFile(join(workspacePath, ".opencode", "skills", skill, "SKILL.md"), `# ${skill}\n`, "utf8");
+    }
     await mkdir(join(workspacePath, ".opencode", "skills", "openwork-core", "scripts"), { recursive: true });
-    await mkdir(join(workspacePath, ".opencode", "skills", "openwork-debug"), { recursive: true });
-    await writeFile(join(workspacePath, ".opencode", "skills", "docx", "SKILL.md"), "# docx\n", "utf8");
-    await writeFile(join(workspacePath, ".opencode", "skills", "openwork-core", "SKILL.md"), "# openwork-core\n", "utf8");
     await writeFile(join(workspacePath, ".opencode", "skills", "openwork-core", "scripts", "extract_doc_state.py"), "print('ok')\n", "utf8");
-    await writeFile(join(workspacePath, ".opencode", "skills", "openwork-debug", "SKILL.md"), "# debug\n", "utf8");
 
     const runtime = await provisionSessionWorkspace(workspacePath, {
       preferredView: "document-writer",
       preferredAgent: "document-writer",
       preferredAgentLock: "document-writer",
     });
+    const runtimeSkillDirs = (await readdir(join(runtime.runtimeDir, ".opencode", "skills"))).sort();
+    const profileRaw = await readFile(join(runtime.runtimeDir, ".opencode", "openwork-runtime-profile.json"), "utf8");
+    const profile = JSON.parse(profileRaw) as { id?: string; skillAllowlist?: string[] };
 
-    expect(await exists(join(runtime.runtimeDir, ".opencode", "skills", "docx", "SKILL.md"))).toBe(true);
-    expect(await exists(join(runtime.runtimeDir, ".opencode", "skills", "openwork-core", "SKILL.md"))).toBe(true);
+    expect(runtimeSkillDirs).toEqual([
+      "doc-coauthoring",
+      "doc-normalize",
+      "docx",
+      "openwork-core",
+      "pdf",
+      "pptx",
+      "xlsx",
+    ]);
+    expect(profile.id).toBe("document-writer");
+    expect(profile.skillAllowlist?.sort()).toEqual([
+      "doc-coauthoring",
+      "doc-normalize",
+      "docx",
+      "openwork-core",
+      "pdf",
+      "pptx",
+      "xlsx",
+    ]);
     expect(await exists(join(runtime.runtimeDir, ".opencode", "skills", "openwork-core", "scripts", "extract_doc_state.py"))).toBe(
       true,
     );
-    expect(await exists(join(runtime.runtimeDir, ".opencode", "skills", "openwork-debug", "SKILL.md"))).toBe(false);
   });
 
   test("writes a runtime knowledge carrier config by preserving parent config and adding the MCP", async () => {

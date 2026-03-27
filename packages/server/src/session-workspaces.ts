@@ -89,12 +89,9 @@ const RUNTIME_MIRRORED_OPENCODE_DIRS = [
   "skills",
 ] as const;
 const DOCUMENT_SESSION_SKILL_ALLOWLIST = [
-  "content-research-writer",
   "doc-coauthoring",
   "doc-normalize",
   "docx",
-  "image-enhancer",
-  "internal-comms",
   "pdf",
   "pptx",
   "xlsx",
@@ -103,7 +100,6 @@ const DOCUMENT_WRITER_SESSION_SKILL_ALLOWLIST = [...DOCUMENT_SESSION_SKILL_ALLOW
 const DOCUMENT_SESSION_MCP_ALLOWLIST = [
   "bocha-search",
   "doc_state",
-  "filesystem",
   "openwork-knowledge",
 ] as const;
 

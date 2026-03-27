@@ -452,11 +452,13 @@ test("common-work routes document sessions through a small document-focused supp
 
   expect(prompt).toContain("只有在当前阶段确实需要时");
   expect(prompt).toContain("`doc-coauthoring`");
-  expect(prompt).toContain("`content-research-writer`");
-  expect(prompt).toContain("`internal-comms`");
-  expect(prompt).toContain("`image-enhancer`");
-  expect(prompt).toContain("补充 skill 只作为阶段性增强");
+  expect(prompt).toContain("`doc-normalize`");
+  expect(prompt).toContain("补充 skill 只保留文档阶段真正相关的一小组");
   expect(prompt).toContain("不要一次同时拉起多个“看起来都可能有用”的 skill");
+  expect(prompt).toContain("不额外切到泛化 research / internal-comms / image skill");
+  expect(prompt).not.toContain("`content-research-writer`");
+  expect(prompt).not.toContain("`internal-comms`");
+  expect(prompt).not.toContain("`image-enhancer`");
 });
 
 test("common-work keeps the MCP stack small and document-oriented instead of enabling every available connector", async () => {
@@ -471,6 +473,14 @@ test("common-work keeps the MCP stack small and document-oriented instead of ena
   expect(prompt).toContain("`filesystem` 这类与当前 workspace 文件能力重叠的 MCP");
   expect(prompt).toContain("memory / sequential-thinking");
   expect(prompt).toContain("优先依赖 workspace 内状态文件");
+});
+
+test("common-work explicitly forbids external-directory detours for hosted document sessions", async () => {
+  const prompt = await readFile(resolve(root, ".opencode/agent/common-work.md"), "utf8");
+
+  expect(prompt).toContain("不要主动调用 `external_directory`");
+  expect(prompt).toContain("workspace 外绝对路径");
+  expect(prompt).toContain("输入、草稿、状态和交付物都应当回到 `<WORKSPACE>` 内");
 });
 
 test("docx skill steers extraction artifacts into workspace-local temp paths", async () => {

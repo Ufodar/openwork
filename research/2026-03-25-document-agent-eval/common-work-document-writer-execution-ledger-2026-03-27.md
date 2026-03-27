@@ -68,7 +68,7 @@ Stage 1 status:
 - in progress
 
 Immediate blocker:
-- fixed locally, pending republish: OpenCode rejects runtime `opencode.jsonc` when it contains an unknown top-level `openwork` key
+- pod-side live verification is still partially blocked by intermittent SSH / edge timeout; local code and tests are green, but the latest runtime folder listing on pod still needs a fresh check after republish
 
 ## Latest Findings
 
@@ -96,6 +96,61 @@ Local verification after the fix:
 - `bun test packages/server/src/session-workspaces.test.ts packages/server/src/server.proxy-session-create.test.ts packages/app/src/app/app.create-session-runtime-profile.test.ts packages/app/src/app/lib/session-preferences.test.ts packages/app/src/app/context/session.runtime-directory-hydration.test.ts packages/app/src/app/lib/session-command-palette.test.ts`
 - all passing
 
+### 2026-03-27: document-session runtime surface was tightened again to remove generic detours
+
+What changed:
+- document-agent / common-work runtime skills were reduced to:
+  - `doc-coauthoring`
+  - `doc-normalize`
+  - `docx`
+  - `pdf`
+  - `pptx`
+  - `xlsx`
+- document-writer runtime keeps the same set plus `openwork-core`
+- document-session runtime MCP allowlist was reduced to:
+  - `bocha-search`
+  - `doc_state`
+  - `openwork-knowledge`
+- document sessions no longer preserve the redundant `filesystem` MCP
+- `common-work` prompt and session command palette were aligned to this smaller runtime surface
+
+Why:
+- OpenCode loads whatever exists under the runtime `.opencode/skills` folder
+- keeping generic support skills in document sessions increases the chance of long-document runs drifting into irrelevant routes
+- keeping `filesystem` in the document runtime MCP surface was redundant because the hosted session already has native file tools scoped to `<WORKSPACE>`
+
+Local verification:
+- `bun test packages/server/src/session-workspaces.test.ts`
+- `bun test packages/app/src/app/lib/session-command-palette.test.ts packages/app/scripts/doc-subagent-prompts.test.mjs packages/app/src/app/lib/session-preferences.test.ts packages/app/src/app/context/session.runtime-directory-hydration.test.ts`
+- `git diff --check -- packages/server/src/session-workspaces.ts packages/server/src/session-workspaces.test.ts packages/app/src/app/lib/session-command-palette.ts packages/app/src/app/lib/session-command-palette.test.ts .opencode/agent/common-work.md packages/app/scripts/doc-subagent-prompts.test.mjs`
+- all passing
+
+### 2026-03-27: first low-token Qin diagnostic answered the external-path concern locally
+
+Scenario:
+- `QIN_ABC_LANES=raw,local OPENWORK_COMPARE_MODE=diagnostic node tmp/qin-abc-minimax.mjs`
+
+Findings:
+- local `common-work` early tool burst:
+  - `glob: 1`
+  - `skill: 1`
+  - `bash: 3`
+  - `read: 2`
+- local `common-work` routing diagnostics:
+  - `externalPathTouchCount = 0`
+  - `systemTempTouchCount = 0`
+  - `directOfficeReadCount = 0`
+  - `issueCounts = {}`
+- local raw OpenCode routing diagnostics:
+  - `externalPathTouchCount = 0`
+  - `systemTempTouchCount = 0`
+  - `directOfficeReadCount = 0`
+- raw still showed two `webfetch` failures; this remains a raw-side issue, not a hosted document-session boundary issue
+
+Interpretation:
+- the current concern around `external_directory` / workspace-external writes is not showing up as a local parity gap in the first low-token Qin pass
+- the remaining parity question is still pod/common-work behavior under hosted runtime, not local raw behavior
+
 ## Files Touched In Current Stage
 
 - `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/packages/server/src/session-workspaces.ts`
@@ -118,13 +173,13 @@ Local verification after the fix:
 
 ## Next Actions
 
-1. Commit the sidecar-based runtime profile fix.
+1. Commit the reduced document-session skill/MCP surface and prompt/palette alignment.
 2. Push to GitHub and Gitee.
 3. Pull on pod and restart.
-4. Re-run the minimal live document-session create check.
-5. Confirm:
+4. Re-run a minimal live document-session create check on pod.
+5. Confirm on pod:
    - session creation succeeds
-   - runtime skill folder is physically pruned
-   - runtime MCP surface is pruned
-   - history view tests still pass
-6. Only then resume `common-work` A/B diagnostics.
+   - runtime skill folder is physically pruned to the intended subset
+   - runtime MCP surface is physically pruned to the intended subset
+   - history view behavior still opens the intended TSX
+6. Once that is confirmed, continue Stage 2 with low-token `common-work` A/B diagnostics against local raw OpenCode, then only escalate to longer runs when a parity gap is real.

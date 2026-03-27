@@ -23,21 +23,15 @@ const DOCUMENT_AGENT_SKILL_PRIORITY = [
   "pptx",
   "doc-normalize",
   "doc-coauthoring",
-  "content-research-writer",
-  "internal-comms",
-  "image-enhancer",
 ] as const;
 
 const DOCUMENT_WRITER_SKILL_PRIORITY = [
   "docx",
   "doc-normalize",
   "doc-coauthoring",
-  "content-research-writer",
-  "internal-comms",
   "pdf",
   "xlsx",
   "pptx",
-  "image-enhancer",
 ] as const;
 
 const GENERAL_SESSION_SKILL_PRIORITY = [
@@ -47,9 +41,6 @@ const GENERAL_SESSION_SKILL_PRIORITY = [
   "pptx",
   "doc-normalize",
   "doc-coauthoring",
-  "content-research-writer",
-  "internal-comms",
-  "image-enhancer",
 ] as const;
 
 const DOCUMENT_SKILL_EXACT_ALLOW = new Set<string>([
@@ -63,6 +54,8 @@ const HIDDEN_FROM_NON_DEVELOPER_SESSIONS = new Set<string>([
   "changelog-generator",
   "frontend-design",
   "get-started",
+  "image-enhancer",
+  "internal-comms",
   "mcp-builder",
   "opencode-bridge",
   "opencode-mirror",
@@ -74,6 +67,7 @@ const HIDDEN_FROM_NON_DEVELOPER_SESSIONS = new Set<string>([
   "release",
   "skill-creator",
   "solidjs-patterns",
+  "content-research-writer",
   "tauri-solidjs",
 ]);
 

@@ -1,6 +1,6 @@
 import { spawn, type SpawnOptions } from "node:child_process";
 import { once } from "node:events";
-import { cp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer as createNetServer } from "node:net";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -47,6 +47,27 @@ export type StartedSessionRuntime = {
 
 const DEFAULT_MAX_ACTIVE_SESSION_RUNTIMES = 30;
 const DEFAULT_SESSION_RUNTIME_IDLE_TTL_MS = 8 * 60 * 60 * 1000;
+const STRIPPED_RUNTIME_CONFIG_DIRS = [
+  "skills",
+  "plugins",
+  "commands",
+  "agents",
+  "prompts",
+  "references",
+  "themes",
+  "tools",
+  "superpowers",
+] as const;
+const STRIPPED_RUNTIME_CONFIG_FILES = [
+  "opencode-mem.jsonc",
+] as const;
+const COPIED_RUNTIME_CONFIG_KEYS = [
+  "$schema",
+  "provider",
+  "model",
+  "small_model",
+  "reasoning_model",
+] as const;
 
 function parsePositiveInteger(value: string | undefined): number | null {
   const trimmed = value?.trim();
@@ -449,15 +470,31 @@ async function seedIsolatedRuntime(runtime: IsolatedOpencodeRuntime): Promise<vo
 }
 
 async function sanitizeSeededRuntimeConfigDir(runtime: IsolatedOpencodeRuntime): Promise<void> {
+  for (const relativeDir of STRIPPED_RUNTIME_CONFIG_DIRS) {
+    await rm(join(runtime.configDir, relativeDir), { recursive: true, force: true }).catch(() => undefined);
+  }
+  for (const relativeFile of STRIPPED_RUNTIME_CONFIG_FILES) {
+    await rm(join(runtime.configDir, relativeFile), { force: true }).catch(() => undefined);
+  }
   for (const fileName of ["opencode.json", "opencode.jsonc"]) {
     const configPath = join(runtime.configDir, fileName);
     if (!(await exists(configPath))) continue;
     const { data } = await readJsoncFile<Record<string, unknown>>(configPath, {});
-    const sanitized = sanitizeRuntimeConfigForSession(data, {
+    const stripped = sanitizeRuntimeConfigForSession(data, {
       runtimeDir: runtime.tempDir ? join(runtime.tempDir, "..", "..") : undefined,
     });
+    const sanitized = buildSeededRuntimeConfigRecord(stripped);
     await writeJsoncFile(configPath, sanitized);
   }
+}
+
+function buildSeededRuntimeConfigRecord(configInput: Record<string, unknown>): Record<string, unknown> {
+  const config = configInput && typeof configInput === "object" ? configInput : {};
+  const sanitized: Record<string, unknown> = {};
+  for (const key of COPIED_RUNTIME_CONFIG_KEYS) {
+    if (key in config) sanitized[key] = config[key];
+  }
+  return sanitized;
 }
 
 function buildRuntimeAuthHeaders(workspace: WorkspaceInfo): Record<string, string> | undefined {

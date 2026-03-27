@@ -50,9 +50,18 @@ describe("SessionOpencodeRuntimeService", () => {
     const hostConfigDir = await mkdtemp(join(tmpdir(), "openwork-session-runtime-host-config-"));
     const hostDataHome = await mkdtemp(join(tmpdir(), "openwork-session-runtime-host-data-"));
     await mkdir(join(hostConfigDir, "plugins"), { recursive: true });
+    await mkdir(join(hostConfigDir, "skills", "host-only-skill"), { recursive: true });
     await writeFile(
       join(hostConfigDir, "opencode.json"),
       JSON.stringify({
+        provider: {
+          test: {
+            options: {
+              baseURL: "http://127.0.0.1:3002/v1",
+              apiKey: "secret",
+            },
+          },
+        },
         model: "host-model",
         mcp: {
           filesystem: {
@@ -68,6 +77,11 @@ describe("SessionOpencodeRuntimeService", () => {
       "utf8",
     );
     await writeFile(join(hostConfigDir, "plugins", "sample.js"), "export default {}", "utf8");
+    await writeFile(join(hostConfigDir, "skills", "host-only-skill", "SKILL.md"), "# host-only-skill\n", "utf8");
+    await writeFile(join(hostConfigDir, "opencode-mem.jsonc"), JSON.stringify({
+      autoCaptureEnabled: true,
+      chatMessage: { enabled: true },
+    }), "utf8");
     await mkdir(join(hostDataHome, "opencode"), { recursive: true });
     await writeFile(join(hostDataHome, "opencode", "auth.json"), "{\"ok\":true}", "utf8");
     await writeFile(join(hostDataHome, "opencode", "mcp-auth.json"), "{\"mcp\":true}", "utf8");
@@ -88,20 +102,26 @@ describe("SessionOpencodeRuntimeService", () => {
     expect(entry.opencodeRuntime?.rootDir.startsWith(runtimeDir)).toBe(true);
     expect(entry.opencodeRuntime?.configHomeDir.startsWith(runtimeDir)).toBe(true);
     expect(await exists(join(entry.opencodeRuntime?.configDir ?? "", "opencode.json"))).toBe(true);
-    expect(await exists(join(entry.opencodeRuntime?.configDir ?? "", "plugins", "sample.js"))).toBe(true);
+    expect(await exists(join(entry.opencodeRuntime?.configDir ?? "", "plugins", "sample.js"))).toBe(false);
+    expect(await exists(join(entry.opencodeRuntime?.configDir ?? "", "skills", "host-only-skill", "SKILL.md"))).toBe(false);
+    expect(await exists(join(entry.opencodeRuntime?.configDir ?? "", "opencode-mem.jsonc"))).toBe(false);
     expect(await exists(join(entry.opencodeRuntime?.dataDir ?? "", "opencode", "auth.json"))).toBe(true);
     expect(await exists(join(entry.opencodeRuntime?.dataDir ?? "", "opencode", "mcp-auth.json"))).toBe(true);
     expect(await exists(entry.opencodeRuntime?.tempDir ?? "")).toBe(true);
     const configRaw = await readFile(join(entry.opencodeRuntime?.configDir ?? "", "opencode.json"), "utf8");
     expect(configRaw).toContain("host-model");
     const config = JSON.parse(configRaw) as {
+      provider?: Record<string, unknown>;
       mcp?: Record<string, unknown>;
     };
-    expect(config.mcp?.filesystem).toBeUndefined();
-    expect(config.mcp?.memory).toMatchObject({
-      type: "local",
-      command: ["npx", "-y", "@modelcontextprotocol/server-memory"],
+    expect(config.provider?.test).toMatchObject({
+      options: {
+        baseURL: "http://127.0.0.1:3002/v1",
+        apiKey: "secret",
+      },
     });
+    expect(config.mcp?.filesystem).toBeUndefined();
+    expect(config.mcp).toBeUndefined();
   });
 
   test("spawns opencode serve with session-scoped env and resolves a dedicated runtime workspace", async () => {

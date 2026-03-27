@@ -62,16 +62,79 @@ Exit criteria:
 ## Current Status
 
 Active stage:
-- Stage 2
+- Stage 1
 
 Stage 1 status:
-- complete
+- in progress
 
 Immediate blocker:
-- no Stage 1 blocker remains
-- next active work is Stage 2 low-token `common-work` A/B diagnostics against local raw OpenCode
+- hidden global config leakage still makes hosted child runtimes load unrelated global skills, MCP, and `opencode-mem`
+- until live pod verification confirms that the child runtime only loads the intended session surface, Stage 2 A/B comparisons are not trustworthy
 
 ## Latest Findings
+
+### 2026-03-27: hosted child runtimes were still inheriting host-global skills, MCP, and opencode-mem
+
+What was observed live:
+- the session root for a pod `common-work` diagnostic session was already trimmed correctly:
+  - runtime `.opencode/skills` only contained:
+    - `doc-coauthoring`
+    - `doc-normalize`
+    - `docx`
+    - `pdf`
+    - `pptx`
+    - `xlsx`
+  - runtime `opencode.jsonc` only exposed:
+    - `mcp = ["bocha-search"]`
+- but the isolated child runtime config under:
+  - `.openwork-runtime/opencode/config/`
+  still contained:
+  - a large host-global `skills/` tree
+  - host-global `plugins/`
+  - host-global MCP entries such as `fetch`, `git`, `github`, `chrome-devtools`, `sqlite`, `sequential-thinking`
+  - `opencode-mem.jsonc`
+
+Why this matters:
+- OpenCode does not only load the session root `.opencode/skills`
+- it also loads global `~/.config/opencode/skills` and global plugins/config surfaces
+- so the earlier “runtime skill pruning is complete” conclusion was only half true
+- this hidden second load surface can still:
+  - expose irrelevant tools/skills to hosted sessions
+  - create hosted-only routing differences relative to the intended session profile
+  - keep document sessions weaker or noisier than the controlled local comparison target
+
+Root cause:
+- `SessionOpencodeRuntimeService.seedIsolatedRuntime()` copied the entire host `OPENCODE_CONFIG_DIR` into the child runtime
+- the existing sanitization only removed unsafe absolute-root `filesystem` MCP entries
+- it did not strip:
+  - global `skills/`
+  - global `plugins/`
+  - global MCP entries in copied `opencode.json`
+  - `opencode-mem.jsonc`
+
+What changed locally:
+- isolated child runtimes now strip host-global runtime content after seeding:
+  - remove copied global `skills/`
+  - remove copied global `plugins/`
+  - remove copied `opencode-mem.jsonc`
+  - rewrite copied `opencode.json/opencode.jsonc` down to the minimal safe runtime carrier:
+    - keep provider/model fields
+    - drop copied global MCP surface
+    - drop copied global plugin/skill loading state
+
+Local verification:
+- new red/green coverage added in:
+  - `packages/server/src/session-opencode-runtime.test.ts`
+- verified passing:
+  - `bun test packages/server/src/session-opencode-runtime.test.ts packages/server/src/session-workspaces.test.ts packages/server/src/server.proxy-session-create.test.ts`
+  - `bun test packages/app/src/app/lib/session-preferences.test.ts packages/app/src/app/context/session.runtime-directory-hydration.test.ts packages/app/src/app/lib/session-view-routing.test.ts packages/app/src/app/app.sidebar-session-hints-preserved.test.mjs`
+  - `corepack pnpm --filter openwork-server build:bin`
+
+Interpretation:
+- the next live pod verification must confirm both layers are now clean:
+  - session root `.opencode/skills`
+  - child runtime `.openwork-runtime/opencode/config/*`
+- only after that can the remaining hosted `glob` / `skill(docx)` symptoms be judged fairly
 
 ### 2026-03-27: hosted bootstrap source inventory was polluted by runtime-internal files, which masked the real local-source set
 

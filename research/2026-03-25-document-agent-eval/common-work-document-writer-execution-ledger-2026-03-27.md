@@ -73,6 +73,63 @@ Immediate blocker:
 
 ## Latest Findings
 
+### 2026-03-27: local baseline was tightened again so even default hosted sessions now prune to the document-first runtime surface, and document-mode bridge now explicitly forbids `external_directory` detours
+
+What changed locally:
+- `packages/server/src/session-workspaces.ts`
+  - the hosted runtime default profile no longer falls back to “copy every skill and keep generic MCP”
+  - default hosted session runtimes now use the same document-first runtime surface as `document-agent/common-work`:
+    - runtime skills:
+      - `doc-coauthoring`
+      - `doc-normalize`
+      - `docx`
+      - `pdf`
+      - `pptx`
+      - `xlsx`
+    - runtime MCP allowlist:
+      - `bocha-search`
+      - `doc_state`
+      - `openwork-knowledge`
+  - skill mirroring is now driven by the effective runtime allowlist, not by the profile ID alone
+- `.opencode/plugins/document-mode-bridge.js`
+  - document-heavy sessions now receive an explicit system rule that they must not:
+    - call `external_directory`
+    - probe parent directories
+    - probe sibling session folders
+    - probe repo-root files
+  - if a needed document is not inside the current workspace, the agent should treat that as missing input rather than “search one level up”
+
+Why this matters:
+- the user baseline is stricter than “document-agent sessions are pruned when the right hint arrives”
+- OpenCode loads whatever exists under each session runtime `.opencode/skills`
+- so if any no-hint / default hosted session still copied the full workspace skill tree, users could still see the same irrelevant-skill problem in real sessions
+- pushing the default hosted runtime down to the document-first surface makes the baseline less dependent on UI routing correctness
+
+Local verification completed:
+- red/green tests were added first, then the implementation was updated to make them pass
+- verification run:
+  - `bun test packages/server/src/server.proxy-session-create.test.ts packages/server/src/session-workspaces.test.ts packages/server/src/skills.test.ts packages/app/src/app/lib/session-preferences.test.ts packages/app/src/app/context/session.runtime-directory-hydration.test.ts packages/app/src/app/pages/dashboard.history-session-hints.test.mjs packages/app/src/app/app.create-session-runtime-profile.test.ts packages/app/src/app/app.sidebar-session-hints-preserved.test.mjs .opencode/plugins/document-mode-bridge.test.mjs .opencode/plugins/document-normalize.test.mjs packages/app/scripts/doc-subagent-prompts.test.mjs`
+  - result:
+    - `78 pass`
+    - `0 fail`
+- `git diff --check` is clean for:
+  - `packages/server/src/session-workspaces.ts`
+  - `packages/server/src/session-workspaces.test.ts`
+  - `packages/server/src/server.proxy-session-create.test.ts`
+  - `.opencode/plugins/document-mode-bridge.js`
+  - `.opencode/plugins/document-mode-bridge.test.mjs`
+
+Interpretation:
+- locally, the baseline is now stronger than the previous “only hinted document sessions are pruned” behavior
+- this does not yet count as deployed proof
+- the next required step is still:
+  - commit
+  - push to `origin` and `gitee`
+  - pod `git pull --ff-only`
+  - recover/restart pod
+  - verify live that a fresh default hosted session runtime also exposes only the intended document skill/MCP surface
+  - then rerun the low-token parity diagnostics
+
 ### 2026-03-27: fresh hosted-vs-local WJW diagnostics isolated a hosted-only `glob` / `grep` / `skill` weakness, so the next mitigation is to route `common-work` around those tool paths by default
 
 Scenario:
@@ -1082,6 +1139,8 @@ Interpretation:
 - `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/packages/app/src/app/pages/session.tsx`
 - `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/packages/app/scripts/doc-subagent-prompts.test.mjs`
 - `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/.opencode/agent/common-work.md`
+- `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/.opencode/plugins/document-mode-bridge.js`
+- `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/.opencode/plugins/document-mode-bridge.test.mjs`
 
 ## Current Working Rules
 
@@ -1097,16 +1156,22 @@ Interpretation:
 
 ## Next Actions
 
-1. Continue Stage 2 low-token `common-work` A/B against local raw OpenCode now that the hosted baseline is re-verified live.
-2. Focus Stage 2 on:
+1. Deploy the newest default-runtime pruning and document-mode bridge hardening:
+   - commit
+   - push to `origin` and `gitee`
+   - pod `git pull --ff-only`
+   - recover/restart pod
+   - verify a fresh default hosted session runtime now loads only the document-first skill/MCP surface
+2. Continue Stage 2 low-token `common-work` A/B against local raw OpenCode once that live runtime-surface check is green.
+3. Focus Stage 2 on:
    - early search churn after local document grounding
    - repeated failure patterns
    - final-result quality and completion quality
    - whether hosted `common-work` is now materially stronger than local raw OpenCode, not just “less broken”
-3. For Stage 2 long-document work, use the formal benchmark docs under:
+4. For Stage 2 long-document work, use the formal benchmark docs under:
    - `/Users/storm/Pictures/开发参考文件/标书agent开发相关文件/`
-4. Keep the hosted baseline checks in the loop while doing Stage 2:
+5. Keep the hosted baseline checks in the loop while doing Stage 2:
    - runtime `.opencode/skills` remains physically pruned
    - runtime MCP surface stays trimmed
    - history re-entry remains correct
-5. Do not begin Stage 3 / `document-writer` work until `common-work` is demonstrably at least as strong as local raw OpenCode on the chosen document benchmarks.
+6. Do not begin Stage 3 / `document-writer` work until `common-work` is demonstrably at least as strong as local raw OpenCode on the chosen document benchmarks.

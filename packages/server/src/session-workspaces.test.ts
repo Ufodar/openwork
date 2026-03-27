@@ -58,10 +58,7 @@ describe("provisionSessionWorkspace", () => {
     };
 
     expect(parsed.mcp?.filesystem).toBeUndefined();
-    expect(parsed.mcp?.memory).toMatchObject({
-      type: "local",
-      command: ["npx", "-y", "@modelcontextprotocol/server-memory"],
-    });
+    expect(parsed.mcp?.memory).toBeUndefined();
   });
 
   test("creates a runtime directory, a workspace-local temp root, and mirrors required .opencode support files", async () => {
@@ -209,6 +206,73 @@ describe("provisionSessionWorkspace", () => {
     expect(parsed.mcp?.filesystem).toBeUndefined();
   });
 
+  test("prunes default hosted session runtimes to the same document-first skill and MCP surface", async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), "openwork-session-workspace-default-doc-surface-"));
+    const allSkills = [
+      "content-research-writer",
+      "doc-coauthoring",
+      "doc-normalize",
+      "docx",
+      "image-enhancer",
+      "internal-comms",
+      "openwork-debug",
+      "pdf",
+      "pptx",
+      "release",
+      "xlsx",
+    ] as const;
+    for (const skill of allSkills) {
+      await mkdir(join(workspacePath, ".opencode", "skills", skill), { recursive: true });
+      await writeFile(join(workspacePath, ".opencode", "skills", skill, "SKILL.md"), `# ${skill}\n`, "utf8");
+    }
+    await writeFile(
+      join(workspacePath, "opencode.jsonc"),
+      JSON.stringify({
+        model: "test-model",
+        mcp: {
+          filesystem: {
+            type: "local",
+            command: ["npx", "-y", "@modelcontextprotocol/server-filesystem", "."],
+          },
+          memory: {
+            type: "local",
+            command: ["npx", "-y", "@modelcontextprotocol/server-memory"],
+          },
+          "bocha-search": {
+            type: "local",
+            command: ["uv", "--directory", "/tmp/bocha", "run", "bocha-search-mcp"],
+          },
+          "sequential-thinking": {
+            type: "local",
+            command: ["npx", "-y", "@modelcontextprotocol/server-sequential-thinking"],
+          },
+        },
+      }, null, 2),
+      "utf8",
+    );
+
+    const runtime = await provisionSessionWorkspace(workspacePath);
+    const runtimeSkillDirs = (await readdir(join(runtime.runtimeDir, ".opencode", "skills"))).sort();
+    const raw = await readFile(join(runtime.runtimeDir, "opencode.jsonc"), "utf8");
+    const parsed = JSON.parse(raw) as {
+      mcp?: Record<string, unknown>;
+    };
+
+    expect(runtimeSkillDirs).toEqual([
+      "doc-coauthoring",
+      "doc-normalize",
+      "docx",
+      "pdf",
+      "pptx",
+      "xlsx",
+    ]);
+    expect(Object.keys(parsed.mcp ?? {}).sort()).toEqual([
+      "bocha-search",
+    ]);
+    expect(parsed.mcp?.memory).toBeUndefined();
+    expect(parsed.mcp?.filesystem).toBeUndefined();
+  });
+
   test("keeps openwork-core for document-writer runtime sessions", async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), "openwork-session-workspace-doc-writer-"));
     const writerSkills = [
@@ -305,12 +369,8 @@ describe("provisionSessionWorkspace", () => {
     const instructionRaw = await readFile(join(runtime.runtimeDir, ".opencode", "openwork-knowledge.md"), "utf8");
 
     expect(parsed.model).toBe("test-model");
-    expect(parsed.mcp?.filesystem).toBeTruthy();
-    expect(parsed.mcp?.memory).toMatchObject({
-      type: "local",
-      command: ["npx", "-y", "@modelcontextprotocol/server-memory"],
-    });
-    expect((parsed.mcp?.memory as Record<string, unknown> | undefined)?.enabled).toBeUndefined();
+    expect(parsed.mcp?.filesystem).toBeUndefined();
+    expect(parsed.mcp?.memory).toBeUndefined();
     expect(parsed.mcp?.ragflow).toBeUndefined();
     expect(parsed.mcp?.["openwork-knowledge"]).toMatchObject({
       type: "remote",
@@ -362,7 +422,7 @@ describe("provisionSessionWorkspace", () => {
     const instructionRaw = await readFile(join(runtime.runtimeDir, ".opencode", "doc-state.md"), "utf8");
 
     expect(parsed.model).toBe("test-model");
-    expect(parsed.mcp?.filesystem).toBeTruthy();
+    expect(parsed.mcp?.filesystem).toBeUndefined();
     expect(parsed.mcp?.doc_state).toMatchObject({
       type: "remote",
       url: "http://127.0.0.1:8789/workspace/ws_1/doc-state/mcp",
@@ -418,11 +478,7 @@ describe("provisionSessionWorkspace", () => {
     };
     const instructionRaw = await readFile(join(runtime.runtimeDir, ".opencode", "openwork-knowledge.md"), "utf8");
     expect(parsed.mcp?.ragflow).toBeUndefined();
-    expect(parsed.mcp?.memory).toMatchObject({
-      type: "local",
-      command: ["npx", "-y", "@modelcontextprotocol/server-memory"],
-    });
-    expect((parsed.mcp?.memory as Record<string, unknown> | undefined)?.enabled).toBeUndefined();
+    expect(parsed.mcp?.memory).toBeUndefined();
     expect(instructionRaw).toContain("商业资质库");
     expect(instructionRaw).toContain("Attached knowledge count: 1");
     expect(instructionRaw).toContain("If attachments changed earlier in the conversation");

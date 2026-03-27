@@ -93,7 +93,8 @@ describe("proxyOpencodeRequest session creation", () => {
     };
     const runtimeInstructionRaw = await readFile(join(runtime?.runtimeDir ?? "", ".opencode", "openwork-runtime.md"), "utf8");
     expect(parsed.model).toBe("test-model");
-    expect(parsed.mcp?.filesystem).toBeTruthy();
+    expect(parsed.mcp?.filesystem).toBeUndefined();
+    expect(parsed.mcp?.memory).toBeUndefined();
     expect(parsed.mcp?.["openwork-knowledge"]).toBeUndefined();
     expect(parsed.instructions).toContain(".opencode/openwork-runtime.md");
     expect(parsed.instructions ?? []).not.toContain(".opencode/openwork-knowledge.md");

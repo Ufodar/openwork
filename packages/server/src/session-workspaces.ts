@@ -139,6 +139,13 @@ function buildRuntimeSessionProfile(
   };
 }
 
+function buildDefaultRuntimeSessionProfile(): RuntimeSessionProfile {
+  return buildRuntimeSessionProfile("default", {
+    skillAllowlist: DOCUMENT_SESSION_SKILL_ALLOWLIST,
+    mcpAllowlist: DOCUMENT_SESSION_MCP_ALLOWLIST,
+  });
+}
+
 function resolveRuntimeSessionProfile(hints?: SessionRuntimeProvisioningHints | null): RuntimeSessionProfile {
   const preferredView = normalizeOptionalString(hints?.preferredView)?.toLowerCase() ?? "";
   const preferredAgent = normalizeOptionalString(hints?.preferredAgent)?.toLowerCase() ?? "";
@@ -166,14 +173,14 @@ function resolveRuntimeSessionProfile(hints?: SessionRuntimeProvisioningHints | 
     });
   }
 
-  return buildRuntimeSessionProfile("default");
+  return buildDefaultRuntimeSessionProfile();
 }
 
 function parseRuntimeSessionProfileRecord(raw: unknown): RuntimeSessionProfile {
   const record = raw && typeof raw === "object" ? raw as Record<string, unknown> : null;
   const id = normalizeOptionalString(record?.id);
   if (id !== "document-agent" && id !== "document-writer") {
-    return buildRuntimeSessionProfile("default");
+    return buildDefaultRuntimeSessionProfile();
   }
   const fallback = resolveRuntimeSessionProfile({ preferredView: id });
   const skillAllowlist = normalizeStringList(record?.skillAllowlist);
@@ -186,12 +193,12 @@ function parseRuntimeSessionProfileRecord(raw: unknown): RuntimeSessionProfile {
 
 async function readRuntimeSessionProfile(runtimeDir: string): Promise<RuntimeSessionProfile> {
   const profilePath = join(runtimeDir, RUNTIME_PROFILE_RELATIVE_PATH);
-  if (!(await exists(profilePath))) return buildRuntimeSessionProfile("default");
+  if (!(await exists(profilePath))) return buildDefaultRuntimeSessionProfile();
   try {
     const raw = JSON.parse(await readFile(profilePath, "utf8")) as unknown;
     return parseRuntimeSessionProfileRecord(raw);
   } catch {
-    return buildRuntimeSessionProfile("default");
+    return buildDefaultRuntimeSessionProfile();
   }
 }
 
@@ -341,7 +348,11 @@ async function mirrorWorkspaceOpencodeSupportFiles(
     if (!(await exists(sourceDir))) continue;
     const targetDir = join(runtimeOpencodeDir, relativeDir);
     await rm(targetDir, { recursive: true, force: true }).catch(() => undefined);
-    if (relativeDir === "skills" && runtimeProfile.id !== "default") {
+    if (relativeDir === "skills") {
+      if (!runtimeProfile.skillAllowlist.length) {
+        await cp(sourceDir, targetDir, { recursive: true, force: true });
+        continue;
+      }
       await ensureDir(targetDir);
       for (const skillName of runtimeProfile.skillAllowlist) {
         const sourceSkillDir = join(sourceDir, skillName);
@@ -384,7 +395,7 @@ function buildRuntimeConfigBase(
   const workspaceConfig = workspaceConfigInput && typeof workspaceConfigInput === "object" ? workspaceConfigInput : {};
   const runtimeConfig = runtimeConfigInput && typeof runtimeConfigInput === "object" ? runtimeConfigInput : {};
   const baseConfig: Record<string, unknown> = { ...workspaceConfig, ...runtimeConfig };
-  const runtimeProfile = options?.runtimeProfile ?? buildRuntimeSessionProfile("default");
+  const runtimeProfile = options?.runtimeProfile ?? buildDefaultRuntimeSessionProfile();
 
   const workspaceMcp = workspaceConfig.mcp && typeof workspaceConfig.mcp === "object"
     ? workspaceConfig.mcp as Record<string, unknown>

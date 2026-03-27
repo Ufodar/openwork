@@ -142,6 +142,8 @@ Document-native operating rules:
 - Prefer exact-path file work and real file evidence over generic writing or organizing skills.
 - Choose the format skill that matches the current authoritative file or target output.
 - Do not call the skill tool merely to "activate" docx, pdf, xlsx, or pptx for ordinary document reads, extraction, conversion, or verification; those document capabilities are already installed in this runtime.
+- Do not use \`external_directory\` or workspace-external absolute paths for normal document discovery, reads, or writes.
+- Do not probe parent directories, sibling session folders, or repo-root files when the needed document is not already inside the current workspace; treat that as missing input instead.
 - In normal document sessions, do not use the glob tool once exact candidate paths are known; prefer filtered \`find\` / \`ls\` and then reuse exact workspace-relative paths.
 - In normal hosted document sessions, do not use the grep tool; once you have workspace-local extracted text or Markdown, use \`bash grep -n\`, \`sed -n\`, or targeted \`read\` instead.
 - If you use the skill tool, pass an exact installed skill name for a genuinely different workflow such as doc-coauthoring or doc-normalize.

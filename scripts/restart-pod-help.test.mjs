@@ -57,3 +57,11 @@ test("restart-pod launches long-lived services under nohup with stable log files
   assert.match(restartScript, /launch_detached_process\s+\\\s+WEB_PID/);
   assert.match(restartScript, /launch_detached_process\s+\\\s+ORCHESTRATOR_PID/);
 });
+
+test("restart-pod releases cleanup traps after health checks succeed", () => {
+  const restartScript = readFileSync(new URL("./restart-pod.sh", import.meta.url), "utf8");
+
+  assert.match(restartScript, /Deployment is up\./);
+  assert.match(restartScript, /trap - EXIT INT TERM/);
+  assert.match(restartScript, /WEB_PID=""\s+PUBLIC_WEB_PID=""\s+ORCHESTRATOR_PID=""\s+exit 0/s);
+});

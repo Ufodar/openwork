@@ -1094,18 +1094,12 @@ else
     echo "[restart-pod] Deployment is up. Web: http://${OPENWORK_POD_IP}:${OPENWORK_WEB_PORT}  OpenWork: http://127.0.0.1:${OPENWORK_PORT}"
 fi
 
-while true; do
-    if ! kill -0 "$WEB_PID" 2>/dev/null; then
-        wait "$WEB_PID"
-        exit $?
-    fi
-    if [ -n "$PUBLIC_WEB_PID" ] && ! kill -0 "$PUBLIC_WEB_PID" 2>/dev/null; then
-        wait "$PUBLIC_WEB_PID"
-        exit $?
-    fi
-    if ! kill -0 "$ORCHESTRATOR_PID" 2>/dev/null; then
-        wait "$ORCHESTRATOR_PID"
-        exit $?
-    fi
-    sleep 1
-done
+# Services are launched under nohup with stable log files. Once the health
+# checks pass we should leave them detached; the orchestrator launcher may exit
+# after handing off to the actual sidecars, and treating that as a failure would
+# tear down an otherwise healthy deployment.
+trap - EXIT INT TERM
+WEB_PID=""
+PUBLIC_WEB_PID=""
+ORCHESTRATOR_PID=""
+exit 0

@@ -659,7 +659,11 @@ launch_detached_process() {
     shift 2
 
     mkdir -p "$(dirname "$log_file")"
-    nohup "$@" >"$log_file" 2>&1 </dev/null &
+    if command -v setsid >/dev/null 2>&1; then
+        nohup setsid "$@" >"$log_file" 2>&1 </dev/null &
+    else
+        nohup "$@" >"$log_file" 2>&1 </dev/null &
+    fi
     local pid=$!
     printf -v "$__pid_var" '%s' "$pid"
 }
@@ -1094,10 +1098,11 @@ else
     echo "[restart-pod] Deployment is up. Web: http://${OPENWORK_POD_IP}:${OPENWORK_WEB_PORT}  OpenWork: http://127.0.0.1:${OPENWORK_PORT}"
 fi
 
-# Services are launched under nohup with stable log files. Once the health
-# checks pass we should leave them detached; the orchestrator launcher may exit
-# after handing off to the actual sidecars, and treating that as a failure would
-# tear down an otherwise healthy deployment.
+# Services are launched under setsid+nohup when available so they do not remain
+# tied to the current SSH/session process group. Once the health checks pass we
+# should leave them detached; the orchestrator launcher may exit after handing
+# off to the actual sidecars, and treating that as a failure would tear down an
+# otherwise healthy deployment.
 trap - EXIT INT TERM
 WEB_PID=""
 PUBLIC_WEB_PID=""

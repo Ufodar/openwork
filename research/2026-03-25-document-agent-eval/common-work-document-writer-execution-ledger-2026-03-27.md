@@ -68,7 +68,11 @@ Stage 1 status:
 - in progress
 
 Immediate blocker:
-- the latest baseline tightening commit is pushed to GitHub and Gitee, but pod-side `git pull --ff-only` / `restart-pod.sh --force` is currently blocked by intermittent SSH / edge timeout; live HTTP health is up, but the pod has not yet been confirmed on the newest commit
+- local baseline evidence is now good on all three user-facing concerns:
+  - no current local evidence of `external_directory` / repo-external drift in `common-work`
+  - runtime session skill surface is physically pruned to the intended document subset
+  - history re-entry tests still restore the intended TSX/view
+- the remaining blocker is live pod deployment verification: the latest baseline tightening commit is pushed to GitHub and Gitee, but pod-side `git pull --ff-only` / `restart-pod.sh --force` is currently blocked by intermittent SSH / edge timeout; live HTTP health is up, but the pod has not yet been confirmed on the newest commit
 
 ## Latest Findings
 
@@ -200,6 +204,58 @@ Interpretation:
 - the more credible hosted/common-work weakness in the early phase is still search routing churn, especially repeated `bocha-search` calls before enough local-document grounding
 - the pod used in this diagnostic still reported OpenCode `version = 1.3.2`, so the result describes the current deployed build, not yet the newest local baseline commit
 
+### 2026-03-27: `common-work` now explicitly forbids repo-level `.opencode/**` detours, and the local Qin diagnostic no longer shows external-path drift
+
+What changed:
+- `common-work` now explicitly forbids reading prompt / skill / agent instructions from repo root, parent directories, or any workspace-external `.opencode/**`
+- if runtime-local references are genuinely needed, the prompt now allows only the current `<WORKSPACE>/.opencode/**` copies
+
+Why:
+- an earlier corrected local Qin diagnostic showed a real parity trap:
+  - `grep` touched `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/.opencode`
+  - this was outside the session runtime workspace
+- hosted runtimes would reject that route, so leaving it in local `common-work` behavior would mask a real local-vs-hosted mismatch
+
+Verification:
+- `bun test packages/app/scripts/doc-subagent-prompts.test.mjs`
+- `git diff --check -- .opencode/agent/common-work.md packages/app/scripts/doc-subagent-prompts.test.mjs`
+- low-token local Qin diagnostic after the prompt update:
+  - `externalPathTouchCount = 0`
+  - `systemTempTouchCount = 0`
+  - `directOfficeReadCount = 0`
+  - `issueCounts = {}`
+  - early tool counts:
+    - `bash: 4`
+    - `skill: 1`
+    - `read: 2`
+    - `webfetch: 1`
+    - `grep: 1`
+    - `todowrite: 1`
+    - `write: 1` (diagnostic abort only)
+
+Interpretation:
+- the specific repo-level `.opencode` detour that previously appeared in local `common-work` is no longer reproducing in the latest low-token Qin pass
+- the remaining local `common-work` weakness in this pass is not external path drift; it is that a `webfetch` call still appears in the early route
+
+### 2026-03-27: actual runtime folder inspection confirms the pruned document-session skill set and a small MCP surface
+
+Observed on the latest local `document-agent/common-work` runtime created by the compare harness:
+- runtime skill directory contained only:
+  - `doc-coauthoring`
+  - `doc-normalize`
+  - `docx`
+  - `pdf`
+  - `pptx`
+  - `xlsx`
+- runtime `opencode.jsonc` MCP keys were:
+  - `bocha-search`
+  - `openwork-knowledge`
+
+Interpretation:
+- the runtime session that OpenCode actually reads is no longer loading generic writing / image / internal-comms skills for `common-work`
+- the inspected common-work runtime also did not contain unrelated MCP such as `filesystem`, `memory`, or `sequential-thinking`
+- `doc_state` remains supported in the runtime pruning design and unit tests, but it was not present in this particular harness-created common-work runtime snapshot; keep that distinction clear when evaluating live session surfaces
+
 ## Files Touched In Current Stage
 
 - `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/packages/server/src/session-workspaces.ts`
@@ -222,11 +278,11 @@ Interpretation:
 
 ## Next Actions
 
-1. Commit the compare-harness hint fix and refreshed ledger notes.
+1. Commit the newest `common-work` prompt rule and refreshed ledger notes, then push to GitHub and Gitee.
 2. Keep retrying pod `git pull --ff-only` + `bash scripts/restart-pod.sh --force` until SSH is usable again.
 3. After pod deploy succeeds, confirm the live pod commit and re-run a minimal hinted document-session create check.
 4. Confirm on the updated pod:
    - runtime skill folder is physically pruned to the intended subset
    - runtime MCP surface is physically pruned to the intended subset
    - history view behavior still opens the intended TSX
-5. Then continue Stage 2 low-token `common-work` A/B work, focusing first on early search-routing drift rather than external-path drift.
+5. Then continue Stage 2 low-token `common-work` A/B work, focusing first on early search-routing drift (`bocha-search` / `webfetch`) rather than external-path drift.

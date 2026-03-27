@@ -440,11 +440,14 @@ test("common-work stays document-first without blanket-disabling planning skills
 test("common-work keeps drafting-stage routing anchored on local source documents before targeted external search", async () => {
   const prompt = await readFile(resolve(root, ".opencode/agent/common-work.md"), "utf8");
 
+  expect(prompt).toContain("在读到至少一份本地文档片段之前");
+  expect(prompt).toContain("不要调用 `bocha-search`、`webfetch` 或其他联网搜索工具");
   expect(prompt).toContain("进入 `extraction` 或 `drafting` 之后");
   expect(prompt).toContain("不要无理由退回到 workspace 根目录做大范围再发现");
   expect(prompt).toContain("也不要把“泛化搜索整个主题”当成默认下一步");
   expect(prompt).toContain("只有出现明确缺口、明确 blocker 或新资料入口时");
   expect(prompt).toContain("已拿到本地核心资料后，直接围绕这些资料推进");
+  expect(prompt).toContain("在写出至少一条明确缺口前");
 });
 
 test("common-work routes document sessions through a small document-focused supplement skill set", async () => {
@@ -459,6 +462,16 @@ test("common-work routes document sessions through a small document-focused supp
   expect(prompt).not.toContain("`content-research-writer`");
   expect(prompt).not.toContain("`internal-comms`");
   expect(prompt).not.toContain("`image-enhancer`");
+});
+
+test("common-work does not allow discovery-only turns to end without reading a real file or reporting a blocker", async () => {
+  const prompt = await readFile(resolve(root, ".opencode/agent/common-work.md"), "utf8");
+
+  expect(prompt).toContain("不要在只做发现后就结束当前回合");
+  expect(prompt).toContain("如果已经有候选文件，本回合必须继续读到真实内容");
+  expect(prompt).toContain("或明确说明真正的阻塞点");
+  expect(prompt).toContain("调用 `skill` 只算路由准备");
+  expect(prompt).toContain("本回合还必须继续执行第一步真实读取、提取、转换或核查");
 });
 
 test("common-work keeps the MCP stack small and document-oriented instead of enabling every available connector", async () => {
@@ -481,6 +494,8 @@ test("common-work explicitly forbids external-directory detours for hosted docum
   expect(prompt).toContain("不要主动调用 `external_directory`");
   expect(prompt).toContain("workspace 外绝对路径");
   expect(prompt).toContain("输入、草稿、状态和交付物都应当回到 `<WORKSPACE>` 内");
+  expect(prompt).toContain("不要为了查看 prompt、skill、agent 说明而去读仓库根目录、父目录或其他 workspace 外的 `.opencode/**`");
+  expect(prompt).toContain("只读当前 `<WORKSPACE>/.opencode/**` 里的 runtime 副本");
 });
 
 test("docx skill steers extraction artifacts into workspace-local temp paths", async () => {

@@ -204,6 +204,10 @@ import DocumentAgentView from "./pages/document-agent";
 import DocumentWriterView from "./pages/document-writer";
 import LoginView from "./pages/login";
 import SessionKnowledgeModal from "./components/session-knowledge-modal";
+import {
+  filterSessionSkillsForContext,
+  filterSessionSlashCommandsForContext,
+} from "./lib/session-command-palette";
 
 type RemoteWorkspaceDefaults = {
   openworkHostUrl?: string | null;
@@ -1719,6 +1723,23 @@ export default function App() {
       return list;
     }
     return [BUILTIN_COMPACT_COMMAND, ...list];
+  }
+
+  const sessionCommandPaletteContext = createMemo(() => ({
+    view: (currentView() === "login" ? "dashboard" : currentView()) as View,
+    agent: selectedSessionAgent(),
+    agentLock: selectedSessionAgentLock(),
+  }));
+
+  const sessionSkills = createMemo(() =>
+    filterSessionSkillsForContext(skills(), sessionCommandPaletteContext()),
+  );
+
+  async function listSessionCommands(): Promise<
+    { id: string; name: string; description?: string; source?: "command" | "mcp" | "skill" }[]
+  > {
+    const commands = await listCommands();
+    return filterSessionSlashCommandsForContext(commands, sessionCommandPaletteContext());
   }
 
   function setSessionAgent(sessionID: string, agent: string | null) {
@@ -6753,7 +6774,7 @@ export default function App() {
       if (!sessionId) return;
       void persistSessionRagflowSelection(sessionId, { datasetIds: [], datasetNames: [] });
     },
-    skills: skills(),
+    skills: sessionSkills(),
     skillsStatus: skillsStatus(),
     createSessionAndOpen: createSessionAndOpen,
     sendPromptAsync: sendPrompt,
@@ -6808,7 +6829,7 @@ export default function App() {
     providers: providers(),
     providerConnectedIds: providerConnectedIds(),
     listAgents: listAgents,
-    listCommands: listCommands,
+    listCommands: listSessionCommands,
     selectedSessionAgent: selectedSessionAgent(),
     selectedSessionAgentLock: selectedSessionAgentLock(),
     setSessionAgent: setSessionAgent,

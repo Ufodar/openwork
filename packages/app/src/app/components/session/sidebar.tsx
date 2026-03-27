@@ -483,55 +483,53 @@ export default function SessionSidebar(props: SidebarProps) {
                             }
                           >
                             <For each={visibleSessions()}>
-                              {(session) => (
-                                {(() => {
-                                  const sessionDisplayTitle = displaySessionTitle(session.title);
-                                  return (
-                                    <button
-                                      class={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
-                                        session.id === props.selectedSessionId
-                                          ? "bg-gray-3 text-gray-12 font-medium"
-                                          : "text-gray-11 hover:text-gray-12 hover:bg-gray-2"
-                                      } ${!allowActions() ? "opacity-70" : ""}`}
-                                      onClick={() => {
-                                        if (!allowActions()) return;
-                                        props.onSelectSession(group.workspace.id, session.id);
-                                      }}
-                                      onContextMenu={(event) => {
-                                        if (!isActive()) return;
-                                        openContextMenu(event, session.id);
-                                      }}
-                                      disabled={!allowActions()}
-                                    >
-                                      <div class="flex items-center justify-between gap-2 w-full overflow-hidden">
-                                        <div class="truncate">{sessionDisplayTitle}</div>
-                                        <Show
-                                          when={
-                                            props.sessionStatusById[session.id] &&
-                                            props.sessionStatusById[session.id] !== "idle"
-                                          }
+                              {(session) => {
+                                const sessionDisplayTitle = displaySessionTitle(session.title);
+                                return (
+                                  <button
+                                    class={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
+                                      session.id === props.selectedSessionId
+                                        ? "bg-gray-3 text-gray-12 font-medium"
+                                        : "text-gray-11 hover:text-gray-12 hover:bg-gray-2"
+                                    } ${!allowActions() ? "opacity-70" : ""}`}
+                                    onClick={() => {
+                                      if (!allowActions()) return;
+                                      props.onSelectSession(group.workspace.id, session.id);
+                                    }}
+                                    onContextMenu={(event) => {
+                                      if (!isActive()) return;
+                                      openContextMenu(event, session.id);
+                                    }}
+                                    disabled={!allowActions()}
+                                  >
+                                    <div class="flex items-center justify-between gap-2 w-full overflow-hidden">
+                                      <div class="truncate">{sessionDisplayTitle}</div>
+                                      <Show
+                                        when={
+                                          props.sessionStatusById[session.id] &&
+                                          props.sessionStatusById[session.id] !== "idle"
+                                        }
+                                      >
+                                        <span
+                                          class={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full border flex items-center gap-1 ${
+                                            props.sessionStatusById[session.id] === "running"
+                                              ? "border-amber-7/50 text-amber-11 bg-amber-2/50"
+                                              : "border-gray-7/50 text-gray-10 bg-gray-2/50"
+                                          }`}
                                         >
-                                          <span
-                                            class={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full border flex items-center gap-1 ${
+                                          <div
+                                            class={`w-1 h-1 rounded-full ${
                                               props.sessionStatusById[session.id] === "running"
-                                                ? "border-amber-7/50 text-amber-11 bg-amber-2/50"
-                                                : "border-gray-7/50 text-gray-10 bg-gray-2/50"
+                                                ? "bg-amber-9 animate-pulse"
+                                                : "bg-gray-9"
                                             }`}
-                                          >
-                                            <div
-                                              class={`w-1 h-1 rounded-full ${
-                                                props.sessionStatusById[session.id] === "running"
-                                                  ? "bg-amber-9 animate-pulse"
-                                                  : "bg-gray-9"
-                                              }`}
-                                            />
-                                          </span>
-                                        </Show>
-                                      </div>
-                                    </button>
-                                  );
-                                })()}
-                              )}
+                                          />
+                                        </span>
+                                      </Show>
+                                    </div>
+                                  </button>
+                                );
+                              }}
                             </For>
                             <Show when={hasMoreSessions()}>
                               <button

@@ -313,9 +313,16 @@ export async function provisionSessionWorkspace(
   const runtimeDir = join(workspacePath, "documents", "sessions", runtimeId);
   const runtimeProfile = resolveRuntimeSessionProfile(hints);
   await ensureDir(runtimeDir);
+  await writeRuntimeProjectBoundary(runtimeDir);
   await mirrorWorkspaceOpencodeSupportFiles(workspacePath, runtimeDir, runtimeProfile);
   await writeRuntimeSessionCarrierConfig({ workspacePath, runtimeDir, profile: runtimeProfile });
   return { runtimeId, runtimeDir };
+}
+
+async function writeRuntimeProjectBoundary(runtimeDir: string): Promise<void> {
+  const gitMarkerPath = join(runtimeDir, ".git");
+  if (await exists(gitMarkerPath)) return;
+  await writeFile(gitMarkerPath, "gitdir: .openwork-runtime/git\n", "utf8");
 }
 
 async function mirrorWorkspaceOpencodeSupportFiles(

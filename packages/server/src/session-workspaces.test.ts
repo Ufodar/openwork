@@ -85,6 +85,7 @@ describe("provisionSessionWorkspace", () => {
     const runtimeInstructionRaw = await readFile(join(result.runtimeDir, ".opencode", "openwork-runtime.md"), "utf8");
 
     expect(result.runtimeDir.startsWith(join(workspacePath, "documents", "sessions"))).toBe(true);
+    expect(await exists(join(result.runtimeDir, ".git"))).toBe(true);
     expect(await exists(join(result.runtimeDir, "opencode.json"))).toBe(false);
     expect(await exists(join(result.runtimeDir, "opencode.jsonc"))).toBe(true);
     expect(await exists(join(result.runtimeDir, ".tmp", "system"))).toBe(true);

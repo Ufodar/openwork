@@ -2952,6 +2952,9 @@ export default function App() {
       },
     },
   );
+  const [openworkRemoteSessionPrefsById, setOpenworkRemoteSessionPrefsById] = createSignal<
+    Record<string, OpenworkSessionPrefs>
+  >({});
   const [openworkSessionPrefsLoaded, setOpenworkSessionPrefsLoaded] = createSignal(false);
   const [openworkSessionPrefsWorkspaceId, setOpenworkSessionPrefsWorkspaceId] = createSignal<string | null>(null);
   let openworkSessionPrefsLoadPromise: Promise<void> | null = null;
@@ -3126,6 +3129,7 @@ export default function App() {
         }
         const openwork = config.openwork && typeof config.openwork === "object" ? (config.openwork as Record<string, unknown>) : {};
         const prefs = parseOpenworkSessionPrefs(openwork);
+        setOpenworkRemoteSessionPrefsById(prefs);
         // Remote config should not erase valid local session-view hints when the
         // server snapshot simply has not caught up yet.
         const mergedPrefs = mergeOpenworkSessionPrefs(openworkSessionPrefsById(), prefs);
@@ -3173,24 +3177,24 @@ export default function App() {
     if (!configContext) return;
     const { client: openworkClient, workspaceId } = configContext;
 
-    let basePrefs: Record<string, OpenworkSessionPrefs> | null = null;
+    let remotePrefs: Record<string, OpenworkSessionPrefs> | null = null;
     if (openworkSessionPrefsLoaded() && openworkSessionPrefsWorkspaceId() === workspaceId) {
-      basePrefs = openworkSessionPrefsById();
+      remotePrefs = openworkRemoteSessionPrefsById();
     } else {
       try {
         const config = await openworkClient.getConfig(workspaceId);
         const openwork =
           config.openwork && typeof config.openwork === "object" ? (config.openwork as Record<string, unknown>) : {};
-        basePrefs = parseOpenworkSessionPrefs(openwork);
+        remotePrefs = parseOpenworkSessionPrefs(openwork);
       } catch {
         return;
       }
     }
 
-    const remoteExisting = basePrefs?.[id] ?? null;
+    const remoteExisting = remotePrefs?.[id] ?? null;
     if (remoteExisting?.view === view) return;
 
-    const mergedBasePrefs = mergeSessionPrefsForRemotePatch(basePrefs, id);
+    const mergedBasePrefs = mergeSessionPrefsForRemotePatch(openworkSessionPrefsById(), id);
     const existing = mergedBasePrefs[id] ?? null;
 
     const nextPrefs = {
@@ -3202,6 +3206,7 @@ export default function App() {
     } satisfies Record<string, OpenworkSessionPrefs>;
 
     setOpenworkSessionPrefsById(nextPrefs);
+    setOpenworkRemoteSessionPrefsById(nextPrefs);
     setOpenworkSessionPrefsWorkspaceId(workspaceId);
     setOpenworkSessionPrefsLoaded(true);
     markOpenworkSessionPrefsMutation();
@@ -3251,25 +3256,25 @@ export default function App() {
     if (!configContext) return;
     const { client: openworkClient, workspaceId } = configContext;
 
-    let basePrefs: Record<string, OpenworkSessionPrefs> | null = null;
+    let remotePrefs: Record<string, OpenworkSessionPrefs> | null = null;
     if (openworkSessionPrefsLoaded() && openworkSessionPrefsWorkspaceId() === workspaceId) {
-      basePrefs = openworkSessionPrefsById();
+      remotePrefs = openworkRemoteSessionPrefsById();
     } else {
       try {
         const config = await openworkClient.getConfig(workspaceId);
         const openwork =
           config.openwork && typeof config.openwork === "object" ? (config.openwork as Record<string, unknown>) : {};
-        basePrefs = parseOpenworkSessionPrefs(openwork);
+        remotePrefs = parseOpenworkSessionPrefs(openwork);
       } catch {
         return;
       }
     }
 
-    const remoteExisting = basePrefs?.[id] ?? null;
+    const remoteExisting = remotePrefs?.[id] ?? null;
     const existingRemoteAgent = normalizeStoredAgent(remoteExisting?.agent) ?? null;
     if (existingRemoteAgent === nextAgent) return;
 
-    const mergedBasePrefs = mergeSessionPrefsForRemotePatch(basePrefs, id);
+    const mergedBasePrefs = mergeSessionPrefsForRemotePatch(openworkSessionPrefsById(), id);
     const existing = mergedBasePrefs[id] ?? null;
 
     const nextPrefs: Record<string, OpenworkSessionPrefs> = {
@@ -3290,6 +3295,7 @@ export default function App() {
     }
 
     setOpenworkSessionPrefsById(nextPrefs);
+    setOpenworkRemoteSessionPrefsById(nextPrefs);
     setOpenworkSessionPrefsWorkspaceId(workspaceId);
     setOpenworkSessionPrefsLoaded(true);
     markOpenworkSessionPrefsMutation();
@@ -3343,26 +3349,26 @@ export default function App() {
     if (!configContext) return;
     const { client: openworkClient, workspaceId } = configContext;
 
-    let basePrefs: Record<string, OpenworkSessionPrefs> | null = null;
+    let remotePrefs: Record<string, OpenworkSessionPrefs> | null = null;
     if (openworkSessionPrefsLoaded() && openworkSessionPrefsWorkspaceId() === workspaceId) {
-      basePrefs = openworkSessionPrefsById();
+      remotePrefs = openworkRemoteSessionPrefsById();
     } else {
       try {
         const config = await openworkClient.getConfig(workspaceId);
         const openwork =
           config.openwork && typeof config.openwork === "object" ? (config.openwork as Record<string, unknown>) : {};
-        basePrefs = parseOpenworkSessionPrefs(openwork);
+        remotePrefs = parseOpenworkSessionPrefs(openwork);
       } catch {
         return;
       }
     }
 
-    const remoteExisting = basePrefs?.[id] ?? null;
+    const remoteExisting = remotePrefs?.[id] ?? null;
     const existingRemoteLock = normalizeStoredAgent(remoteExisting?.agentLock) ?? null;
     const existingRemoteAgent = normalizeStoredAgent(remoteExisting?.agent) ?? null;
     if (existingRemoteLock === nextLock && (nextLock === null || existingRemoteAgent === nextLock)) return;
 
-    const mergedBasePrefs = mergeSessionPrefsForRemotePatch(basePrefs, id);
+    const mergedBasePrefs = mergeSessionPrefsForRemotePatch(openworkSessionPrefsById(), id);
     const existing = mergedBasePrefs[id] ?? null;
 
     const nextPrefs: Record<string, OpenworkSessionPrefs> = {
@@ -3385,6 +3391,7 @@ export default function App() {
     }
 
     setOpenworkSessionPrefsById(nextPrefs);
+    setOpenworkRemoteSessionPrefsById(nextPrefs);
     setOpenworkSessionPrefsWorkspaceId(workspaceId);
     setOpenworkSessionPrefsLoaded(true);
     markOpenworkSessionPrefsMutation();
@@ -3581,25 +3588,25 @@ export default function App() {
     if (!configContext) return;
     const { client: openworkClient, workspaceId } = configContext;
 
-    let basePrefs: Record<string, OpenworkSessionPrefs> | null = null;
+    let remotePrefs: Record<string, OpenworkSessionPrefs> | null = null;
     if (openworkSessionPrefsLoaded() && openworkSessionPrefsWorkspaceId() === workspaceId) {
-      basePrefs = openworkSessionPrefsById();
+      remotePrefs = openworkRemoteSessionPrefsById();
     } else {
       try {
         const config = await openworkClient.getConfig(workspaceId);
         const openwork =
           config.openwork && typeof config.openwork === "object" ? (config.openwork as Record<string, unknown>) : {};
-        basePrefs = parseOpenworkSessionPrefs(openwork);
+        remotePrefs = parseOpenworkSessionPrefs(openwork);
       } catch {
         return;
       }
     }
 
-    const remoteExisting = basePrefs?.[id] ?? null;
+    const remoteExisting = remotePrefs?.[id] ?? null;
     const existingRemoteSelection = resolveStoredRagflowSelection(remoteExisting);
     if (JSON.stringify(existingRemoteSelection) === JSON.stringify(nextSelection)) return;
 
-    const mergedBasePrefs = mergeSessionPrefsForRemotePatch(basePrefs, id);
+    const mergedBasePrefs = mergeSessionPrefsForRemotePatch(openworkSessionPrefsById(), id);
     const existing = mergedBasePrefs[id] ?? null;
 
     const nextPrefs: Record<string, OpenworkSessionPrefs> = {
@@ -3632,6 +3639,7 @@ export default function App() {
     }
 
     setOpenworkSessionPrefsById(nextPrefs);
+    setOpenworkRemoteSessionPrefsById(nextPrefs);
     setOpenworkSessionPrefsWorkspaceId(workspaceId);
     setOpenworkSessionPrefsLoaded(true);
     markOpenworkSessionPrefsMutation();
@@ -3791,6 +3799,7 @@ export default function App() {
     setOpenworkSessionPrefsWorkspaceId(workspaceId || null);
     setOpenworkSessionPrefsLoaded(false);
     setOpenworkSessionPrefsById(readLocalOpenworkSessionPrefs());
+    setOpenworkRemoteSessionPrefsById({});
 
     if (!workspaceId) return;
     void ensureOpenworkSessionPrefsLoaded().catch(() => undefined);

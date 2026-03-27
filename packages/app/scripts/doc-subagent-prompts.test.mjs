@@ -440,6 +440,20 @@ test("common-work routes document sessions through a small document-focused supp
   expect(prompt).toContain("不要一次同时拉起多个“看起来都可能有用”的 skill");
 });
 
+test("common-work keeps the MCP stack small and document-oriented instead of enabling every available connector", async () => {
+  const prompt = await readFile(resolve(root, ".opencode/agent/common-work.md"), "utf8");
+
+  expect(prompt).toContain("MCP 只保留少数高价值增强");
+  expect(prompt).toContain("`Context7`");
+  expect(prompt).toContain("`Notion`");
+  expect(prompt).toContain("`GitHub`");
+  expect(prompt).toContain("`Playwright`");
+  expect(prompt).toContain("不要因为某个 MCP 很流行就默认接入");
+  expect(prompt).toContain("`filesystem` 这类与当前 workspace 文件能力重叠的 MCP");
+  expect(prompt).toContain("memory / sequential-thinking");
+  expect(prompt).toContain("优先依赖 workspace 内状态文件");
+});
+
 test("docx skill steers extraction artifacts into workspace-local temp paths", async () => {
   const skill = await readFile(resolve(root, ".opencode/skills/docx/SKILL.md"), "utf8");
 

@@ -13,6 +13,7 @@ describe("filterSessionSkillsForContext", () => {
     { name: "pdf", path: ".opencode/skills/pdf/SKILL.md", description: "Handle PDF files" },
     { name: "doc-normalize", path: ".opencode/skills/doc-normalize/SKILL.md", description: "Normalize headings" },
     { name: "content-research-writer", path: ".opencode/skills/content-research-writer/SKILL.md", description: "Research-backed writing" },
+    { name: "status-report-writer", path: ".opencode/skills/status-report-writer/SKILL.md", description: "Write internal reports and documents" },
     { name: "openwork-debug", path: ".opencode/skills/openwork-debug/SKILL.md", description: "Debug sidecars" },
   ];
 
@@ -31,6 +32,12 @@ describe("filterSessionSkillsForContext", () => {
       filterSessionSkillsForContext(skills, { view: "session", agentLock: "common-work" }).map((entry) => entry.name),
     ).toEqual(["docx", "pdf", "doc-normalize", "content-research-writer"]);
   });
+
+  test("does not admit unrelated writing skills just because their descriptions mention reports or documents", () => {
+    expect(
+      filterSessionSkillsForContext(skills, { view: "document-agent", agentLock: "common-work" }).map((entry) => entry.name),
+    ).not.toContain("status-report-writer");
+  });
 });
 
 describe("filterSessionSlashCommandsForContext", () => {
@@ -39,6 +46,7 @@ describe("filterSessionSlashCommandsForContext", () => {
     { id: "skill:frontend-design", name: "frontend-design", description: "Build flashy UI", source: "skill" },
     { id: "skill:docx", name: "docx", description: "Work with Word docs", source: "skill" },
     { id: "skill:content-research-writer", name: "content-research-writer", description: "Research-backed writing", source: "skill" },
+    { id: "skill:status-report-writer", name: "status-report-writer", description: "Write internal reports and documents", source: "skill" },
     { id: "skill:pdf", name: "pdf", description: "Handle PDF files", source: "skill" },
     { id: "skill:openwork-debug", name: "openwork-debug", description: "Debug sidecars", source: "skill" },
     { id: "mcp:search", name: "search", description: "Search external sources", source: "mcp" },
@@ -60,5 +68,13 @@ describe("filterSessionSlashCommandsForContext", () => {
       "skill:pdf",
       "mcp:search",
     ]);
+  });
+
+  test("drops unrelated writer-style skill commands from document sessions", () => {
+    expect(
+      filterSessionSlashCommandsForContext(commands, { view: "document-agent", agentLock: "common-work" }).map(
+        (entry) => `${entry.source}:${entry.name}`,
+      ),
+    ).not.toContain("skill:status-report-writer");
   });
 });

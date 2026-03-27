@@ -41,66 +41,10 @@ const DOCUMENT_WRITER_SKILL_PRIORITY = [
   "file-organizer",
 ] as const;
 
-const DOCUMENT_SKILL_EXACT_EXCLUDE = new Set([
-  "algorithmic-art",
-  "artifacts-builder",
-  "brand-guidelines",
-  "browser-setup-devtools",
-  "cargo-lock-manager",
-  "canvas-design",
-  "changelog-generator",
-  "competitive-ads-extractor",
-  "developer-growth-analysis",
-  "domain-name-brainstormer",
-  "frontend-design",
-  "get-started",
-  "lead-research-assistant",
-  "mcp-builder",
-  "meeting-insights-analyzer",
-  "openwork-core",
-  "openwork-debug",
-  "openwork-docker-chrome-mcp",
-  "openwork-orchestrator-npm-publish",
-  "opencode-bridge",
-  "opencode-mirror",
-  "opencode-primitives",
-  "release",
-  "skill-creator",
-  "solidjs-patterns",
-  "tailored-resume-generator",
-  "tauri-solidjs",
+const DOCUMENT_SKILL_EXACT_ALLOW = new Set<string>([
+  ...DOCUMENT_AGENT_SKILL_PRIORITY,
+  ...DOCUMENT_WRITER_SKILL_PRIORITY,
 ]);
-
-const DOCUMENT_SKILL_KEYWORDS = [
-  "doc",
-  "docx",
-  "document",
-  "writer",
-  "writing",
-  "proposal",
-  "report",
-  "memo",
-  "letter",
-  "word",
-  "markdown",
-  "normalize",
-  "coauthor",
-  "co-author",
-  "pdf",
-  "xlsx",
-  "csv",
-  "tsv",
-  "spreadsheet",
-  "table",
-  "pptx",
-  "slides",
-  "presentation",
-  "office",
-  "research",
-  "citation",
-  "outline",
-  "image",
-] as const;
 
 const normalizeKey = (value: string | null | undefined) =>
   String(value ?? "")
@@ -109,11 +53,6 @@ const normalizeKey = (value: string | null | undefined) =>
     .replace(/\.md$/i, "")
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
-
-const normalizeText = (value: string | null | undefined) =>
-  String(value ?? "")
-    .trim()
-    .toLowerCase();
 
 const resolveDocumentSessionMode = (
   context: SessionCommandPaletteContext,
@@ -139,27 +78,14 @@ const scoreDocumentSkill = (
 ): number | null => {
   const normalizedName = normalizeKey(skill.name);
   if (!normalizedName) return null;
-  if (DOCUMENT_SKILL_EXACT_EXCLUDE.has(normalizedName)) return null;
 
   const priority = skillPriorityIndex(normalizedName, mode);
   if (priority !== -1) {
     return 10_000 - priority * 100;
   }
-
-  const haystack = [skill.name, skill.description, skill.trigger]
-    .map((entry) => normalizeText(entry))
-    .filter(Boolean)
-    .join(" ");
-
-  if (!haystack) return null;
-
-  let keywordHits = 0;
-  for (const keyword of DOCUMENT_SKILL_KEYWORDS) {
-    if (haystack.includes(keyword)) keywordHits += 1;
-  }
-  if (!keywordHits) return null;
-
-  return 1_000 + keywordHits;
+  if (DOCUMENT_SKILL_EXACT_ALLOW.has(normalizedName)) return 1_000;
+  if (normalizedName.startsWith("doc-")) return 900;
+  return null;
 };
 
 const compareRankedSkills = <T extends SkillLike>(mode: DocumentSessionMode) =>

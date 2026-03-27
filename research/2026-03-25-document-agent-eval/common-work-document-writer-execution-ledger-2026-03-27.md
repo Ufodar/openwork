@@ -62,16 +62,272 @@ Exit criteria:
 ## Current Status
 
 Active stage:
-- Stage 1
+- Stage 2
 
 Stage 1 status:
-- in progress
+- completed on the current pod build after fresh live verification
 
 Immediate blocker:
-- hidden global config leakage still makes hosted child runtimes load unrelated global skills, MCP, and `opencode-mem`
-- until live pod verification confirms that the child runtime only loads the intended session surface, Stage 2 A/B comparisons are not trustworthy
+- no active Stage 1 blocker remains on the current pod build
+- Stage 2 now needs to prove `common-work` is actually stronger than local raw OpenCode, not just free of the hosted regressions
 
 ## Latest Findings
+
+### 2026-03-27: first formal Stage 2 A/B on the卫健委 long-document set shows hosted `common-work` is cleaner and faster, but still had one scope-selection weakness
+
+Scenario:
+- `OPENWORK_COMPARE_SCENARIO=wjw OPENWORK_COMPARE_MODE=diagnostic QIN_ABC_LANES=raw,pod OPENWORK_COMPARE_DIAGNOSTIC_TIMEOUT_MS=300000 node tmp/qin-abc-minimax.mjs`
+- source docs:
+  - `招标文件-天津市滨海新区卫生健康委员会天津市滨海新区卫生健康信息化平台项目.docx`
+  - `海滨医院点对点应答.docx`
+  - `智慧网络医疗服务项目设备参数9.29(1).docx`
+
+What the first A/B proved:
+- hosted `common-work` early route was materially cleaner:
+  - no `external_directory` drift
+  - no `/tmp` detour
+  - no broad-discovery burst
+  - 9 tool calls before the diagnostic stop
+- local raw OpenCode was materially noisier:
+  - started with `glob **/*.docx`
+  - 16 tool calls before finishing
+  - repeated `read` passes against the same extracted Markdown
+  - `export` JSON was malformed again, forcing recovery from `run-jsonl`
+- elapsed time:
+  - pod `common-work`: ~49s in the first diagnostic
+  - local raw OpenCode: ~149s
+
+Where hosted `common-work` was not yet clearly stronger:
+- local raw OpenCode completed a full deliverable in that same run
+- the first pod diagnostic was intentionally cut by the old `max-tool-calls` threshold before final output write/convert completed
+
+Targeted follow-up for fairness:
+- reran pod only with:
+  - `OPENWORK_COMPARE_DIAGNOSTIC_MAX_TOOL_CALLS=20`
+- result:
+  - hosted `common-work` also completed full deliverables:
+    - `outputs/海滨医院点对点解决方案.md`
+    - `outputs/海滨医院点对点解决方案.docx`
+  - elapsed time:
+    - ~117s
+  - still no hosted boundary issues:
+    - `externalPathTouchCount = 0`
+    - `systemTempTouchCount = 0`
+    - `directOfficeReadCount = 0`
+
+The actual Stage 2 weakness this exposed:
+- hosted `common-work` anchored the output scope too tightly to the supporting file:
+  - `海滨医院点对点应答.docx`
+- its final title and narrative collapsed to:
+  - `海滨医院点对点解决方案`
+- local raw OpenCode kept the broader project frame:
+  - `天津市滨海新区卫生健康信息化平台项目`
+  - `点对点解决方案`
+
+Interpretation:
+- this is no longer a hosted runtime / permission / skill-surface problem
+- it is a prompt-level scope-resolution weakness:
+  - in multi-document tasks, `common-work` can still let a specific supporting file name override the user objective and the primary招标/需求文档 scope
+
+### 2026-03-27: local prompt fix prepared to keep multi-document scope anchored on the user objective and the primary requirements document
+
+Local fix:
+- `common-work` now explicitly states:
+  - when the workspace contains a main招标/需求文档 plus supporting files such as sample responses, parameter sheets, product brochures, or historical point-to-point drafts, first use the user objective and the main招标/需求文档 to determine:
+    - task scope
+    - target title
+    - chapter boundary
+  - do not collapse the whole deliverable to a narrower sub-scenario just because one supporting file has a more specific filename
+  - supporting files default to evidence, terminology, parameters, or writing reference; they do not override the main project scope
+
+Files changed locally:
+- `.opencode/agent/common-work.md`
+- `packages/app/scripts/doc-subagent-prompts.test.mjs`
+
+Local verification:
+- added a new regression test:
+  - `common-work keeps multi-document scope anchored on the user objective and the primary requirements document`
+- verified passing:
+  - `bun test packages/app/scripts/doc-subagent-prompts.test.mjs`
+  - `git diff --check -- .opencode/agent/common-work.md packages/app/scripts/doc-subagent-prompts.test.mjs research/2026-03-25-document-agent-eval/common-work-document-writer-execution-ledger-2026-03-27.md`
+
+Next deployment step:
+- push this prompt fix to `origin` and `gitee`
+- pod `git pull --ff-only`
+- `bash scripts/restart-pod.sh --force`
+- rerun the same `wjw` pod diagnostic to confirm the output scope no longer collapses to the supporting-file title
+
+### 2026-03-27: fresh live verification after commit `4dd229cd` confirms the runtime-root `.git` boundary actually cut off parent user-workspace skill inheritance
+
+Fresh hosted verification target:
+- session id:
+  - `ses_2cf3b6663ffefBSEwqcz5Rte2C`
+- runtime dir:
+  - `/root/.openwork/user-workspaces/c503a0f6-a558-41f4-8ba4-899eb1ed6923/documents/sessions/3e6b5b08c2dc4b04ab52f4164f121899`
+
+Observed directly on pod:
+- runtime root now physically contains:
+  - `.git`
+- runtime `.git` contents:
+  - `gitdir: .openwork-runtime/git`
+- runtime `.opencode/skills` contains only:
+  - `doc-coauthoring`
+  - `doc-normalize`
+  - `docx`
+  - `pdf`
+  - `pptx`
+  - `xlsx`
+- runtime `opencode.jsonc` currently exposes only:
+  - `bocha-search`
+- runtime instructions are only:
+  - `.opencode/references/doc-state-schema.md`
+  - `.opencode/openwork-runtime.md`
+
+Most important direct-runtime proof:
+- a live pod `opencode run --print-logs --log-level DEBUG --agent common-work --format json "只回复ok"` inside that runtime only evaluated:
+  - `doc-coauthoring`
+  - `doc-normalize`
+  - `docx`
+  - `pdf`
+  - `pptx`
+  - `xlsx`
+- the earlier inherited parent skills did not appear:
+  - no `file-organizer`
+  - no `internal-comms`
+  - no `mcp-builder`
+  - no `openwork-debug`
+
+Interpretation:
+- the runtime-root `.git` boundary fix is now live-green on pod
+- the user-facing baseline item “new session runtimes should not load irrelevant parent-workspace skills” is now confirmed by both:
+  - physical runtime folder inspection
+  - direct runtime log evidence
+
+### 2026-03-27: fresh hosted Qin low-token diagnostic shows no remaining external-directory or temp-path regression on the current build
+
+Scenario:
+- `OPENWORK_COMPARE_SCENARIO=qin OPENWORK_COMPARE_MODE=diagnostic QIN_ABC_LANES=pod OPENWORK_COMPARE_DIAGNOSTIC_TIMEOUT_MS=240000 node tmp/qin-abc-minimax.mjs`
+- session:
+  - `ses_2cf392103ffe2KCupKWuTKglNS`
+
+Results:
+- upload completed successfully for both Qin `.docx` sources
+- routing diagnostics:
+  - `externalPathTouchCount = 0`
+  - `systemTempTouchCount = 0`
+  - `directOfficeReadCount = 0`
+  - `repeatedFailureCount = 0`
+  - `issueCounts = {}`
+- early route:
+  - workspace-local `pwd && ls -la`
+  - `skill`
+  - workspace-local `mkdir -p .tmp/docx-read`
+  - workspace-local `pandoc ... -o .tmp/docx-read/*.md`
+  - `read` extracted Markdown
+  - `bocha-search` x2
+  - `todowrite`
+  - final `write` aborted only because diagnostic mode intentionally stopped at max tool calls
+
+Interpretation:
+- on the current build, the hosted `common-work` baseline no longer shows the user’s feared regressions around:
+  - `external_directory`
+  - workspace-external file touches
+  - `/tmp` conversion probes
+  - direct Office-file reads
+- the remaining parity work is now mainly about route quality and final-result quality, not hosted boundary correctness
+
+### 2026-03-27: browser-level history re-entry is still live-green on the current pod build
+
+Real browser verification via Playwright CLI on `http://192.168.5.10:32765`:
+- login succeeded with the hosted user account
+- from `/dashboard/agents`, clicking historical session:
+  - `历史会话 ses_2cf71bb1`
+- resulting URL:
+  - `/document-agent/ses_2cf71bb17ffeBvY6pTCsgMI481`
+
+Related API confirmation:
+- session list entries still expose:
+  - `openworkPreferredView = document-agent`
+  - `openworkPreferredAgent = common-work`
+  - `openworkPreferredAgentLock = common-work`
+
+Interpretation:
+- the user-facing baseline item “historical sessions must reopen into the correct TSX/view” remains live-green after the runtime-boundary changes
+- this baseline is now covered by:
+  - server/API metadata
+  - real browser navigation evidence
+
+### 2026-03-27: overnight roadmap was pinned to a durable execution ledger and a formal long-document benchmark corpus
+
+User-directed working order now locked here:
+- finish the three user-facing baseline items before any broader A/B or `document-writer` work:
+  - avoid wasted workspace-external / `external_directory` detours
+  - ensure new session runtimes only load the intended document skill and MCP surface
+  - ensure historical sessions reopen into the correct TSX/view
+- only after that:
+  - run local-vs-pod A/B for `common-work`
+  - then audit shared code paths before touching `document-writer`
+  - then generalize `document-writer` away from Qin-only heuristics into a workflow-enhanced `common-work-plus`
+
+Benchmark corpus selected for the overnight long-document work:
+- `/Users/storm/Pictures/开发参考文件/标书agent开发相关文件/备-天河产业园一期融合算力系统建设项目CPU、GPU节点及云计算服务器采购投标文件电子版-技术部分-烽火.docx`
+- `/Users/storm/Pictures/开发参考文件/标书agent开发相关文件/备-环投数科临沂项目第一包v20250507v1.0(1)(1).docx`
+- `/Users/storm/Pictures/开发参考文件/标书agent开发相关文件/备1-品冠-技术部分V2.docx`
+
+Why these were chosen:
+- they are formal, large, and structurally dense `.docx` files
+- they are closer to the real “技术方案 / 标书 / 大文档改写与生成” workload than the smaller earlier probes
+- they provide a better Stage 2 parity target once the Stage 1 baseline is truly closed
+
+### 2026-03-27: child runtime config sanitization was not enough because OpenCode was still discovering parent user-workspace skills through directory ancestry
+
+What was observed live after the earlier config-dir cleanup:
+- a fresh hosted `document-agent/common-work` session still physically had a clean runtime `.opencode/skills` folder
+- the isolated child config dir under `.openwork-runtime/opencode/config` was also trimmed
+- but direct `opencode run --print-logs --log-level DEBUG` inside the runtime still evaluated many unrelated skills from the parent user workspace, including examples like:
+  - `file-organizer`
+  - `internal-comms`
+  - `mcp-builder`
+  - other non-document support skills
+
+Why:
+- session runtime directories live under:
+  - `<userWorkspace>/documents/sessions/<runtimeId>`
+- OpenCode skill discovery was still walking up directory ancestry and finding:
+  - `<userWorkspace>/.opencode/skills/*`
+- so trimming only the child config dir did not fully isolate the effective runtime skill surface
+
+Live A/B proof of the root cause:
+- on a disposable hosted runtime, adding a runtime-root `.git` marker immediately stopped the parent skill inheritance
+- after that boundary marker, the same direct debug run only evaluated the runtime-local pruned document skill set
+
+Resolution implemented locally and deployed:
+- `packages/server/src/session-workspaces.ts`
+  - fresh session runtimes now write a runtime-root `.git` boundary marker during provisioning
+- `packages/server/src/session-workspaces.test.ts`
+  - now asserts that provisioned session runtimes contain `.git`
+- `packages/server/src/skills.test.ts`
+  - new regression test proves `listSkills(runtimeDir, false)` stops inheriting parent workspace skills once the runtime-root project boundary exists
+
+Verification already completed locally:
+- `bun test packages/server/src/skills.test.ts`
+- `bun test packages/server/src/session-workspaces.test.ts packages/server/src/server.proxy-session-create.test.ts packages/server/src/session-opencode-runtime.test.ts`
+- `corepack pnpm --filter openwork-server build:bin`
+
+Deployment state:
+- commit deployed:
+  - `4dd229cd` (`Isolate session runtime project roots`)
+- pushed to:
+  - `origin/dev`
+  - `gitee/dev`
+- pod pull + restart succeeded
+- pod health after deploy:
+  - `http://127.0.0.1:8789/health -> ok`
+  - `http://127.0.0.1:32765/openwork/health -> ok`
+
+Interpretation:
+- the earlier “Stage 1 baseline is closed” conclusion was premature
+- Stage 1 must stay open until fresh hosted runtime evidence confirms that users no longer inherit parent user-workspace skills in real sessions
 
 ### 2026-03-27: hosted child runtimes were still inheriting host-global skills, MCP, and opencode-mem
 
@@ -670,6 +926,7 @@ Interpretation:
 
 - `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/packages/server/src/session-workspaces.ts`
 - `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/packages/server/src/session-workspaces.test.ts`
+- `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/packages/server/src/skills.test.ts`
 - `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/packages/server/src/server.ts`
 - `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/packages/server/src/server.proxy-session-create.test.ts`
 - `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/packages/app/src/app/app.tsx`
@@ -685,7 +942,7 @@ Interpretation:
 
 ## Current Working Rules
 
-- Stage 1 baseline is now closed; Stage 2 can start
+- Stage 1 baseline is closed again on the current pod build
 - do not start `document-writer` generalization until `common-work` hosted parity is solid
 - prefer low-token diagnostics before long full-generation runs
 - for hosted regressions, isolate whether the problem is:
@@ -693,18 +950,20 @@ Interpretation:
   - server provisioning/runtime control
   - OpenCode config compatibility
   - prompt/tool routing
+  - project-root / `.opencode` discovery boundaries
 
 ## Next Actions
 
-1. Start Stage 2 low-token `common-work` A/B diagnostics against local raw OpenCode, using the Qin benchmark and the uploaded long-form reference files.
-2. Focus comparison on:
-   - early tool-call drift
-   - repeated search churn after local-file grounding
-   - any hosted-only permission failures that still survive the current baseline
-   - whether `common-work` final outputs now beat raw local OpenCode once the early route is cleaned up
-3. Keep runtime-surface checks in the loop while doing A/B:
+1. Continue Stage 2 low-token `common-work` A/B against local raw OpenCode now that the hosted baseline is re-verified live.
+2. Focus Stage 2 on:
+   - early search churn after local document grounding
+   - repeated failure patterns
+   - final-result quality and completion quality
+   - whether hosted `common-work` is now materially stronger than local raw OpenCode, not just “less broken”
+3. For Stage 2 long-document work, use the formal benchmark docs under:
+   - `/Users/storm/Pictures/开发参考文件/标书agent开发相关文件/`
+4. Keep the hosted baseline checks in the loop while doing Stage 2:
    - runtime `.opencode/skills` remains physically pruned
-   - document-session MCP surface stays trimmed
-   - no `external_directory` / workspace-external reopen path appears
-4. Only if Stage 2 shows a real hosted-only weakness, patch `common-work` or the hosted runtime boundary and re-run the same low-token diagnostic before escalating to long full-generation runs.
+   - runtime MCP surface stays trimmed
+   - history re-entry remains correct
 5. Do not begin Stage 3 / `document-writer` work until `common-work` is demonstrably at least as strong as local raw OpenCode on the chosen document benchmarks.

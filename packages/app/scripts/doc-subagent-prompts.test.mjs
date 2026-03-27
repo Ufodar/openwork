@@ -460,6 +460,16 @@ test("common-work keeps drafting-stage routing anchored on local source document
   expect(prompt).toContain("先回到本地资料继续提取");
 });
 
+test("common-work keeps multi-document scope anchored on the user objective and the primary requirements document", async () => {
+  const prompt = await readFile(resolve(root, ".opencode/agent/common-work.md"), "utf8");
+
+  expect(prompt).toContain("如果 workspace 内同时存在主招标/需求文档与样例应答、设备参数、产品资料");
+  expect(prompt).toContain("先用用户目标和主招标/需求文档确定任务范围、目标标题和章节边界");
+  expect(prompt).toContain("不要因为某个辅助文档文件名更具体");
+  expect(prompt).toContain("把整个交付物收缩成那个子场景");
+  expect(prompt).toContain("辅助文档默认只提供证据、术语、参数或写法参考");
+});
+
 test("common-work checks bootstrap state before external search and ignores noisy runtime-internal manifest entries", async () => {
   const prompt = await readFile(resolve(root, ".opencode/agent/common-work.md"), "utf8");
 

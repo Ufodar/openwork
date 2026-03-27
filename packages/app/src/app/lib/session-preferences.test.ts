@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  buildSessionPreferenceHint,
   mergeOpenworkSessionPrefs,
   resolveSessionPreferences,
   resolveStoredRagflowSelection,
@@ -57,6 +58,30 @@ describe("mergeOpenworkSessionPrefs", () => {
 });
 
 describe("resolveSessionPreferences", () => {
+  test("builds a session-list hint from hosted preferred view metadata", () => {
+    expect(
+      buildSessionPreferenceHint({
+        openworkPreferredView: "document-agent",
+        openworkPreferredAgent: "common-work",
+        openworkPreferredAgentLock: "common-work",
+      }),
+    ).toEqual({
+      view: "document-agent",
+      agent: "common-work",
+      agentLock: "common-work",
+    });
+  });
+
+  test("returns null when a session list item has no preferred view metadata", () => {
+    expect(
+      buildSessionPreferenceHint({
+        openworkPreferredView: null,
+        openworkPreferredAgent: null,
+        openworkPreferredAgentLock: null,
+      }),
+    ).toBeNull();
+  });
+
   test("uses session-list hints when stored prefs are missing", () => {
     const resolved = resolveSessionPreferences({
       hint: {

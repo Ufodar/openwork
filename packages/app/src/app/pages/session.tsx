@@ -78,6 +78,7 @@ import {
   normalizeDirectoryPath,
   parseTemplateFrontmatter,
 } from "../utils";
+import { buildSessionPreferenceHint } from "../lib/session-preferences";
 import { formatSessionDisplayTitle } from "../lib/session-title";
 import { finishPerf, perfNow, recordPerfLog } from "../lib/perf-log";
 
@@ -2234,14 +2235,7 @@ export default function SessionView(props: SessionViewProps) {
   const openSessionFromList = (workspaceId: string, session: SidebarSessionItem) => {
     const sessionId = session.id.trim();
     if (!sessionId) return;
-    const hint =
-      session.openworkPreferredView || session.openworkPreferredAgent || session.openworkPreferredAgentLock
-        ? {
-            view: session.openworkPreferredView ?? null,
-            agent: session.openworkPreferredAgent ?? null,
-            agentLock: session.openworkPreferredAgentLock ?? null,
-          }
-        : null;
+    const hint = buildSessionPreferenceHint(session);
     // Route-driven selection: navigate first and let the route effect own selectSession.
     if (workspaceId === props.activeWorkspaceId) {
       void props.openSessionInPreferredView(sessionId, { title: session.title ?? null, hint });

@@ -3,6 +3,7 @@ import type { Agent } from "@opencode-ai/sdk/v2/client";
 import type {
   CreateSessionOptions,
   DashboardTab,
+  SidebarSessionItem,
   McpServerEntry,
   McpStatusMap,
   OpencodeConnectStatus,
@@ -24,6 +25,7 @@ import {
   normalizeDirectoryPath,
 } from "../utils";
 import { formatSessionDisplayTitle } from "../lib/session-title";
+import { buildSessionPreferenceHint } from "../lib/session-preferences";
 import {
   buildOpenworkConnectInviteUrl,
   buildOpenworkWorkspaceBaseUrl,
@@ -93,7 +95,13 @@ export type DashboardViewProps = {
   submitProviderApiKey: (providerId: string, apiKey: string) => Promise<string | void>;
   view: View;
   setView: (view: View, sessionId?: string) => void;
-  openSessionInPreferredView: (sessionId: string, options?: { title?: string | null }) => void | Promise<void>;
+  openSessionInPreferredView: (
+    sessionId: string,
+    options?: {
+      title?: string | null;
+      hint?: { view?: View | null; agent?: string | null; agentLock?: string | null } | null;
+    },
+  ) => void | Promise<void>;
   listAgents: () => Promise<Agent[]>;
   startupPreference: StartupPreference | null;
   baseUrl: string;
@@ -357,16 +365,19 @@ export default function DashboardView(props: DashboardViewProps) {
         : tr("dashboard.workspace_kind_remote")
       : tr("dashboard.workspace_kind_local");
 
-  const openSessionFromList = (workspaceId: string, sessionId: string, sessionTitle?: string | null) => {
+  const openSessionFromList = (workspaceId: string, session: SidebarSessionItem) => {
+    const sessionId = session.id.trim();
+    if (!sessionId) return;
+    const hint = buildSessionPreferenceHint(session);
     // Route-driven selection: navigate first and let the route effect own selectSession.
     if (workspaceId === props.activeWorkspaceId) {
-      void props.openSessionInPreferredView(sessionId, { title: sessionTitle ?? null });
+      void props.openSessionInPreferredView(sessionId, { title: session.title ?? null, hint });
       return;
     }
     // For different workspace, activate workspace first
     void (async () => {
       await Promise.resolve(props.activateWorkspace(workspaceId));
-      void props.openSessionInPreferredView(sessionId, { title: sessionTitle ?? null });
+      void props.openSessionInPreferredView(sessionId, { title: session.title ?? null, hint });
     })();
   };
 
@@ -1143,12 +1154,12 @@ export default function DashboardView(props: DashboardViewProps) {
                                         ? "bg-dls-active text-dls-text"
                                         : "hover:bg-dls-hover"
                                     }`}
-                                    onClick={() => openSessionFromList(workspace().id, session.id, session.title)}
+                                    onClick={() => openSessionFromList(workspace().id, session)}
                                     onKeyDown={(event) => {
                                       if (event.key !== "Enter" && event.key !== " ") return;
                                       if (event.isComposing || event.keyCode === 229) return;
                                       event.preventDefault();
-                                      openSessionFromList(workspace().id, session.id, session.title);
+                                      openSessionFromList(workspace().id, session);
                                     }}
                                   >
                                     <span class="text-sm text-dls-text truncate mr-2 font-medium">
@@ -1197,12 +1208,12 @@ export default function DashboardView(props: DashboardViewProps) {
                                           ? "bg-dls-active text-dls-text"
                                           : "hover:bg-dls-hover"
                                       }`}
-                                      onClick={() => openSessionFromList(workspace().id, session.id, session.title)}
+                                      onClick={() => openSessionFromList(workspace().id, session)}
                                       onKeyDown={(event) => {
                                         if (event.key !== "Enter" && event.key !== " ") return;
                                         if (event.isComposing || event.keyCode === 229) return;
                                         event.preventDefault();
-                                        openSessionFromList(workspace().id, session.id, session.title);
+                                        openSessionFromList(workspace().id, session);
                                       }}
                                     >
                                       <span class="text-sm text-dls-text truncate mr-2 font-medium">

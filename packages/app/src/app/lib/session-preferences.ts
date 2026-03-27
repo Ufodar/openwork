@@ -1,4 +1,4 @@
-import type { View } from "../types";
+import type { SidebarSessionItem, View } from "../types";
 
 export type OpenworkSessionPrefs = {
   view?: View | null;
@@ -28,6 +28,12 @@ export type ResolvedSessionPreferences = {
   view: ResolvedSessionPreference<ResolvedSessionView>;
   agent: ResolvedSessionPreference<string | null>;
   agentLock: ResolvedSessionPreference<string | null>;
+};
+
+export type SessionPreferenceHint = {
+  view?: View | null;
+  agent?: string | null;
+  agentLock?: string | null;
 };
 
 export const normalizeStoredView = (value: unknown): View | null => {
@@ -97,6 +103,23 @@ export const mergeOpenworkSessionPrefs = (
   }
 
   return merged;
+};
+
+export const buildSessionPreferenceHint = (
+  session?: Pick<
+    SidebarSessionItem,
+    "openworkPreferredView" | "openworkPreferredAgent" | "openworkPreferredAgentLock"
+  > | null,
+): SessionPreferenceHint | null => {
+  if (!session) return null;
+  if (!session.openworkPreferredView && !session.openworkPreferredAgent && !session.openworkPreferredAgentLock) {
+    return null;
+  }
+  return {
+    view: session.openworkPreferredView ?? null,
+    agent: session.openworkPreferredAgent ?? null,
+    agentLock: session.openworkPreferredAgentLock ?? null,
+  };
 };
 
 const resolveStoredSessionView = (value: unknown): ResolvedSessionView | null => {

@@ -6,5 +6,7 @@ test("document mode bridge forbids external-directory detours for document-heavy
   const file = readFileSync(join(import.meta.dir, "document-mode-bridge.js"), "utf8");
 
   expect(file).toContain("Do not use \\`external_directory\\`");
+  expect(file).toContain("create \\`<WORKSPACE>/.tmp/system\\`");
+  expect(file).toContain("Do not \"probe\" \\`/tmp/*\\`");
   expect(file).toContain("parent directories, sibling session folders, or repo-root files");
 });

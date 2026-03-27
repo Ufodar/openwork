@@ -93,6 +93,8 @@ describe("provisionSessionWorkspace", () => {
     expect(runtimeConfig.model).toBe("test");
     expect(runtimeConfig.instructions).toContain(".opencode/openwork-runtime.md");
     expect(runtimeInstructionRaw).toContain("<WORKSPACE>/.tmp/system");
+    expect(runtimeInstructionRaw).toContain("Before the first extraction or conversion shell command");
+    expect(runtimeInstructionRaw).toContain("Do not first try `/tmp/*.md`, `/tmp/*.txt`, `/tmp/*.xml`");
     expect(runtimeInstructionRaw).toContain("copy or re-emit the needed artifact into `<WORKSPACE>/.tmp/system/`");
     expect(runtimeInstructionRaw).toContain("Treat `/tmp/*` and `/private/tmp/*` as shell-only transient paths");
   });

@@ -143,6 +143,8 @@ Document-native operating rules:
 - Choose the format skill that matches the current authoritative file or target output.
 - Do not call the skill tool merely to "activate" docx, pdf, xlsx, or pptx for ordinary document reads, extraction, conversion, or verification; those document capabilities are already installed in this runtime.
 - Do not use \`external_directory\` or workspace-external absolute paths for normal document discovery, reads, or writes.
+- Before the first extraction or conversion shell command, create \`<WORKSPACE>/.tmp/system\` (or another workspace-local temp directory) and write outputs there directly.
+- Do not "probe" \`/tmp/*\` or \`/private/tmp/*\` first and then recover after a permission error; rewrite the command before execution so reopenable outputs stay inside the workspace.
 - Do not probe parent directories, sibling session folders, or repo-root files when the needed document is not already inside the current workspace; treat that as missing input instead.
 - In normal document sessions, do not use the glob tool once exact candidate paths are known; prefer filtered \`find\` / \`ls\` and then reuse exact workspace-relative paths.
 - In normal hosted document sessions, do not use the grep tool; once you have workspace-local extracted text or Markdown, use \`bash grep -n\`, \`sed -n\`, or targeted \`read\` instead.

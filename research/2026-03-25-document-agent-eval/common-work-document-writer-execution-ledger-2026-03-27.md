@@ -73,6 +73,128 @@ Immediate blocker:
 
 ## Latest Findings
 
+### 2026-03-27: latest WJW raw-vs-pod A/B shows the hosted baseline is now tighter than raw on external-path behavior, and the only remaining hosted waste in the early route is a denied first `/tmp/*.txt` extraction attempt
+
+Scenario:
+- `OPENWORK_COMPARE_SCENARIO=wjw OPENWORK_COMPARE_MODE=diagnostic QIN_ABC_LANES=raw,pod OPENWORK_COMPARE_DIAGNOSTIC_TIMEOUT_MS=300000 OPENWORK_COMPARE_DIAGNOSTIC_MAX_TOOL_CALLS=20 node tmp/qin-abc-minimax.mjs`
+- summary output:
+  - `tmp/compare-agents/wjw-raw-vs-pod-minimax/summary.json`
+
+What the latest A/B proved:
+- pod `common-work`:
+  - `totalToolCalls = 11`
+  - `broadDiscoveryCount = 0`
+  - `externalPathTouchCount = 0`
+  - `directOfficeReadCount = 0`
+  - only recorded issue:
+    - `access-denied = 1`
+  - the denied call was:
+    - `pandoc "招标文件-天津市滨海新区卫生健康委员会天津市滨海新区卫生健康信息化平台项目.docx" -t plain -o /tmp/bidding.txt`
+  - the agent then immediately recovered to:
+    - `mkdir -p .tmp/system`
+    - workspace-local `pandoc ... -o .tmp/system/*.txt`
+    - workspace-local `read`
+    - workspace-local `grep`
+- local raw OpenCode:
+  - `totalToolCalls = 8`
+  - `directOfficeReadCount = 3`
+  - no hosted boundary issue, but it still wasted three early `read` attempts directly against `.docx`
+  - it eventually recovered through:
+    - a large inline `python-docx` shell step
+    - `write`
+    - final `pandoc` conversion
+
+Interpretation:
+- the user’s highest-risk hosted concerns are not reproducing in this latest WJW A/B:
+  - no `external_directory` drift
+  - no workspace-external file touch
+  - no parent/sibling-session detour
+  - no irrelevant runtime skill surface
+- the remaining hosted waste is narrower:
+  - one first-try `/tmp/*.txt` conversion that gets denied before the route falls back to `<WORKSPACE>/.tmp/system`
+- compared with local raw OpenCode, hosted `common-work` is now stricter on:
+  - not reading binary Office files directly
+  - not leaving the current workspace
+- this means the next baseline refinement should target:
+  - eliminating that first denied `/tmp` conversion attempt
+  - keeping the A/B diagnostics honest about bash commands that mention `/tmp`
+
+Local hardening prepared immediately after this A/B:
+- `.opencode/plugins/document-mode-bridge.js`
+  - document-heavy sessions now get an earlier, more explicit system rule:
+    - create `<WORKSPACE>/.tmp/system` before the first extraction / conversion shell command
+    - do not “probe” `/tmp/*` or `/private/tmp/*` first and then recover after a permission denial
+- `packages/server/src/session-workspaces.ts`
+  - runtime carrier instructions now mirror the same stronger rule, not just the generic “prefer workspace-local temp” wording
+- `packages/app/scripts/openwork-compare-diagnostics.mjs`
+  - diagnostics now classify bash commands that embed `/tmp/...` or `/private/tmp/...` as `system-temp-touch`
+  - this closes the previous observability gap where a denied `pandoc -o /tmp/foo.txt` command showed up only as `access-denied`
+
+Local verification:
+- `bun test packages/server/src/session-workspaces.test.ts packages/app/scripts/openwork-compare-diagnostics.test.mjs .opencode/plugins/document-mode-bridge.test.mjs`
+- result:
+  - `20 pass`
+  - `0 fail`
+- `git diff --check` is clean for:
+  - `packages/server/src/session-workspaces.ts`
+  - `packages/server/src/session-workspaces.test.ts`
+  - `packages/app/scripts/openwork-compare-diagnostics.mjs`
+  - `packages/app/scripts/openwork-compare-diagnostics.test.mjs`
+  - `.opencode/plugins/document-mode-bridge.js`
+  - `.opencode/plugins/document-mode-bridge.test.mjs`
+
+Current next step:
+- commit this `/tmp`-first-route hardening
+- push to `origin` and `gitee`
+- pod `git pull --ff-only`
+- `bash scripts/recover-pod-runtime.sh --force`
+- rerun the same WJW low-token A/B to confirm the hosted route no longer burns the first denied `/tmp` extraction call
+
+### 2026-03-27: commit `fc082920` is live on pod, standard recover succeeded, and a fresh default hosted runtime now proves the document-first surface even without session hints
+
+Deployment:
+- local commit:
+  - `fc082920` (`Prune default hosted session runtime surface`)
+- pushed to:
+  - `origin/dev`
+  - `gitee/dev`
+- pod:
+  - `git pull --ff-only`
+  - `bash scripts/recover-pod-runtime.sh --force`
+- current pod health after deploy:
+  - `http://127.0.0.1:8789/health -> ok`
+  - `http://127.0.0.1:32765/openwork/health -> ok`
+
+Fresh live runtime-surface probe on pod:
+- used the deployed pod source directly against a real hosted user workspace:
+  - `/root/.openwork/user-workspaces/479bcb92-84e0-4f1f-a88b-5085b1065076`
+- created a fresh default runtime via:
+  - `provisionSessionWorkspace(workspacePath)` with no preferred-view / preferred-agent hints
+- observed generated runtime surface:
+  - skills:
+    - `doc-coauthoring`
+    - `doc-normalize`
+    - `docx`
+    - `pdf`
+    - `pptx`
+    - `xlsx`
+  - MCP keys:
+    - `bocha-search`
+
+Why this matters:
+- this closes the gap between:
+  - hinted `document-agent/common-work` sessions
+  - no-hint default hosted sessions
+- the user concern was not just “does the document-agent entry prune correctly”
+- it was “will a newly opened session still load a pile of unrelated skills because OpenCode reads everything under `.opencode/skills`”
+- the live pod answer on the current build is now:
+  - no
+
+Interpretation:
+- the user-facing Stage 1 baseline around runtime skill/MCP pruning remains live-green on pod after the latest deploy
+- history-session TSX restoration was not touched in this change set and remains covered by the passing regression suite; no new evidence suggests a regression there
+- with this deployment complete, the roadmap can go back to Stage 2 parity work instead of more Stage 1 runtime-surface cleanup
+
 ### 2026-03-27: local baseline was tightened again so even default hosted sessions now prune to the document-first runtime surface, and document-mode bridge now explicitly forbids `external_directory` detours
 
 What changed locally:
@@ -1137,6 +1259,8 @@ Interpretation:
 - `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/packages/app/src/app/pages/dashboard.tsx`
 - `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/packages/app/src/app/pages/dashboard.history-session-hints.test.mjs`
 - `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/packages/app/src/app/pages/session.tsx`
+- `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/packages/app/scripts/openwork-compare-diagnostics.mjs`
+- `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/packages/app/scripts/openwork-compare-diagnostics.test.mjs`
 - `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/packages/app/scripts/doc-subagent-prompts.test.mjs`
 - `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/.opencode/agent/common-work.md`
 - `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/.opencode/plugins/document-mode-bridge.js`
@@ -1156,22 +1280,16 @@ Interpretation:
 
 ## Next Actions
 
-1. Deploy the newest default-runtime pruning and document-mode bridge hardening:
-   - commit
-   - push to `origin` and `gitee`
-   - pod `git pull --ff-only`
-   - recover/restart pod
-   - verify a fresh default hosted session runtime now loads only the document-first skill/MCP surface
-2. Continue Stage 2 low-token `common-work` A/B against local raw OpenCode once that live runtime-surface check is green.
-3. Focus Stage 2 on:
+1. Deploy the latest `/tmp`-first-route hardening, then rerun the same low-token WJW raw-vs-pod A/B to verify the denied first extraction call is gone.
+2. Focus Stage 2 on:
    - early search churn after local document grounding
    - repeated failure patterns
    - final-result quality and completion quality
    - whether hosted `common-work` is now materially stronger than local raw OpenCode, not just “less broken”
-4. For Stage 2 long-document work, use the formal benchmark docs under:
+3. For Stage 2 long-document work, use the formal benchmark docs under:
    - `/Users/storm/Pictures/开发参考文件/标书agent开发相关文件/`
-5. Keep the hosted baseline checks in the loop while doing Stage 2:
+4. Keep the hosted baseline checks in the loop while doing Stage 2:
    - runtime `.opencode/skills` remains physically pruned
    - runtime MCP surface stays trimmed
    - history re-entry remains correct
-6. Do not begin Stage 3 / `document-writer` work until `common-work` is demonstrably at least as strong as local raw OpenCode on the chosen document benchmarks.
+5. Do not begin Stage 3 / `document-writer` work until `common-work` is demonstrably at least as strong as local raw OpenCode on the chosen document benchmarks.

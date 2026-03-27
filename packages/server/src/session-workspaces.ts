@@ -527,9 +527,11 @@ function buildRuntimeSessionInstructions(): string {
     "2. Any artifact that will later be reopened by file tools (`read`, `list`, `glob`, `edit`, `filesystem_*`) must stay inside `<WORKSPACE>`.",
     `3. If a tool naturally returns an external temp path, first copy or re-emit the needed artifact into \`<WORKSPACE>/${SESSION_TMP_ROOT_RELATIVE_PATH}/\` (or another workspace-local path) before using any file tool on it.`,
     "4. Treat `/tmp/*` and `/private/tmp/*` as shell-only transient paths until you copy them back into `<WORKSPACE>`.",
-    "5. Hosted runtime permissions may deny shell commands that explicitly write reopenable document/text artifacts to system temp paths like `/tmp/*.md` or `/private/tmp/*.docx`.",
-    "6. Final deliverables and persisted state must stay inside `<WORKSPACE>`.",
-    "7. Do not assume hosted sessions can rely on external directories remaining readable.",
+    `5. Before the first extraction or conversion shell command, create \`<WORKSPACE>/${SESSION_TMP_ROOT_RELATIVE_PATH}\` and point \`pandoc -o\`, shell redirection, Python output files, and similar artifacts there directly.`,
+    "6. Do not first try `/tmp/*.md`, `/tmp/*.txt`, `/tmp/*.xml`, `/private/tmp/*.docx`, or similar system-temp outputs and then recover after a permission error; rewrite the command before execution.",
+    "7. Hosted runtime permissions may deny shell commands that explicitly write reopenable document/text artifacts to system temp paths like `/tmp/*.md` or `/private/tmp/*.docx`.",
+    "8. Final deliverables and persisted state must stay inside `<WORKSPACE>`.",
+    "9. Do not assume hosted sessions can rely on external directories remaining readable.",
     "",
   ].join("\n");
 }

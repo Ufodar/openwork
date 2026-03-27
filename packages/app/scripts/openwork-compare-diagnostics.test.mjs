@@ -52,6 +52,18 @@ describe("summarizeConversationDiagnostics", () => {
     expect(summary.issueCounts["system-temp-touch"]).toBe(1);
   });
 
+  test("flags system temp writes embedded in bash commands", () => {
+    const summary = summarizeConversationDiagnostics([
+      toolPart("bash", { command: "pandoc input.docx -t plain -o /tmp/out.txt" }),
+      toolPart("bash", { command: "mkdir -p .tmp/system && pandoc input.docx -t plain -o .tmp/system/out.txt" }),
+    ], {
+      workspaceDir: "/workspace/documents/sessions/rt_1",
+    });
+
+    expect(summary.systemTempTouchCount).toBe(1);
+    expect(summary.issueCounts["system-temp-touch"]).toBe(1);
+  });
+
   test("flags direct office reads and repeated failures", () => {
     const summary = summarizeConversationDiagnostics([
       toolPart("read", { filePath: "资料.docx" }),
@@ -95,6 +107,24 @@ describe("buildCompactToolTrace", () => {
       issueCodes: ["fetch-failed"],
       url: "https://example.com/spec",
     });
+  });
+
+  test("records system temp bash writes in compact traces", () => {
+    const trace = buildCompactToolTrace([
+      toolPart("bash", { command: "pandoc input.docx -o /tmp/out.txt" }),
+    ], {
+      workspaceDir: "/workspace/documents/sessions/rt_1",
+    });
+
+    expect(trace).toEqual([
+      {
+        index: 0,
+        tool: "bash",
+        status: "completed",
+        issueCodes: ["system-temp-touch"],
+        command: "pandoc input.docx -o /tmp/out.txt",
+      },
+    ]);
   });
 });
 

@@ -12,6 +12,7 @@ const SYSTEM_TEMP_RE = /^(\/tmp\/|\/private\/tmp\/)/i;
 const BROAD_GLOB_RE = /(^|\/)\*\*(\/\*)?$/;
 const BROAD_FIND_RE = /\bfind\s+\.\s+-type\s+f\b/;
 const ABSOLUTE_CD_RE = /\bcd\s+(['"]?)(\/[^'" ;]+)\1/g;
+const COMMAND_SYSTEM_TEMP_RE = /(^|[\s"'=`])(?:\/private\/tmp\/|\/tmp\/)[^\s"'`;|&)]+/i;
 const FETCH_FAILED_RE = /fetch failed/i;
 const ACCESS_DENIED_RE = /access denied|prevents you from using this specific tool call/i;
 const MCP_ERROR_RE = /mcp error/i;
@@ -103,6 +104,10 @@ function classifyIssueCodes(part, { workspaceDir } = {}) {
     if (isAbsolute(path) && workspaceDir && !pathWithinWorkspace(path, workspaceDir)) {
       codes.push("external-path-touch");
     }
+  }
+
+  if (tool === "bash" && COMMAND_SYSTEM_TEMP_RE.test(command)) {
+    codes.push("system-temp-touch");
   }
 
   if (tool === "read" && paths.some((path) => OFFICE_FILE_RE.test(path))) {

@@ -14,8 +14,8 @@ A .docx file is a ZIP archive containing XML files.
 
 | Task | Approach |
 |------|----------|
-| Read/analyze content | `pandoc` or unpack for raw XML |
-| Create new document | Use `docx-js` - see Creating New Documents below |
+| Read/analyze content | `pandoc` or unpack for raw XML, but keep intermediates under workspace-local temp dirs |
+| Create new document | For long prose-heavy docs, write Markdown and convert with `pandoc`; use `docx-js` only when you need precise layout control |
 | Edit existing document | Unpack → edit XML → repack - see Editing Existing Documents below |
 
 Document normalization rule: semantic structure beats visual appearance. If a line is meant to behave like a heading or list item, encode it with real heading styles or numbering semantics instead of typing visual prefixes such as `1.`, `1.1`, `一、`, or `-`.
@@ -31,12 +31,19 @@ python scripts/office/soffice.py --headless --convert-to docx document.doc
 ### Reading Content
 
 ```bash
+# Always create a workspace-local temp directory first
+mkdir -p .tmp/docx-read
+
 # Text extraction with tracked changes
-pandoc --track-changes=all document.docx -o output.md
+pandoc --track-changes=all document.docx -o .tmp/docx-read/document.md
 
 # Raw XML access
-python scripts/office/unpack.py document.docx unpacked/
+python scripts/office/unpack.py document.docx .tmp/docx-read/unpacked/
 ```
+
+**Never write extraction output to `/tmp`, `/private/tmp`, or any workspace-external path.**
+If you need a throwaway location, use `.tmp/docx-read/`, `tmp/docx-read/`, or another directory inside the current workspace so later `read` and follow-up steps stay inside the tool safety boundary.
+If an Office helper, third-party CLI, or existing shell pipeline unexpectedly writes an extracted `.md` / `.xml` / text artifact to `/tmp` or `/private/tmp`, copy it back into `.tmp/docx-read/` or another workspace-local temp directory before calling `read`, `edit`, `glob`, `list`, or `filesystem_*` on it.
 
 ### Converting to Images
 
@@ -56,6 +63,25 @@ python scripts/accept_changes.py input.docx output.docx
 ---
 
 ## Creating New Documents
+
+### Prefer Markdown -> Pandoc For Long Narrative Docs
+
+For proposals, reports, technical materials, or other mostly-text deliverables, prefer a workspace-local Markdown draft and convert it to `.docx`:
+
+```bash
+mkdir -p reports/docx-draft outputs
+cat > reports/docx-draft/draft.md <<'MD'
+# 文档标题
+
+## 第一章
+
+正文内容...
+MD
+
+pandoc reports/docx-draft/draft.md -o outputs/final.docx
+```
+
+This route is usually more robust than hand-writing hundreds of JS string literals, especially for long Chinese documents with many headings and code blocks.
 
 Generate .docx files with JavaScript, then validate. Install: `npm install -g docx`
 
@@ -293,6 +319,8 @@ sections: [{
 - **Include `outlineLevel`** - required for TOC (0 for H1, 1 for H2, etc.)
 - **Reuse the target document's style system** - when editing existing docs, copy the nearest valid `pStyle`, `numPr`, spacing, and outline pattern before changing text
 - **If structure is ambiguous, inherit instead of inventing** - prefer copying the nearest correct heading, list, or body block over creating an ad-hoc format
+- **Keep extraction artifacts inside the workspace** - use `.tmp/docx-read/`, `.tmp/docx-edit/`, or another workspace-local directory; never default to `/tmp` or `/private/tmp`
+- **If a helper unexpectedly wrote to `/tmp`, copy it back before reopening** - treat `/tmp/*.md`, `/tmp/*.xml`, `/private/tmp/*` and similar paths as shell-only transients until you `cp` or re-emit them into `.tmp/docx-read/` / `.tmp/docx-edit/`
 
 ---
 
@@ -302,7 +330,8 @@ sections: [{
 
 ### Step 1: Unpack
 ```bash
-python scripts/office/unpack.py document.docx unpacked/
+mkdir -p .tmp/docx-edit
+python scripts/office/unpack.py document.docx .tmp/docx-edit/unpacked/
 ```
 Extracts XML, pretty-prints, merges adjacent runs, and converts smart quotes to XML entities (`&#x201C;` etc.) so they survive editing. Use `--merge-runs false` to skip run merging.
 
@@ -367,6 +396,8 @@ Validates with auto-repair, condenses XML, and creates DOCX. Use `--validate fal
 - **Preserve `<w:rPr>` formatting**: Copy the original run's `<w:rPr>` block into your tracked change runs to maintain bold, font size, etc.
 - **Pseudo headings and pseudo lists break document structure**: A plain paragraph that only looks like `1.` / `1.1` / `一、` / `-` will not participate correctly in TOC, navigation, cross-references, or future structured edits. Convert it to real heading or numbering semantics instead of copying the visual pattern forward.
 - **Reuse nearby paragraph semantics when normalizing**: When adding or fixing a heading, list, or body block, copy the nearest valid `w:pStyle` / `w:numPr` pattern before changing the text.
+- **Do not write intermediate markdown/XML to `/tmp` in sandboxed or session-isolated workspaces**: keep extracted markdown, unpacked XML, and conversion artifacts under a workspace-local temp directory such as `.tmp/docx-read/` so later tool calls can still access them.
+- **Do not pass `/tmp` extraction paths back into file tools**: if a shell step or helper returns `/tmp/foo.md`, first copy it into `.tmp/docx-read/foo.md` (or another workspace-local path), then continue with `read`, `edit`, `glob`, `list`, or `filesystem_*`.
 - **Never use DOM 解析器（ElementTree / lxml）提取章节**: DOM 解析器在序列化时会丢弃未显式声明的命名空间前缀（如 `wp14`、`w14`、`w15`、`mc`），导致 pack 后文档损坏（报 "namespace not declared" 错误）。**必须使用字符串操作**（`str.find()` + 切片）提取 XML 片段，这样能 100% 保留原始命名空间声明和格式。
 - **定位章节时跳过 TOC 区域**: document.xml 中的目录（Table of Contents）包裹在 `<w:sdt>` 标签内，其中的文字也包含章节标题（如"第五部分"）。搜索章节标题时，必须跳过 `<w:sdt>...</w:sdt>` 区域内的匹配，否则会定位到目录条目而非实际正文。实用方法：搜索所有匹配位置，取 `<w:sdt>` 块之外的**最后一个**匹配。
 

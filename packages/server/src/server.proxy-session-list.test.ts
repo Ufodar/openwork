@@ -205,4 +205,82 @@ describe("proxyOpencodeRequest session listing", () => {
     expect(payload.find((item) => item.id === "ses_root_hist_1")?.directory).toBe(workspacePath);
     expect(payload.find((item) => item.id === "ses_runtime_hist_1")?.directory).toBe(runtimeDir);
   });
+
+  test("does not boot an isolated runtime just to list historical sessions", async () => {
+    let fetchCount = 0;
+    globalThis.fetch = (async () => {
+      fetchCount += 1;
+      throw new Error("should not query a session-owned runtime for history");
+    }) as typeof fetch;
+
+    const workspacePath = await mkdir(join(tmpdir(), `openwork-session-iso-list-${Date.now()}`), { recursive: true });
+    const runtimeDir = join(workspacePath, "documents", "sessions", "runtime-iso-1");
+    await mkdir(join(runtimeDir, ".opencode"), { recursive: true });
+    await writeFile(
+      join(runtimeDir, ".opencode", "openwork.json"),
+      JSON.stringify({
+        version: 1,
+        sessions: {
+          ses_iso_1: { view: "document-agent" },
+        },
+      }),
+      "utf8",
+    );
+
+    const workspace: WorkspaceInfo = {
+      id: "ws_shared",
+      name: "shared",
+      path: workspacePath,
+      workspaceType: "local",
+      baseUrl: "http://127.0.0.1:33459",
+    };
+
+    const sessionOwnership = {
+      listEntries: async () => ({
+        ses_iso_1: { ownerKey: "host-owner", updatedAt: 1 },
+      }),
+    } as unknown as SessionOwnershipService;
+
+    const sessionWorkspaces = {
+      getWorkspace: async () => ({
+        runtimeId: "runtime-iso-1",
+        runtimeDir,
+        createdAt: 1,
+        opencodeRuntime: {
+          mode: "isolated_process",
+          rootDir: join(runtimeDir, ".openwork-runtime", "opencode"),
+          configDir: join(runtimeDir, ".openwork-runtime", "opencode", "config"),
+          dataDir: join(runtimeDir, ".openwork-runtime", "opencode", "data"),
+          stateDir: join(runtimeDir, ".openwork-runtime", "opencode", "state"),
+          cacheDir: join(runtimeDir, ".openwork-runtime", "opencode", "cache"),
+          bindHost: "127.0.0.1",
+        },
+      }),
+    } as unknown as SessionWorkspaceService;
+
+    const response = await proxyOpencodeRequest({
+      request: new Request(
+        `http://openwork.local/w/ws_shared/opencode/session?directory=${encodeURIComponent(workspacePath)}`,
+        { method: "GET" },
+      ),
+      url: new URL(`http://openwork.local/w/ws_shared/opencode/session?directory=${encodeURIComponent(workspacePath)}`),
+      workspace,
+      proxyPath: "/session",
+      actor: { type: "remote", scope: "owner", tokenHash: "host-owner" },
+      sessionOwnership,
+      sessionWorkspaces,
+      runtimeKnowledgeTokens: { revokeRuntime: async () => undefined, issue: async () => ({ token: "", expiresAt: 0 }), resolve: async () => null } as any,
+      runtimeDocumentStateTokens: { revokeRuntime: async () => undefined, issue: async () => ({ token: "", expiresAt: 0 }), resolve: async () => null } as any,
+      openworkBaseUrl: "http://127.0.0.1:8789",
+      sessionRuntimeService: {
+        peekSessionWorkspace: () => null,
+      } as any,
+    });
+
+    const payload = await response.json() as Array<{ id: string; directory: string | null }>;
+    expect(payload).toHaveLength(1);
+    expect(payload[0]?.id).toBe("ses_iso_1");
+    expect(payload[0]?.directory).toBe(runtimeDir);
+    expect(fetchCount).toBe(0);
+  });
 });

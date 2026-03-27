@@ -139,6 +139,47 @@ For the current multi-user hosted deployment model, treat these as product const
 * **Shared global modules**: pod startup exports global npm modules via `NODE_PATH`, so session-local `node` processes can resolve preinstalled global packages. Prefer using the shared environment before adding per-session installs.
 * **Model default**: the current hosted default model is `my-company/Qwen3.5-397B-A17B`. `Kimi-K2.5` and `GLM-5` are retired in this deployment path and should not be reintroduced as active defaults without an explicit product decision.
 
+## Pod Deployment Discipline (Required)
+
+Treat the repository as the source of truth for hosted behavior. Do not normalize a workflow where code is changed locally and then hand-copied into the pod as the primary deployment path.
+
+Required discipline:
+
+* **Default path is repo-first**: implement and verify in the repo, push the change, then update the pod by pulling the repo and rebuilding/restarting as needed.
+* **Pod-only edits are emergency-only**: direct edits under `/root/ai_staff/openwork`, `~/.config/openwork`, or a hosted user workspace are allowed only to diagnose or unblock a live system, not as the steady-state development path.
+* **Emergency pod edits must be reconciled immediately**: if you make a pod-local hotfix, copy the same change back into the repo in the same session, record it in the active `research/...` archive, and do not treat the pod as “fixed” until the repo copy exists too.
+* **Do not trust dirty pod state as product truth**: if the deployed pod repo is dirty, stale, or ahead of the checked-out repo, treat hosted test conclusions as provisional until source, deployed repo copy, and active hosted workspace assets are re-aligned.
+* **Hosted validation must name the deployment path**: when reporting hosted results, say whether they came from a proper repo sync (`push/pull/build` or equivalent) or from an emergency pod-local patch. Do not blur those into the same class of evidence.
+
+## Document-Agent Evaluation Discipline
+
+When evaluating or tuning long-running document agents, treat these as repo rules rather than ad-hoc preferences:
+
+* **Pressure tests are not product narrowing**: real-user samples (for example proposal packages or bid documents) are valid pressure tests, but do not hard-code the system so it only performs well on that sample family.
+* **Keep sample specifics out of shared product logic**: filenames, customer names, project names, named systems, exact sample section titles, and domain heuristics discovered from one evaluation sample must not be hard-coded into shared prompts, shared skills, shared scripts, or default runtime config unless they are part of an explicit product contract that clearly generalizes beyond that sample.
+* **Sample-specific code must stay quarantined**: if a comparison run needs one-off scaffolding, keep it in clearly labeled evaluation-only harnesses, fixtures, or `research/**` notes. Do not let sample-specific logic quietly migrate into `.opencode/skills/openwork-core/**`, shared agent prompts, or other repo-wide execution paths.
+* **Abstract before shipping**: if a test sample reveals a useful behavior, rewrite it as a capability-level rule (for example multi-system coverage checks, authority-vs-background source handling, exact-heading preservation, or matrix-style section verification) instead of shipping the sample's concrete nouns and structure as hidden defaults.
+* **Final artifact quality is the real optimization target**: A/B/C lanes (`raw`, `common-work`, `document-writer`) are diagnostic tools, not loyalties. If another lane exposes a better generalizable behavior, adopt it into OpenWork rather than defending the current lane.
+* **Use the same baseline when comparing**: for A/B/C comparisons across raw OpenCode, `common-work`, and `document-writer`, keep model choice, permission posture, and major tool availability aligned before drawing conclusions from behavior differences.
+* **Do not confuse route choice with capability loading**: if one lane does not proactively call a global skill or overlay, first prove whether the capability is absent or merely suppressed by the active agent prompt/routing policy before blaming runtime/config loading.
+* **Record the runtime baseline every round**: every comparison round must write down the actual OpenCode version, active model, global permission posture, critical MCP availability (`bocha-search`, memory, other task-relevant MCPs), and any global skill overlays that materially change routing or questioning behavior before interpreting the result.
+* **Permission posture is part of the baseline, not an afterthought**: if raw OpenCode or hosted OpenWork is blocked by `ask`/`deny` permission posture during a comparison run, fix or explicitly record that baseline mismatch before using the run as quality evidence.
+* **Keep comparison models narrow**: for current hosted and compare work, prefer `my-company/Qwen3.5-397B-A17B`; `MiniMax-2.5` is the only accepted backup when Qwen is unavailable; do not use `Kimi-K2.5`.
+* **`bocha-search` is the required external-search path**: for proposal-style external supplements, policy references, standards references, and API references, treat `bocha-search` as the system search tool. If it fails, surface that failure explicitly as a blocker or system issue.
+* **Record critical MCP outcomes per environment**: if a key MCP such as `bocha-search` works in pod/hosted OpenWork but fails on the local machine (or vice versa), record those outcomes separately. Do not collapse local network failures and hosted runtime results into one product conclusion.
+* **No hidden search fallback**: do not add or keep secondary search fallbacks just to make a run “complete.” A fake success is worse than an explicit blocker for this class of task.
+* **No dangerous operational fallback without an explicit decision**: do not quietly bypass critical system tools, MCPs, or permission posture mismatches with local stubs, alternate services, or “just for testing” shims unless the repo has an explicit documented decision saying that fallback is part of the product.
+* **No simulated research**: do not fabricate “模拟搜索结果,” hand-write an industry-practice list, invent vendor comparisons, or synthesize API examples and then present them as if they came from search or external authority.
+* **No fake authority via generic pages**: do not substitute a generic homepage, landing page, mirror page, repost, community blog, or arbitrary `webfetch` hit for the authority the task actually requires.
+* **Block honestly**: if external evidence is required and the system toolchain cannot retrieve it, say exactly what is blocked, what evidence is missing, and why the section cannot be strengthened yet.
+* **Keep an evaluation archive**: for multi-round document-agent testing, maintain a dated folder under `research/` with `README`, `handoff`, `run-ledger`, `findings`, `resolutions`, `decisions`, and `status` so later sessions can continue without rediscovering the same context.
+* **Every effective round must be written down before the next round**: after any run that changes your understanding, update `run-ledger.md` first, then update `findings.md`, `decisions.md`, `resolutions.md`, or `status.md` as needed before continuing.
+* **Contradicting evidence beats prior hypotheses**: if a later rerun disproves an earlier theory, update the archive and stop treating the old theory as fact. Do not patch production code around an unproven hypothesis.
+* **Hosted evidence requires runtime asset verification**: local edits under `.opencode/` are not hosted proof by themselves. Before trusting a hosted result, verify the changed prompt/script exists both in the deployed repo copy and in the target user workspace copy that the hosted run actually loaded.
+* **Surface consumed supplements in the final deliverable**: if `reports/doc-writer/external-supplements.md` was materially consumed, the final document must surface those references in `参考与依据/联网补充依据`; do not leave generic `如需进一步补充` / `建议联网检索` placeholders.
+* **Distinguish authority from background context**: if only reposts, portal news, or community summaries are available for part of a topic, label them as background references rather than presenting them as first-party authority.
+* **Audit `fallback` by concrete path, not by keyword alone**: a `fallback` string can refer to model resolution, state-surface lookup, generic section naming, or other non-search control flow. Only treat it as a forbidden search fallback when the concrete runtime path proves it is being used to bypass required external evidence.
+
 ## Technology Stack
 
 | Layer                | Technology                |
@@ -158,6 +199,15 @@ For the current multi-user hosted deployment model, treat these as product const
 * If you change `packages/server/src`, rebuild the OpenWork server binary (`pnpm --filter openwork-server build:bin`) because `openwork` (openwork-orchestrator) runs the compiled server, not the TS sources.
 * If you touch session isolation, event streaming, or message rendering, remember that runtime sessions are scoped by directory. Real-time updates must subscribe to the selected session runtime directory as well as the workspace root; otherwise new messages may only appear after a manual refresh.
 * When debugging hosted document flows, prefer verifying against the current session workspace path rather than assuming legacy shared `documents/sessions/<sessionId>` behavior.
+* When debugging hosted prompt/script changes, verify all three layers before drawing conclusions:
+  - local repo source
+  - deployed repo copy on the pod
+  - active hosted user workspace copy under `~/.openwork/user-workspaces/<userId>`
+  Stale hosted assets can create false greens and false negatives.
+* When debugging OpenCode agent behavior, verify the actual runtime entry files before drawing conclusions. OpenCode loads agent definitions from `.opencode/agent/*.md`; do not assume a prompt under `.opencode/prompts/` is active unless the wiring proves it.
+* When debugging hidden `doc-*` subagents, verify the matching `opencode.json` / `opencode.jsonc` tool and permission block before blaming the prompt. A runtime deny in the concrete subagent config outweighs prompt prose that says a file or tool is available.
+* When debugging comparison harnesses, do not “fix” product code until the harness names the failing step. Generic `fetch failed` / `socket hang up` evidence is insufficient to conclude a runtime bug without a step-specific repro.
+* When auditing or regenerating pod/global OpenCode config, load the runtime env files first. Do not run `scripts/sync-global-opencode-config.py` naked on a pod and then trust the output; verify whether provider API keys, permission posture, and critical MCP config were preserved.
 
 ## Local Structure
 

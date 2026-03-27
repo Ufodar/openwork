@@ -13,6 +13,7 @@ import { once } from "node:events";
 
 import { createOpencodeClient } from "@opencode-ai/sdk/v2/client";
 import type { TuiHandle } from "./tui/app.js";
+import { buildOpenworkServerRuntimeEnv, loadOpenworkRuntimeEnv } from "./runtime-env";
 
 type ApprovalMode = "manual" | "auto";
 
@@ -2582,6 +2583,7 @@ async function startOpencode(options: {
   opencodeRouterHealthPort?: number;
 }) {
   const args = ["serve", "--hostname", options.bindHost, "--port", String(options.port)];
+  const runtimeEnv = loadOpenworkRuntimeEnv();
   for (const origin of options.corsOrigins) {
     args.push("--cors", origin);
   }
@@ -2590,7 +2592,7 @@ async function startOpencode(options: {
     cwd: options.workspace,
     stdio: ["ignore", "pipe", "pipe"],
     env: {
-      ...process.env,
+      ...runtimeEnv,
       OPENCODE_CLIENT: "openwork-orchestrator",
       OPENWORK: "1",
       OPENWORK_RUN_ID: options.runId,
@@ -2630,6 +2632,7 @@ async function startOpenworkServer(options: {
   readOnly: boolean;
   corsOrigins: string[];
   opencodeBaseUrl?: string;
+  opencodeBin?: string;
   opencodeDirectory?: string;
   opencodeUsername?: string;
   opencodePassword?: string;
@@ -2681,15 +2684,24 @@ async function startOpenworkServer(options: {
   }
 
   const resolved = resolveBinCommand(options.bin);
+  const runtimeEnv = buildOpenworkServerRuntimeEnv({
+    openworkToken: options.token,
+    openworkHostToken: options.hostToken,
+    runId: options.runId,
+    logFormat: options.logFormat,
+    opencodeBaseUrl: options.opencodeBaseUrl,
+    opencodeBin: options.opencodeBin,
+    opencodeDirectory: options.opencodeDirectory,
+    opencodeUsername: options.opencodeUsername,
+    opencodePassword: options.opencodePassword,
+    opencodeRouterHealthPort: options.opencodeRouterHealthPort,
+    opencodeRouterDataDir: options.opencodeRouterDataDir,
+  });
   const child = spawnProcess(resolved.command, [...resolved.prefixArgs, ...args], {
     cwd: options.workspace,
     stdio: ["ignore", "pipe", "pipe"],
     env: {
-      ...process.env,
-      OPENWORK_TOKEN: options.token,
-      OPENWORK_HOST_TOKEN: options.hostToken,
-      OPENWORK_RUN_ID: options.runId,
-      OPENWORK_LOG_FORMAT: options.logFormat,
+      ...runtimeEnv,
       OTEL_RESOURCE_ATTRIBUTES: mergeResourceAttributes(
         {
           "service.name": "openwork-server",
@@ -2697,12 +2709,6 @@ async function startOpenworkServer(options: {
         },
         process.env.OTEL_RESOURCE_ATTRIBUTES,
       ),
-      ...(options.opencodeRouterHealthPort ? { OPENCODE_ROUTER_HEALTH_PORT: String(options.opencodeRouterHealthPort) } : {}),
-      ...(options.opencodeRouterDataDir ? { OPENCODE_ROUTER_DATA_DIR: options.opencodeRouterDataDir } : {}),
-      ...(options.opencodeBaseUrl ? { OPENWORK_OPENCODE_BASE_URL: options.opencodeBaseUrl } : {}),
-      ...(options.opencodeDirectory ? { OPENWORK_OPENCODE_DIRECTORY: options.opencodeDirectory } : {}),
-      ...(options.opencodeUsername ? { OPENWORK_OPENCODE_USERNAME: options.opencodeUsername } : {}),
-      ...(options.opencodePassword ? { OPENWORK_OPENCODE_PASSWORD: options.opencodePassword } : {}),
     },
   });
 
@@ -2725,6 +2731,7 @@ async function startOpenCodeRouter(options: {
   logFormat: LogFormat;
 }) {
   const args = ["serve", options.workspace];
+  const runtimeEnv = loadOpenworkRuntimeEnv();
   if (options.opencodeUrl) {
     const supports = await opencodeRouterSupportsOpencodeUrl(options.bin);
     if (supports) {
@@ -2737,7 +2744,7 @@ async function startOpenCodeRouter(options: {
     cwd: options.workspace,
     stdio: ["ignore", "pipe", "pipe"],
     env: {
-      ...process.env,
+      ...runtimeEnv,
       OPENWORK_RUN_ID: options.runId,
       OPENWORK_LOG_FORMAT: options.logFormat,
       OTEL_RESOURCE_ATTRIBUTES: mergeResourceAttributes(
@@ -5380,6 +5387,7 @@ async function runStart(args: ParsedArgs) {
         // reachable (e.g. Docker/VPN interfaces on macOS). Remote clients access
         // OpenCode through OpenWork's `/opencode` proxy anyway.
         opencodeBaseUrl,
+        opencodeBin: opencodeBinary.bin,
         opencodeDirectory: resolvedWorkspace,
         opencodeUsername,
         opencodePassword,

@@ -34,6 +34,37 @@ test("plan_doc_state.py generates system-material sections and filters noisy evi
     await writeFile(
       join(workspace, ".worktree", "facts.json"),
       JSON.stringify({
+        source_briefs: [
+          {
+            docId: "src-001",
+            title: "融合算力云平台白皮书",
+            relativePath: "融合算力云平台白皮书.docx",
+            sections: [
+              {
+                title: "平台物理架构",
+                topic: "resource-aggregation",
+                summary: "控制中心和算力中心协同纳管超算、智算和裸金属资源。",
+              },
+              {
+                title: "平台技术架构",
+                topic: "api-interoperability",
+                summary: "服务层提供标准化接口，支持 API 与网关接入。",
+              },
+            ],
+          },
+          {
+            docId: "src-002",
+            title: "天河监控运维一体化平台软件介绍v0.3",
+            relativePath: "天河监控运维一体化平台软件介绍v0.3.docx",
+            sections: [
+              {
+                title: "技术架构",
+                topic: "security-monitoring",
+                summary: "展示层、业务层、中间层、通信层、目标层协同实现监控与告警。",
+              },
+            ],
+          },
+        ],
         goal: "Compile uploaded source documents into structured state",
         canonical_facts: [
           {
@@ -117,12 +148,29 @@ test("plan_doc_state.py generates system-material sections and filters noisy evi
       "参考与依据",
     ]);
     expect(coverage.targets[0].required_subsections).toEqual([
+      "功能定位",
       "技术架构",
       "技术路线",
       "互联互通机制",
       "标识系统构建",
-      "API 调用示例",
+      "API调用示例",
     ]);
+    expect(plan.sections[0].required_evidence.map((item) => item.statement)).toContain(
+      "平台支持 K8S、虚拟机、裸金属和 GPU 统一纳管，实现跨中心异构资源池化。",
+    );
+    expect(plan.sections[1].required_evidence.map((item) => item.statement)).toContain(
+      "系统融合实时网络时延、带宽和丢包率，结合 TPM/RPM 指标实现任务-资源-路径联合调度。",
+    );
+    expect(plan.sections[2].required_evidence.map((item) => item.statement)).toContain(
+      "平台提供统一认证、RBAC、审计日志、异常任务识别和资源滥用告警能力，满足等保三级要求。",
+    );
+    expect(plan.sections[0].source_context_refs[0].section_titles).toContain("平台物理架构");
+    expect(plan.writer_instructions).toContain(
+      "Use section-level required_evidence and source_context_refs before reopening the global facts store.",
+    );
+    expect(plan.writer_instructions).toContain(
+      "If the backing facts store is needed for a missing claim, extract only the relevant records for the current section instead of reading the entire file into context.",
+    );
 
     const evidenceStatements = plan.required_evidence.map((item) => item.statement);
     expect(evidenceStatements).toContain("平台支持 K8S、虚拟机、裸金属和 GPU 统一纳管，实现跨中心异构资源池化。");

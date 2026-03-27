@@ -15,6 +15,19 @@ export function makeClient({ baseUrl, directory }) {
   });
 }
 
+export function buildHostedOpenworkClientOptions({ baseUrl, workspaceId, token }) {
+  return {
+    baseUrl: `${baseUrl.replace(/\/+$/, "")}/w/${encodeURIComponent(workspaceId)}/opencode`,
+    headers: { Authorization: `Bearer ${token}` },
+    responseStyle: "data",
+    throwOnError: true,
+  };
+}
+
+export function createHostedOpenworkClient(input) {
+  return createOpencodeClient(buildHostedOpenworkClientOptions(input));
+}
+
 export async function findFreePort() {
   const server = net.createServer();
   server.unref();

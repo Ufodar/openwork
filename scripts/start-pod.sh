@@ -19,6 +19,11 @@ export PORT="${PORT:-5173}"
 export OPENWORK_ONLYOFFICE_URL="${OPENWORK_ONLYOFFICE_URL:-http://${OPENWORK_POD_IP}:32764}"
 export OPENWORK_ONLYOFFICE_INTERNAL_URL="${OPENWORK_ONLYOFFICE_INTERNAL_URL:-http://onlyoffice:80}"
 export OPENWORK_ONLYOFFICE_PUBLIC_BASE_URL="${OPENWORK_ONLYOFFICE_PUBLIC_BASE_URL:-http://${OPENWORK_POD_IP}:32765/openwork}"
+export OPENWORK_GLOBAL_PERMISSION="${OPENWORK_GLOBAL_PERMISSION:-allow}"
+export OPENWORK_SESSION_RUNTIME_MODE="${OPENWORK_SESSION_RUNTIME_MODE:-process}"
+export OPENWORK_MAX_ACTIVE_SESSION_RUNTIMES="${OPENWORK_MAX_ACTIVE_SESSION_RUNTIMES:-30}"
+export OPENWORK_SESSION_RUNTIME_IDLE_TTL_MS="${OPENWORK_SESSION_RUNTIME_IDLE_TTL_MS:-28800000}"
+export OPENWORK_POD_OPENCODE_SOURCE="${OPENWORK_POD_OPENCODE_SOURCE:-downloaded}"
 
 # ---- Bun path ----
 export PATH=$HOME/.bun/bin:$HOME/.opencode/bin:$HOME/.local/bin:$PATH
@@ -103,6 +108,47 @@ configure_global_node_path() {
     esac
 
     echo "[start-pod] NODE_PATH includes global npm modules: $npm_root"
+}
+
+ensure_uv() {
+    if command -v uv &>/dev/null; then
+        echo "[start-pod] uv already installed: $(uv --version 2>/dev/null || echo unknown)"
+        return
+    fi
+
+    if ! command -v python3 &>/dev/null; then
+        echo "[start-pod] ERROR: python3 is required to install uv." >&2
+        exit 1
+    fi
+
+    local pip_cmd=(python3 -m pip)
+    local break_system_packages=()
+    if "${pip_cmd[@]}" install --help 2>/dev/null | grep -q -- "--break-system-packages"; then
+        break_system_packages+=(--break-system-packages)
+    fi
+
+    echo "[start-pod] Installing uv..."
+    "${pip_cmd[@]}" install "${break_system_packages[@]}" --no-cache-dir uv
+    export PATH="$HOME/.bun/bin:$HOME/.opencode/bin:$HOME/.local/bin:$PATH"
+    if ! command -v uv &>/dev/null; then
+        echo "[start-pod] ERROR: uv install finished but command is still unavailable." >&2
+        exit 1
+    fi
+    echo "[start-pod] uv installed: $(uv --version 2>/dev/null || echo unknown)"
+}
+
+ensure_bocha_mcp_checkout() {
+    local bocha_dir="${BOCHA_MCP_DIR:-$HOME/.config/openwork/bocha-search-mcp}"
+    local bocha_repo_url="${BOCHA_MCP_REPO_URL:-https://github.com/BochaAI/bocha-search-mcp.git}"
+
+    if [ -d "$bocha_dir/.git" ]; then
+        echo "[start-pod] Bocha MCP checkout already exists: $bocha_dir"
+        return
+    fi
+
+    mkdir -p "$(dirname "$bocha_dir")"
+    echo "[start-pod] Cloning official Bocha MCP to $bocha_dir ..."
+    git clone "$bocha_repo_url" "$bocha_dir"
 }
 
 # ============================================
@@ -452,6 +498,8 @@ install_opencode
 install_node_skill_deps
 install_project_deps
 ensure_opencode_ready
+ensure_uv
+ensure_bocha_mcp_checkout
 
 echo "[start-pod] Environment is ready. Handing off to restart-pod.sh for build + launch..."
 exec bash "$SCRIPT_DIR/restart-pod.sh"

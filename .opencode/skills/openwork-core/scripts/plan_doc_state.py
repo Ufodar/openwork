@@ -12,11 +12,12 @@ GENERIC_GOALS = {
 }
 
 SYSTEM_SUBSECTIONS = [
+    "功能定位",
     "技术架构",
     "技术路线",
     "互联互通机制",
     "标识系统构建",
-    "API 调用示例",
+    "API调用示例",
 ]
 
 
@@ -98,25 +99,25 @@ def build_system_material_sections():
             "id": "算力资源汇聚系统",
             "title": "算力资源汇聚系统",
             "purpose": "说明跨中心算力纳管、异构资源池化与统一标签体系的实现方式。",
-            "acceptance": "覆盖资源接入、资源抽象、统一标签、互联互通与 API 示例。",
+            "acceptance": "覆盖功能定位、资源接入、资源抽象、统一标签、互联互通与 API 调用示例。",
             "required_subsections": SYSTEM_SUBSECTIONS,
-            "evidence_topics": ["resource-aggregation", "api-interoperability", "identifier-system", "general"],
+            "evidence_topics": ["resource-aggregation", "api-interoperability", "identifier-system"],
         },
         {
             "id": "算力选择与调度系统",
             "title": "算力选择与调度系统",
             "purpose": "说明多维指标驱动的任务-资源-路径联合调度策略。",
-            "acceptance": "覆盖网络感知、算力建模、调度算法、互联互通与 API 示例。",
+            "acceptance": "覆盖功能定位、网络感知、算力建模、调度算法、互联互通与 API 调用示例。",
             "required_subsections": SYSTEM_SUBSECTIONS,
-            "evidence_topics": ["scheduling", "api-interoperability", "general"],
+            "evidence_topics": ["scheduling", "api-interoperability", "identifier-system"],
         },
         {
             "id": "算力运行安全监测系统",
             "title": "算力运行安全监测系统",
             "purpose": "说明监控、告警、审计、身份认证与安全合规的实现方式。",
-            "acceptance": "覆盖安全监控架构、运行风险闭环、互联互通与 API 示例。",
+            "acceptance": "覆盖功能定位、安全监控架构、运行风险闭环、互联互通与 API 调用示例。",
             "required_subsections": SYSTEM_SUBSECTIONS,
-            "evidence_topics": ["security-monitoring", "api-interoperability", "general"],
+            "evidence_topics": ["security-monitoring", "api-interoperability", "identifier-system"],
         },
         {
             "id": "参考与依据",
@@ -203,6 +204,8 @@ def build_goal_profile(goal: str, manifest: dict, canonical_facts: list[dict]) -
     negative_keywords = {
         "充值券", "二维码", "抵扣", "支付结果", "红包", "扫码支付",
         "优惠券", "代金券", "充值", "下架", "续费", "定价模型", "营销",
+        "订单", "购物车", "商城", "店铺", "账户余额", "支付平台", "第三方支付",
+        "@startuml", "@enduml", "participant",
     }
 
     if is_system_material_goal(goal, manifest, canonical_facts):
@@ -272,6 +275,25 @@ def select_required_evidence(canonical_facts: list[dict], goal: str, manifest: d
 
     selected = []
     seen = set()
+
+    for preferred_topic in profile["preferred_topics"]:
+        taken = 0
+        for _, item in ranked:
+            if str(item.get("topic") or "") != preferred_topic:
+                continue
+            statement = str(item.get("statement") or "").strip()
+            if not statement or statement in seen:
+                continue
+            seen.add(statement)
+            selected.append({
+                "topic": item.get("topic"),
+                "statement": statement,
+                "source_count": len(item.get("sources") or []),
+            })
+            taken += 1
+            if taken >= 3:
+                break
+
     for _, item in ranked:
         statement = str(item.get("statement") or "").strip()
         if not statement or statement in seen:
@@ -297,6 +319,99 @@ def select_required_evidence(canonical_facts: list[dict], goal: str, manifest: d
         for item in canonical_facts[:12]
         if isinstance(item, dict)
     ]
+
+
+def select_section_required_evidence(section: dict, canonical_facts: list[dict], goal: str, manifest: dict) -> list[dict]:
+    evidence_topics = {
+        str(topic).strip()
+        for topic in (section.get("evidence_topics") if isinstance(section.get("evidence_topics"), list) else [])
+        if str(topic).strip()
+    }
+    if not evidence_topics:
+        return []
+
+    profile = build_goal_profile(goal, manifest, canonical_facts)
+    profile["preferred_topics"] = evidence_topics
+
+    ranked = []
+    for item in canonical_facts:
+        if not isinstance(item, dict):
+            continue
+        topic = str(item.get("topic") or "").strip()
+        if topic not in evidence_topics:
+            continue
+        score = score_fact(item, profile)
+        if score < 2:
+            continue
+        ranked.append((score, item))
+
+    ranked.sort(key=lambda pair: (-pair[0], pair[1].get("topic") or "", pair[1].get("statement") or ""))
+
+    selected = []
+    seen = set()
+    for _, item in ranked:
+        statement = str(item.get("statement") or "").strip()
+        if not statement or statement in seen:
+            continue
+        seen.add(statement)
+        selected.append({
+            "topic": item.get("topic"),
+            "statement": statement,
+            "source_count": len(item.get("sources") or []),
+        })
+        if len(selected) >= 6:
+            break
+    return selected
+
+
+def select_source_context_refs(section: dict, source_briefs: list[dict]) -> list[dict]:
+    evidence_topics = {
+        str(topic).strip()
+        for topic in (section.get("evidence_topics") if isinstance(section.get("evidence_topics"), list) else [])
+        if str(topic).strip()
+    }
+    if not evidence_topics:
+        return []
+
+    ranked_sources: list[tuple[int, dict]] = []
+    for source in source_briefs:
+        if not isinstance(source, dict):
+            continue
+        sections = source.get("sections") if isinstance(source.get("sections"), list) else []
+        matched_sections = []
+        score = 0
+        for section_item in sections:
+            if not isinstance(section_item, dict):
+                continue
+            topic = str(section_item.get("topic") or "").strip()
+            if topic and topic not in evidence_topics:
+                continue
+            title = str(section_item.get("title") or "").strip()
+            summary = str(section_item.get("summary") or "").strip()
+            if not title and not summary:
+                continue
+            matched_sections.append(title or summary[:60])
+            score += 2
+            if topic in evidence_topics:
+                score += 2
+            if len(matched_sections) >= 3:
+                break
+
+        if not matched_sections:
+            continue
+
+        ranked_sources.append((
+            score,
+            {
+                "docId": str(source.get("docId") or ""),
+                "title": str(source.get("title") or ""),
+                "relativePath": str(source.get("relativePath") or ""),
+                "section_titles": matched_sections,
+            },
+        ))
+
+    ranked_sources.sort(key=lambda item: (-item[0], item[1].get("title") or ""))
+    return [item for _, item in ranked_sources[:3]]
 
 
 def main():
@@ -330,11 +445,17 @@ def main():
     )
 
     canonical_facts = facts.get("canonical_facts") if isinstance(facts.get("canonical_facts"), list) else []
+    source_briefs = facts.get("source_briefs") if isinstance(facts.get("source_briefs"), list) else []
     gaps = facts.get("gaps") if isinstance(facts.get("gaps"), list) else []
     open_questions = conflicts.get("open_questions") if isinstance(conflicts.get("open_questions"), list) else []
     conflict_items = conflicts.get("conflicts") if isinstance(conflicts.get("conflicts"), list) else []
     goal = infer_goal(goal, manifest, canonical_facts)
     sections = build_sections(goal, manifest, canonical_facts)
+    for section in sections:
+        section["required_evidence"] = select_section_required_evidence(section, canonical_facts, goal, manifest)
+        source_context_refs = select_source_context_refs(section, source_briefs)
+        if source_context_refs:
+            section["source_context_refs"] = source_context_refs
     required_evidence = select_required_evidence(canonical_facts, goal, manifest)
 
     plan_payload = {
@@ -358,6 +479,8 @@ def main():
         "writer_instructions": [
             "Use the section order in this plan unless the target document already has stable structure that must be preserved.",
             "Prefer canonical facts and conflict artifacts over reopening source artifacts.",
+            "Use section-level required_evidence and source_context_refs before reopening the global facts store.",
+            "If the backing facts store is needed for a missing claim, extract only the relevant records for the current section instead of reading the entire file into context.",
             "If a section cannot be fully supported, write the supported portion and mark the rest as assumptions or pending confirmation.",
             "Keep the tone practical and evidence-aware rather than speculative.",
             "When the user asks for named systems or required headings, keep those exact titles and their required subsections visible in the deliverable.",

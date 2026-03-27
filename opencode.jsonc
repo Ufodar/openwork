@@ -3,6 +3,7 @@
   "instructions": [
     ".opencode/references/doc-state-schema.md"
   ],
+  "permission": "allow",
   "agent": {
     "doc-orchestrator": {
       "description": "Supervises long document tasks by reading state first and delegating source work to hidden doc-* subagents",
@@ -14,8 +15,6 @@
       "tools": {
         "*": false,
         "task": true,
-        "todoread": true,
-        "todowrite": true,
         "read": true,
         "list": true,
         "glob": true,
@@ -31,15 +30,15 @@
         },
         "read": {
           "*": "deny",
-          ".worktree/index.json": "allow",
-          "**/.worktree/index.json": "allow",
-          ".worktree/sources/manifest.json": "allow",
-          "**/.worktree/sources/manifest.json": "allow",
-          ".worktree/facts.json": "allow",
-          "**/.worktree/facts.json": "allow",
-          ".worktree/merge/conflicts.json": "allow",
-          "**/.worktree/merge/conflicts.json": "allow",
-          ".worktree/plan/solution-plan.json": "allow",
+        ".worktree/index.json": "allow",
+        "**/.worktree/index.json": "allow",
+        ".worktree/sources/manifest.json": "allow",
+        "**/.worktree/sources/manifest.json": "allow",
+        ".worktree/facts.json": "allow",
+        "**/.worktree/facts.json": "allow",
+        ".worktree/merge/conflicts.json": "allow",
+        "**/.worktree/merge/conflicts.json": "allow",
+        ".worktree/plan/solution-plan.json": "allow",
           "**/.worktree/plan/solution-plan.json": "allow",
           ".worktree/coverage.json": "allow",
           "**/.worktree/coverage.json": "allow",
@@ -69,6 +68,15 @@
         },
         "glob": {
           "*": "deny",
+          "**/*.{docx,doc,pdf,md}": "allow",
+          "*.docx": "allow",
+          "**/*.docx": "allow",
+          "*.doc": "allow",
+          "**/*.doc": "allow",
+          "*.pdf": "allow",
+          "**/*.pdf": "allow",
+          "*.md": "allow",
+          "**/*.md": "allow",
           ".worktree/**": "allow",
           ".bid/**": "allow",
           "reports/**": "allow",
@@ -81,9 +89,7 @@
         "grep": "deny",
         "skill": {
           "*": "deny"
-        },
-        "todoread": "allow",
-        "todowrite": "allow"
+        }
       }
     },
     "document-writer": {
@@ -96,8 +102,6 @@
       "tools": {
         "*": false,
         "task": true,
-        "todoread": true,
-        "todowrite": true,
         "read": true,
         "list": true,
         "glob": true,
@@ -151,6 +155,15 @@
         },
         "glob": {
           "*": "deny",
+          "**/*.{docx,doc,pdf,md}": "allow",
+          "*.docx": "allow",
+          "**/*.docx": "allow",
+          "*.doc": "allow",
+          "**/*.doc": "allow",
+          "*.pdf": "allow",
+          "**/*.pdf": "allow",
+          "*.md": "allow",
+          "**/*.md": "allow",
           ".worktree/**": "allow",
           ".bid/**": "allow",
           "reports/**": "allow",
@@ -163,9 +176,32 @@
         "grep": "deny",
         "skill": {
           "*": "deny"
+        }
+      }
+    },
+    "common-work": {
+      "description": "General-purpose OpenWork document agent that keeps raw OpenCode's default tool latitude while applying workspace-safe document guidance",
+      "mode": "primary",
+      "color": "#6366F1",
+      "prompt": "{file:./.opencode/agent/common-work.md}",
+      "permission": {
+        "task": "allow",
+        "read": {
+          "*": "allow"
         },
-        "todoread": "allow",
-        "todowrite": "allow"
+        "write": {
+          "*": "allow"
+        },
+        "edit": {
+          "*": "allow"
+        },
+        "list": "allow",
+        "glob": "allow",
+        "bash": "allow",
+        "grep": "allow",
+        "skill": {
+          "*": "allow"
+        }
       }
     },
     "doc-intake": {
@@ -181,6 +217,7 @@
         "read": true,
         "list": true,
         "glob": true,
+        "bash": true,
         "write": true,
         "edit": true
       },
@@ -203,7 +240,7 @@
           ".worktree/sources/manifest.json": "allow",
           ".worktree/conventions.md": "allow"
         },
-        "bash": "deny"
+        "bash": "allow"
       }
     },
     "doc-reader": {
@@ -325,12 +362,24 @@
         "read": {
           "*": "deny",
           ".worktree/index.json": "allow",
+          "**/.worktree/index.json": "allow",
           ".worktree/sources/manifest.json": "allow",
+          "**/.worktree/sources/manifest.json": "allow",
           ".worktree/facts.json": "allow",
+          "**/.worktree/facts.json": "allow",
           ".worktree/merge/conflicts.json": "allow",
+          "**/.worktree/merge/conflicts.json": "allow",
+          ".worktree/plan/solution-plan.json": "allow",
+          "**/.worktree/plan/solution-plan.json": "allow",
+          ".worktree/coverage.json": "allow",
+          "**/.worktree/coverage.json": "allow",
           ".bid/**": "allow",
+          "**/.bid/**": "allow",
           "requirements.csv": "allow",
+          "**/requirements.csv": "allow",
           "reports/**": "allow"
+          ,
+          "**/reports/**": "allow"
         },
         "list": {
           "*": "deny",
@@ -376,7 +425,7 @@
         "write": true,
         "edit": true,
         "bash": true,
-        "skill": true,
+        "skill": false,
         "bocha-search*": true
       },
       "permission": {
@@ -444,11 +493,7 @@
         },
         "bash": "allow",
         "skill": {
-          "*": "deny",
-          "docx": "allow",
-          "pdf": "allow",
-          "xlsx": "allow",
-          "pptx": "allow"
+          "*": "deny"
         }
       }
     },
@@ -613,15 +658,14 @@
     "bocha-search": {
       "type": "local",
       "command": [
-        "npx",
-        "-y",
-        "@iflow-mcp/yoko19191-bocha-ai-mcp-server"
+        "uv",
+        "--directory",
+        "{env:BOCHA_MCP_DIR}",
+        "run",
+        "bocha-search-mcp"
       ],
       "environment": {
-        "BOCHA_API_KEY": "{env:BOCAI_API_KEY}",
-        "BOCHA_API_URL": "{env:BOCAI_API_URL}",
-        "BOCAI_API_KEY": "{env:BOCAI_API_KEY}",
-        "BOCAI_API_URL": "{env:BOCAI_API_URL}"
+        "BOCHA_API_KEY": "{env:BOCHA_API_KEY}"
       }
     },
     "ragflow": {

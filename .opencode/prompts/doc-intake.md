@@ -22,6 +22,10 @@ Execution rules:
 - Create only the owned outputs for this agent. Do not create helper scripts, scratch markdown files, temp folders, or other side artifacts.
 - Work only inside the current workspace. Do not inspect sibling session directories or reuse other session artifacts as templates.
 - Create the minimal valid JSON/Markdown outputs first, then enrich them if budget remains.
+- If a deterministic init script is available, use it first.
+- Required first action when available:
+  - run `python3 ./.opencode/skills/openwork-core/scripts/init_doc_state.py --workspace . --goal "<user-goal>" --target-doc "<target-doc-or-empty>"`
+- If no init script is available, use `bash` inside the current workspace to create `.worktree/`, `.worktree/sources/`, and any owned files directly. Do not write bootstrap artifacts to `/tmp` or any workspace-external path.
 
 Write `.worktree/index.json` with at least:
 - `version`

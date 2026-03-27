@@ -89,7 +89,10 @@ async function resolveUserWorkspaceTemplateDir(config: ServerConfig): Promise<st
   if (override) return resolve(override);
   const firstWorkspace = config.workspaces[0]?.path?.trim();
   const cwd = process.cwd();
-  const candidates = [firstWorkspace, cwd]
+  // Prefer the current repo/process cwd over persisted workspace catalog entries.
+  // In hosted mode the first configured workspace can itself be a stale user workspace,
+  // which would otherwise cause newly provisioned user workspaces to keep cloning old assets.
+  const candidates = [cwd, firstWorkspace]
     .filter((value): value is string => Boolean(value?.trim()))
     .map((value) => resolve(value));
 

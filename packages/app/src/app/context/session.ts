@@ -621,6 +621,9 @@ export function createSessionStore(options: {
     const run = (async () => {
       mark("start");
 
+      const currentSession = store.sessions.find((session) => session.id === sessionID) ?? null;
+      const currentDirectory = normalizeDirectoryPath(currentSession?.directory ?? "");
+
       mark("checking health");
       try {
         const health = unwrap(await c.global.health({ signal: AbortSignal.timeout(3_000) }));
@@ -634,6 +637,26 @@ export function createSessionStore(options: {
         });
       }
       if (abortIfStale("selection changed after health")) return;
+
+      if (!currentDirectory) {
+        mark("calling session.get");
+        try {
+          const info = unwrap(await c.session.get(
+            { sessionID },
+            { signal: AbortSignal.timeout(8_000) },
+          ));
+          mark("session.get done", {
+            directory: normalizeDirectoryPath(info?.directory ?? ""),
+          });
+          if (abortIfStale("selection changed before session applied")) return;
+          setStore("sessions", (current) => upsertSession(current, info));
+        } catch (error) {
+          mark("session.get failed/timeout", {
+            error: error instanceof Error ? error.message : safeStringify(error),
+          });
+          if (abortIfStale("selection changed after session.get failure")) return;
+        }
+      }
 
       mark("calling session.messages");
       const msgs = unwrap(await c.session.messages(

@@ -1,0 +1,744 @@
+# Handoff
+
+更新时间：2026-03-27
+
+## 当前目标
+
+- 不是把系统调成只会处理“秦老师这两份材料”。
+- 是用真实长文档压力测试，逼出 OpenWork 在长程文档产出上的通用问题，然后修成能稳定产出高质量最终文稿的系统。
+- 但当前还有一个更高优先级的现实约束：
+  - 已有真实用户开始使用 pod 里的 OpenWork
+  - 所以必须先确保：
+    - pod 运行的是当前本地关键修改内容
+    - pod 当前处于可正常使用状态
+
+## 当前已经明确的方向
+
+- 联网补充只允许 `bocha-search`。
+- 不允许用搜索 fallback 掩盖系统工具故障。
+- 当前 raw vs `common-work` 公平基线先统一到 `my-company/MiniMax-2.5`。
+- `my-company/Qwen3.5-397B-A17B` 仍是长期首选，但本机 raw OpenCode 目前会触发 `system message must be at the beginning`，所以暂时不拿它做公平基线。
+- `common-work` 与 Superpowers 的当前差异，现阶段更像 prompt 路由差异，不是“skills 根本没加载”；这点已经被本机显式可见性探针证实。
+- 最新 MiniMax baseline 短探针已经补齐三条 lane：
+  - raw OpenCode
+  - local OpenWork `common-work`
+  - pod OpenWork `common-work`
+- 当前已确认：
+  - 三条 lane 都能看到 `brainstorming` / `writing-plans`
+  - local `common-work` 会在对齐后的 `planning_route` 探针中主动走 `skill`
+  - pod `common-work` 早期“不走 skill”那轮是无效结论，因为它实际跑的是旧版 `common-work.md`；同步 prompt 后，pod lane 也变成 `skill: 1`
+- `document-writer` 这条链已经真实进入 `doc-*` 子 agent 编排，不再只是纸面设定。
+- hosted 运行态结论必须先核对：
+  - pod 部署仓库资产
+  - 目标用户 workspace 资产
+  否则本地修复不等于 hosted 已生效。
+- 当前主要问题已经收敛到：
+  - `raw OpenCode` vs `pod common-work` 基线对齐后的真实质量对比
+  - hosted 资产刷新链是否可自动传播
+- compare/upload 链路与内容质量问题的拆分
+
+## 最新运维状态
+
+- 当前 pod `/root/ai_staff/openwork` 已与本地当前工作树完成一轮直接同步。
+- 关键文件内容不是“看起来像同步过”，而是已经有 SHA-256 一致性证据：
+  - `AGENTS.md`
+  - `.opencode/agent/common-work.md`
+  - `packages/app/src/app/lib/tool-monitor/analyze.ts`
+  - `packages/server/src/session-workspaces.ts`
+  - `packages/server/src/session-opencode-runtime.ts`
+  - `scripts/start-pod.sh`
+  - `scripts/restart-pod.sh`
+  - `scripts/recover-pod-runtime.sh`
+- 当前 pod 是通过手工拉起方式恢复的，不是走稳定的恢复脚本链：
+  - `node scripts/serve-web-prod.mjs`
+  - `OPENWORK_WEB_PORT=32765 node scripts/serve-web-prod.mjs`
+  - `packages/orchestrator/dist/bin/openwork serve ... --opencode-source downloaded ...`
+- 当前健康：
+  - `127.0.0.1:8789/health -> 200`
+  - `127.0.0.1:32765/openwork/health -> 200`
+  - `127.0.0.1:32765/ -> 200`
+- 当前 run：
+  - `dfdfcc6e-0f1b-4b55-b639-2b7b1b806e0b`
+- 当前活跃进程：
+  - `1634850 node scripts/serve-web-prod.mjs`
+  - `1634851 node scripts/serve-web-prod.mjs`
+  - `1634852 packages/orchestrator/dist/bin/openwork serve ...`
+  - `1635080 ... sidecar opencode serve ...`
+  - `1635185 packages/opencode-router/dist/bin/opencode-router serve ...`
+  - `1635208 packages/server/dist/bin/openwork-server ...`
+- 需要牢记：
+  - pod 现在是可用的
+  - 但 `restart-pod.sh` / `recover-pod-runtime.sh` 这条链仍未彻底收口
+  - 日后要回到规范的 `push -> pod pull/build`，而不是继续长期依赖 dirty 工作树直同步
+  - 详细过程见：
+    - `pod-sync-and-manual-recovery-2026-03-27.md`
+
+- 这轮又确认并修掉了一个比“脚本偶发恢复失败”更根本的问题：
+  - `listWorkspaceSessions()` 和 `ensureRuntimeActivitySubscriptions()` 会误启动 isolated runtime
+  - 结果是：
+    - 历史 session 一多
+    - pod 就会出现大量 `opencode serve --hostname 127.0.0.1`
+    - backend 被拖慢，`8789/health` 与 `/openwork/health` 超时
+- 修复方式：
+  - 新增 `peekSessionWorkspace(...)`
+  - 列表页与维护轮询只读取“已运行 runtime”或历史恢复元数据
+  - 不再因为只读状态查询启动新的 isolated runtime
+- 本地测试已过：
+  - `bun test packages/server/src/session-opencode-runtime.test.ts packages/server/src/server.proxy-session-list.test.ts packages/server/src/server.runtime-maintenance.test.ts`
+- pod 已用新 server binary 重新拉起：
+  - 初始：
+    - `8789=up`
+    - `32765=up`
+    - `CHILD_COUNT=0`
+  - 延迟复检：
+    - `8789=up`
+    - `32765=up`
+    - `CHILD_COUNT=2`
+  - 这和“只给真实活跃 session 保留 runtime”是一致的
+- 详细记录：
+  - `session-list-runtime-spawn-fix-2026-03-27.md`
+
+## 最新有效工作
+
+- 最新一轮不是继续跑旧 baseline，而是先修掉了 compare harness 自己制造的噪音：
+  - 不再默认依赖 workspace 级 `/w/<workspace>/opencode/event`
+  - settle 改为看最后一条“已完成且有内容”的 assistant turn
+  - 这解决了此前“`.docx` 已生成但 compare 仍假超时”的问题
+- 修正后，Qin 主 baseline 已经重新锁住：
+  - raw：
+    - `ses_2d29c9d1dffe4iThsecrQmF8n4`
+    - `elapsedMs = 213978`
+    - `opencodeVersion = 1.3.3`
+    - `toolIssueCounts = { webfetch: 1 }`
+    - 交付：
+      - `outputs/融合算力平台三大系统技术材料.docx`
+      - `.tmp/docx-draft/技术材料.md`
+  - pod：
+    - `ses_2d29c971effeFgqEbe3AL4wZ8N`
+    - `elapsedMs = 355799`
+    - `health.version = 1.3.3`
+    - `toolCounts = { glob: 2, bocha-search_bocha_web_search: 3, skill: 2, bash: 10, read: 2, write: 2, edit: 4 }`
+    - `toolIssueCounts = {}`
+    - 交付：
+      - `outputs/三大系统技术方案.docx`
+- 这轮最关键的新判断是：
+  - `pod common-work` 当前不只是“没有明显弱于 raw”
+  - 在修正后的正式 baseline 里，它已经比 raw 更像最终交付件
+  - raw 仍保留：
+    - `webfetch` 异常
+    - `export` 坏 JSON，只能回退 `run-jsonl`
+- `/tmp` 这条线也要更新判断：
+  - 最新 Qin pod lane 中，系统 `/tmp` 已经没有复现
+  - 实际看到的是 session-local：
+    - `<WORKSPACE>/.tmp/whitepaper.md`
+    - `<WORKSPACE>/.tmp/monitoring.md`
+    - `<WORKSPACE>/.tmp/system/*`
+  - 所以旧的 shared `/tmp` 路径碰撞已经不是当前主 baseline 的 blocker
+- 当前继续推进时，重点应该切换到：
+  - raw 的联网与导出稳定性
+  - pod 的文稿质量跨样例能否继续保持不弱于 raw
+- 这轮又补了一处 compare harness 小修复，主要是避免 raw 因坏 `export` 丢掉用户可见总结：
+  - `tmp/qin-abc-minimax.mjs` 在 `run-jsonl` 回退路径里，现会为 message 推断完成时间
+  - 用当前 Qin raw 的 `raw.run.jsonl` 已直接验证：
+    - 能恢复出 `assistant_text_len = 556`
+  - 所以下一轮即使 raw `export` 继续坏掉，对读报告也不该再把 raw 写成“assistantText 为空”
+
+- 这轮最关键的新结论不是又修了一个 prompt 细节，而是：
+  - `downloaded` shared hosted 基线已经重新成立
+  - Qin `pod-only` 在 `downloaded` 模式下可稳定完整跑完
+  - shared hosted 入口不再像 external `1.2.6` 那样在长任务后掉线
+- 为了把 shared 入口从 external 拉回受管路径，这轮又补了三处脚本级修复：
+  - `scripts/start-pod.sh`
+  - `scripts/restart-pod.sh`
+  - `scripts/recover-pod-runtime.sh`
+- 修复点是：
+  - pod 启动/恢复默认把 `OPENWORK_POD_OPENCODE_SOURCE` 固定为 `downloaded`
+  - `restart-pod.sh` 不再因为 PATH 上存在 `opencode` 就默认选 `external`
+  - 本地验证已过：
+    - `node --test scripts/restart-pod-help.test.mjs`
+    - `bash -n scripts/start-pod.sh`
+    - `bash -n scripts/restart-pod.sh`
+    - `bash -n scripts/recover-pod-runtime.sh`
+- live 恢复后日志里已经直接出现：
+  - `Unsetting OPENWORK_OPENCODE_BIN because OpenCode source is downloaded.`
+  - 说明 shared hosted 入口当前确实不再走 external `1.2.6`
+- Qin 第 1 次 `downloaded` live 复跑：
+  - `ses_2d2dff0e1ffevTJO6lcTEMQfkJ`
+  - `elapsedMs = 231735`
+  - `health.version = 1.3.3`
+  - 最终 `.docx` 已清掉：
+    - `ops-team@example.com`
+    - `callback.example.com`
+    - `logs.example.com`
+    - `<APP_HOST>`
+    - `<API_HOST>`
+  - 但仍残留：
+    - `gpu-cluster-01.internal.example.com`
+    - `s3.example.com`
+- 因此又继续补了一轮 `common-work` 约束：
+  - 节点地址、对象存储端点必须用：
+    - `<NODE_ADDRESS>`
+    - `<OBJECT_STORAGE_ENDPOINT>`
+  - 不再允许：
+    - `gpu-cluster-01.internal.example.com`
+    - `s3.example.com`
+  - 对应文件：
+    - `.opencode/agent/common-work.md`
+    - `packages/app/scripts/doc-subagent-prompts.test.mjs`
+  - 本地 prompt 回归已过：
+    - `bun test packages/app/scripts/doc-subagent-prompts.test.mjs`
+- Qin 第 2 次 `downloaded` live 复跑：
+  - `ses_2d2d8ae46ffeTTqGnm6Z4Qh8NK`
+  - `elapsedMs = 185787`
+  - `health.version = 1.3.3`
+  - 最终 `.docx` 核查结果已经是：
+    - `example.com = false`
+    - `@example.com = false`
+    - `ops-team@example.com = false`
+    - `net-team@example.com = false`
+    - `callback.example.com = false`
+    - `logs.example.com = false`
+    - `gpu-cluster-01.internal.example.com = false`
+    - `s3.example.com = false`
+    - `<APP_HOST> = false`
+    - `<API_HOST> = false`
+    - `<SERVICE_HOST> = false`
+    - `/api/v1/ = true`
+- 所以当前这条主目标已经可以明确表述为：
+  - “每个 session 独立 OpenCode runtime + `downloaded` shared hosted 入口 + Qin 主样例文稿占位残留清零” 这三件事已经在 live pod 上同时成立
+- 当前剩余未收口项不是内容质量，而是工具行为：
+  - agent 仍会试探 `/tmp/*.md` 路线
+  - 但这些都被 hosted 权限正确拦截，没有再把最终结果带偏
+- 还有一个 housekeeping 没做完：
+  - `/root/.config/openwork/pod.env` 里历史遗留的：
+    - `OPENWORK_OPENCODE_SOURCE=external`
+    - `OPENWORK_OPENCODE_BIN=/root/.local/bin/opencode`
+  - 这轮没有完全清干净
+  - 但已经不再主导当前运行结果，因为新脚本默认值和恢复链会覆盖它
+  - 这件事可以在后续清理，不影响本轮主结论成立
+
+- 最新一轮首先暴露的不是内容问题，而是 pod 入口整体掉线：
+  - Qin `pod-only`：
+    - `ses_2d3b37f7fffedJ7kulGbYA0nNi`
+  - 两个参考文档上传完成后，本地 compare 客户端直接收到：
+    - `TypeError: fetch failed`
+    - `SocketError: other side closed`
+  - 已确认：
+    - 这是 `5173/32765` 入口掉线，不是文稿生成质量本身的问题
+- pod 已使用下列组合恢复成功：
+  - `OPENWORK_POD_OPENCODE_SOURCE=downloaded`
+  - `OPENWORK_DISABLE_SHARED_WORKSPACE_EVENT_TRACKING=1`
+  - 恢复命令：
+    - `bash scripts/recover-pod-runtime.sh --force`
+  - 恢复后健康检查：
+    - `GET http://127.0.0.1:5173/openwork/health -> 200`
+    - `GET http://192.168.5.10:32765/openwork/health -> 200`
+- “每个 session 独立 OpenCode 进程”这条线现在已经拿到新的 live 进程证据：
+  - 当前 pod 进程快照显示：
+    - 1 个 shared `opencode serve`
+    - 2 个 session 级 `opencode serve`
+  - 也就是：
+    - shared 入口还在
+    - 但 session-owned child runtime 也已经真实存在，不再只是代码层设计
+- Qin `pod-only` 这轮连续三次 live 收口：
+  - `ses_2d3aaba0dffeBTSxne79et6fzt`
+    - helper 脚本已不再进入 `generatedDocuments`
+    - 但正文仍残留：
+      - `https://<API_HOST>/...`
+      - `user@example.com`
+      - `https://example.com/...`
+  - `ses_2d3a2c4f3ffe8n4y6v2f3pEbXe`
+    - `toolIssueCounts = {}`
+    - helper 脚本没有回潮
+    - `example.com` 已消失
+    - 但仍残留：
+      - `Host: <API_HOST>`
+      - `user@example.com`
+  - `ses_2d39d1f62ffejzE8MfYROhu2Hr`
+    - `toolIssueCounts = { bash: 1 }`
+    - 这 1 次是 `/tmp/whitepaper.md` 路线被 hosted 规则正确拦截
+    - 最终正文核查结果：
+      - `example.com = false`
+      - `@example.com = false`
+      - `<API_HOST> = false`
+      - `<SERVICE_HOST> = true`
+      - `/api/v1/ = true`
+    - 当前唯一明显残留：
+      - `callback_url: "https://<APP_HOST>/callback/task-status"`
+- `common-work` 这轮新增的 prompt 约束已经本地过测，并同步到 pod repo 与目标 user workspace：
+  - helper 脚本不得进入稳定交付路径
+  - API 示例默认相对路径 / hostless 占位
+  - `Host:` 行统一使用 `<SERVICE_HOST>`
+  - 禁止：
+    - `https://<API_HOST>/...`
+    - `<API_HOST>`
+    - `user@example.com`
+    - `ops-team@example.com`
+    - `@example.com`
+  - 身份类占位统一成：
+    - `<LOGIN_USERNAME>`
+    - `<CONTACT_EMAIL>`
+    - `<PHONE_NUMBER>`
+    - `<ACCOUNT_ID>`
+  - 对应文件：
+    - `.opencode/agent/common-work.md`
+    - `packages/app/scripts/doc-subagent-prompts.test.mjs`
+  - 本地验证：
+    - `bun test packages/app/scripts/doc-subagent-prompts.test.mjs`
+- 此后又继续补了一轮更细的 prompt 约束，专门针对最新正文残留：
+  - 新增明确禁止：
+    - `https://<APP_HOST>/callback/...`
+    - `https://callback.example.com/...`
+    - `https://logs.example.com/...`
+    - `ops-team@example.com`
+    - `net-team@example.com`
+  - 并要求：
+    - 回调地址统一写成 `<CALLBACK_URL>`
+    - 日志链接统一写成 `<LOG_STREAM_URL>`
+    - 通知接收人统一写成 `<OPS_EMAIL_GROUP>`、`<CONTACT_EMAIL>` 或其他显式占位字段
+  - 本地验证仍然通过：
+    - `bun test packages/app/scripts/doc-subagent-prompts.test.mjs`
+    - `git diff --check -- .opencode/agent/common-work.md packages/app/scripts/doc-subagent-prompts.test.mjs`
+- 但这轮最新 prompt 还没有完成 live pod 复核，因为同步阶段卡在外部链路：
+  - `ssh/scp -p 31033 -i ~/biaoshu.key root@hcc-subcenter1.tianhe-tech.com`
+  - 返回：
+    - `Connection to 117.131.148.109 port 31033 timed out`
+- 在同步失败前，又用旧 prompt 状态补跑了一次 Qin pod-only：
+  - `ses_2d33807bfffeIxIpwpLyCMxXFw`
+  - `elapsedMs = 229323`
+  - `toolIssueCounts = { bash: 2 }`
+  - 这 2 次 issue 仍是 `/tmp/*.md` 路径被 hosted 规则正确拦截
+  - 交付：
+    - `outputs/算力网络三大核心系统技术材料.docx`
+  - 最新正文核查结果：
+    - `example.com = true`
+    - `@example.com = true`
+    - `<APP_HOST> = false`
+    - `<SERVICE_HOST> = true`
+    - `/api/v1/ = true`
+  - 当前剩余残留已收缩为：
+    - `https://callback.example.com/...`
+    - `https://logs.example.com/...`
+    - `ops-team@example.com`
+    - `net-team@example.com`
+
+- 最新 Qin `raw vs pod` 长样例已经在修复后的 hosted runtime 上正式补齐：
+  - raw：
+    - `ses_2d4c88920ffeMylWzM7OWg7Xc5`
+    - `elapsedMs = 222457`
+    - `toolIssueCounts = { webfetch: 2 }`
+    - 交付：
+      - `算力资源平台技术材料.md`
+      - `outputs/算力资源平台三大系统技术材料.docx`
+  - pod：
+    - `ses_2d4c88065ffemxca53ddk69fS7`
+    - `elapsedMs = 249894`
+    - `toolCounts = { bash: 8, glob: 2, bocha-search_bocha_ai_search: 4, skill: 1, write: 1, read: 1 }`
+    - `toolIssueCounts = { glob: 2, skill: 1 }`
+    - `health.version = 1.3.3`
+    - 交付：
+      - `outputs/算力网络调度平台技术材料.docx`
+- 这轮 Qin 的产品级意义比单次内容优劣更大：
+  - 说明修复后的 hosted session-isolated runtime 已经能稳定支撑正式长样例对照
+  - 当前主问题不再是“session 会不会崩”
+  - 而是：
+    - `pod common-work` 还有哪些剩余噪音
+    - `raw` 与 pod 在正式交付质量上如何继续收敛
+- 最新对读结论：
+  - `pod common-work` 当前已不再显著弱于 raw
+  - 在正式申报材料形态上，pod 更像最终交付件
+  - raw 仍偏技术草稿：
+    - 大量代码围栏
+    - 脚本式 API 示例
+    - 示例级 heading 混入正文
+  - 但两边共同仍有：
+    - 占位式 API 域名
+    - 证据纪律不够硬
+- 这轮还顺手补了一个用户可见层约束：
+  - `common-work` 最终只允许对用户报告 workspace 内稳定交付路径的相对表示
+  - 不再允许暴露：
+    - hosted pod 绝对路径
+    - user workspace ID
+    - runtime 目录
+    - `.tmp/system` 草稿路径
+  - 对应文件：
+    - `.opencode/agent/common-work.md`
+    - `packages/app/scripts/doc-subagent-prompts.test.mjs`
+- 这条约束已经做过 live hosted 复核，不是只停在 prompt 测试：
+  - 已把最新 `common-work.md` 同步到 pod repo 和当前用户 workspace
+  - `WJW pod-only`：
+    - `ses_2d4bc5202ffeqxBCcpYJ4dnoim`
+    - `elapsedMs = 243007`
+    - `toolIssueCounts = {}`
+    - 交付：
+      - `点对点解决方案_滨海新区卫健委信息化平台.docx`
+      - `点对点解决方案_滨海新区卫健委信息化平台.md`
+  - 最新 `assistantText` 已不再泄露：
+    - `/root/.openwork/...`
+    - `documents/sessions/<runtimeId>/...`
+    - `.tmp/system/*.md`
+- Qin 的后续两轮 live 复核又把剩余问题继续缩小了：
+  - `ses_2d3ca57edffeuqH08zjMZKHirm`
+    - `.tmp/system` 路径泄漏已消失
+    - 但 API payload 里仍残留：
+      - `app.example.com`
+      - `*.example.com`
+    - 同时仍有 `glob/skill` socket 噪音
+  - 为此，`common-work` 现已新增：
+    - API 示例默认优先相对路径 `/api/v1/...`
+    - 非来源确认的 host 只能写成 `<SERVICE_HOST>`、`<CALLBACK_URL>` 等显式占位变量
+    - 完成前显式扫描：
+      - `example.com`
+      - `/root/.openwork`
+      - `documents/sessions/`
+      - `.tmp/system`
+  - 第二轮：
+    - `ses_2d3bd4d9bffeQRelEgAwSarPtC`
+    - `toolIssueCounts = { bash: 1 }`
+    - `glob/skill` socket 错误这轮没有再出现
+    - 最终 `.docx` 已确认：
+      - 无 `example.com`
+      - 无 `http://` / `https://`
+      - API 示例统一收回相对路径 `/api/v1/...`
+    - `assistantText` 也仍只报告：
+      - `outputs/融合算力平台三大系统技术方案.docx`
+- 当前最新的小回归是：
+  - helper 脚本污染问题已经被压掉
+  - `<APP_HOST>` 这类残留也已经压掉
+  - 当前新的最小剩余问题变成：
+    - `https://callback.example.com/...`
+    - `https://logs.example.com/...`
+    - `ops-team@example.com`
+    - `net-team@example.com`
+  - 这说明下一步不该回头重做大范围 runtime 排障，而是继续做一次更窄的 prompt / 产物核查收口
+- 因此下一步不要回到老的 shared-crash 排障思路，而应该优先做两件事：
+  - 等 SSH 恢复后，把最新 `common-work.md` 同步到 pod repo 和目标 user workspace
+  - 立刻重跑 Qin `pod-only`，确认上述四个残留是否被压掉
+- 这轮又补了一处直接影响 session-isolated runtime 真实性的 server bug：
+  - `proxyOpencodeRequest()` 在已经解析出 `runtimeDirectory` 的情况下，之前仍会保留上游请求自带的 `x-opencode-directory`
+  - 结果是：
+    - session child runtime 明明已经用独立 `runtimeDir` / `XDG_*` / `TMPDIR`
+    - 但真正的 prompt request 仍可能把 user workspace 根目录带进去
+  - live 症状非常直接：
+    - 上传文件已经在 `runtimeDir`
+    - `common-work` 却还在 `/root/.openwork/user-workspaces/...` 上做 `glob`
+    - 然后误判“当前工作区为空”
+  - 现在 server 已改为：
+    - 一旦当前请求属于有 `runtimeDirectory` 的 session
+    - 强制把 `x-opencode-directory` 覆盖成该 `runtimeDirectory`
+  - 对应文件：
+    - `packages/server/src/server.ts`
+    - `packages/server/src/server.proxy-session-activity.test.ts`
+- 这轮也把 `common-work` 的最终 `.docx` 路径契约收紧了：
+  - 明确要求最终 `.docx` 应优先直接生成到稳定交付路径
+  - 而不是默认先落 `.tmp/system/*.docx`，再指望模型最后自己记得搬运
+  - 对应文件：
+    - `.opencode/agent/common-work.md`
+    - `packages/app/scripts/doc-subagent-prompts.test.mjs`
+- 新的 pod-only 复核已经证明：
+  - server 目录头修复后，`common-work` 不再误判“当前工作区为空”
+  - session：
+    - `ses_2d4dd07a0ffezszucJfcFyUUZH`
+  - 之后同步新的 `common-work.md` 到 pod repo 和目标 user workspace
+  - 再复核：
+    - `ses_2d4d712c1ffemwZIgWQ4uWm2wD`
+    - `.docx` 已重新回到稳定路径
+- 最新正式 WJW `raw vs pod` 对照已经在这条修复后的 hosted runtime 上补齐：
+  - raw：
+    - `ses_2d4d3624fffeCCdLSYazWSBYS6`
+    - 交付：
+      - `点对点解决方案.md`
+      - `outputs/点对点解决方案.docx`
+    - `toolIssueCounts = {}`
+  - pod：
+    - `ses_2d4d35a7effeU1Pw4ajF8vjEeF`
+    - 交付：
+      - `智慧网络医疗服务项目点对点解决方案.md`
+      - `智慧网络医疗服务项目点对点解决方案.docx`
+    - `toolIssueCounts = { bash: 3 }`
+    - 这 3 次都是 `/tmp/*.md` 尝试被 hosted 规则正确挡下
+    - `health.version = 1.3.3`
+- 这条结果意味着：
+  - “每个 session 独立 OpenCode 进程”现在不只是运行了
+  - 它在请求头层、上传文件可见性层、最终 `.docx` 交付层都已经重新闭环
+  - WJW 主 baseline 已经重新回到可比状态
+- repaired pod runtime 这轮又补上了一个关键闭环：
+  - `scripts/restart-pod.sh` 之前会 source runtime env 文件，把显式传入的：
+    - `OPENWORK_POD_OPENCODE_SOURCE=downloaded`
+    - 等 shell 覆盖重新吃掉
+  - 结果 pod 恢复很容易在日志上看起来像“已经 unset old bin”，但实际还是被 env 文件拖回 external/旧路径
+  - 现在 `load_runtime_env()` 已改为保留 shell 里已有的 `OPENWORK_*`，source 完 env 文件后再覆盖回去
+  - 对应文件：
+    - `scripts/restart-pod.sh`
+- 这轮还确认了另一个很现实的问题：
+  - `recover-pod-runtime.sh` 默认 `OPENWORK_REUSE_BUILD=1`
+  - 所以如果只改脚本不重建 orchestrator，就会继续复用旧输出
+  - 当前已经在 pod 上原地执行：
+    - `corepack pnpm --filter openwork-server build:bin`
+    - `corepack pnpm --filter openwork-orchestrator build:bin`
+  - 随后在：
+    - `OPENWORK_POD_OPENCODE_SOURCE=downloaded`
+    下恢复成功
+  - 健康检查：
+    - `GET /healthz -> 200`
+    - `GET /openwork/health -> 200`
+- 这轮已经拿到新的 product-level 证据，证明“每个 session 独立 OpenCode 进程”不只是代码实现：
+  - WJW pod lane：
+    - `ses_2d4f42ac3ffeGU3gp40PdfrwGH`
+  - runtimeId：
+    - `a1612f183733463980192775f864b673`
+  - 当前 persisted runtime 已包含：
+    - `runtimeDir`
+    - `configHomeDir`
+    - `tempDir`
+    - session-owned child OpenCode runtime
+  - 已交付：
+    - `点对点解决方案_海滨医院.docx`
+    - `点对点解决方案_海滨医院.md`
+  - `health.version = 1.3.3`
+- 当前 repaired pod lane 的剩余问题不再是 shared 主链崩溃，而是更小范围的工具异常：
+  - `skill/glob` 连接错误
+  - 一次 `find /` 被权限规则正确挡下
+  - 旧的 `/tmp/*.md` reopenability 失败这轮没有复现
+- 这也意味着：
+  - 现在不能再把精力继续花在“shared hosted 主链是不是还会秒崩”这种老问题上
+  - 当前正确的主线，是在这条 repaired runtime 上把正式 `raw vs pod common-work` 基线补齐
+- 最新 Qin `raw vs pod` clean baseline 已经锁住：
+  - raw：
+    - `ses_2d53150d8ffewEohlEhJl3N46M`
+    - `elapsedMs = 273584`
+    - `toolIssueCounts = {}`
+  - pod：
+    - `ses_2d5314ebefferz7xhORLOR86GM`
+    - `elapsedMs = 337125`
+    - `toolCounts = { glob: 1, bocha-search_bocha_ai_search: 3, skill: 1, bash: 4, read: 2, todowrite: 2, write: 1 }`
+    - `toolIssueCounts = {}`
+    - `health.version = 1.3.2`
+  - pod 当前最终只暴露：
+    - `outputs/融合算力平台三大系统技术方案.docx`
+    - `算力资源汇聚与调度系统技术方案.md`
+  - 不再出现：
+    - `/tmp` 读回权限错误
+    - `Bocha API KEY 无效`
+    - 大量 `unpack_*` 中间文件被误计入最终交付
+- 这轮还额外确认了一个系统根因：
+  - Bocha key 本身没有问题
+  - 在 pod 上直接用 running `openwork-server` 进程环境请求官方 API，返回 `200`
+  - 真正污染 clean baseline 的，是目标用户 workspace 还残留旧版 `opencode.jsonc`
+    - 里面仍是第三方 `@iflow-mcp/yoko19191-bocha-ai-mcp-server`
+    - 仍在用 `BOCAI_*`
+    - 且缺失顶层 `permission = allow`
+- 这又反推出一个更高层的产品问题：
+  - hosted 登录/建 session 时，用户 workspace 模板源会优先看 `config.workspaces[0]`
+  - 当第一位本身就是旧 user workspace 时，就会继续拿旧资产当模板
+  - 当前已在 server 侧修复为：
+    - `resolveUserWorkspaceTemplateDir()` 优先使用当前 repo `cwd`
+    - 再回退到 persisted first workspace
+  - 对应实现：
+    - `packages/server/src/auth.ts`
+    - `packages/server/src/auth.test.ts`
+  - 本地与 pod 单测均通过，`openwork-server` 二进制也已重建并重新部署
+- hosted session runtime 这轮真正补齐了“每个 session 用独立 OpenCode 进程”最后缺的那一块：
+  - 不是 workspace 隔离错了
+  - 而是 isolated child runtime 之前仍在走 PATH 里的旧版 `opencode 1.2.6`
+  - 共享 orchestrator 用的是 downloaded `1.3.2`，session child 却偷偷掉回 `1.2.6`
+- 现在已通过 orchestrator 显式向 `openwork-server` 传递：
+  - `OPENWORK_OPENCODE_BIN=<resolved downloaded opencode>`
+  - 对应实现：
+    - `packages/orchestrator/src/runtime-env.ts`
+    - `packages/orchestrator/src/cli.ts`
+  - 这让 `openwork-server` 拉起的 isolated child runtime 终于和 shared 主链对齐到同一份 `1.3.2`
+- 这条修复本地与 pod 都已验证：
+  - 本机：
+    - `bun test packages/orchestrator/src/runtime-env.test.ts`
+    - `bun test packages/server/src/session-opencode-runtime.test.ts packages/orchestrator/src/runtime-env.test.ts`
+    - `corepack pnpm --filter openwork-orchestrator build:bin`
+  - pod：
+    - `bun test packages/orchestrator/src/runtime-env.test.ts`
+    - `corepack pnpm --filter openwork-orchestrator build:bin`
+- 直接 product-level 证据：
+  - 直接 API `createSession` 成功返回：
+    - `ses_2d55a525dffe4CWDqrnWoC9JJj`
+    - `version = 1.3.2`
+  - Qin pod-only compare 成功跑通：
+    - `ses_2d5584e13ffeZBG8C77mySVBrp`
+    - 已生成真实 `.docx`
+- hosted pod 主链这轮已经真正恢复：
+  - `OPENWORK_POD_OPENCODE_SOURCE=downloaded`
+  - `OPENWORK_OPENCODE_ROUTER=0`
+  - `OPENWORK_DISABLE_SHARED_WORKSPACE_EVENT_TRACKING=1`
+  - 在这组条件下：
+    - `GET /healthz = 200`
+    - `GET /openwork/health = 200`
+    - `raw create_only / prompt_only / full` 已过
+    - `common-work full` 已过
+- 这轮最关键的新根因不是 prompt，而是 pod 上 `openwork-server` 二进制被污染：
+  - JSON 日志明确报：
+    - `ENOEXEC: unknown error, posix_spawn '/root/ai_staff/openwork/packages/server/dist/bin/openwork-server'`
+  - 修复方式是：
+    - 在 pod 仓库内直接跑
+      - `corepack pnpm --filter openwork-server build:bin`
+  - 修完后 orchestrator 成功：
+    - spawn `openwork-server`
+    - `GET /health 200`
+    - `Ready`
+- 为了让 recovery 更贴近当前诊断需要，脚本也已更新：
+  - `restart-pod.sh`
+    - 新增健康等待时间环境变量
+    - 增加 `generic opencode serve` 清理
+  - `recover-pod-runtime.sh`
+    - 默认 `OPENWORK_SERVER_HEALTH_TIMEOUT_SECONDS=60`
+- 当前这条结论也顺手解释了为什么最近几天的 pod 行为会越来越漂：
+  - 之前多次是“本机改完直接同步/覆盖 pod 产物”
+  - 而不是规范的 `push -> pod pull -> pod 本地构建`
+  - 这件事要在本轮收口后补进 [AGENTS.md](/Users/storm/Documents/code/studyProject/opencode-docx/openwork/AGENTS.md)，但不是当前最优先动作
+- 新增了无需前端重建的 pod 恢复链：
+  - `scripts/restart-pod.sh` 现在支持 `--reuse-build`
+  - 新增 `scripts/recover-pod-runtime.sh`
+  - 这条链已经在 pod 上实测恢复成功
+- 最新 probe 结论继续把范围缩小了：
+  - external `opencode 1.2.6` 模式下，恢复日志仍出现：
+    - orchestrator 期望 `1.3.2`
+    - `/opencode/event`
+    - `/w/<workspace>/opencode/event`
+    - 紧接着 `[opencode] ERROR Process exited`
+  - 所以当前更像是 shared hosted event 链与 external `1.2.6` 组合不稳定
+  - 不能再把它简单记成“`common-work` prompt 打崩服务”
+- 这轮还纠正了一个 probe 使用错误：
+  - pod 内正确的 web 代理入口是：
+    - `http://127.0.0.1:5173/openwork`
+  - 不是：
+    - `http://127.0.0.1:8789/openwork`
+  - 后者会把 auth 请求打到错误前缀，产生伪 `404 not_found`
+- 做了一个最值钱的版本实验：
+  - 只在这次启动里设置 `OPENWORK_POD_OPENCODE_SOURCE=downloaded`
+  - pod 成功恢复
+  - 进一步抓日志后已经确认：
+    - 不是“稳定长执行”
+    - 而是 `prompt_async` 成功、首次 `message` 读取后再崩
+    - 关键 session：`ses_2d5fb3c1bffeN72PSyeQV2Mglu`
+  - 这说明：
+    - `raw` lane 也会复现
+    - 问题不能再归因到 `common-work`
+  - 详细记录见：
+    - [pod-opencode-version-event-crash-probe-2026-03-26.md](/Users/storm/Documents/code/studyProject/opencode-docx/openwork/research/2026-03-25-document-agent-eval/pod-opencode-version-event-crash-probe-2026-03-26.md)
+- 为下一轮诊断，已在本地补了一个默认关闭的开关：
+  - `OPENWORK_DISABLE_SHARED_WORKSPACE_EVENT_TRACKING=1`
+  - 它的目的不是产品默认行为修改，而是验证 shared workspace event 订阅是否在触发 shared 主链崩溃
+- 这轮阻碍继续推进的主要问题已经变成：
+  - 之前的 `createSession -> 500` 已经不再是主 blocker
+  - 当前应回到正式主 baseline，看修复后的 hosted 路径上：
+    - `raw OpenCode`
+    - `pod OpenWork common-work`
+    的真实最终产物与工具行为差异
+- 已修 session-local OpenCode runtime 的一类宿主机配置泄漏：
+  - hosted runtime overlay 和 seeded host config 都会清洗越界的 `mcp.filesystem`
+  - 本地与 pod 的 server 测试均已通过
+- 但 live probe 暴露出更高优先级的新 blocker：
+  - pod 内最小 `common-work` probe 在 `prompt_async` 之后会直接打挂共享主 `opencode`
+  - 关键 session：`ses_2d628c80dffe5KRyUSAj2WCqzA`
+  - 表现：
+    - `POST /.../prompt_async` 返回 `204`
+    - 随后 `[opencode] ERROR Process exited`
+    - `openwork-orchestrator` 与 `openwork-server` 一并退出
+  - 详细记录见：
+    - [isolated-runtime-mcp-sanitization-and-hosted-probe-crash-2026-03-26.md](/Users/storm/Documents/code/studyProject/opencode-docx/openwork/research/2026-03-25-document-agent-eval/isolated-runtime-mcp-sanitization-and-hosted-probe-crash-2026-03-26.md)
+- probe 触发 crash 后，`restart-pod.sh` 又因为前端重建被系统杀掉：
+  - `vite build`
+  - `Exit status 137`
+- 当前 pod 已通过复用现有 `dist/` / `dist/bin/` 手工恢复，不是通过完整 `restart-pod.sh` 恢复。
+
+- 已把 hosted session 隔离从“workspace 级”推进到更完整的“OpenCode runtime 级”：
+  - 新增 `SessionOpencodeRuntimeService`
+  - session 会持久化自己的 isolated runtime 元数据
+  - server proxy 会在需要时拉起 session-owned `opencode serve`
+  - `SessionActivityService` 已能区分 shared workspace stream 和 isolated session stream
+  - 最新一轮又把：
+    - `configHomeDir`
+    - `tempDir`
+    - `OPENCODE_CONFIG_DIR`
+    - `XDG_CONFIG_HOME`
+    - `TMPDIR/TMP/TEMP`
+    一起纳入 session 作用域
+- 这轮实现没有修改 OpenCode 源码，隔离责任全部落在 OpenWork server。
+- 这条隔离链已经完成 pod live 复核：
+  - 关键 session：`ses_2d671b6dfffeJY9ZGO2L030ERe`
+  - persisted runtime metadata 已能看到 `configHomeDir/tempDir`
+- 最新 Qin pod-only baseline 已在更深的 runtime 隔离下重跑成功：
+  - session：`ses_2d670d6beffeoquayIArVR6qWs`
+  - 结果：
+    - `generatedDocuments = 2`
+    - `toolCounts = { bash: 8, skill: 1, bocha-search_bocha_ai_search: 3, todowrite: 3, read: 2, write: 1 }`
+- 已修 verifier 的三个通用问题：
+  - 双前缀标题假阴性
+  - 复合英文技术词支撑误判
+  - 低权威来源识别不完整
+- 已把 `doc-writer` / `document-writer` / `doc-orchestrator` 收紧为 bocha-only，不再允许搜索 fallback。
+- 已删除未跟踪的 `web_search_fallback` 原型工件，避免后续误把它当成现行设计。
+- 已建立本目录作为正式 handoff 包，并新增 `run-ledger.md` 用来记录每轮实验。
+- 已确认 hosted verifier 曾因运行态资产陈旧而假绿；这个根因已经定位并同步修正。
+- 已把“已消费的外补依据必须进入最终稿”“重复架构标签必须拦截”“背景来源必须显式降级”写进 writer/verifier/script。
+- 已完成 Qin MiniMax 一轮真实长跑 baseline：
+  - raw：`ses_2d834c80effexJos4QSG1Xa4yA`
+  - local：`ses_2d834c454ffed0s2aD4k15wev6`
+  - pod：`ses_2d834bab7ffem4OmET67lm60eD`
+  - 三条都生成了真实 `.docx`
+  - 从下一轮起，主 baseline 改为：
+    - raw OpenCode
+    - pod OpenWork `common-work`
+  - local `common-work` 改为辅助诊断 lane
+- 已新增并修正：
+  - `tmp/qin-abc-minimax.mjs`
+  - 其中 `uploadElapsedMs` 统计口径已修正，不再把整轮耗时误记为上传耗时
+- 此前已记录的一条 hosted 问题是：
+  - `docx` skill 在 hosted `common-work` 下不稳定
+  - Qin pod baseline 同一轮已出现：
+    - `toolIssueCounts = { skill: 1 }`
+    - `Error: Unable to connect. Is the computer able to access the url?`
+  - 最小复现 session：
+    - `ses_2d667e286ffe16Asqj1brqinWc`
+  - 这说明它不是 Qin 样例特有问题，而是 hosted `skill(name=docx)` 自己需要继续查
+- 当前 Qin hosted 最佳稳定基线：
+  - session：`ses_2d97dad4dffeDbEf0Q05HVa3U3`
+  - 当前 verifier 只剩：
+    - `open-question: 未明显识别到评分标准，需要后续核对`
+
+## 当前最值得先看
+
+1. `decisions.md`
+2. `run-ledger.md`
+3. `findings.md`
+4. `status.md`
+
+## 接下来该做什么
+
+1. 继续沿当前修复后的 hosted 稳定基线推进：
+   - `downloaded`
+   - `no-router`
+   - `OPENWORK_DISABLE_SHARED_WORKSPACE_EVENT_TRACKING=1`
+2. WJW 这条主 baseline 已经重新补齐，下一步先做质量对读：
+   - 本机 raw OpenCode
+   - pod OpenWork `common-work`
+   - 重点看工具行为、文风、证据纪律和交付完整度
+3. `local OpenWork common-work` 继续只保留为辅助诊断 lane
+4. 主 baseline 仍统一到：
+   - `MiniMax-2.5`
+   - 对齐 permission posture
+   - 对齐并记录 global skills / overlays
+5. 现在已经可以继续进入 Qin 长样例的主基线重跑，对 `common-work >= raw OpenCode` 做更高压力下的内容质量验证
+6. 当前还要继续盯住两类残余噪音：
+   - `common-work` 先尝试 `/tmp/*.md`
+   - 偶发根目录 `glob`
+7. 先把这轮“session child binary 未对齐”的根因记死，不要再把后续差异误归因到 prompt
+8. 再补记这轮“restart/recover 的 env 覆盖优先级 + orchestrator 旧 build 复用”这两个恢复陷阱，避免下次又把 downloaded 运行态看假
+9. 再补记这轮“user workspace template 选错源导致 stale 资产复活”的根因，不要再把这类脏基线当 agent 能力结论
+10. 当前 `/tmp` 旧问题已从最新 Qin pod lane 中消失，不要再围绕 shared `/tmp` 反复排障；后续若再出现，只按 regression 处理
+11. 现在优先做的是：
+   - 用最新正式 baseline 做 `raw vs pod common-work` 质量对读
+   - 再继续看 raw 的 `webfetch/export` 稳定性
+12. 在主 baseline 重新稳定后，再回头看：
+   - hosted `docx` skill
+   - `document-writer`
+   - 新 sub-agent 模式是否真的优于 `common-work`
+13. 本轮收口后，把“不要长期绕过规范 push/pull 发布路径，不要把本机构建产物直接灌进 pod”写进 [AGENTS.md](/Users/storm/Documents/code/studyProject/opencode-docx/openwork/AGENTS.md)
+14. 每轮结束先写 `run-ledger.md`，再继续下一轮

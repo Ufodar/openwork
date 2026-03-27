@@ -138,6 +138,38 @@ describe("AuthService", () => {
 
     expect(await readFile(missingAgentPath, "utf8")).toContain("agent");
   });
+
+  test("login prefers the current repo template over a stale first workspace template", async () => {
+    const root = join(tmpdir(), `openwork-auth-cwd-template-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const staleWorkspace = join(root, "stale-workspace");
+    const templateDir = join(root, "template");
+    const userRoots = join(root, "user-workspaces");
+    await mkdir(join(staleWorkspace, ".opencode", "agent"), { recursive: true });
+    await mkdir(join(templateDir, ".opencode", "agent"), { recursive: true });
+    await writeFile(join(staleWorkspace, "opencode.jsonc"), "{\n  \"permission\": \"ask\",\n  \"model\": \"stale\"\n}\n", "utf8");
+    await writeFile(join(templateDir, "opencode.jsonc"), "{\n  \"permission\": \"allow\",\n  \"model\": \"fresh\"\n}\n", "utf8");
+    await writeFile(join(staleWorkspace, ".opencode", "agent", "common-work.md"), "stale-agent\n", "utf8");
+    await writeFile(join(templateDir, ".opencode", "agent", "common-work.md"), "fresh-agent\n", "utf8");
+
+    config.workspaces = [{
+      id: "ws_stale",
+      name: "stale",
+      path: staleWorkspace,
+      workspaceType: "local",
+    }];
+    process.env.OPENWORK_USER_WORKSPACES_ROOT = userRoots;
+    process.chdir(templateDir);
+    auth = new AuthService(config, tokens);
+
+    const registered = await auth.register({ username: "dave", password: "123456" });
+    const workspaceConfig = await readFile(join(registered.workspace.path, "opencode.jsonc"), "utf8");
+    const commonWorkPrompt = await readFile(join(registered.workspace.path, ".opencode", "agent", "common-work.md"), "utf8");
+
+    expect(workspaceConfig).toContain("\"permission\": \"allow\"");
+    expect(workspaceConfig).toContain("\"model\": \"fresh\"");
+    expect(commonWorkPrompt).toContain("fresh-agent");
+    expect(commonWorkPrompt).not.toContain("stale-agent");
+  });
   test("resolving a bound user repairs an existing workspace without requiring a new login", async () => {
     const root = join(tmpdir(), `openwork-auth-bound-user-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     const blankWorkspace = join(root, "blank-workspace");

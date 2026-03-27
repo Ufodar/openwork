@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "conflicts": [
+    {
+      "id": "conflict-dfe2db74975e",
+      "topic": "general",
+      "competing_values": [
+        {
+          "docId": "doc-1100ad35b582",
+          "title": "临沂招标文件正文",
+          "statement": "考所列质量参考的材料和工程设备，采购相当于或高于所列技术标准的材料和工程设备，",
+          "locator": "line:714"
+        },
+        {
+          "docId": "doc-v20250507v1-0-1-1",
+          "title": "备 环投数科临沂项目第一包v20250507v1.0(1)(1)",
+          "statement": "我司应答：所投产品为本公司自研监控运维平台使用分布式代理架构与自动化脚本模块实现客户端批量部署，通过代理（Proxy）横向扩展及任务队列优化，在低网络延迟条件下可实现单节点部署平均响应时间小于30秒，依托脚本重试机制保障事务通过率高于99%；",
+          "locator": "paragraph:3671"
+        },
+        {
+          "docId": "doc-v20250507v1-0-1-1",
+          "title": "备 环投数科临沂项目第一包v20250507v1.0(1)(1)",
+          "statement": "我司应答：我方所投产品本司自研融合算力云平台，支持用户分别查询消费记录（如Notebook资源使用、智能计算资源购买）与充值记录以核对收支明细，当前暂不支持按时间段筛选，用户可通过交易流水号或金额范围快速定位单笔记录。",
+          "locator": "paragraph:3891"
+        },
+        {
+          "docId": "doc-v20250508",
+          "title": "环投数科临沂项目第一包v20250508终版文件",
+          "statement": "我司应答：所投产品为本公司自研监控运维平台使用分布式代理架构与自动化脚本模块实现客户端批量部署，通过代理（Proxy）横向扩展及任务队列优化，在低网络延迟条件下可实现单节点部署平均响应时间小于30秒，依托脚本重试机制保障事务通过率高于99%；",
+          "locator": "paragraph:3649"
+        },
+        {
+          "docId": "doc-v20250508",
+          "title": "环投数科临沂项目第一包v20250508终版文件",
+          "statement": "我司应答：我方所投产品本司自研融合算力云平台，支持用户分别查询消费记录（如Notebook资源使用、智能计算资源购买）与充值记录以核对收支明细，当前暂不支持按时间段筛选，用户可通过交易流水号或金额范围快速定位单笔记录。",
+          "locator": "paragraph:3869"
+        }
+      ],
+      "preferred_value": null,
+      "rationale": "Flagged by explicit deviation or requirement-language mismatch in the compiled source artifacts.",
+      "unresolved": true
+    }
+  ],
+  "open_questions": [
+    "未明显识别到评分标准，需要后续核对。"
+  ],
+  "last_merged_at": "2026-03-24T08:07:10Z"
+}

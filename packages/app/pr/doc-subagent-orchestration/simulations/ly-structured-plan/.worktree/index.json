@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "project": "备 环投数科临沂项目第一包v20250507v1.0(1)(1)",
+  "target_doc": null,
+  "phase": "intake",
+  "summary": "Uploaded 3 source documents. Bootstrap state is ready for source compilation.",
+  "current_focus": "Compile uploaded documents into per-source state artifacts.",
+  "conventions_ref": ".worktree/conventions.md",
+  "children": []
+}

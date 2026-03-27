@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "goal": "分析临沂项目招标文件和投标文件，输出完整解决方案",
+  "target_doc": "outputs/ly-solution.md",
+  "targets": [
+    {
+      "id": "project-understanding",
+      "title": "项目理解与目标"
+    },
+    {
+      "id": "requirement-mapping",
+      "title": "需求拆解与点对点对应"
+    },
+    {
+      "id": "solution-route",
+      "title": "解决路径与实施方案"
+    },
+    {
+      "id": "evidence-assumptions",
+      "title": "证据来源与关键假设"
+    },
+    {
+      "id": "risk-open-questions",
+      "title": "风险与待确认事项"
+    },
+    {
+      "id": "implementation-milestones",
+      "title": "实施里程碑与协作分工"
+    }
+  ],
+  "covered": [
+    "项目理解",
+    "点对点解决路径",
+    "证据来源与假设",
+    "风险与待确认事项",
+    "实施里程碑与协作分工"
+  ],
+  "missing": [],
+  "risks": [],
+  "next_checks": [
+    "doc-verifier checks section coverage, evidence support, and unresolved blockers"
+  ],
+  "updated_at": "2026-03-24T08:30:00Z"
+}

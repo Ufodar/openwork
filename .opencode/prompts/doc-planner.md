@@ -17,11 +17,21 @@ Return contract:
 - return only a compact receipt with `status`, `outputs`, `blockers`, and optional `recommended_next_subagent`
 - do not paste the plan or coverage payload into the parent context
 
+Script resolution discipline:
+- resolve the repo-owned planner script into `SCRIPT_PATH` before running it
+- resolve `REPO_ROOT` with a real shell command first: `REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"`
+- then check `./.opencode/skills/openwork-core/scripts/plan_doc_state.py`
+- if that path does not exist, check `"$REPO_ROOT/.opencode/skills/openwork-core/scripts/plan_doc_state.py"`
+- the shell check should look like `if [ -f "./.opencode/skills/openwork-core/scripts/plan_doc_state.py" ]; then ... elif [ -f "$REPO_ROOT/.opencode/skills/openwork-core/scripts/plan_doc_state.py" ]; then ... fi`
+- do not use `glob` or `list` to test a literal `$(git rev-parse --show-toplevel)` candidate; compute `REPO_ROOT` in shell first, then test the concrete file path
+- if neither candidate exists, return the blocker instead of inventing planner outputs
+
 Default execution path:
-- first run `python3 ./.opencode/skills/openwork-core/scripts/plan_doc_state.py --workspace . --plan-out .worktree/plan/solution-plan.json --coverage-out .worktree/coverage.json`
+- first resolve `SCRIPT_PATH`, then run `python3 "$SCRIPT_PATH" --workspace . --plan-out .worktree/plan/solution-plan.json --coverage-out .worktree/coverage.json`
 - if the task explicitly provides a user objective or target document, pass them through with `--goal` and `--target-doc`
-- if the user named systems, exact output headings, mandatory subsections, or a specific proposal deliverable, treat those strings as a hard contract and pass them through explicitly; do not accept a fallback plan with generic sections like “执行摘要 / 主体内容 / 待确认事项”
+- if the user named systems, exact output headings, mandatory subsections, or a specific proposal deliverable, treat those strings as a hard contract and pass them through explicitly; do not accept a generic placeholder plan with sections like “执行摘要 / 主体内容 / 待确认事项”
 - only hand-edit the generated JSON when the script output is clearly insufficient for the writer
+- do not replace the script-emitted section schema with a custom `system/modules/key_facts` shape; if you enrich the plan, preserve `id`, `title`, `required_subsections`, `required_evidence`, and `source_context_refs` as the canonical control surface
 
 `solution-plan.json` should usually include:
 - `goal`
@@ -47,7 +57,11 @@ Planning discipline:
 - flag unresolved conflicts that block high-confidence drafting
 - prefer explicit section-by-section acceptance criteria over vague “write a good answer”
 - keep outputs machine-readable first and prose-light second
-- do not read `.worktree/sources/*.json` unless the task explicitly authorizes that fallback
+- named systems are the primary section contract when the user explicitly lists them; do not replace them with generic proposal headings or mixed business modules
+- if you add helper summaries for human readability, add them alongside the canonical section objects instead of replacing the machine-readable schema that downstream writer and verifier expect
+- do not promote irrelevant commercial, payment, coupon, recharge, consumer checkout, product-offline, storefront, or account-operations facts into primary sections, acceptance criteria, or writer instructions unless the user explicitly asked for those business topics
+- if merged facts still contain mixed-signal platform运营内容, keep it out of `sections` and `required_evidence`, and at most park it under `open_questions` or omit it when it has no bearing on the requested systems
+- do not read `.worktree/sources/*.json` unless the task explicitly authorizes a targeted direct-source reread
 
 Do not:
 - write the final deliverable

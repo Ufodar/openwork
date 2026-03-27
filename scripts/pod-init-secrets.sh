@@ -49,6 +49,7 @@ my_company_api_key = provider_options.get("apiKey") if isinstance(provider_optio
 model_base_url = provider_options.get("baseURL") if isinstance(provider_options, dict) else None
 
 mcp = config.get("mcp", {})
+bocha = {}
 bocha_env = {}
 if isinstance(mcp, dict):
     bocha = mcp.get("bocha-search", {})
@@ -65,14 +66,25 @@ def first_non_empty(*values: str) -> str:
             return value.strip()
     return ""
 
-bocai_api_key = first_non_empty(
-    bocha_env.get("BOCAI_API_KEY", ""),
+def extract_bocha_mcp_dir(command: object) -> str:
+    if not isinstance(command, list):
+        return ""
+    for index, part in enumerate(command):
+        if part == "--directory" and index + 1 < len(command):
+            next_part = command[index + 1]
+            if isinstance(next_part, str) and next_part.strip():
+                return next_part.strip()
+    return ""
+
+bocha_command = bocha.get("command", {}) if isinstance(bocha, dict) else {}
+bocha_api_key = first_non_empty(
     bocha_env.get("BOCHA_API_KEY", ""),
+    bocha_env.get("BOCAI_API_KEY", ""),
 )
-bocai_api_url = first_non_empty(
-    bocha_env.get("BOCAI_API_URL", ""),
-    bocha_env.get("BOCHA_API_URL", ""),
-    "https://api.bochaai.com/v1/web-search",
+bocha_mcp_dir = first_non_empty(
+    bocha_env.get("BOCHA_MCP_DIR", ""),
+    extract_bocha_mcp_dir(bocha_command),
+    str(Path.home() / ".config" / "openwork" / "bocha-search-mcp"),
 )
 
 def shell_quote(value: str) -> str:
@@ -85,11 +97,11 @@ lines = [
     f"export MY_COMPANY_API_KEY={shell_quote(my_company_api_key or '')}",
     f"export OPENWORK_PROVIDER_ID={shell_quote(provider_id)}",
     f"export OPENWORK_MODEL_BASE_URL={shell_quote(model_base_url or 'http://192.168.5.10:3002/v1')}",
-    "# Supported values: MiniMax-2.5, Qwen3.5-397B-A17B",
+    "# Supported values: Qwen3.5-397B-A17B, MiniMax-2.5",
     f"export OPENWORK_DEFAULT_MODEL={shell_quote(default_model)}",
     f"export OPENWORK_SMALL_MODEL={shell_quote(default_model)}",
-    f"export BOCAI_API_KEY={shell_quote(bocai_api_key or '')}",
-    f"export BOCAI_API_URL={shell_quote(bocai_api_url or 'https://api.bochaai.com/v1/web-search')}",
+    f"export BOCHA_API_KEY={shell_quote(bocha_api_key or '')}",
+    f"export BOCHA_MCP_DIR={shell_quote(bocha_mcp_dir)}",
     "# RAGFlow knowledge retrieval",
     "export RAGFLOW_BASE_URL='http://192.168.2.35:32473'",
     "export RAGFLOW_API_KEY=''",

@@ -1,17 +1,70 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+  buildSessionPermissionRules,
   provisionSessionWorkspace,
+  SessionWorkspaceService,
   writeRuntimeDocumentStateCarrierConfig,
   writeRuntimeKnowledgeCarrierConfig,
 } from "./session-workspaces.js";
 import { exists } from "./utils.js";
 
+const originalOpenworkDataDir = process.env.OPENWORK_DATA_DIR;
+
+afterEach(() => {
+  if (typeof originalOpenworkDataDir === "string") process.env.OPENWORK_DATA_DIR = originalOpenworkDataDir;
+  else delete process.env.OPENWORK_DATA_DIR;
+});
+
 describe("provisionSessionWorkspace", () => {
-  test("creates a runtime directory and mirrors required .opencode support files", async () => {
+  test("denies external directories and system-temp document outputs for hosted session runtimes", () => {
+    const rules = buildSessionPermissionRules();
+
+    expect(rules).toHaveLength(41);
+    expect(rules).toContainEqual({ permission: "bash", pattern: "*-o /tmp/*.md*", action: "deny" });
+    expect(rules).toContainEqual({ permission: "bash", pattern: "*> /tmp/*.md*", action: "deny" });
+    expect(rules).toContainEqual({ permission: "bash", pattern: "*-o /private/tmp/*.docx*", action: "deny" });
+    expect(rules).toContainEqual({ permission: "bash", pattern: "*> /private/tmp/*.pptx*", action: "deny" });
+    expect(rules).toContainEqual({ permission: "external_directory", pattern: "*", action: "deny" });
+  });
+
+  test("drops unsafe absolute filesystem MCP roots from the runtime carrier config", async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), "openwork-session-workspace-host-fs-"));
+    await writeFile(
+      join(workspacePath, "opencode.jsonc"),
+      JSON.stringify({
+        model: "test-model",
+        mcp: {
+          filesystem: {
+            type: "local",
+            command: ["npx", "-y", "@modelcontextprotocol/server-filesystem", "/Users/storm/Documents/code"],
+          },
+          memory: {
+            type: "local",
+            command: ["npx", "-y", "@modelcontextprotocol/server-memory"],
+          },
+        },
+      }, null, 2),
+      "utf8",
+    );
+
+    const result = await provisionSessionWorkspace(workspacePath);
+    const raw = await readFile(join(result.runtimeDir, "opencode.jsonc"), "utf8");
+    const parsed = JSON.parse(raw) as {
+      mcp?: Record<string, unknown>;
+    };
+
+    expect(parsed.mcp?.filesystem).toBeUndefined();
+    expect(parsed.mcp?.memory).toMatchObject({
+      type: "local",
+      command: ["npx", "-y", "@modelcontextprotocol/server-memory"],
+    });
+  });
+
+  test("creates a runtime directory, a workspace-local temp root, and mirrors required .opencode support files", async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), "openwork-session-workspace-"));
     await mkdir(join(workspacePath, ".opencode", "prompts"), { recursive: true });
     await mkdir(join(workspacePath, ".opencode", "references"), { recursive: true });
@@ -24,13 +77,26 @@ describe("provisionSessionWorkspace", () => {
     await writeFile(join(workspacePath, ".opencode", "skills", "docx", "SKILL.md"), "# skill\n", "utf8");
 
     const result = await provisionSessionWorkspace(workspacePath);
+    const runtimeConfigRaw = await readFile(join(result.runtimeDir, "opencode.jsonc"), "utf8");
+    const runtimeConfig = JSON.parse(runtimeConfigRaw) as {
+      model?: string;
+      instructions?: string[];
+    };
+    const runtimeInstructionRaw = await readFile(join(result.runtimeDir, ".opencode", "openwork-runtime.md"), "utf8");
 
     expect(result.runtimeDir.startsWith(join(workspacePath, "documents", "sessions"))).toBe(true);
     expect(await exists(join(result.runtimeDir, "opencode.json"))).toBe(false);
+    expect(await exists(join(result.runtimeDir, "opencode.jsonc"))).toBe(true);
+    expect(await exists(join(result.runtimeDir, ".tmp", "system"))).toBe(true);
     expect(await exists(join(result.runtimeDir, ".opencode", "commands", "hello.md"))).toBe(true);
     expect(await exists(join(result.runtimeDir, ".opencode", "prompts", "doc-orchestrator.md"))).toBe(true);
     expect(await exists(join(result.runtimeDir, ".opencode", "references", "doc-state-schema.md"))).toBe(true);
     expect(await exists(join(result.runtimeDir, ".opencode", "skills", "docx", "SKILL.md"))).toBe(true);
+    expect(runtimeConfig.model).toBe("test");
+    expect(runtimeConfig.instructions).toContain(".opencode/openwork-runtime.md");
+    expect(runtimeInstructionRaw).toContain("<WORKSPACE>/.tmp/system");
+    expect(runtimeInstructionRaw).toContain("copy or re-emit the needed artifact into `<WORKSPACE>/.tmp/system/`");
+    expect(runtimeInstructionRaw).toContain("Treat `/tmp/*` and `/private/tmp/*` as shell-only transient paths");
   });
 
   test("writes a runtime knowledge carrier config by preserving parent config and adding the MCP", async () => {
@@ -88,6 +154,7 @@ describe("provisionSessionWorkspace", () => {
         Authorization: "Bearer owkrt_test",
       },
     });
+    expect(parsed.instructions).toContain(".opencode/openwork-runtime.md");
     expect(parsed.instructions).toContain(".opencode/openwork-knowledge.md");
     expect(instructionRaw).toContain("openwork_knowledge_search");
     expect(instructionRaw).toContain("Attached knowledge count: 0");
@@ -138,6 +205,7 @@ describe("provisionSessionWorkspace", () => {
         Authorization: "Bearer owdst_test",
       },
     });
+    expect(parsed.instructions).toContain(".opencode/openwork-runtime.md");
     expect(parsed.instructions).toContain(".opencode/doc-state.md");
     expect(instructionRaw).toContain("doc_state_state_get_brief");
     expect(instructionRaw).toContain("doc_state_state_get_facts");
@@ -195,5 +263,35 @@ describe("provisionSessionWorkspace", () => {
     expect(instructionRaw).toContain("If attachments changed earlier in the conversation");
     expect(instructionRaw).toContain("knowledge_id=kb_alpha");
     expect(instructionRaw).toContain("owner=alice");
+  });
+
+  test("persists isolated opencode runtime metadata through the session workspace store", async () => {
+    process.env.OPENWORK_DATA_DIR = await mkdtemp(join(tmpdir(), "openwork-session-workspace-store-"));
+    const service = new SessionWorkspaceService();
+
+    await service.setWorkspace("ws_1", "ses_1", {
+      runtimeId: "runtime_1",
+      runtimeDir: "/tmp/runtime-1",
+      createdAt: 1,
+      opencodeRuntime: {
+        mode: "isolated_process",
+        rootDir: "/tmp/runtime-1/.openwork-runtime/opencode",
+        configDir: "/tmp/runtime-1/.openwork-runtime/opencode/config",
+        configHomeDir: "/tmp/runtime-1/.openwork-runtime/opencode/config-home",
+        dataDir: "/tmp/runtime-1/.openwork-runtime/opencode/data",
+        stateDir: "/tmp/runtime-1/.openwork-runtime/opencode/state",
+        cacheDir: "/tmp/runtime-1/.openwork-runtime/opencode/cache",
+        tempDir: "/tmp/runtime-1/.tmp/system",
+        bindHost: "127.0.0.1",
+      },
+    });
+
+    const stored = await service.getWorkspace("ws_1", "ses_1");
+    const listed = await service.listWorkspaces("ws_1");
+    expect(stored?.opencodeRuntime?.mode).toBe("isolated_process");
+    expect(stored?.opencodeRuntime?.configDir).toBe("/tmp/runtime-1/.openwork-runtime/opencode/config");
+    expect(stored?.opencodeRuntime?.configHomeDir).toBe("/tmp/runtime-1/.openwork-runtime/opencode/config-home");
+    expect(stored?.opencodeRuntime?.tempDir).toBe("/tmp/runtime-1/.tmp/system");
+    expect(listed.ses_1?.opencodeRuntime?.mode).toBe("isolated_process");
   });
 });

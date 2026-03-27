@@ -138,37 +138,120 @@ def infer_role(relative_path: str, explicit_role: str | None) -> str:
     return "参考材料"
 
 
-def build_summary(blocks: list[dict]) -> str:
+def build_summary(blocks: list[dict], *, max_chars: int = 700, max_parts: int = 4) -> str:
     parts: list[str] = []
     total = 0
     for block in blocks:
         text = block["text"]
         if len(text) < 12:
             continue
-        if total + len(text) > 700:
+        if total + len(text) > max_chars and parts:
             break
         parts.append(text)
         total += len(text)
-        if len(parts) >= 4:
+        if len(parts) >= max_parts:
             break
     return normalize_whitespace(" ".join(parts))
 
 
-def select_statements(blocks: list[dict], *, kind: str, limit: int) -> list[dict]:
+def build_section_groups(
+    blocks: list[dict],
+    sections: list[dict],
+    *,
+    fallback_title: str,
+) -> tuple[list[dict], dict[str, str]]:
+    section_starts = {
+        str(section.get("locator") or ""): normalize_whitespace(str(section.get("title") or ""))
+        for section in sections
+        if str(section.get("locator") or "").strip()
+    }
+
+    groups: list[dict] = []
+    current: dict | None = None
+
+    for block in blocks:
+        locator = str(block.get("locator") or "")
+        heading_title = section_starts.get(locator)
+        if heading_title:
+            if current and current["blocks"]:
+                groups.append(current)
+            current = {
+                "title": heading_title,
+                "locator": locator,
+                "blocks": [block],
+            }
+            continue
+
+        if current is None:
+            current = {
+                "title": fallback_title,
+                "locator": locator,
+                "blocks": [block],
+            }
+        else:
+            current["blocks"].append(block)
+
+    if current and current["blocks"]:
+        groups.append(current)
+
+    locator_to_section: dict[str, str] = {}
+    normalized_groups: list[dict] = []
+    for group in groups:
+        group_blocks = group.get("blocks") or []
+        if not group_blocks:
+            continue
+        title = normalize_whitespace(str(group.get("title") or "")) or fallback_title
+        locator = str(group.get("locator") or group_blocks[0].get("locator") or "")
+        normalized_group = {
+            "title": title,
+            "locator": locator,
+            "blocks": group_blocks,
+        }
+        normalized_groups.append(normalized_group)
+        for block in group_blocks:
+            block_locator = str(block.get("locator") or "")
+            if block_locator:
+                locator_to_section[block_locator] = title
+
+    return normalized_groups, locator_to_section
+
+
+def build_statement_limit(block_count: int, section_count: int, *, base: int, cap: int, block_divisor: int, section_divisor: int) -> int:
+    return max(base, min(cap, (block_count // block_divisor) + max(0, section_count // section_divisor)))
+
+
+def select_statements(
+    blocks: list[dict],
+    *,
+    kind: str,
+    limit: int,
+    section_lookup: dict[str, str] | None = None,
+) -> list[dict]:
     keywords = {
-        "claim": ["项目", "采购", "建设", "服务", "功能", "要求", "方案", "实施", "技术", "标准"],
-        "fact": ["时间", "金额", "数量", "评分", "期限", "地址", "联系人", "标准", "平台", "接口"],
+        "claim": [
+            "项目", "采购", "建设", "服务", "功能", "要求", "方案", "实施", "技术", "标准",
+            "系统", "平台", "架构", "调度", "监控", "安全", "接口", "资源", "算力",
+        ],
+        "fact": [
+            "时间", "金额", "数量", "评分", "期限", "地址", "联系人", "标准", "平台", "接口",
+            "系统", "架构", "调度", "监控", "安全", "认证", "协议", "标签", "资源", "算力",
+        ],
     }[kind]
 
     candidates: list[tuple[int, int, str, str]] = []
     for block in blocks:
         locator = block["locator"]
+        section_title = normalize_whitespace((section_lookup or {}).get(locator) or "")
         for sentence in split_sentences(block["text"]):
             score = sum(2 for keyword in keywords if keyword in sentence)
             if kind == "fact" and re.search(r"\d", sentence):
                 score += 2
             if len(sentence) >= 40:
                 score += 1
+            if len(sentence) >= 100:
+                score += 1
+            if section_title and any(keyword in section_title for keyword in ["架构", "技术", "系统", "平台", "调度", "监控", "安全", "接口", "标识", "资源", "认证"]):
+                score += 2
             if score <= 0:
                 continue
             candidates.append((score, len(sentence), sentence, locator))
@@ -185,12 +268,52 @@ def select_statements(blocks: list[dict], *, kind: str, limit: int) -> list[dict
             "id": f"{kind}-{index}",
             "statement": sentence,
             "locator": locator,
+            "section": (section_lookup or {}).get(locator) or None,
             "evidence": sentence[:220],
             "confidence": min(0.95, 0.45 + (score * 0.1)),
         })
         if len(selected) >= limit:
             break
     return selected
+
+
+def build_section_briefs(section_groups: list[dict]) -> list[dict]:
+    briefs: list[dict] = []
+    for group in section_groups:
+        raw_blocks = group.get("blocks") or []
+        if not raw_blocks:
+            continue
+        title = normalize_whitespace(str(group.get("title") or ""))
+        content_blocks = raw_blocks
+        if normalize_whitespace(str(raw_blocks[0].get("text") or "")) == title and len(raw_blocks) > 1:
+            content_blocks = raw_blocks[1:]
+        summary = build_summary(content_blocks or raw_blocks, max_chars=520, max_parts=5)
+        lookup = {
+            str(block.get("locator") or ""): title
+            for block in (content_blocks or raw_blocks)
+            if str(block.get("locator") or "").strip()
+        }
+        key_points = select_statements(
+            content_blocks or raw_blocks,
+            kind="fact",
+            limit=4,
+            section_lookup=lookup,
+        )
+        if not summary and not key_points:
+            continue
+        briefs.append({
+            "title": title,
+            "locator": str(group.get("locator") or ""),
+            "summary": summary,
+            "key_points": [
+                {
+                    "statement": str(item.get("statement") or ""),
+                    "locator": str(item.get("locator") or ""),
+                }
+                for item in key_points
+            ],
+        })
+    return briefs[:80]
 
 
 def build_open_questions(blocks: list[dict], sections: list[dict]) -> list[str]:
@@ -250,8 +373,30 @@ def main() -> int:
     relative_path = os.path.relpath(str(input_path), args.cwd)
     title = input_path.stem.replace("_", " ").replace("-", " ").strip()
     role = infer_role(relative_path, args.role)
-    claims = select_statements(blocks, kind="claim", limit=12)
-    facts = select_statements(blocks, kind="fact", limit=12)
+    section_groups, locator_to_section = build_section_groups(
+        blocks,
+        sections,
+        fallback_title=title or "文档概览",
+    )
+    claim_limit = build_statement_limit(
+        len(blocks),
+        len(section_groups),
+        base=12,
+        cap=32,
+        block_divisor=24,
+        section_divisor=4,
+    )
+    fact_limit = build_statement_limit(
+        len(blocks),
+        len(section_groups),
+        base=16,
+        cap=40,
+        block_divisor=18,
+        section_divisor=3,
+    )
+    claims = select_statements(blocks, kind="claim", limit=claim_limit, section_lookup=locator_to_section)
+    facts = select_statements(blocks, kind="fact", limit=fact_limit, section_lookup=locator_to_section)
+    section_briefs = build_section_briefs(section_groups)
 
     payload = {
         "docId": args.doc_id,
@@ -260,7 +405,8 @@ def main() -> int:
         "kind": input_path.suffix.lower().lstrip("."),
         "role": role,
         "summary": build_summary(blocks),
-        "sections": sections[:40],
+        "sections": sections[:80],
+        "section_briefs": section_briefs,
         "claims": claims,
         "facts": facts,
         "gaps": build_gaps(blocks, sections),
@@ -268,6 +414,7 @@ def main() -> int:
         "meta": {
             "extractor": "openwork-core/extract_doc_state.py",
             "blockCount": len(blocks),
+            "sectionBriefCount": len(section_briefs),
         },
     }
 

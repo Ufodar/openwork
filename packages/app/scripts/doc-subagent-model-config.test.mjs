@@ -36,14 +36,14 @@ test("resolveSimulationModel uses workspace config first and infers provider whe
   try {
     await writeFile(join(workspace, "opencode.json"), JSON.stringify({
       provider: { "my-company": {} },
-      model: "Qwen3.5-397B-A17B",
+      model: "GLM-5",
     }, null, 2), "utf8");
 
     expect(await resolveSimulationModel({
       explicitModel: "",
       envModel: "",
       workspaceRoot: workspace,
-    })).toBe("my-company/Qwen3.5-397B-A17B");
+    })).toBe("my-company/GLM-5");
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -80,5 +80,21 @@ test("resolveSimulationModel falls back to user config when workspace config has
   } finally {
     await rm(workspace, { recursive: true, force: true });
     await rm(fakeHome, { recursive: true, force: true });
+  }
+});
+
+test("resolveSimulationModel falls back to Qwen when no config is present", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "doc-subagent-model-"));
+
+  try {
+    expect(await resolveSimulationModel({
+      explicitModel: "",
+      envModel: "",
+      workspaceRoot: workspace,
+      workspaceConfigPaths: [join(workspace, "missing-opencode.json")],
+      userConfigPaths: [join(workspace, "missing-user-opencode.json")],
+    })).toBe("my-company/Qwen3.5-397B-A17B");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
   }
 });

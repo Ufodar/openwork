@@ -1,4 +1,4 @@
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { homedir } from "node:os";
 import { cp, readFile, rename, rm, writeFile } from "node:fs/promises";
 
@@ -17,15 +17,28 @@ type PermissionRule = {
 export type PermissionRuleset = PermissionRule[];
 
 type SessionWorkspaceStore = {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
   updatedAt: number;
   workspaces: Record<string, SessionWorkspaceEntry>;
+};
+
+export type IsolatedOpencodeRuntime = {
+  mode: "isolated_process";
+  rootDir: string;
+  configDir: string;
+  configHomeDir: string;
+  dataDir: string;
+  stateDir: string;
+  cacheDir: string;
+  tempDir: string;
+  bindHost: string;
 };
 
 export type SessionWorkspaceEntry = {
   runtimeId: string;
   runtimeDir: string;
   createdAt: number;
+  opencodeRuntime?: IsolatedOpencodeRuntime;
 };
 
 type RuntimeKnowledgeInstructionRecord = {
@@ -35,8 +48,23 @@ type RuntimeKnowledgeInstructionRecord = {
   description?: string | null;
 };
 
+const RUNTIME_INSTRUCTIONS_RELATIVE_PATH = ".opencode/openwork-runtime.md";
 const KNOWLEDGE_INSTRUCTIONS_RELATIVE_PATH = ".opencode/openwork-knowledge.md";
 const DOC_STATE_INSTRUCTIONS_RELATIVE_PATH = ".opencode/doc-state.md";
+const SESSION_TMP_ROOT_RELATIVE_PATH = ".tmp/system";
+const HOSTED_SYSTEM_TMP_PREFIXES = ["/tmp/", "/private/tmp/"] as const;
+const HOSTED_REOPENABLE_DOC_EXTENSIONS = [
+  "md",
+  "txt",
+  "xml",
+  "html",
+  "csv",
+  "tsv",
+  "pdf",
+  "docx",
+  "xlsx",
+  "pptx",
+] as const;
 const RUNTIME_MIRRORED_OPENCODE_DIRS = [
   "agent",
   "commands",
@@ -63,7 +91,7 @@ function resolveSessionWorkspacePath(workspaceId: string): string {
 
 async function readStore(path: string): Promise<SessionWorkspaceStore> {
   if (!(await exists(path))) {
-    return { schemaVersion: 1, updatedAt: Date.now(), workspaces: {} };
+    return { schemaVersion: 2, updatedAt: Date.now(), workspaces: {} };
   }
   try {
     const raw = await readFile(path, "utf8");
@@ -76,19 +104,52 @@ async function readStore(path: string): Promise<SessionWorkspaceStore> {
       const runtimeId = typeof record.runtimeId === "string" ? record.runtimeId.trim() : "";
       const runtimeDir = typeof record.runtimeDir === "string" ? record.runtimeDir.trim() : "";
       const createdAt = typeof record.createdAt === "number" ? record.createdAt : Date.now();
+      const opencodeRuntimeRecord =
+        record.opencodeRuntime && typeof record.opencodeRuntime === "object"
+          ? record.opencodeRuntime as Partial<IsolatedOpencodeRuntime>
+          : null;
+      const opencodeRuntime =
+        opencodeRuntimeRecord?.mode === "isolated_process" &&
+          typeof opencodeRuntimeRecord.rootDir === "string" &&
+          typeof opencodeRuntimeRecord.configDir === "string" &&
+          typeof opencodeRuntimeRecord.dataDir === "string" &&
+          typeof opencodeRuntimeRecord.stateDir === "string" &&
+          typeof opencodeRuntimeRecord.cacheDir === "string"
+          ? {
+              mode: "isolated_process" as const,
+              rootDir: opencodeRuntimeRecord.rootDir.trim(),
+              configDir: opencodeRuntimeRecord.configDir.trim(),
+              configHomeDir:
+                typeof (opencodeRuntimeRecord as Partial<IsolatedOpencodeRuntime>).configHomeDir === "string" &&
+                  (opencodeRuntimeRecord as Partial<IsolatedOpencodeRuntime>).configHomeDir?.trim()
+                  ? (opencodeRuntimeRecord as Partial<IsolatedOpencodeRuntime>).configHomeDir!.trim()
+                  : join(opencodeRuntimeRecord.rootDir.trim(), "config-home"),
+              dataDir: opencodeRuntimeRecord.dataDir.trim(),
+              stateDir: opencodeRuntimeRecord.stateDir.trim(),
+              cacheDir: opencodeRuntimeRecord.cacheDir.trim(),
+              tempDir:
+                typeof (opencodeRuntimeRecord as Partial<IsolatedOpencodeRuntime>).tempDir === "string" &&
+                  (opencodeRuntimeRecord as Partial<IsolatedOpencodeRuntime>).tempDir?.trim()
+                  ? (opencodeRuntimeRecord as Partial<IsolatedOpencodeRuntime>).tempDir!.trim()
+                  : join(runtimeDir, SESSION_TMP_ROOT_RELATIVE_PATH),
+              bindHost: typeof opencodeRuntimeRecord.bindHost === "string" && opencodeRuntimeRecord.bindHost.trim()
+                ? opencodeRuntimeRecord.bindHost.trim()
+                : "127.0.0.1",
+            }
+          : undefined;
       if (!sessionId.trim() || !runtimeId || !runtimeDir) continue;
-      workspaces[sessionId] = { runtimeId, runtimeDir, createdAt };
+      workspaces[sessionId] = { runtimeId, runtimeDir, createdAt, opencodeRuntime };
     }
-    return { schemaVersion: 1, updatedAt: Date.now(), workspaces };
+    return { schemaVersion: 2, updatedAt: Date.now(), workspaces };
   } catch {
-    return { schemaVersion: 1, updatedAt: Date.now(), workspaces: {} };
+    return { schemaVersion: 2, updatedAt: Date.now(), workspaces: {} };
   }
 }
 
 async function writeStore(path: string, workspaces: Record<string, SessionWorkspaceEntry>) {
   await ensureDir(dirname(path));
   const payload: SessionWorkspaceStore = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     updatedAt: Date.now(),
     workspaces,
   };
@@ -102,6 +163,7 @@ export async function provisionSessionWorkspace(workspacePath: string): Promise<
   const runtimeDir = join(workspacePath, "documents", "sessions", runtimeId);
   await ensureDir(runtimeDir);
   await mirrorWorkspaceOpencodeSupportFiles(workspacePath, runtimeDir);
+  await writeRuntimeSessionCarrierConfig({ workspacePath, runtimeDir });
   return { runtimeId, runtimeDir };
 }
 
@@ -137,6 +199,155 @@ function normalizeInstructionEntries(value: unknown): string[] {
     next.push(trimmed);
   }
   return next;
+}
+
+function buildRuntimeConfigBase(
+  workspaceConfigInput: Record<string, unknown>,
+  runtimeConfigInput: Record<string, unknown>,
+  options?: {
+    workspacePath?: string;
+    runtimeDir?: string;
+  },
+): Record<string, unknown> {
+  const workspaceConfig = workspaceConfigInput && typeof workspaceConfigInput === "object" ? workspaceConfigInput : {};
+  const runtimeConfig = runtimeConfigInput && typeof runtimeConfigInput === "object" ? runtimeConfigInput : {};
+  const baseConfig: Record<string, unknown> = { ...workspaceConfig, ...runtimeConfig };
+
+  const workspaceMcp = workspaceConfig.mcp && typeof workspaceConfig.mcp === "object"
+    ? workspaceConfig.mcp as Record<string, unknown>
+    : {};
+  const runtimeMcp = runtimeConfig.mcp && typeof runtimeConfig.mcp === "object"
+    ? runtimeConfig.mcp as Record<string, unknown>
+    : {};
+  if (Object.keys(workspaceMcp).length || Object.keys(runtimeMcp).length) {
+    baseConfig.mcp = sanitizeRuntimeMcpEntries({ ...workspaceMcp, ...runtimeMcp }, options);
+  } else {
+    delete baseConfig.mcp;
+  }
+
+  const instructions = [
+    ...normalizeInstructionEntries(workspaceConfig.instructions),
+    ...normalizeInstructionEntries(runtimeConfig.instructions),
+  ].filter((entry, index, source) => source.indexOf(entry) === index);
+  if (instructions.length) baseConfig.instructions = instructions;
+  else delete baseConfig.instructions;
+
+  return baseConfig;
+}
+
+function pathIsWithin(basePath: string, candidatePath: string): boolean {
+  const base = resolve(basePath);
+  const candidate = resolve(candidatePath);
+  const rel = relative(base, candidate);
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
+function extractFilesystemRoots(command: string[]): string[] {
+  const serverIndex = command.findIndex((token) => token.includes("server-filesystem"));
+  const rawRoots = (serverIndex >= 0 ? command.slice(serverIndex + 1) : command.slice(1))
+    .map((token) => token.trim())
+    .filter((token) => token && !token.startsWith("-"));
+  return rawRoots;
+}
+
+function isSafeFilesystemRoot(
+  root: string,
+  options?: {
+    workspacePath?: string;
+    runtimeDir?: string;
+  },
+): boolean {
+  const trimmed = root.trim();
+  if (!trimmed || !isAbsolute(trimmed)) return true;
+  const allowedBases = [options?.workspacePath, options?.runtimeDir]
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+  if (!allowedBases.length) return false;
+  return allowedBases.some((basePath) => pathIsWithin(basePath, trimmed));
+}
+
+function shouldDropHostedFilesystemMcp(
+  name: string,
+  entry: unknown,
+  options?: {
+    workspacePath?: string;
+    runtimeDir?: string;
+  },
+): boolean {
+  if (name !== "filesystem" || !entry || typeof entry !== "object") return false;
+  const record = entry as Record<string, unknown>;
+  const type = typeof record.type === "string" ? record.type.trim() : "local";
+  if (type && type !== "local") return false;
+  if (!Array.isArray(record.command)) return false;
+  const command = record.command.filter((value): value is string => typeof value === "string");
+  if (!command.length) return false;
+  const roots = extractFilesystemRoots(command);
+  if (!roots.length) return false;
+  return roots.some((root) => !isSafeFilesystemRoot(root, options));
+}
+
+export function sanitizeRuntimeMcpEntries(
+  mcpInput: Record<string, unknown>,
+  options?: {
+    workspacePath?: string;
+    runtimeDir?: string;
+  },
+): Record<string, unknown> {
+  const sanitized: Record<string, unknown> = {};
+  for (const [name, entry] of Object.entries(mcpInput)) {
+    if (shouldDropHostedFilesystemMcp(name, entry, options)) continue;
+    sanitized[name] = entry;
+  }
+  return sanitized;
+}
+
+export function sanitizeRuntimeConfigForSession(
+  configInput: Record<string, unknown>,
+  options?: {
+    workspacePath?: string;
+    runtimeDir?: string;
+  },
+): Record<string, unknown> {
+  const config = configInput && typeof configInput === "object" ? { ...configInput } : {};
+  const mcpInput = config.mcp && typeof config.mcp === "object"
+    ? config.mcp as Record<string, unknown>
+    : null;
+  if (!mcpInput) return config;
+  const sanitizedMcp = sanitizeRuntimeMcpEntries(mcpInput, options);
+  if (Object.keys(sanitizedMcp).length) config.mcp = sanitizedMcp;
+  else delete config.mcp;
+  return config;
+}
+
+function buildRuntimeSessionInstructions(): string {
+  return [
+    "# OpenWork Session Runtime",
+    "",
+    "This session runs inside a dedicated OpenWork workspace. Treat the current workspace root as `<WORKSPACE>`.",
+    "",
+    "Runtime temp root:",
+    `- Use \`<WORKSPACE>/${SESSION_TMP_ROOT_RELATIVE_PATH}\` as the default location for transient extraction, conversion, generated helper files, and other temporary artifacts.`,
+    "",
+    "Rules:",
+    `1. Prefer \`<WORKSPACE>/${SESSION_TMP_ROOT_RELATIVE_PATH}\`, \`<WORKSPACE>/.tmp/\`, or another workspace-local temp directory over system \`/tmp\` paths.`,
+    "2. Any artifact that will later be reopened by file tools (`read`, `list`, `glob`, `edit`, `filesystem_*`) must stay inside `<WORKSPACE>`.",
+    `3. If a tool naturally returns an external temp path, first copy or re-emit the needed artifact into \`<WORKSPACE>/${SESSION_TMP_ROOT_RELATIVE_PATH}/\` (or another workspace-local path) before using any file tool on it.`,
+    "4. Treat `/tmp/*` and `/private/tmp/*` as shell-only transient paths until you copy them back into `<WORKSPACE>`.",
+    "5. Hosted runtime permissions may deny shell commands that explicitly write reopenable document/text artifacts to system temp paths like `/tmp/*.md` or `/private/tmp/*.docx`.",
+    "6. Final deliverables and persisted state must stay inside `<WORKSPACE>`.",
+    "7. Do not assume hosted sessions can rely on external directories remaining readable.",
+    "",
+  ].join("\n");
+}
+
+function buildHostedSystemTempBashDenyRules(): PermissionRuleset {
+  const rules: PermissionRuleset = [];
+  for (const prefix of HOSTED_SYSTEM_TMP_PREFIXES) {
+    for (const extension of HOSTED_REOPENABLE_DOC_EXTENSIONS) {
+      rules.push({ permission: "bash", pattern: `*-o ${prefix}*.${extension}*`, action: "deny" });
+      rules.push({ permission: "bash", pattern: `*> ${prefix}*.${extension}*`, action: "deny" });
+    }
+  }
+  return rules;
 }
 
 function buildRuntimeKnowledgeInstructions(attachedKnowledge: RuntimeKnowledgeInstructionRecord[]): string {
@@ -201,6 +412,33 @@ function buildRuntimeDocumentStateInstructions(): string {
   ].join("\n");
 }
 
+export async function writeRuntimeSessionCarrierConfig(input: {
+  workspacePath: string;
+  runtimeDir: string;
+}): Promise<string> {
+  const workspaceConfigPath = opencodeConfigPath(input.workspacePath);
+  const runtimeConfigPath = opencodeConfigPath(input.runtimeDir);
+  const { data: workspaceConfig } = await readJsoncFile<Record<string, unknown>>(workspaceConfigPath, {});
+  const { data: runtimeConfig } = await readJsoncFile<Record<string, unknown>>(runtimeConfigPath, {});
+  const baseConfig = buildRuntimeConfigBase(workspaceConfig, runtimeConfig, {
+    workspacePath: input.workspacePath,
+    runtimeDir: input.runtimeDir,
+  });
+  const existingInstructions = normalizeInstructionEntries(baseConfig.instructions);
+  baseConfig.instructions = [
+    ...existingInstructions.filter((entry) => entry !== RUNTIME_INSTRUCTIONS_RELATIVE_PATH),
+    RUNTIME_INSTRUCTIONS_RELATIVE_PATH,
+  ];
+
+  await ensureDir(join(input.runtimeDir, SESSION_TMP_ROOT_RELATIVE_PATH));
+
+  const instructionPath = join(input.runtimeDir, RUNTIME_INSTRUCTIONS_RELATIVE_PATH);
+  await ensureDir(dirname(instructionPath));
+  await writeFile(instructionPath, buildRuntimeSessionInstructions(), "utf8");
+  await writeJsoncFile(runtimeConfigPath, baseConfig);
+  return runtimeConfigPath;
+}
+
 export async function writeRuntimeKnowledgeCarrierConfig(input: {
   workspacePath: string;
   runtimeDir: string;
@@ -211,8 +449,11 @@ export async function writeRuntimeKnowledgeCarrierConfig(input: {
   const workspaceConfigPath = opencodeConfigPath(input.workspacePath);
   const runtimeConfigPath = opencodeConfigPath(input.runtimeDir);
   const { data: workspaceConfig } = await readJsoncFile<Record<string, unknown>>(workspaceConfigPath, {});
-  const { data: runtimeConfig } = await readJsoncFile<Record<string, unknown>>(runtimeConfigPath, workspaceConfig);
-  const baseConfig = runtimeConfig && typeof runtimeConfig === "object" ? { ...runtimeConfig } : {};
+  const { data: runtimeConfig } = await readJsoncFile<Record<string, unknown>>(runtimeConfigPath, {});
+  const baseConfig = buildRuntimeConfigBase(workspaceConfig, runtimeConfig, {
+    workspacePath: input.workspacePath,
+    runtimeDir: input.runtimeDir,
+  });
   const existingMcp = baseConfig.mcp && typeof baseConfig.mcp === "object"
     ? { ...(baseConfig.mcp as Record<string, unknown>) }
     : {};
@@ -226,7 +467,10 @@ export async function writeRuntimeKnowledgeCarrierConfig(input: {
   };
   baseConfig.mcp = existingMcp;
   const existingInstructions = normalizeInstructionEntries(baseConfig.instructions);
-  baseConfig.instructions = [...existingInstructions.filter((entry) => entry !== KNOWLEDGE_INSTRUCTIONS_RELATIVE_PATH), KNOWLEDGE_INSTRUCTIONS_RELATIVE_PATH];
+  baseConfig.instructions = [
+    ...existingInstructions.filter((entry) => entry !== KNOWLEDGE_INSTRUCTIONS_RELATIVE_PATH),
+    KNOWLEDGE_INSTRUCTIONS_RELATIVE_PATH,
+  ];
   const instructionPath = join(input.runtimeDir, KNOWLEDGE_INSTRUCTIONS_RELATIVE_PATH);
   await ensureDir(dirname(instructionPath));
   await writeFile(
@@ -247,8 +491,11 @@ export async function writeRuntimeDocumentStateCarrierConfig(input: {
   const workspaceConfigPath = opencodeConfigPath(input.workspacePath);
   const runtimeConfigPath = opencodeConfigPath(input.runtimeDir);
   const { data: workspaceConfig } = await readJsoncFile<Record<string, unknown>>(workspaceConfigPath, {});
-  const { data: runtimeConfig } = await readJsoncFile<Record<string, unknown>>(runtimeConfigPath, workspaceConfig);
-  const baseConfig = runtimeConfig && typeof runtimeConfig === "object" ? { ...runtimeConfig } : {};
+  const { data: runtimeConfig } = await readJsoncFile<Record<string, unknown>>(runtimeConfigPath, {});
+  const baseConfig = buildRuntimeConfigBase(workspaceConfig, runtimeConfig, {
+    workspacePath: input.workspacePath,
+    runtimeDir: input.runtimeDir,
+  });
   const existingMcp = baseConfig.mcp && typeof baseConfig.mcp === "object"
     ? { ...(baseConfig.mcp as Record<string, unknown>) }
     : {};
@@ -273,7 +520,10 @@ export async function writeRuntimeDocumentStateCarrierConfig(input: {
 }
 
 export function buildSessionPermissionRules(): PermissionRuleset {
-  return [{ permission: "external_directory", pattern: "*", action: "deny" }];
+  return [
+    ...buildHostedSystemTempBashDenyRules(),
+    { permission: "external_directory", pattern: "*", action: "deny" },
+  ];
 }
 
 export function sessionDirectoryBelongsToWorkspace(workspacePath: string, sessionDirectory: string | null | undefined): boolean {
@@ -307,6 +557,7 @@ export class SessionWorkspaceService {
       runtimeId: entry.runtimeId,
       runtimeDir: entry.runtimeDir,
       createdAt: entry.createdAt,
+      opencodeRuntime: entry.opencodeRuntime,
     };
     await writeStore(resolveSessionWorkspacePath(ws), store.workspaces);
   }
@@ -317,6 +568,13 @@ export class SessionWorkspaceService {
     if (!ws || !sid) return null;
     const store = await this.ensureLoaded(ws);
     return store.workspaces[sid] ?? null;
+  }
+
+  async listWorkspaces(workspaceId: string): Promise<Record<string, SessionWorkspaceEntry>> {
+    const ws = workspaceId.trim();
+    if (!ws) return {};
+    const store = await this.ensureLoaded(ws);
+    return { ...store.workspaces };
   }
 
   async removeWorkspace(workspaceId: string, sessionId: string): Promise<void> {

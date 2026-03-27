@@ -40,6 +40,16 @@ describe("resolveSupportedModel", () => {
     expect(resolved).toEqual(fallback);
   });
 
+  test("keeps Qwen sessions unchanged because Qwen is the supported default", () => {
+    const resolved = utils.resolveSupportedModel(
+      { providerID: "my-company", modelID: "Qwen3.5-397B-A17B" },
+      providers,
+      fallback,
+    );
+
+    expect(resolved).toEqual({ providerID: "my-company", modelID: "Qwen3.5-397B-A17B" });
+  });
+
   test("keeps still-supported models unchanged", () => {
     const model = { providerID: "my-company", modelID: "MiniMax-2.5" };
     const resolved = utils.resolveSupportedModel(model, providers, fallback);

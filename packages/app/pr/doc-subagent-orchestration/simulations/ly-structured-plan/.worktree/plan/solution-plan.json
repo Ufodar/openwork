@@ -1,0 +1,208 @@
+{
+  "version": 1,
+  "goal": "分析临沂项目招标文件和投标文件，输出完整解决方案",
+  "target_doc": "outputs/ly-solution.md",
+  "recommended_route": [
+    "Draft from plan and canonical facts first",
+    "Do not reopen raw source files unless the plan is missing evidence for a specific claim",
+    "Carry unresolved conflicts forward as explicit assumptions or risks",
+    "Refresh coverage after writing, then run verification"
+  ],
+  "sections": [
+    {
+      "id": "project-understanding",
+      "title": "项目理解与目标",
+      "purpose": "Summarize the project scope, stakeholder objective, and success target from the merged fact surface.",
+      "acceptance": "Explains the project background, target outcome, and the solution framing in Chinese.",
+      "evidence_topics": [
+        "commercial-baseline",
+        "timeline",
+        "general"
+      ]
+    },
+    {
+      "id": "requirement-mapping",
+      "title": "需求拆解与点对点对应",
+      "purpose": "Map the core tender requirements or user asks to the proposed response line-by-line.",
+      "acceptance": "Explicitly links requirement points to corresponding response actions or capabilities.",
+      "evidence_topics": [
+        "ai-nodes",
+        "hpc",
+        "xinchuang-cloud",
+        "fp16-capability",
+        "fp64-capability"
+      ]
+    },
+    {
+      "id": "solution-route",
+      "title": "解决路径与实施方案",
+      "purpose": "Describe the practical implementation route, delivery path, and collaboration model.",
+      "acceptance": "Contains concrete execution steps rather than generic sales language.",
+      "evidence_topics": [
+        "timeline",
+        "hpc",
+        "ai-nodes",
+        "xinchuang-cloud"
+      ]
+    },
+    {
+      "id": "evidence-assumptions",
+      "title": "证据来源与关键假设",
+      "purpose": "Show which facts are supported by source artifacts and which assumptions remain provisional.",
+      "acceptance": "Includes explicit evidence references and labels assumptions conservatively.",
+      "evidence_topics": [
+        "general",
+        "commercial-baseline",
+        "payment"
+      ]
+    },
+    {
+      "id": "risk-open-questions",
+      "title": "风险与待确认事项",
+      "purpose": "Expose unresolved conflicts, deviations, and missing details that still affect confidence.",
+      "acceptance": "Calls out unresolved issues and the next confirmation action for each.",
+      "evidence_topics": [
+        "cooling-method",
+        "rack-power",
+        "fp64-capability"
+      ]
+    }
+  ],
+  "dependencies": [
+    ".worktree/facts.json",
+    ".worktree/merge/conflicts.json",
+    ".worktree/sources/manifest.json"
+  ],
+  "required_evidence": [
+    {
+      "topic": "ai-nodes",
+      "statement": "天河产业园一期融合算力系统建设项目 CPU、GPU 节点及云计算服务器采购招标文",
+      "source_count": 1
+    },
+    {
+      "topic": "ai-nodes",
+      "statement": "天河产业园一期融合算力系统建设项目 CPU、GPU 节点及云计算服务器采购招标文件",
+      "source_count": 1
+    },
+    {
+      "topic": "ai-nodes",
+      "statement": "天河产业园一期融合算力系统建设项目 CPU、GPU 节点及云计算服务器采购的招标人",
+      "source_count": 1
+    },
+    {
+      "topic": "ai-nodes",
+      "statement": "项目名称：天河产业园一期融合算力系统建设项目 CPU、GPU 节点及云计算服务器",
+      "source_count": 1
+    },
+    {
+      "topic": "general",
+      "statement": "(7)服务系统：包含登录节点和融合算力平台及接口，提供用户登录、",
+      "source_count": 1
+    },
+    {
+      "topic": "general",
+      "statement": "0）、密码法和信息系统密码应用基本要求的发布，以及云计算技术在行业中的普及应用和发展，为满足行业安全建设中密码应用的统一管理、统一标准、统一建设的要求，建设统一密码服务管理平台将势在必行。",
+      "source_count": 4
+    },
+    {
+      "topic": "general",
+      "statement": "1 在投标截止时间 15 天前，招标人可以通过临沂市阳光采购服务平台修改招",
+      "source_count": 1
+    },
+    {
+      "topic": "general",
+      "statement": "600 万元＜货物类项目的中标金额≤1500 万元，收费标准按发改价格[2011]534 号",
+      "source_count": 1
+    },
+    {
+      "topic": "general",
+      "statement": "HVDC ▲输入 1250A*1，输出熔丝 800A*2，600KW，数量≥2 台；",
+      "source_count": 1
+    },
+    {
+      "topic": "general",
+      "statement": "NO-PAT模式：NO-PAT（Not Port Address Translation，非端口地址转换）模式下，一个IPv4地址同一时间只能对应一个IPv6地址进行转换，不能同时被多个IPv6地址共用。",
+      "source_count": 2
+    },
+    {
+      "topic": "general",
+      "statement": "▲兼容性，平台和接口可同时支持 X86 和 ARM 等多种处理器集",
+      "source_count": 1
+    },
+    {
+      "topic": "general",
+      "statement": "▲每个阵列配置 12Gbp s SAS 主机接口≥8 个，12Gbp s SAS",
+      "source_count": 1
+    },
+    {
+      "topic": "general",
+      "statement": "▲每台设备内存大小≥16G，硬盘容量≥480G SSD，接口数量：",
+      "source_count": 1
+    },
+    {
+      "topic": "general",
+      "statement": "《GM/T 0029-2014 签名验签服务器技术规范》接口规范，API 支持主流操作系统，具有很强的环境适用性，能够平滑接入各种系统平台，满足大多数应用系统的要求。",
+      "source_count": 1
+    },
+    {
+      "topic": "general",
+      "statement": "一个完善的采购计划应包括：设计技术要求、物资类别、工艺应用状况、采购方式(招(议)标、询比价、框架采购、定向采购等)、分交供应商、时间控制(项目需用时间和预计交货时间)、交货方式(交货状态、运输方式等)、质量控制方案、预计价格等内容。",
+      "source_count": 2
+    },
+    {
+      "topic": "general",
+      "statement": "云管平台通过 API 接口与超融合基础架构对接集成，从而实现自动调度和管理虚拟机对象及其相关对象，如网络、存储资源等，超融合架构利用标准 API 接口，可以向云管平台同时提供这些资源的配置和管理能力。",
+      "source_count": 1
+    },
+    {
+      "topic": "general",
+      "statement": "使用遵循《GM/T 0018-2012密码设备应用接口规范》、《GM/T 0019通用密码服务接口规范》密码设备的服务能力，借助设备厂商提供的软件程序开发包(SDK)密码服务管理平台将密码运算能力提供给接入平台的业务系统。",
+      "source_count": 2
+    },
+    {
+      "topic": "general",
+      "statement": "依据 GB/T 39786-2021《信息安全技术 信息系统密码应用基本要求》，从物理和环境安全、网络和通信安全、设备和计算安全、应用和数据安全等 4 个技术层面，以及密钥管理、安全管理等方面，定制化设计系统密码应用的技术方案、安全管理方案和实施保障方案。",
+      "source_count": 2
+    },
+    {
+      "topic": "general",
+      "statement": "售后服务方 方案完整详细，针对性、可操作性强，完全满足采购需求，得【4-5】",
+      "source_count": 1
+    },
+    {
+      "topic": "general",
+      "statement": "在SmartX云平台分布式文件系统中，我们使用了元数据强一致性的算法来确保数据在100%时间内都是可用的，同时该算法还可以确保ZBS分布式存储扩展到超大规模数据量时依然可靠。",
+      "source_count": 2
+    },
+    {
+      "topic": "general",
+      "statement": "我公司高度重视与用户的合作，我公司工程师将始终与用户保持紧密的联系，在项目实施和全方位的服务过程中，我们专门为业主设计了完善的服务方案，并对建设以及验收完成后的故障问题进行定义，以便及时、准确的解决系统中出现的故障问题，我公司提供运行维护和技术服务时间、内容和服务模式，向客户提供有效的、全方位的、及时技术支持和服务。",
+      "source_count": 2
+    },
+    {
+      "topic": "general",
+      "statement": "我司应答：我方所投产品本司自研融合算力云平台，支持用户分别查询消费记录（如Notebook资源使用、智能计算资源购买）与充值记录以核对收支明细，当前暂不支持按时间段筛选，用户可通过交易流水号或金额范围快速定位单笔记录。",
+      "source_count": 2
+    },
+    {
+      "topic": "general",
+      "statement": "我司应答：所投产品为本公司自研监控运维平台使用主机属性模块实现设备全局标识（自定义字段）和IP地址的增删改查，通过用户组配置管理联系人及其权限角色，并依托审计日志记录关键配置变更；",
+      "source_count": 2
+    },
+    {
+      "topic": "general",
+      "statement": "我司应答：所投产品为本公司自研监控运维平台使用分布式代理架构与自动化脚本模块实现客户端批量部署，通过代理（Proxy）横向扩展及任务队列优化，在低网络延迟条件下可实现单节点部署平均响应时间小于30秒，依托脚本重试机制保障事务通过率高于99%；",
+      "source_count": 2
+    }
+  ],
+  "open_questions": [
+    "未明显识别到评分标准，需要后续核对。"
+  ],
+  "writer_instructions": [
+    "Use the section order in this plan unless the target document already has stable structure that must be preserved.",
+    "Prefer canonical facts and conflict artifacts over reopening source artifacts.",
+    "If a section cannot be fully supported, write the supported portion and mark the rest as assumptions or pending confirmation.",
+    "Keep the tone practical and evidence-aware rather than speculative."
+  ],
+  "updated_at": "2026-03-24T08:07:28Z"
+}

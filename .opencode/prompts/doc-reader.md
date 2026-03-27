@@ -44,13 +44,23 @@ Reading discipline:
 - work only inside the current workspace and do not inspect sibling session directories
 - use workspace-relative input and output paths
 
+Script resolution discipline:
+- resolve the actual extractor path before running it
+- resolve `REPO_ROOT` with a real shell command first: `REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"`
+- then check `./.opencode/skills/openwork-core/scripts/extract_doc_state.py` inside the current workspace
+- if that path does not exist, check `"$REPO_ROOT/.opencode/skills/openwork-core/scripts/extract_doc_state.py"`
+- the shell check should look like `if [ -f "./.opencode/skills/openwork-core/scripts/extract_doc_state.py" ]; then ... elif [ -f "$REPO_ROOT/.opencode/skills/openwork-core/scripts/extract_doc_state.py" ]; then ... fi`
+- keep the resolved path in `SCRIPT_PATH`
+- do not use `glob` or `list` to test a literal `$(git rev-parse --show-toplevel)` candidate; compute `REPO_ROOT` in shell first, then test the concrete file path
+- if neither candidate exists, return the blocker; do not pretend the extractor ran and do not switch to a handwritten compilation path
+
 Default execution path:
-- before ad-hoc exploration, compile the assigned source with `python3 ./.opencode/skills/openwork-core/scripts/extract_doc_state.py`
+- before ad-hoc exploration, resolve the actual extractor path and then compile the assigned source with `python3 "$SCRIPT_PATH"`
 - use the task-provided `docId`, role, input path, and output path when they are supplied
 - if the task names multiple source documents, run the extractor once per document and write one owned JSON artifact per document
 - use `.worktree/sources/manifest.json` as the first source of truth for `docId`, role, and relative paths when it already exists
 - if the extractor succeeds, trust the generated artifact and stop
-- if the extractor fails, return the blocker unless the parent explicitly authorizes a manual fallback
+- if the extractor fails, return the blocker unless the parent explicitly authorizes a manual recovery path
 - do not browse unrelated repo files such as `package.json` or broad workspace globs once the assigned source files are known
 
 Do not:

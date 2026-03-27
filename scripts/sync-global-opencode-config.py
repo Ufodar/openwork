@@ -6,34 +6,22 @@ from pathlib import Path
 
 
 SUPPORTED_MODELS = {
+    "Qwen3.5-397B-A17B": {
+        "name": "Qwen3.5-397B-A17B",
+        "capabilities": {
+            "input": {"text": True, "image": True, "audio": True, "video": True, "pdf": True},
+            "output": {"text": True, "image": True, "audio": False, "video": False, "pdf": False},
+            "attachment": True,
+            "interleaved": True,
+            "toolcall": True,
+        },
+    },
     "MiniMax-2.5": {
         "name": "MiniMax-2.5",
         "capabilities": {
             "input": {"text": True},
             "output": {"text": True},
             "attachment": False,
-            "toolcall": True,
-        },
-    },
-    "Qwen3.5-397B-A17B": {
-        "name": "Qwen3.5-397B-A17B",
-        "capabilities": {
-            "input": {
-                "text": True,
-                "image": True,
-                "audio": True,
-                "video": True,
-                "pdf": True,
-            },
-            "output": {
-                "text": True,
-                "image": True,
-                "audio": False,
-                "video": False,
-                "pdf": False,
-            },
-            "attachment": True,
-            "interleaved": True,
             "toolcall": True,
         },
     },
@@ -64,6 +52,24 @@ def load_json(path: Path) -> dict:
     return data if isinstance(data, dict) else {}
 
 
+def first_non_empty(*values: str) -> str:
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def extract_bocha_mcp_dir(command: object) -> str:
+    if not isinstance(command, list):
+        return ""
+    for index, part in enumerate(command):
+        if part == "--directory" and index + 1 < len(command):
+            next_part = command[index + 1]
+            if isinstance(next_part, str) and next_part.strip():
+                return next_part.strip()
+    return ""
+
+
 def main() -> int:
     global_path = Path(
         os.environ.get("OPENWORK_GLOBAL_CONFIG", str(Path.home() / ".config" / "opencode" / "opencode.json"))
@@ -72,7 +78,7 @@ def main() -> int:
     default_model = os.environ.get("OPENWORK_DEFAULT_MODEL", DEFAULT_MODEL_ID).strip() or DEFAULT_MODEL_ID
     small_model = os.environ.get("OPENWORK_SMALL_MODEL", default_model).strip() or default_model
     base_url = resolve_default_base_url()
-    api_key = os.environ.get("MY_COMPANY_API_KEY", "").strip()
+    permission_mode = os.environ.get("OPENWORK_GLOBAL_PERMISSION", "").strip()
 
     if default_model not in SUPPORTED_MODELS:
         print(
@@ -106,6 +112,15 @@ def main() -> int:
         provider = {}
         providers[provider_id] = provider
 
+    provider_options = provider.get("options")
+    if not isinstance(provider_options, dict):
+        provider_options = {}
+
+    api_key = first_non_empty(
+        os.environ.get("MY_COMPANY_API_KEY", ""),
+        str(provider_options.get("apiKey", "")),
+    )
+
     provider["options"] = {
         "baseURL": base_url,
         "apiKey": api_key,
@@ -113,6 +128,8 @@ def main() -> int:
     provider["models"] = SUPPORTED_MODELS
     config["model"] = f"{provider_id}/{default_model}"
     config["small_model"] = f"{provider_id}/{small_model}"
+    if permission_mode:
+        config["permission"] = permission_mode
 
     plugins = config.get("plugin")
     if isinstance(plugins, list) and not keep_global_mem_plugin:
@@ -124,10 +141,50 @@ def main() -> int:
         config["plugin"] = filtered_plugins
 
     mcp = config.get("mcp")
-    if isinstance(mcp, dict) and not keep_global_memory_mcp:
+    if not isinstance(mcp, dict):
+        mcp = {}
+        config["mcp"] = mcp
+
+    if not keep_global_memory_mcp:
         memory = mcp.get("memory")
         if isinstance(memory, dict):
             memory["enabled"] = False
+
+    bocha = mcp.get("bocha-search")
+    if not isinstance(bocha, dict):
+        bocha = {}
+
+    bocha_env = bocha.get("environment")
+    if not isinstance(bocha_env, dict):
+        bocha_env = {}
+    bocha_command = bocha.get("command")
+
+    bocha_api_key = first_non_empty(
+        os.environ.get("BOCAI_API_KEY", ""),
+        os.environ.get("BOCHA_API_KEY", ""),
+        bocha_env.get("BOCAI_API_KEY", ""),
+        bocha_env.get("BOCHA_API_KEY", ""),
+    )
+    bocha_mcp_dir = first_non_empty(
+        os.environ.get("BOCHA_MCP_DIR", ""),
+        extract_bocha_mcp_dir(bocha_command),
+        str(Path.home() / ".config" / "openwork" / "bocha-search-mcp"),
+    )
+
+    if bocha_api_key:
+        bocha["type"] = "local"
+        bocha["enabled"] = True
+        bocha["command"] = [
+            "uv",
+            "--directory",
+            bocha_mcp_dir,
+            "run",
+            "bocha-search-mcp",
+        ]
+        bocha["environment"] = {
+            "BOCHA_API_KEY": bocha_api_key,
+        }
+        mcp["bocha-search"] = bocha
 
     global_path.parent.mkdir(parents=True, exist_ok=True)
     global_path.write_text(json.dumps(config, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

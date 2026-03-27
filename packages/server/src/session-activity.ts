@@ -16,31 +16,83 @@ type SubscriptionRecord = {
   controller: AbortController;
 };
 
+type SubscriptionTarget = {
+  key: string;
+  workspaceId: string;
+  workspace: WorkspaceInfo;
+  expectedSessionId?: string;
+};
+
 const MIN_RECONNECT_DELAY_MS = 1_000;
 const MAX_RECONNECT_DELAY_MS = 5_000;
+
+function isTruthy(value: string | undefined): boolean {
+  const normalized = value?.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+}
 
 export class SessionActivityService {
   private activeByWorkspace = new Map<string, Map<string, ActiveSessionRecord>>();
   private subscriptions = new Map<string, SubscriptionRecord>();
+  private readonly disableWorkspaceTracking: boolean;
+  private readonly disableSessionRuntimeTracking: boolean;
+  private readonly onSessionBusy?: (workspaceId: string, sessionId: string) => void;
+  private readonly onSessionIdle?: (workspaceId: string, sessionId: string) => void;
 
-  constructor(private readonly logger?: ServerLogger) {}
+  constructor(
+    private readonly logger?: ServerLogger,
+    options?: {
+      disableWorkspaceTracking?: boolean;
+      disableSessionRuntimeTracking?: boolean;
+      onSessionBusy?: (workspaceId: string, sessionId: string) => void;
+      onSessionIdle?: (workspaceId: string, sessionId: string) => void;
+    },
+  ) {
+    this.disableWorkspaceTracking = options?.disableWorkspaceTracking ?? isTruthy(process.env.OPENWORK_DISABLE_SHARED_WORKSPACE_EVENT_TRACKING);
+    this.disableSessionRuntimeTracking = options?.disableSessionRuntimeTracking ?? isTruthy(process.env.OPENWORK_DISABLE_SESSION_RUNTIME_EVENT_TRACKING);
+    this.onSessionBusy = options?.onSessionBusy;
+    this.onSessionIdle = options?.onSessionIdle;
+  }
 
   async ensureWorkspace(workspace: WorkspaceInfo): Promise<void> {
+    if (this.disableWorkspaceTracking) return;
     const baseUrl = workspace.baseUrl?.trim() ?? "";
     if (!workspace.id?.trim() || !baseUrl) return;
-    const fingerprint = buildWorkspaceFingerprint(workspace);
-    const existing = this.subscriptions.get(workspace.id);
+    await this.ensureTarget({
+      key: buildWorkspaceTargetKey(workspace.id),
+      workspaceId: workspace.id,
+      workspace,
+    });
+  }
+
+  async ensureSessionRuntime(workspaceId: string, sessionId: string, workspace: WorkspaceInfo): Promise<void> {
+    if (this.disableSessionRuntimeTracking) return;
+    const ws = workspaceId.trim();
+    const sid = sessionId.trim();
+    const baseUrl = workspace.baseUrl?.trim() ?? "";
+    if (!ws || !sid || !baseUrl) return;
+    await this.ensureTarget({
+      key: buildSessionTargetKey(ws, sid),
+      workspaceId: ws,
+      workspace,
+      expectedSessionId: sid,
+    });
+  }
+
+  private async ensureTarget(target: SubscriptionTarget): Promise<void> {
+    const fingerprint = buildWorkspaceFingerprint(target.workspace, target.expectedSessionId);
+    const existing = this.subscriptions.get(target.key);
     if (existing && existing.fingerprint === fingerprint && !existing.controller.signal.aborted) {
       return;
     }
     existing?.controller.abort();
 
     const controller = new AbortController();
-    this.subscriptions.set(workspace.id, { fingerprint, controller });
-    void this.runWorkspaceLoop(workspace, controller).finally(() => {
-      const latest = this.subscriptions.get(workspace.id);
+    this.subscriptions.set(target.key, { fingerprint, controller });
+    void this.runWorkspaceLoop(target, controller).finally(() => {
+      const latest = this.subscriptions.get(target.key);
       if (latest?.controller === controller) {
-        this.subscriptions.delete(workspace.id);
+        this.subscriptions.delete(target.key);
       }
     });
   }
@@ -58,6 +110,7 @@ export class SessionActivityService {
       startedAt: existing?.startedAt ?? now,
       lastEventAt: now,
     });
+    this.onSessionBusy?.(ws, sid);
   }
 
   noteSessionBusy(workspaceId: string, sessionId: string): void {
@@ -69,11 +122,14 @@ export class SessionActivityService {
     const sid = sessionId.trim();
     if (!ws || !sid) return;
     const sessions = this.activeByWorkspace.get(ws);
-    if (!sessions) return;
-    sessions.delete(sid);
-    if (sessions.size === 0) {
-      this.activeByWorkspace.delete(ws);
+    if (sessions) {
+      sessions.delete(sid);
+      if (sessions.size === 0) {
+        this.activeByWorkspace.delete(ws);
+      }
     }
+    this.stopSessionSubscription(ws, sid);
+    this.onSessionIdle?.(ws, sid);
   }
 
   removeSession(workspaceId: string, sessionId: string): void {
@@ -90,16 +146,19 @@ export class SessionActivityService {
     return this.listActiveSessions().length;
   }
 
-  private async runWorkspaceLoop(workspace: WorkspaceInfo, controller: AbortController): Promise<void> {
+  private async runWorkspaceLoop(target: SubscriptionTarget, controller: AbortController): Promise<void> {
     let delayMs = MIN_RECONNECT_DELAY_MS;
     while (!controller.signal.aborted) {
       try {
-        await this.consumeWorkspaceEvents(workspace, controller.signal);
+        await this.consumeWorkspaceEvents(target, controller.signal);
         delayMs = MIN_RECONNECT_DELAY_MS;
       } catch (error) {
         if (controller.signal.aborted) return;
         this.logger?.log("warn", "OpenCode event tracking disconnected; retrying", {
-          workspaceId: workspace.id,
+          workspaceId: target.workspaceId,
+          sessionId: target.expectedSessionId ?? null,
+          subscriptionKey: target.key,
+          baseUrl: target.workspace.baseUrl ?? null,
           error: error instanceof Error ? error.message : String(error),
         });
         await wait(delayMs, controller.signal).catch(() => undefined);
@@ -108,7 +167,8 @@ export class SessionActivityService {
     }
   }
 
-  private async consumeWorkspaceEvents(workspace: WorkspaceInfo, signal: AbortSignal): Promise<void> {
+  private async consumeWorkspaceEvents(target: SubscriptionTarget, signal: AbortSignal): Promise<void> {
+    const workspace = target.workspace;
     const baseUrl = workspace.baseUrl?.trim() ?? "";
     if (!baseUrl) return;
     const targetUrl = new URL(baseUrl);
@@ -150,7 +210,7 @@ export class SessionActivityService {
         for (const chunk of chunks) {
           const payload = parseSsePayload(chunk);
           if (!payload) continue;
-          this.handlePayload(workspace.id, payload);
+          this.handlePayload(target, payload);
         }
       }
     } finally {
@@ -162,13 +222,14 @@ export class SessionActivityService {
     }
   }
 
-  private handlePayload(workspaceId: string, payload: Record<string, unknown>) {
+  private handlePayload(target: SubscriptionTarget, payload: Record<string, unknown>) {
     const type = typeof payload.type === "string" ? payload.type : "";
     const props = payload.properties && typeof payload.properties === "object"
       ? (payload.properties as Record<string, unknown>)
       : null;
     const sessionId = typeof props?.sessionID === "string" ? props.sessionID.trim() : "";
     if (!sessionId) return;
+    if (target.expectedSessionId && sessionId !== target.expectedSessionId) return;
 
     if (type === "session.status") {
       const status = props?.status && typeof props.status === "object"
@@ -176,17 +237,25 @@ export class SessionActivityService {
         : null;
       const statusType = typeof status?.type === "string" ? status.type : "";
       if (statusType === "busy" || statusType === "retry") {
-        this.noteSessionBusy(workspaceId, sessionId);
+        this.noteSessionBusy(target.workspaceId, sessionId);
       }
       if (statusType === "idle") {
-        this.noteSessionIdle(workspaceId, sessionId);
+        this.noteSessionIdle(target.workspaceId, sessionId);
       }
       return;
     }
 
     if (type === "session.idle" || type === "session.error") {
-      this.noteSessionIdle(workspaceId, sessionId);
+      this.noteSessionIdle(target.workspaceId, sessionId);
     }
+  }
+
+  private stopSessionSubscription(workspaceId: string, sessionId: string): void {
+    const key = buildSessionTargetKey(workspaceId, sessionId);
+    const existing = this.subscriptions.get(key);
+    if (!existing) return;
+    existing.controller.abort();
+    this.subscriptions.delete(key);
   }
 }
 
@@ -236,7 +305,15 @@ function buildOpencodeAuthHeader(workspace: WorkspaceInfo): string | null {
   return `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
 }
 
-function buildWorkspaceFingerprint(workspace: WorkspaceInfo): string {
+function buildWorkspaceTargetKey(workspaceId: string): string {
+  return `workspace::${workspaceId.trim()}`;
+}
+
+function buildSessionTargetKey(workspaceId: string, sessionId: string): string {
+  return `session::${workspaceId.trim()}::${sessionId.trim()}`;
+}
+
+function buildWorkspaceFingerprint(workspace: WorkspaceInfo, expectedSessionId?: string): string {
   return [
     workspace.id,
     workspace.baseUrl?.trim() ?? "",
@@ -244,6 +321,7 @@ function buildWorkspaceFingerprint(workspace: WorkspaceInfo): string {
     workspace.directory?.trim() ?? "",
     workspace.opencodeUsername?.trim() ?? "",
     workspace.opencodePassword?.trim() ?? "",
+    expectedSessionId?.trim() ?? "",
   ].join("::");
 }
 

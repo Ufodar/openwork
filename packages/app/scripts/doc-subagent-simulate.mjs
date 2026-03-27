@@ -4,13 +4,14 @@ import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promi
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { createOpencodeClient } from "@opencode-ai/sdk/v2/client";
+import { createHostedOpenworkClient, makeClient } from "./_util.mjs";
 
 import {
   extractMarkdownHeadings,
   summarizeArtifactFiles,
   validateScenarioResult,
 } from "./doc-subagent-simulate-lib.mjs";
+import { joinVisibleAssistantText } from "./_assistant-text.mjs";
 import { resolveSimulationModel } from "./doc-subagent-model-config.mjs";
 
 import {
@@ -215,10 +216,24 @@ function hasPendingToolStates(messages) {
   });
 }
 
+function findLastCompletedAssistant(messages) {
+  return [...messages].reverse().find(
+    (message) =>
+      messageRole(message) === "assistant" &&
+      Array.isArray(message.parts) &&
+      message.parts.length > 0 &&
+      messageCompletedAt(message) !== null,
+  );
+}
+
 function hasCompletedAssistantTurn(messages) {
-  const assistant = [...messages].reverse().find((message) => messageRole(message) === "assistant");
+  const assistant = findLastCompletedAssistant(messages);
   if (!assistant) return false;
   return messageCompletedAt(assistant) !== null && !hasPendingToolStates([assistant]);
+}
+
+function hasAnyAssistantMessage(messages) {
+  return messages.some((message) => messageRole(message) === "assistant");
 }
 
 async function waitForSessionSettled(client, sessionId, runPrompt, {
@@ -226,41 +241,46 @@ async function waitForSessionSettled(client, sessionId, runPrompt, {
   pollMs = 3_000,
   quietMs = 10_000,
   noProgressTimeoutMs = 120_000,
+  useWorkspaceEventStream = false,
 } = {}) {
-  const controller = new AbortController();
-  const sub = await client.event.subscribe(undefined, { signal: controller.signal });
   const observed = new Set();
   let sawIdle = false;
   let sawError = null;
   const now = () => performance.now();
+  let controller = null;
+  let reader = Promise.resolve();
 
-  const reader = (async () => {
-    try {
-      for await (const raw of sub.stream) {
-        const evt = normalizeEvent(raw);
-        if (!evt) continue;
-        const properties = evt.properties && typeof evt.properties === "object" ? evt.properties : {};
-        const eventSessionId =
-          typeof properties.sessionID === "string"
-            ? properties.sessionID
-            : typeof properties.sessionId === "string"
-            ? properties.sessionId
-              : null;
-        if (eventSessionId && eventSessionId !== sessionId) continue;
-        observed.add(evt.type);
-        if (evt.type === "session.error") {
-          sawError = new Error(`session.error for ${sessionId}`);
-          return;
+  if (useWorkspaceEventStream) {
+    controller = new AbortController();
+    const sub = await client.event.subscribe(undefined, { signal: controller.signal });
+    reader = (async () => {
+      try {
+        for await (const raw of sub.stream) {
+          const evt = normalizeEvent(raw);
+          if (!evt) continue;
+          const properties = evt.properties && typeof evt.properties === "object" ? evt.properties : {};
+          const eventSessionId =
+            typeof properties.sessionID === "string"
+              ? properties.sessionID
+              : typeof properties.sessionId === "string"
+              ? properties.sessionId
+                : null;
+          if (eventSessionId && eventSessionId !== sessionId) continue;
+          observed.add(evt.type);
+          if (evt.type === "session.error") {
+            sawError = new Error(`session.error for ${sessionId}`);
+            return;
+          }
+          if (evt.type === "session.idle") {
+            sawIdle = true;
+            return;
+          }
         }
-        if (evt.type === "session.idle") {
-          sawIdle = true;
-          return;
-        }
+      } finally {
+        // Let the polling loop decide when to abort.
       }
-    } finally {
-      // Let the polling loop decide when to abort.
-    }
-  })();
+    })();
+  }
 
   try {
     await runPrompt();
@@ -283,12 +303,7 @@ async function waitForSessionSettled(client, sessionId, runPrompt, {
         lastProgressAt = now();
       }
 
-      const hasAnyAssistantPayload = messages.some((message) =>
-        messageRole(message) === "assistant" &&
-        Array.isArray(message.parts) &&
-        message.parts.length > 0,
-      );
-      if (!hasAnyAssistantPayload && now() - lastProgressAt >= noProgressTimeoutMs) {
+      if (!hasAnyAssistantMessage(messages) && now() - lastProgressAt >= noProgressTimeoutMs) {
         throw new Error(`No assistant progress after ${Math.round(now() - startedAt)}ms`);
       }
 
@@ -301,7 +316,7 @@ async function waitForSessionSettled(client, sessionId, runPrompt, {
 
     throw new Error(`Timed out waiting for session to settle after ${Math.round(now() - startedAt)}ms`);
   } finally {
-    controller.abort();
+    controller?.abort();
     await Promise.race([
       reader,
       new Promise((resolveDelay) => setTimeout(resolveDelay, 500)),
@@ -345,11 +360,7 @@ function extractTaskSummary(messages) {
 function extractAssistantText(messages) {
   const assistant = [...messages].reverse().find((message) => messageRole(message) === "assistant");
   if (!assistant || !Array.isArray(assistant.parts)) return "";
-  return assistant.parts
-    .filter((part) => part?.type === "text" && typeof part.text === "string")
-    .map((part) => part.text)
-    .join("\n")
-    .trim();
+  return joinVisibleAssistantText(assistant.parts);
 }
 
 function extractToolErrors(messages) {
@@ -688,12 +699,7 @@ const openworkServer = spawnLogged(
 );
 
 try {
-  const directClient = createOpencodeClient({
-    baseUrl: `http://127.0.0.1:${opencodePort}`,
-    directory: root,
-    responseStyle: "data",
-    throwOnError: true,
-  });
+  const directClient = makeClient({ baseUrl: `http://127.0.0.1:${opencodePort}`, directory: root });
   await waitForHealthy(directClient);
 
   const openworkBase = `http://127.0.0.1:${openworkPort}`;
@@ -703,15 +709,7 @@ try {
   const directory = workspaces?.items?.[0]?.opencode?.directory ?? workspaces?.items?.[0]?.directory ?? root;
   assert.ok(workspaceId, "workspaceId is required");
 
-  const client = createOpencodeClient({
-    baseUrl: `${openworkBase}/w/${encodeURIComponent(workspaceId)}/opencode`,
-    directory,
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-    responseStyle: "data",
-    throwOnError: true,
-  });
+  const client = createHostedOpenworkClient({ baseUrl: openworkBase, workspaceId, token });
 
   const results = [];
   for (const scenario of selectedScenarios) {

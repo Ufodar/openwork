@@ -9,6 +9,7 @@ import type {
   ToolMonitorTurnReport,
 } from "./types";
 import { renderToolMonitorMarkdown } from "./markdown";
+import { stripReasoningArtifacts } from "../assistant-text";
 
 type ToolPartRecord = Part & {
   tool?: unknown;
@@ -85,7 +86,9 @@ const pickTextPreviewFromParts = (parts: Part[]) => {
     .map((part) => (part as any)?.text)
     .filter((value) => typeof value === "string" && value.trim());
   if (!textParts.length) return "";
-  return truncateText(textParts.join("\n\n"), 700);
+  const visibleText = stripReasoningArtifacts(textParts.join("\n\n"));
+  if (!visibleText) return "";
+  return truncateText(visibleText, 700);
 };
 
 const extractToolCalls = (parts: Part[]): ToolMonitorToolCall[] => {

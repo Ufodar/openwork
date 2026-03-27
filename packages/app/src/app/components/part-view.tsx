@@ -7,6 +7,7 @@ import { isTauriRuntime, safeStringify, summarizeStep } from "../utils";
 import { usePlatform } from "../context/platform";
 import { perfNow, recordPerfLog } from "../lib/perf-log";
 import { resolveToolPartDisplayStatus } from "../lib/tool-part-status";
+import { stripReasoningArtifacts } from "../lib/assistant-text";
 import { currentLocale, t } from "../../i18n";
 
 type Props = {
@@ -428,6 +429,11 @@ export default function PartView(props: Props) {
   const showThinking = () => props.showThinking ?? true;
   const renderMarkdown = () => props.renderMarkdown ?? false;
   const markdownThrottleMs = () => Math.max(0, props.markdownThrottleMs ?? 100);
+  const visibleText = createMemo(() => {
+    if (p().type !== "text") return "";
+    const raw = "text" in p() ? String((p() as { text: string }).text ?? "") : "";
+    return props.messageInfo?.role === "assistant" ? stripReasoningArtifacts(raw) : raw;
+  });
   let textContainerEl: HTMLDivElement | undefined;
   const fileInfo = () => {
     if (p().type !== "file") return null;
@@ -476,8 +482,7 @@ export default function PartView(props: Props) {
   const normalizeMarkdownSource = (value: string) => value.replace(/^[\s\u00A0]+/, "");
   const markdownSource = createMemo(() => {
     if (!renderMarkdown() || p().type !== "text") return "";
-    const raw = "text" in p() ? String((p() as { text: string }).text ?? "") : "";
-    return normalizeMarkdownSource(raw);
+    return normalizeMarkdownSource(visibleText());
   });
   const throttledMarkdownSource = useThrottledValue(markdownSource, markdownThrottleMs);
   const renderedMarkdown = createMemo(() => {
@@ -551,7 +556,7 @@ export default function PartView(props: Props) {
   };
 
   const renderTextWithLinks = () => {
-    const text = "text" in p() ? String((p() as { text: string }).text) : "";
+    const text = visibleText();
     if (!text) return <span>{""}</span>;
 
     const tokens = splitTextTokens(text);

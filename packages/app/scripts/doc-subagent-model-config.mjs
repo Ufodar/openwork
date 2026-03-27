@@ -41,7 +41,7 @@ export async function resolveSimulationModel({
   workspaceRoot,
   workspaceConfigPaths,
   userConfigPaths,
-  fallbackModel = "my-company/MiniMax-2.5",
+  fallbackModel = "my-company/Qwen3.5-397B-A17B",
 }) {
   if (typeof explicitModel === "string" && explicitModel.trim()) return explicitModel.trim();
   if (typeof envModel === "string" && envModel.trim()) return envModel.trim();

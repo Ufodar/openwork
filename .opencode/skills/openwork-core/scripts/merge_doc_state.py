@@ -7,6 +7,57 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
+SYSTEM_MATERIAL_HINTS = {
+    "项目申报",
+    "技术材料",
+    "三大系统",
+    "算力资源汇聚系统",
+    "算力选择与调度系统",
+    "算力运行安全监测系统",
+    "api调用示例",
+    "api 调用示例",
+}
+
+SYSTEM_MATERIAL_KEYWORDS = {
+    "算力", "资源", "纳管", "k8s", "kubernetes", "虚拟机", "裸金属", "gpu", "标签",
+    "调度", "时延", "带宽", "丢包", "路径", "算网", "监控", "告警", "审计",
+    "安全", "等保", "api", "rest", "restful", "grpc", "互联互通", "标识",
+    "认证", "ldap", "oauth", "rbac", "prometheus", "grafana", "网关", "多云",
+    "agent", "拓扑", "资源池", "集群",
+}
+
+GENERAL_SYSTEM_FACT_KEYWORDS = {
+    "架构", "展示层", "业务层", "中间层", "通信层", "目标层", "容器化", "前后端分离",
+    "prometheus", "zabbix", "influxdb", "elasticsearch", "kafka", "mysql", "redis",
+    "gpu", "虚拟机", "k8s", "ldap", "oauth", "rbac", "审计", "告警", "拓扑", "协议",
+}
+
+TOPIC_ORDER = {
+    "resource-aggregation": 0,
+    "scheduling": 1,
+    "security-monitoring": 2,
+    "api-interoperability": 3,
+    "identifier-system": 4,
+    "general": 5,
+}
+
+NOISE_KEYWORDS = {
+    "充值", "充值券", "支付", "支付平台", "二维码", "扫码", "抵扣", "优惠券", "代金券",
+    "订单", "购物车", "店铺", "商城", "账户余额", "充值金额", "第三方支付", "下架",
+    "上架", "促销", "红包", "账户充值", "续费", "支付结果", "收银", "售卖",
+}
+
+GENERIC_AUTH_NOISE = {
+    "authorization-code",
+    "implicit",
+    "client credentials",
+    "客户端凭证",
+    "授权码",
+    "密码式",
+    "隐藏式",
+}
+
+
 def load_json(path: Path, default):
     try:
         return json.loads(path.read_text("utf-8"))
@@ -51,6 +102,30 @@ def dedupe_strings(values):
     return result
 
 
+def is_system_material_goal(goal: str) -> bool:
+    lowered = normalize_text(goal)
+    return any(keyword in lowered for keyword in SYSTEM_MATERIAL_HINTS)
+
+
+def build_goal_profile(goal: str):
+    lowered = normalize_text(goal)
+    profile = {
+        "system_material": is_system_material_goal(goal),
+        "keywords": set(),
+        "negative_keywords": set(NOISE_KEYWORDS),
+    }
+    if profile["system_material"]:
+        profile["keywords"].update(SYSTEM_MATERIAL_KEYWORDS)
+    elif any(keyword in lowered for keyword in ["方案", "solution", "点对点"]):
+        profile["keywords"].update({"方案", "系统", "技术", "实施", "项目"})
+    else:
+        profile["keywords"].update({"项目", "系统", "技术", "平台"})
+
+    for phrase in re.findall(r"[\u4e00-\u9fffA-Za-z0-9\-]{2,}", goal or ""):
+        profile["keywords"].add(phrase.lower())
+    return profile
+
+
 def infer_topic(statement: str) -> str:
     lowered = normalize_text(statement)
     if any(keyword in lowered for keyword in ["ldap", "oauth", "rbac", "sso", "审计", "告警", "等保", "安全", "访问控制"]):
@@ -88,6 +163,135 @@ def infer_topic(statement: str) -> str:
     if "信创" in statement:
         return "xinchuang-cloud"
     return "general"
+
+
+def is_noise_statement(statement: str, topic: str, profile: dict) -> bool:
+    lowered = normalize_text(statement)
+    if not lowered:
+        return True
+    if "@startuml" in lowered or "@enduml" in lowered or " participant " in lowered or "->" in statement:
+        return True
+    if any(keyword in statement for keyword in profile["negative_keywords"]):
+        return True
+    if profile["system_material"] and any(keyword in lowered for keyword in GENERIC_AUTH_NOISE):
+        positive_hits = sum(1 for keyword in SYSTEM_MATERIAL_KEYWORDS if keyword in lowered)
+        if positive_hits <= 2:
+            return True
+    if profile["system_material"] and topic in {"payment", "commercial-baseline", "bid-security"}:
+        return True
+    return False
+
+
+def score_fact(statement: str, topic: str, source_count: int, profile: dict) -> int:
+    lowered = normalize_text(statement)
+    if not lowered:
+        return -999
+    if is_noise_statement(statement, topic, profile):
+        return -999
+    keyword_hits = sum(1 for keyword in profile["keywords"] if keyword and keyword in lowered)
+    if profile["system_material"] and topic == "general":
+        if len(statement.strip()) < 24:
+            return -999
+        if keyword_hits < 3:
+            return -999
+        if not any(keyword in lowered for keyword in GENERAL_SYSTEM_FACT_KEYWORDS):
+            return -999
+
+    score = 0
+    score += keyword_hits * 3
+    if profile["system_material"] and topic in {
+        "resource-aggregation",
+        "scheduling",
+        "security-monitoring",
+        "api-interoperability",
+        "identifier-system",
+    }:
+        score += 8
+    elif topic != "general":
+        score += 3
+    score += min(source_count, 3) * 2
+    if 24 <= len(statement) <= 260:
+        score += 2
+    if re.search(r"\d", statement):
+        score += 1
+    return score
+
+
+def score_source_section(section: dict, profile: dict) -> tuple[int, str]:
+    title = str(section.get("title") or "").strip()
+    summary = str(section.get("summary") or "").strip()
+    key_points = section.get("key_points") if isinstance(section.get("key_points"), list) else []
+    key_text = " ".join(
+        str(item.get("statement") or "").strip()
+        for item in key_points
+        if isinstance(item, dict)
+    )
+    combined = " ".join(part for part in [title, summary, key_text] if part).strip()
+    topic = infer_topic(combined or title or summary)
+    score = score_fact(combined, topic, 1, profile)
+    return score, topic
+
+
+def build_source_briefs(source_records: list[dict], profile: dict) -> list[dict]:
+    briefs: list[dict] = []
+
+    for source in source_records:
+        doc_id = str(source.get("docId") or "")
+        title = str(source.get("title") or "")
+        role = str(source.get("role") or "")
+        relative_path = str(source.get("relativePath") or "")
+        summary = str(source.get("summary") or "")
+        raw_sections = source.get("section_briefs") if isinstance(source.get("section_briefs"), list) else []
+
+        ranked_sections: list[tuple[int, dict]] = []
+        fallback_sections: list[dict] = []
+        for section in raw_sections:
+            if not isinstance(section, dict):
+                continue
+            cleaned = {
+                "title": str(section.get("title") or ""),
+                "locator": str(section.get("locator") or ""),
+                "summary": str(section.get("summary") or ""),
+                "key_points": [
+                    {
+                        "statement": str(item.get("statement") or ""),
+                        "locator": str(item.get("locator") or ""),
+                    }
+                    for item in (section.get("key_points") if isinstance(section.get("key_points"), list) else [])
+                    if isinstance(item, dict) and str(item.get("statement") or "").strip()
+                ][:3],
+            }
+            fallback_sections.append(cleaned)
+            score, topic = score_source_section(section, profile)
+            if profile["system_material"] and score < 5:
+                continue
+            if not profile["system_material"] and score < 1:
+                continue
+            ranked_sections.append((score, dict(cleaned, topic=topic)))
+
+        ranked_sections.sort(
+            key=lambda item: (
+                -item[0],
+                TOPIC_ORDER.get(str(item[1].get("topic") or ""), 99),
+                str(item[1].get("title") or ""),
+            )
+        )
+        selected_sections = [item for _, item in ranked_sections[:8]]
+        if not selected_sections:
+            selected_sections = fallback_sections[:5]
+
+        briefs.append(
+            {
+                "docId": doc_id,
+                "title": title,
+                "role": role,
+                "relativePath": relative_path,
+                "summary": summary,
+                "sections": selected_sections,
+            }
+        )
+
+    return briefs
 
 
 def is_conflict_signal(statement: str) -> bool:
@@ -129,10 +333,11 @@ def main():
         source_records.append(record)
 
     canonical_map = {}
-    evidence_index = []
     gaps = []
     open_questions = []
     conflict_map = {}
+    goal = args.goal.strip() or manifest.get("goal") or index.get("summary") or ""
+    profile = build_goal_profile(goal)
 
     for source in source_records:
         doc_id = str(source.get("docId") or "")
@@ -168,16 +373,11 @@ def main():
                     "role": role,
                     "relativePath": relative_path,
                     "locator": locator or None,
+                    "section": str(entry.get("section") or "").strip() or None,
                     "evidence": evidence or None,
                     "statement": statement,
                 }
                 canonical["sources"].append(evidence_item)
-                evidence_index.append(
-                    {
-                        "id": make_id("ev", doc_id, statement, locator),
-                        **evidence_item,
-                    }
-                )
                 if is_conflict_signal(statement):
                     bucket = conflict_map.setdefault(
                         topic,
@@ -202,12 +402,74 @@ def main():
         gaps.extend(source.get("gaps") if isinstance(source.get("gaps"), list) else [])
         open_questions.extend(source.get("open_questions") if isinstance(source.get("open_questions"), list) else [])
 
+    selected_facts = []
+    seen_fact_ids = set()
+    for item in canonical_map.values():
+        sources = item.get("sources") if isinstance(item.get("sources"), list) else []
+        deduped_sources = []
+        seen_sources = set()
+        for source in sources:
+            dedupe_key = (
+                source.get("docId"),
+                source.get("locator"),
+                source.get("statement"),
+            )
+            if dedupe_key in seen_sources:
+                continue
+            seen_sources.add(dedupe_key)
+            deduped_sources.append(source)
+        item["sources"] = deduped_sources
+        score = score_fact(
+            str(item.get("statement") or ""),
+            str(item.get("topic") or ""),
+            len(deduped_sources),
+            profile,
+        )
+        if profile["system_material"] and score < 5:
+            continue
+        if not profile["system_material"] and score < 1:
+            continue
+        if item["id"] in seen_fact_ids:
+            continue
+        seen_fact_ids.add(item["id"])
+        item["_merge_score"] = score
+        selected_facts.append(item)
+
+    selected_facts.sort(
+        key=lambda item: (
+            -int(item.get("_merge_score") or 0),
+            TOPIC_ORDER.get(str(item.get("topic") or ""), 99),
+            item.get("statement") or "",
+        )
+    )
+    for item in selected_facts:
+        item.pop("_merge_score", None)
+
+    evidence_index = []
+    for item in selected_facts:
+        for source in item.get("sources", []):
+            evidence_index.append(
+                {
+                    "id": make_id(
+                        "ev",
+                        str(source.get("docId") or ""),
+                        str(item.get("statement") or ""),
+                        str(source.get("locator") or ""),
+                    ),
+                    **source,
+                    "topic": item.get("topic"),
+                }
+            )
+
+    source_briefs = build_source_briefs(source_records, profile)
+
     facts_payload = {
         "version": 1,
-        "goal": args.goal.strip() or manifest.get("goal") or index.get("summary") or "Merge compiled source artifacts into canonical document state",
+        "goal": goal or "Merge compiled source artifacts into canonical document state",
         "target_doc": args.target_doc.strip() or manifest.get("target_doc") or index.get("target_doc") or None,
         "source_count": len(source_records),
-        "canonical_facts": sorted(canonical_map.values(), key=lambda item: (item.get("topic") or "", item.get("statement") or "")),
+        "source_briefs": source_briefs,
+        "canonical_facts": selected_facts,
         "evidence_index": evidence_index,
         "gaps": dedupe_strings(gaps),
         "last_merged_at": iso_now(),

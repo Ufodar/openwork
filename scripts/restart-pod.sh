@@ -12,6 +12,8 @@ RUNTIME_ENV_DIR_DEFAULT="$HOME/.config/openwork"
 RUNTIME_GENERATED_ENV_FILE_NAME="generated-secrets.env"
 PULL_REQUESTED=""
 FORCE_RESTART=""
+REUSE_BUILD_REQUESTED=""
+SKIP_RUNTIME_CONTROL_REQUESTED=""
 RUNTIME_CONTROL_SUPPORTED="0"
 RUNTIME_CONTROL_CLEANUP_REQUIRED="0"
 RUNTIME_KILL_PHASE_STARTED="0"
@@ -19,6 +21,9 @@ OPENWORK_DRAIN_TIMEOUT_SECONDS_DEFAULT=900
 
 # ---- Bun path ----
 export PATH="$HOME/.bun/bin:$HOME/.opencode/bin:$HOME/.local/bin:$PATH"
+export OPENWORK_SESSION_RUNTIME_MODE="${OPENWORK_SESSION_RUNTIME_MODE:-process}"
+export OPENWORK_MAX_ACTIVE_SESSION_RUNTIMES="${OPENWORK_MAX_ACTIVE_SESSION_RUNTIMES:-30}"
+export OPENWORK_SESSION_RUNTIME_IDLE_TTL_MS="${OPENWORK_SESSION_RUNTIME_IDLE_TTL_MS:-28800000}"
 
 is_truthy() {
     case "${1:-}" in
@@ -52,6 +57,14 @@ Usage: bash scripts/restart-pod.sh [--pull] [--force]
 
   --pull    Run git pull + dependency sync before restarting
   --force   Interrupt active sessions and restart immediately
+  --reuse-build
+            Reuse existing dist/ and dist/bin outputs instead of rebuilding
+  --skip-runtime-control
+            Skip /admin/runtime/restart negotiation and fall back to legacy stop/start
+  Environment overrides:
+    OPENWORK_WEB_HEALTH_TIMEOUT_SECONDS
+    OPENWORK_PUBLIC_WEB_HEALTH_TIMEOUT_SECONDS
+    OPENWORK_SERVER_HEALTH_TIMEOUT_SECONDS
   --help    Show this help
 EOF
 }
@@ -63,6 +76,12 @@ while [ $# -gt 0 ]; do
             ;;
         --force)
             FORCE_RESTART="1"
+            ;;
+        --reuse-build)
+            REUSE_BUILD_REQUESTED="1"
+            ;;
+        --skip-runtime-control)
+            SKIP_RUNTIME_CONTROL_REQUESTED="1"
             ;;
         --help|-h)
             usage
@@ -76,6 +95,20 @@ while [ $# -gt 0 ]; do
     esac
     shift
 done
+
+if [ -z "$REUSE_BUILD_REQUESTED" ] && is_truthy "${OPENWORK_REUSE_BUILD:-0}"; then
+    REUSE_BUILD_REQUESTED="1"
+fi
+
+if [ -z "$SKIP_RUNTIME_CONTROL_REQUESTED" ] && is_truthy "${OPENWORK_SKIP_RUNTIME_CONTROL:-0}"; then
+    SKIP_RUNTIME_CONTROL_REQUESTED="1"
+fi
+
+if [ -n "$PULL_REQUESTED" ] && [ -n "$REUSE_BUILD_REQUESTED" ]; then
+    echo "[restart-pod] --pull and --reuse-build cannot be used together." >&2
+    echo "[restart-pod] Pulling code may require fresh build outputs; run a full restart after pull." >&2
+    exit 1
+fi
 
 # `nohup bash scripts/restart-pod.sh ... &` only protects this shell process.
 # Re-exec under a dedicated session so child services do not inherit the SSH
@@ -173,6 +206,18 @@ load_runtime_env() {
         "$env_dir/secrets.env"
         "$PROJECT_DIR/.env.pod.local"
     )
+    local preserved_names=()
+    local preserved_values=()
+    local key
+
+    while IFS='=' read -r key _; do
+        case "$key" in
+            OPENWORK_*)
+                preserved_names+=("$key")
+                preserved_values+=("${!key}")
+                ;;
+        esac
+    done < <(env)
 
     for env_file in "${env_files[@]}"; do
         if [ -f "$env_file" ]; then
@@ -182,6 +227,11 @@ load_runtime_env() {
             . "$env_file"
             set +a
         fi
+    done
+
+    local index
+    for index in "${!preserved_names[@]}"; do
+        export "${preserved_names[$index]}=${preserved_values[$index]}"
     done
 }
 
@@ -409,6 +459,9 @@ export OPENWORK_PORT="${OPENWORK_PORT:-8789}"
 export PORT="${PORT:-5173}"
 export OPENWORK_WEB_PORT="${OPENWORK_WEB_PORT:-$PORT}"
 export OPENWORK_PUBLIC_WEB_PORT="${OPENWORK_PUBLIC_WEB_PORT:-32765}"
+export OPENWORK_WEB_HEALTH_TIMEOUT_SECONDS="${OPENWORK_WEB_HEALTH_TIMEOUT_SECONDS:-10}"
+export OPENWORK_PUBLIC_WEB_HEALTH_TIMEOUT_SECONDS="${OPENWORK_PUBLIC_WEB_HEALTH_TIMEOUT_SECONDS:-10}"
+export OPENWORK_SERVER_HEALTH_TIMEOUT_SECONDS="${OPENWORK_SERVER_HEALTH_TIMEOUT_SECONDS:-20}"
 export OPENWORK_ONLYOFFICE_URL="${OPENWORK_ONLYOFFICE_URL:-http://${OPENWORK_POD_IP}:32764}"
 export OPENWORK_ONLYOFFICE_INTERNAL_URL="${OPENWORK_ONLYOFFICE_INTERNAL_URL:-http://onlyoffice:80}"
 export OPENWORK_ONLYOFFICE_PUBLIC_BASE_URL="${OPENWORK_ONLYOFFICE_PUBLIC_BASE_URL:-http://${OPENWORK_POD_IP}:32765/openwork}"
@@ -416,6 +469,7 @@ export OPENWORK_PROVIDER_ID="${OPENWORK_PROVIDER_ID:-my-company}"
 export OPENWORK_MODEL_BASE_URL="${OPENWORK_MODEL_BASE_URL:-http://${OPENWORK_POD_IP}:3002/v1}"
 export OPENWORK_DEFAULT_MODEL="${OPENWORK_DEFAULT_MODEL:-Qwen3.5-397B-A17B}"
 export OPENWORK_SMALL_MODEL="${OPENWORK_SMALL_MODEL:-$OPENWORK_DEFAULT_MODEL}"
+export OPENWORK_GLOBAL_PERMISSION="${OPENWORK_GLOBAL_PERMISSION:-allow}"
 export OPENWORK_USER_WORKSPACE_TEMPLATE_DIR="${OPENWORK_USER_WORKSPACE_TEMPLATE_DIR:-$PROJECT_DIR}"
 export OPENWORK_WEB_DIST_DIR="${OPENWORK_WEB_DIST_DIR:-$PROJECT_DIR/packages/app/dist}"
 export OPENWORK_SERVER_BIN="${OPENWORK_SERVER_BIN:-$PROJECT_DIR/packages/server/dist/bin/openwork-server}"
@@ -423,6 +477,12 @@ export OPENCODE_ROUTER_BIN="${OPENCODE_ROUTER_BIN:-$PROJECT_DIR/packages/opencod
 export OPENWORK_ORCHESTRATOR_BIN="${OPENWORK_ORCHESTRATOR_BIN:-$PROJECT_DIR/packages/orchestrator/dist/bin/openwork}"
 export OPENWORK_OPENCODE_ROUTER="${OPENWORK_OPENCODE_ROUTER:-1}"
 export OPENWORK_WEB_BACKEND_URL="${OPENWORK_WEB_BACKEND_URL:-http://127.0.0.1:${OPENWORK_PORT}}"
+export OPENWORK_RUNTIME_LOG_DIR="${OPENWORK_RUNTIME_LOG_DIR:-$PROJECT_DIR/tmp}"
+export OPENWORK_ORCHESTRATOR_LOG="${OPENWORK_ORCHESTRATOR_LOG:-$OPENWORK_RUNTIME_LOG_DIR/manual-orchestrator.log}"
+export OPENWORK_WEB_LOG="${OPENWORK_WEB_LOG:-$OPENWORK_RUNTIME_LOG_DIR/manual-web-${OPENWORK_WEB_PORT}.log}"
+export OPENWORK_PUBLIC_WEB_LOG="${OPENWORK_PUBLIC_WEB_LOG:-$OPENWORK_RUNTIME_LOG_DIR/manual-web-${OPENWORK_PUBLIC_WEB_PORT}.log}"
+
+mkdir -p "$OPENWORK_RUNTIME_LOG_DIR"
 
 ensure_runtime_ready() {
     local required=(bun pnpm python3 lsof node curl)
@@ -590,6 +650,17 @@ wait_for_http_ok() {
     return 1
 }
 
+launch_detached_process() {
+    local __pid_var="$1"
+    local log_file="$2"
+    shift 2
+
+    mkdir -p "$(dirname "$log_file")"
+    nohup "$@" >"$log_file" 2>&1 </dev/null &
+    local pid=$!
+    printf -v "$__pid_var" '%s' "$pid"
+}
+
 runtime_restart_api_url() {
     printf 'http://127.0.0.1:%s/admin/runtime/restart\n' "$OPENWORK_PORT"
 }
@@ -651,6 +722,13 @@ prepare_runtime_restart() {
     if [ -n "$FORCE_RESTART" ]; then
         mode="force"
         reason="restart-pod.sh force restart"
+    fi
+
+    if [ -n "$SKIP_RUNTIME_CONTROL_REQUESTED" ]; then
+        echo "[restart-pod] Skipping runtime control negotiation; using legacy stop/start flow."
+        RUNTIME_CONTROL_SUPPORTED="0"
+        RUNTIME_CONTROL_CLEANUP_REQUIRED="0"
+        return 0
     fi
 
     if ! wait_for_http_ok "http://127.0.0.1:${OPENWORK_PORT}/health" 2; then
@@ -729,7 +807,7 @@ resolve_managed_opencode_source() {
         requested="$OPENWORK_POD_OPENCODE_SOURCE"
     elif [ -n "${OPENWORK_OPENCODE_SOURCE:-}" ]; then
         requested="$OPENWORK_OPENCODE_SOURCE"
-    elif [ -n "${OPENWORK_OPENCODE_BIN:-}" ] || command -v opencode >/dev/null 2>&1; then
+    elif [ -n "${OPENWORK_OPENCODE_BIN:-}" ]; then
         requested="external"
     else
         requested="downloaded"
@@ -839,8 +917,12 @@ fi
 
 sync_global_opencode_config
 sync_opencode_config_files
-build_frontend
-build_backend_binaries
+if [ -n "$REUSE_BUILD_REQUESTED" ]; then
+    echo "[restart-pod] Reusing existing build outputs (OPENWORK_REUSE_BUILD=1)."
+else
+    build_frontend
+    build_backend_binaries
+fi
 ensure_build_outputs
 wait_for_runtime_drain
 
@@ -860,6 +942,9 @@ kill_by_pattern "vite dev server for openwork-ui" "openwork-ui.*vite|vite/bin/vi
 kill_by_pattern "prod web server" "node .*scripts/serve-web-prod.mjs"
 kill_by_pattern "compiled opencode-router" "$PROJECT_DIR/packages/opencode-router/dist/bin/opencode-router"
 kill_by_pattern "orchestrator opencode sidecar" "/openwork-orchestrator/sidecars/opencode/.*/opencode serve"
+# Failed recoveries can leave detached opencode serves behind. Clear them before
+# restarting so stale daemons do not pollute later health checks.
+kill_by_pattern "generic opencode serve" "opencode serve --hostname"
 
 # Port-level fallback cleanup.
 for p in "$OPENWORK_PORT" "$PORT" "$OPENWORK_WEB_PORT" "$OPENWORK_PUBLIC_WEB_PORT" 8789 5173 32765; do
@@ -904,8 +989,16 @@ trap 'cleanup_children $?' EXIT
 trap 'cleanup_children 0' INT TERM
 
 echo "[restart-pod] Starting production web server on ${OPENWORK_WEB_HOST}:${OPENWORK_WEB_PORT}..."
-node "$SCRIPT_DIR/serve-web-prod.mjs" &
-WEB_PID=$!
+launch_detached_process \
+    WEB_PID \
+    "$OPENWORK_WEB_LOG" \
+    env \
+    OPENWORK_PORT="${OPENWORK_PORT}" \
+    OPENWORK_WEB_PORT="${OPENWORK_WEB_PORT}" \
+    OPENWORK_WEB_HOST="${OPENWORK_WEB_HOST}" \
+    OPENWORK_WEB_BACKEND_URL="${OPENWORK_WEB_BACKEND_URL}" \
+    node "$SCRIPT_DIR/serve-web-prod.mjs"
+echo "[restart-pod] Production web server logs: $OPENWORK_WEB_LOG"
 sleep 1
 if ! kill -0 "$WEB_PID" 2>/dev/null; then
     echo "[restart-pod] Production web server failed to start." >&2
@@ -913,19 +1006,23 @@ if ! kill -0 "$WEB_PID" 2>/dev/null; then
     exit 1
 fi
 
-if ! wait_for_http_ok "http://127.0.0.1:${OPENWORK_WEB_PORT}/healthz" 10; then
+if ! wait_for_http_ok "http://127.0.0.1:${OPENWORK_WEB_PORT}/healthz" "$OPENWORK_WEB_HEALTH_TIMEOUT_SECONDS"; then
     echo "[restart-pod] Production web server health check failed." >&2
     exit 1
 fi
 
 if [ "$OPENWORK_PUBLIC_WEB_PORT" != "$OPENWORK_WEB_PORT" ]; then
     echo "[restart-pod] Starting public web server on ${OPENWORK_WEB_HOST}:${OPENWORK_PUBLIC_WEB_PORT}..."
-    OPENWORK_PORT="${OPENWORK_PORT}" \
-    OPENWORK_WEB_PORT="${OPENWORK_PUBLIC_WEB_PORT}" \
-    OPENWORK_WEB_HOST="${OPENWORK_WEB_HOST}" \
-    OPENWORK_WEB_BACKEND_URL="${OPENWORK_WEB_BACKEND_URL}" \
-    node "$SCRIPT_DIR/serve-web-prod.mjs" &
-    PUBLIC_WEB_PID=$!
+    launch_detached_process \
+        PUBLIC_WEB_PID \
+        "$OPENWORK_PUBLIC_WEB_LOG" \
+        env \
+        OPENWORK_PORT="${OPENWORK_PORT}" \
+        OPENWORK_WEB_PORT="${OPENWORK_PUBLIC_WEB_PORT}" \
+        OPENWORK_WEB_HOST="${OPENWORK_WEB_HOST}" \
+        OPENWORK_WEB_BACKEND_URL="${OPENWORK_WEB_BACKEND_URL}" \
+        node "$SCRIPT_DIR/serve-web-prod.mjs"
+    echo "[restart-pod] Public web server logs: $OPENWORK_PUBLIC_WEB_LOG"
     sleep 1
     if ! kill -0 "$PUBLIC_WEB_PID" 2>/dev/null; then
         echo "[restart-pod] Public web server failed to start." >&2
@@ -933,7 +1030,7 @@ if [ "$OPENWORK_PUBLIC_WEB_PORT" != "$OPENWORK_WEB_PORT" ]; then
         exit 1
     fi
 
-    if ! wait_for_http_ok "http://127.0.0.1:${OPENWORK_PUBLIC_WEB_PORT}/healthz" 10; then
+    if ! wait_for_http_ok "http://127.0.0.1:${OPENWORK_PUBLIC_WEB_PORT}/healthz" "$OPENWORK_PUBLIC_WEB_HEALTH_TIMEOUT_SECONDS"; then
         echo "[restart-pod] Public web server health check failed." >&2
         exit 1
     fi
@@ -971,8 +1068,11 @@ else
 fi
 
 echo "[restart-pod] Starting compiled OpenWork orchestrator..."
-"$OPENWORK_ORCHESTRATOR_BIN" "${orchestrator_args[@]}" &
-ORCHESTRATOR_PID=$!
+launch_detached_process \
+    ORCHESTRATOR_PID \
+    "$OPENWORK_ORCHESTRATOR_LOG" \
+    "$OPENWORK_ORCHESTRATOR_BIN" "${orchestrator_args[@]}"
+echo "[restart-pod] OpenWork orchestrator logs: $OPENWORK_ORCHESTRATOR_LOG"
 sleep 1
 if ! kill -0 "$ORCHESTRATOR_PID" 2>/dev/null; then
     echo "[restart-pod] OpenWork orchestrator failed to start." >&2
@@ -980,7 +1080,7 @@ if ! kill -0 "$ORCHESTRATOR_PID" 2>/dev/null; then
     exit 1
 fi
 
-if ! wait_for_http_ok "http://127.0.0.1:${OPENWORK_PORT}/health" 20; then
+if ! wait_for_http_ok "http://127.0.0.1:${OPENWORK_PORT}/health" "$OPENWORK_SERVER_HEALTH_TIMEOUT_SECONDS"; then
     echo "[restart-pod] OpenWork health check failed." >&2
     exit 1
 fi

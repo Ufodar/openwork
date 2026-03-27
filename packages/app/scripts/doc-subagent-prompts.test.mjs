@@ -322,6 +322,10 @@ test("common-work prefers search-backed authoritative sources over guessed aggre
   expect(prompt).toContain("明确记录 blocker");
   expect(prompt).toContain("不要把低权威背景材料混成主依据");
   expect(prompt).toContain("不要静默切回“基于常识先写一版”");
+  expect(prompt).toContain("如果本地源文档已经覆盖了当前写作阶段所需的大部分事实");
+  expect(prompt).toContain("只有在你能明确说出“当前还缺哪一个事实/标准/API 细节”时");
+  expect(prompt).toContain("读完本地核心资料后，不要连续发起多个只是复述题目或系统名的泛化搜索");
+  expect(prompt).toContain("单个写作阶段最多进行 3 次有明确目标的定向搜索");
 });
 
 test("common-work forbids broad unfiltered workspace scans before locating real source documents", async () => {
@@ -329,6 +333,9 @@ test("common-work forbids broad unfiltered workspace scans before locating real 
 
   expect(prompt).toContain("不要使用 `glob **/*`");
   expect(prompt).toContain("不要对整个 workspace 做无过滤的大范围文件扫描");
+  expect(prompt).toContain("一旦某次发现动作已经返回了明确可读的候选文档路径");
+  expect(prompt).toContain("停止继续在 workspace 根目录做新的大范围发现");
+  expect(prompt).toContain("不要为了“再确认一次”重新对整个 workspace 做发现");
 });
 
 test("common-work is registered as a real primary agent instead of only existing as a UI alias", async () => {
@@ -426,6 +433,18 @@ test("common-work stays document-first without blanket-disabling planning skills
   expect(prompt).toContain("不要因为自己是文档 agent 就把这类能力一刀切禁掉");
   expect(prompt).toContain("不要求必须等用户点名");
   expect(prompt).toContain("优先考虑它，而不是直接手写长计划");
+  expect(prompt).toContain("如果已经读到 1-2 份本地核心资料");
+  expect(prompt).toContain("不要马上转去做泛化搜索或重复扫描");
+});
+
+test("common-work keeps drafting-stage routing anchored on local source documents before targeted external search", async () => {
+  const prompt = await readFile(resolve(root, ".opencode/agent/common-work.md"), "utf8");
+
+  expect(prompt).toContain("进入 `extraction` 或 `drafting` 之后");
+  expect(prompt).toContain("不要无理由退回到 workspace 根目录做大范围再发现");
+  expect(prompt).toContain("也不要把“泛化搜索整个主题”当成默认下一步");
+  expect(prompt).toContain("只有出现明确缺口、明确 blocker 或新资料入口时");
+  expect(prompt).toContain("已拿到本地核心资料后，直接围绕这些资料推进");
 });
 
 test("common-work routes document sessions through a small document-focused supplement skill set", async () => {

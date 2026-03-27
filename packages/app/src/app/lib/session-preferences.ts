@@ -168,10 +168,21 @@ export const resolveSessionPreferences = (input: {
   hint?: OpenworkSessionPrefs | null;
   title?: string | null;
 }): ResolvedSessionPreferences => {
-  const stored = {
-    ...(input.hint ?? {}),
-    ...(input.stored ?? {}),
-  } satisfies OpenworkSessionPrefs;
+  const hintedView = resolveStoredSessionView(input.hint?.view);
+  const storedViewPreference = resolveStoredSessionView(input.stored?.view);
+  const shouldPreferHintOverStoredSession =
+    storedViewPreference === "session" && hintedView !== null && hintedView !== "session";
+  const stored: OpenworkSessionPrefs = shouldPreferHintOverStoredSession
+    ? {
+        ...(input.stored ?? {}),
+        view: input.hint?.view ?? input.stored?.view,
+        agent: input.hint?.agent ?? input.stored?.agent,
+        agentLock: input.hint?.agentLock ?? input.stored?.agentLock,
+      }
+    : {
+        ...(input.hint ?? {}),
+        ...(input.stored ?? {}),
+      };
   const storedView = resolveStoredSessionView(stored?.view);
   const storedAgent = normalizeStoredAgent(stored?.agent);
   const storedAgentLock = normalizeStoredAgent(stored?.agentLock);

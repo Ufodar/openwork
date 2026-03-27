@@ -117,6 +117,24 @@ describe("resolveSessionPreferences", () => {
     expect(resolved.agentLock).toEqual({ value: "document-writer", source: "stored" });
   });
 
+  test("lets a document-session hint override stale stored session view state", () => {
+    const resolved = resolveSessionPreferences({
+      stored: {
+        view: "session",
+      },
+      hint: {
+        view: "document-agent",
+        agent: "common-work",
+        agentLock: "common-work",
+      },
+      title: "历史会话 ses_2cf999cb",
+    });
+
+    expect(resolved.view).toEqual({ value: "document-agent", source: "stored" });
+    expect(resolved.agent).toEqual({ value: "common-work", source: "stored" });
+    expect(resolved.agentLock).toEqual({ value: "common-work", source: "stored" });
+  });
+
   test("preserves a stored document-writer view instead of collapsing it to document-agent", () => {
     const resolved = resolveSessionPreferences({
       stored: {

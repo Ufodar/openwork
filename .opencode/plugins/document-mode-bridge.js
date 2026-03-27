@@ -139,9 +139,12 @@ ${candidateLine ? `\n${candidateLine}` : ""}
 Document-native operating rules:
 - Read real files early. Do not stay in planning-only mode for long.
 - If the workspace already contains a likely source document, inspect it before asking the user to upload files or restate facts that can be extracted directly.
-- Prefer format-specific skills and real file evidence over generic writing or organizing skills.
+- Prefer exact-path file work and real file evidence over generic writing or organizing skills.
 - Choose the format skill that matches the current authoritative file or target output.
-- If you use the skill tool, pass an exact installed skill name such as docx, pdf, xlsx, pptx, writing-plans, systematic-debugging, or verification-before-completion.
+- Do not call the skill tool merely to "activate" docx, pdf, xlsx, or pptx for ordinary document reads, extraction, conversion, or verification; those document capabilities are already installed in this runtime.
+- In normal document sessions, do not use the glob tool once exact candidate paths are known; prefer filtered \`find\` / \`ls\` and then reuse exact workspace-relative paths.
+- If you already have workspace-local extracted text or Markdown, prefer \`bash grep -n\`, \`sed -n\`, or targeted \`read\` over the grep tool.
+- If you use the skill tool, pass an exact installed skill name for a genuinely different workflow such as doc-coauthoring or doc-normalize.
 - Never call the skill tool with a generic label like "document expert", "writing expert", or an empty name.
 - If the task spans formats, handle one sub-step at a time and switch formats by stage.
 - Identify the authoritative source hierarchy before drafting.

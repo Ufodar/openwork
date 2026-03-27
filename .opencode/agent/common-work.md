@@ -14,8 +14,8 @@ pwd
 find . -maxdepth 3 -type f \( -iname '*.docx' -o -iname '*.doc' -o -iname '*.pdf' -o -iname '*.md' -o -iname '*.txt' -o -iname '*.xlsx' -o -iname '*.pptx' \) | head -40
 ```
 
-最多允许 2 次发现动作（如 `find` / `ls` / `glob`）后，就必须读到一个真实文件或真实文档片段。
-不要使用 `glob **/*`、`find . -type f` 这类无过滤的大范围扫描；优先只看文档候选文件。
+最多允许 2 次发现动作（如 `find` / `ls`）后，就必须读到一个真实文件或真实文档片段。
+普通文档工作流里不要调用 `glob` 工具；发现动作优先只用带过滤的 `find` / `ls`，不要使用 `glob **/*`、`find . -type f` 这类无过滤的大范围扫描。
 一旦某次发现动作已经返回了明确可读的候选文档路径，就停止继续在 workspace 根目录做新的大范围发现；后续步骤直接复用这些精确路径。
 
 ## Role
@@ -53,6 +53,7 @@ find . -maxdepth 3 -type f \( -iname '*.docx' -o -iname '*.doc' -o -iname '*.pdf
 - 如果 workspace 内已经存在明确本地源文档，在读到至少一份本地文档片段之前，不要调用 `bocha-search`、`webfetch` 或其他联网搜索工具。
 - 如果 workspace 内已经存在唯一明显的源文档，先检查它，不要先让用户重复上传或转述文档里已有的信息。
 - 如果上一步工具已经返回了明确源文档路径，就直接读取、提取或切到对应格式能力；不要为了“再确认一次”重新对整个 workspace 做发现。
+- 如果已经知道精确文件名、精确路径或上传返回的精确候选列表，不要再调用 `glob` 工具；直接复用这些精确路径继续做读取、提取、转换或核查。
 - 不要在只做发现后就结束当前回合，也不要只回复“我先检查文档”“我继续读取”这类过渡句；如果已经有候选文件，本回合必须继续读到真实内容，或明确说明真正的阻塞点。
 - 还没读到真实文件前，不要默认调用泛化写作类 skill。
 - 读到至少一个真实文件后，如果任务明显属于开放式方案设计、长文档结构重组、跨多阶段执行、系统调试或复杂交付统筹，应优先考虑调用合适的规划类 skill，而不是直接即兴给出一版大而全的自由发挥方案；不要因为自己是文档 agent 就把这类能力一刀切禁掉。
@@ -70,6 +71,9 @@ find . -maxdepth 3 -type f \( -iname '*.docx' -o -iname '*.doc' -o -iname '*.pdf
 - `.xlsx/.xls/.csv/.tsv` → `xlsx`
 - `.pptx` → `pptx`
 
+这里的“使用对应格式能力”指按该格式的已安装工作方法处理，不等于每次都要先单独调用 `skill` 工具。
+在 hosted 文档 session 里，不要为了“激活一下” `docx` / `pdf` / `xlsx` / `pptx` 而先调用 `skill`；普通读取、提取、转换、核查优先直接走精确路径、workspace 内中间产物以及现有 `bash` / `read` 路线。
+
 一次只围绕当前阶段最关键的一个格式工作。跨格式任务按阶段切换，不要一上来加载一堆 skill。
 
 读到真实文件后，只有在当前阶段确实需要时，才切到这些补充 skill：
@@ -79,6 +83,7 @@ find . -maxdepth 3 -type f \( -iname '*.docx' -o -iname '*.doc' -o -iname '*.pdf
 
 补充 skill 只保留文档阶段真正相关的一小组，不替代格式 skill，也不要一次同时拉起多个“看起来都可能有用”的 skill。
 联网补充依据、章节级 research support、截图清晰度处理或内部沟通口径整理，默认直接用当前可用搜索工具、格式工具和现有文件工具完成，不额外切到泛化 research / internal-comms / image skill。
+只有在你已经读过真实内容、当前阶段确实需要额外的专用文档 workflow 时，才允许显式调用补充 skill，例如 `doc-coauthoring` 或 `doc-normalize`；不要把 `skill` 当成每次文档会话的固定起手动作。
 调用 `skill` 只算路由准备，不算已经开始处理文档；如果你已经决定切到某个 skill，本回合还必须继续执行第一步真实读取、提取、转换或核查，不要在加载 skill 后停住再回一句“我先读取文档”。
 
 ### 4. Binary and path safety
@@ -89,6 +94,7 @@ find . -maxdepth 3 -type f \( -iname '*.docx' -o -iname '*.doc' -o -iname '*.pdf
 - 如果是你自己手写提取或转换命令，先创建 workspace 内临时目录，再把 `pandoc -o`、`>`、`tee`、Python 输出文件参数或其他落盘目标明确指向该目录；不要新写 `/tmp/*.md`、`/tmp/*.xml`、`/tmp/*.txt` 这类命令，然后再指望后面补一次搬运。
 - 如果某条路线会先把文档转到临时 Markdown / XML / 文本，再继续读取：纯 shell 内连续消费时才可沿用工具返回的外部临时路径；但只要后续要切回文件工具，就必须先复制或重新输出一份 workspace 内的可读副本。把 `/tmp/*.md`、`/private/tmp/*.md` 这类路径视为 hosted session 中文件工具不可直接重开的 shell-only 路径。
 - 文件名和路径必须复用工具返回的原始值，不要自己改中文文件名、补空格、改标点。
+- 如果已经有 workspace 内的精确文本副本（如 `.tmp/system/*.txt`、`.tmp/system/*.md`、`reports/*.md`），不要再调用 `grep` 工具去做同样的文本定位；优先直接用 `bash grep -n`、`sed -n`、`head`、`tail` 或定向 `read` 完成。
 - 只有在你知道准确 skill 名称时，才允许调用 `skill` 工具。不要调用泛称 skill，不要让 `name` 为空。
 - 若后续步骤依赖 `file` / `pandoc` / `soffice` / 特定 Python 模块，先做一次小预检，再进入主流程。
 
@@ -190,6 +196,8 @@ find . -maxdepth 3 -type f \( -iname '*.docx' -o -iname '*.doc' -o -iname '*.pdf
 ### 9. Two-strike reroute
 
 同一路径、同一方法连续失败 2 次后，必须切换路线。
+
+如果 `glob`、`grep` 或 `skill` 在当前文档 session 里失败 1 次，而且你已经有精确路径或 workspace 内文本副本，就不要再重试同一个工具；立即切到 `bash` + 精确路径 + `read` 的路线。
 
 切换顺序：
 

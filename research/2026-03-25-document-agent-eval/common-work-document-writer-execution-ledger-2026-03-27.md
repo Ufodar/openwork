@@ -73,6 +73,92 @@ Immediate blocker:
 
 ## Latest Findings
 
+### 2026-03-27: fresh hosted-vs-local WJW diagnostics isolated a hosted-only `glob` / `grep` / `skill` weakness, so the next mitigation is to route `common-work` around those tool paths by default
+
+Scenario:
+- deployed pod commit:
+  - `af392cc2`
+- pod diagnostic:
+  - `OPENWORK_COMPARE_SCENARIO=wjw OPENWORK_COMPARE_MODE=diagnostic QIN_ABC_LANES=pod OPENWORK_COMPARE_DIAGNOSTIC_TIMEOUT_MS=300000 OPENWORK_COMPARE_DIAGNOSTIC_MAX_TOOL_CALLS=20 node tmp/qin-abc-minimax.mjs`
+- local raw control:
+  - `OPENWORK_COMPARE_SCENARIO=wjw OPENWORK_COMPARE_MODE=diagnostic QIN_ABC_LANES=raw OPENWORK_COMPARE_DIAGNOSTIC_TIMEOUT_MS=300000 OPENWORK_COMPARE_DIAGNOSTIC_MAX_TOOL_CALLS=20 node tmp/qin-abc-minimax.mjs`
+
+What the hosted diagnostic proved:
+- pod `common-work` no longer showed the user-feared boundary regressions:
+  - `externalPathTouchCount = 0`
+  - `systemTempTouchCount = 0`
+  - `directOfficeReadCount = 0`
+- but inside the hosted served runtime, these tools still failed:
+  - `glob("**/*")`
+  - `skill(name="docx")`
+  - `grep(path=.tmp/system, ...)`
+- the repeated error recorded in the session DB was:
+  - `Unable to connect. Is the computer able to access the url?`
+- after those failures, the agent could still keep moving via:
+  - `bash`
+  - workspace-local `pandoc` extraction into `.tmp/system/*.txt`
+  - `read`
+  - `bash grep -n`
+
+What the local raw control proved:
+- local raw OpenCode on the same materials did not hit the hosted-only `Unable to connect` failures
+- local raw still finished a usable deliverable:
+  - `点对点解决方案.docx`
+  - `点对点解决方案.md`
+- this means the remaining parity gap is not just “model habit”; the served hosted runtime still has a real tool-path weakness around `glob` / `skill` / `grep`
+
+Interpretation:
+- the current Stage 2 blocker is no longer session isolation, temp-path handling, or runtime skill/MCP overexposure
+- the next practical mitigation is to make `common-work` treat:
+  - `glob`
+  - `grep`
+  - ordinary format-skill activation via `skill`
+  as non-default routes in hosted document sessions
+- once exact file paths or workspace-local extracted text exist, the default route should stay on:
+  - exact paths
+  - `bash`
+  - `read`
+  - workspace-local intermediate artifacts
+
+Immediate implementation plan:
+- update `common-work` so normal document sessions:
+  - do not use `glob` after exact candidate paths are known
+  - do not call `grep` when workspace-local extracted text is already available
+  - do not call `skill` merely to “activate” `docx` / `pdf` / `xlsx` / `pptx`
+- update `document-mode-bridge` so the injected system guidance does not keep nudging the model toward those failing tool paths
+- locally verify prompt/plugin tests
+- then continue with:
+  - push
+  - pod pull
+  - recover/restart
+  - rerun the same low-token WJW diagnostic
+  - check whether those hosted-only tool failures disappear
+  - only then reassess final output quality and project-scope anchoring
+
+Local implementation completed:
+- updated:
+  - `.opencode/agent/common-work.md`
+  - `.opencode/plugins/document-mode-bridge.js`
+  - `.opencode/plugins/document-normalize.test.mjs`
+  - `packages/app/scripts/doc-subagent-prompts.test.mjs`
+- key local rule changes:
+  - ordinary document sessions no longer permit `glob` as a normal discovery route
+  - once exact paths exist, `common-work` must stay on exact-path reads and workspace-local intermediates
+  - ordinary format handling no longer starts by calling `skill` just to activate `docx` / `pdf` / `xlsx` / `pptx`
+  - when extracted workspace-local text already exists, `common-work` now prefers `bash grep -n` / `sed -n` / targeted `read` over the `grep` tool
+  - if `glob` / `grep` / `skill` fails once and exact paths already exist, reroute immediately to `bash` + exact path + `read`
+
+Local verification:
+- `bun test packages/app/scripts/doc-subagent-prompts.test.mjs packages/server/src/session-workspaces.test.ts packages/server/src/server.proxy-session-create.test.ts packages/server/src/skills.test.ts packages/app/src/app/lib/session-preferences.test.ts packages/app/src/app/context/session.runtime-directory-hydration.test.ts packages/app/src/app/pages/dashboard.history-session-hints.test.mjs`
+- `node --test .opencode/plugins/document-normalize.test.mjs`
+
+Current next step:
+- commit this mitigation
+- push to `origin` and `gitee`
+- pod `git pull --ff-only`
+- recover or restart pod
+- rerun the same low-token WJW diagnostic to see whether hosted `glob` / `grep` / `skill` failures are now absent from the early route
+
 ### 2026-03-27: first formal Stage 2 A/B on the卫健委 long-document set shows hosted `common-work` is cleaner and faster, but still had one scope-selection weakness
 
 Scenario:

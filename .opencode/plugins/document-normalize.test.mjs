@@ -21,6 +21,9 @@ test("document mode bridge injects normalization rules and doc-normalize routing
   assert.match(systemPrompt, /must use real Word heading semantics/i);
   assert.match(systemPrompt, /must use real numbering or bullet structure/i);
   assert.match(systemPrompt, /use \/doc-normalize for full-document normalization/i);
+  assert.match(systemPrompt, /do not call the skill tool merely to "activate" docx, pdf, xlsx, or pptx/i);
+  assert.match(systemPrompt, /do not use the glob tool once exact candidate paths are known/i);
+  assert.match(systemPrompt, /prefer `bash grep -n`, `sed -n`, or targeted `read` over the grep tool/i);
 });
 
 test("doc-normalize command exists as a thin wrapper around the skill", () => {

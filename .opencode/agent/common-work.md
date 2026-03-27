@@ -193,6 +193,8 @@ find . -maxdepth 3 -type f \( -iname '*.docx' -o -iname '*.doc' -o -iname '*.pdf
 - 不要写 `net-team@example.com` 这类看起来完整但没有来源支撑的通知地址；把通知接收人写成 `<OPS_EMAIL_GROUP>`、`<CONTACT_EMAIL>` 或其他显式占位字段。
 - 不要在 `recipients`、`emailGroups`、`to`、`cc`、`bcc` 等 JSON 数组或通知配置字段里写 `["ops-team@example.com"]`、`["net-team@example.com"]` 这类貌似完整但没有来源支撑的地址；优先写成 `["<OPS_EMAIL_GROUP>"]`、`["<CONTACT_EMAIL>"]` 或其他显式占位数组。
 - 对用户名、邮箱、手机号、账号、联系人等身份类占位字段，也使用 `<LOGIN_USERNAME>`、`<CONTACT_EMAIL>`、`<PHONE_NUMBER>`、`<ACCOUNT_ID>` 这类显式变量；不要写 `user@example.com`、`admin@example.com`、`13800000000` 这类看起来具体但没有来源支撑的示例身份。
+- 如果 API 示例只需要说明鉴权上下文，不要把 `Bearer <ACCESS_TOKEN>` 原样写进最终正文；统一改成 `Authorization: Bearer access_token`、`Authorization: Bearer token`，或在文字里说明“需携带访问令牌”。
+- 不要写 `YourSecurePassword123!`、`Passw0rd!`、`Welcome123!`、`user@example.com` 这类模板化凭证；如果来源没有给出真实登录契约，就省略登录密码示例，或只保留字段名与取值约束说明，不要为了凑齐登录示例去编造一组账号密码。
 
 ### 9. Two-strike reroute
 
@@ -217,7 +219,7 @@ find . -maxdepth 3 -type f \( -iname '*.docx' -o -iname '*.doc' -o -iname '*.pdf
   - 关键章节或关键表格是否存在
   - 主要事实是否仍然正确
   - 版式是否明显偏离来源模板
-- 完成前做一次显式扫描，检查最终交付物和准备发给用户的总结里是否残留高风险字符串，例如 `example.com`、`@example.com`、`https://<`、`http://<`、`<API_HOST>`、`<APP_HOST>`、`/root/.openwork`、`documents/sessions/`、`.tmp/system`；如果命中这些高风险残留，就先改写为稳定相对路径、相对 API 路径、统一的 hostless 占位变量或显式占位字段，再交付。
+- 完成前做一次显式扫描，检查最终交付物和准备发给用户的总结里是否残留高风险字符串，例如 `example.com`、`@example.com`、`<ACCESS_TOKEN>`、`Bearer <ACCESS_TOKEN>`、`YourSecurePassword123!`、`https://<`、`http://<`、`<API_HOST>`、`<APP_HOST>`、`/root/.openwork`、`documents/sessions/`、`.tmp/system`；如果命中这些高风险残留，就先改写为稳定相对路径、相对 API 路径、统一的 hostless 占位变量或显式占位字段，再交付。
 - 同时检查 workspace 根目录、`outputs/` 和其他稳定交付路径里是否残留 `generate-docx.js`、`*.py`、`*.ts`、`*.js` 这类仅用于生成文档的 helper 文件；如果有，就先移回 `.tmp/` 或 `reports/`，不要让它们进入最终交付清单。
 - 对多系统 proposal-style 文档，完成前还必须额外检查：
   - 标题是否仍保持语义化，而不是出现双层编号或手打编号伪装结构

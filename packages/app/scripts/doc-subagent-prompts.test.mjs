@@ -435,6 +435,9 @@ test("common-work adds a concrete final sweep for suspicious internal paths and 
   expect(prompt).toContain("完成前做一次显式扫描");
   expect(prompt).toContain("`example.com`");
   expect(prompt).toContain("`@example.com`");
+  expect(prompt).toContain("`<ACCESS_TOKEN>`");
+  expect(prompt).toContain("`Bearer <ACCESS_TOKEN>`");
+  expect(prompt).toContain("`YourSecurePassword123!`");
   expect(prompt).toContain("`https://<`");
   expect(prompt).toContain("`<API_HOST>`");
   expect(prompt).toContain("`<APP_HOST>`");
@@ -442,6 +445,15 @@ test("common-work adds a concrete final sweep for suspicious internal paths and 
   expect(prompt).toContain("`documents/sessions/`");
   expect(prompt).toContain("`.tmp/system`");
   expect(prompt).toContain("如果命中这些高风险残留");
+});
+
+test("common-work forbids placeholder credentials in final API examples", async () => {
+  const prompt = await readFile(resolve(root, ".opencode/agent/common-work.md"), "utf8");
+
+  expect(prompt).toContain("不要把 `Bearer <ACCESS_TOKEN>`");
+  expect(prompt).toContain("`Authorization: Bearer access_token`");
+  expect(prompt).toContain("不要写 `YourSecurePassword123!`");
+  expect(prompt).toContain("不要为了凑齐登录示例");
 });
 
 test("common-work keeps helper generator scripts out of user-visible deliverable paths", async () => {

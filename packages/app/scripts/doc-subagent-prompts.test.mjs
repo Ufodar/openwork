@@ -445,9 +445,9 @@ test("common-work keeps the MCP stack small and document-oriented instead of ena
 
   expect(prompt).toContain("MCP 只保留少数高价值增强");
   expect(prompt).toContain("`Context7`");
-  expect(prompt).toContain("`Notion`");
-  expect(prompt).toContain("`GitHub`");
   expect(prompt).toContain("`Playwright`");
+  expect(prompt).toContain("不作为当前部署的默认预设");
+  expect(prompt).toContain("不要把 `Notion`、`GitHub`、`Linear` 这类国外平台默认塞进文档工作流");
   expect(prompt).toContain("不要因为某个 MCP 很流行就默认接入");
   expect(prompt).toContain("`filesystem` 这类与当前 workspace 文件能力重叠的 MCP");
   expect(prompt).toContain("memory / sequential-thinking");

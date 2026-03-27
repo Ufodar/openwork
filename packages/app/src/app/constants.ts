@@ -33,27 +33,6 @@ export type McpDirectoryInfo = {
 
 export const MCP_QUICK_CONNECT: McpDirectoryInfo[] = [
   {
-    name: "Notion",
-    description: "Pages, databases, and project docs in sync.",
-    url: "https://mcp.notion.com/mcp",
-    type: "remote",
-    oauth: true,
-  },
-  {
-    name: "GitHub",
-    description: "Issues, PRs, releases, and repo docs in one place.",
-    url: "https://api.githubcopilot.com/mcp/",
-    type: "remote",
-    oauth: true,
-  },
-  {
-    name: "Linear",
-    description: "Plan sprints and ship tickets faster.",
-    url: "https://mcp.linear.app/mcp",
-    type: "remote",
-    oauth: true,
-  },
-  {
     name: "Context7",
     description: "Search product docs with richer context.",
     url: "https://mcp.context7.com/mcp",

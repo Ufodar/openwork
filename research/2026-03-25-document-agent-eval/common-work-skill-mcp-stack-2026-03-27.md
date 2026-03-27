@@ -112,16 +112,6 @@
 
 ### Keep by default
 
-- `Notion`
-  - 用于内部知识库、需求页、决策记录、资料页。
-  - 官方文档：<https://developers.notion.com/docs/mcp>
-- `GitHub`
-  - 用于 repo 关联的 issue / PR / release / README / 设计文档。
-  - 官方文档：<https://docs.github.com/en/copilot/concepts/context/mcp>
-  - 官方 GitHub MCP Server：<https://docs.github.com/en/copilot/how-tos/provide-context/use-mcp/use-the-github-mcp-server>
-- `Linear`
-  - 适合 OpenWork 自身的迭代计划、issue 跟踪、项目执行。
-  - 当前项目里已有 quick-connect，保留是合理的。
 - `Context7`
   - 用于 SDK / API / 框架 / 产品官方文档检索，适合“文档里要写技术依据、接口说明、产品能力边界”的场景。
   - 官方项目：<https://github.com/upstash/context7>
@@ -131,6 +121,12 @@
 
 ### Do not keep by default
 
+- `Notion`
+  - 当前部署和用户环境里不应作为默认预设；只有在用户明确已接通且任务确实需要时才临时启用。
+- `GitHub`
+  - 同样不作为当前部署默认预设，避免把国外代码托管能力混入文档会话默认面板。
+- `Linear`
+  - 不作为当前部署默认预设，避免把国外项目管理平台混入文档会话默认面板。
 - `Sentry`
   - 适合 OpenWork 自身线上故障分析、release 回归、错误追踪，但不属于文档会话默认 MCP。
 - `filesystem`
@@ -154,13 +150,8 @@
 参考来源：
 
 - MCP 官方 servers 仓库：<https://github.com/modelcontextprotocol/servers>
-- GitHub 官方 MCP 文档：<https://docs.github.com/en/copilot/concepts/context/mcp>
-- GitHub 官方 GitHub MCP Server 使用文档：<https://docs.github.com/en/copilot/how-tos/provide-context/use-mcp/use-the-github-mcp-server>
-- Notion 官方 MCP 文档：<https://developers.notion.com/docs/mcp>
-- Notion 官方连接说明：<https://developers.notion.com/guides/mcp/get-started-with-mcp>
 - Playwright 官方 MCP 仓库：<https://github.com/microsoft/playwright-mcp>
 - Context7 官方仓库：<https://github.com/upstash/context7>
-- GitHub MCP Registry 官方博客：<https://github.blog/ai-and-ml/generative-ai/how-to-find-install-and-manage-mcp-servers-with-the-github-mcp-registry/>
 
 ## Implementation Guidance
 
@@ -172,7 +163,7 @@
 2. common-work 提示层
    - 明确写死“格式优先、补充按阶段启用、MCP 小栈默认、不要为流行而接入”。
 3. MCP quick-connect 层
-   - 保留 `Notion / GitHub / Linear / Context7 / Control Chrome`
-   - 删掉 `Sentry / HubSpot / Stripe`
+   - 保留 `Context7 / Control Chrome`
+   - 删掉 `Notion / GitHub / Linear / Sentry / HubSpot / Stripe`
 
 这样既能减少新会话噪音，也不会把 `common-work` 变成新的“大杂烩总控 prompt”。

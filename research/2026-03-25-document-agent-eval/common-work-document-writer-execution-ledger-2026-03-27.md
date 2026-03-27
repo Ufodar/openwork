@@ -159,6 +159,63 @@ Current next step:
 - recover or restart pod
 - rerun the same low-token WJW diagnostic to see whether hosted `glob` / `grep` / `skill` failures are now absent from the early route
 
+### 2026-03-27: first hosted rerun after commit `483bf7eb` removed `glob` / `skill` from the early route and restored project-level output scope, but one hosted `grep` call and one missing-`outputs/` retry still remained
+
+Scenario:
+- pod commit:
+  - `483bf7eb`
+- rerun command:
+  - `OPENWORK_COMPARE_SCENARIO=wjw OPENWORK_COMPARE_MODE=diagnostic QIN_ABC_LANES=pod OPENWORK_COMPARE_DIAGNOSTIC_TIMEOUT_MS=300000 OPENWORK_COMPARE_DIAGNOSTIC_MAX_TOOL_CALLS=20 node tmp/qin-abc-minimax.mjs`
+- session:
+  - `ses_2cf138dc7ffe0WafZTY65JvFLP`
+
+What improved materially:
+- no `glob` tool call appeared in the route
+- no `skill` tool call appeared in the route
+- no hosted boundary regressions reappeared:
+  - `broadDiscoveryCount = 0`
+  - `externalPathTouchCount = 0`
+  - `systemTempTouchCount = 0`
+  - `directOfficeReadCount = 0`
+- the output title and file names returned to project scope instead of collapsing to the narrower supporting-file title:
+  - `点对点解决方案_滨海新区卫生健康信息化平台.md`
+  - `outputs/点对点解决方案_滨海新区卫生健康信息化平台.docx`
+
+What still remained:
+- the hosted `grep` tool still fired once and failed with:
+  - `Unable to connect. Is the computer able to access the url?`
+- the agent then recovered correctly via:
+  - `bash grep -n`
+- the final `pandoc` route still wasted one call by trying to write:
+  - `outputs/点对点解决方案_滨海新区卫生健康信息化平台.docx`
+  before creating `outputs/`
+
+Interpretation:
+- the first mitigation succeeded on the two worst hosted-only early-route problems:
+  - `glob`
+  - `skill`
+- but it did not yet fully remove the hosted-only `grep` weakness
+- there is also still a small avoidable workflow inefficiency around creating the stable output directory before final document generation
+
+Second local mitigation prepared immediately after this rerun:
+- strengthen `common-work` from “prefer not to use `grep`” to:
+  - ordinary hosted document sessions should not call the `grep` tool at all
+  - once workspace-local extracted text exists, use `bash grep -n` / `sed -n` / targeted `read`
+- add an explicit rule that if the stable deliverable lives under `outputs/` or another not-yet-created directory, create that directory first before final `pandoc` / copy / move
+- mirror the same stronger guidance into `document-mode-bridge`
+
+Second local verification:
+- `bun test packages/app/scripts/doc-subagent-prompts.test.mjs`
+- `node --test .opencode/plugins/document-normalize.test.mjs`
+
+Current next step:
+- commit the second mitigation
+- push to `origin` and `gitee`
+- pod `git pull --ff-only`
+- recover pod
+- rerun the same WJW diagnostic again
+- confirm the route is now clean of hosted-only `glob` / `grep` / `skill` failures
+
 ### 2026-03-27: first formal Stage 2 A/B on the卫健委 long-document set shows hosted `common-work` is cleaner and faster, but still had one scope-selection weakness
 
 Scenario:

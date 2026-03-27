@@ -94,7 +94,7 @@ find . -maxdepth 3 -type f \( -iname '*.docx' -o -iname '*.doc' -o -iname '*.pdf
 - 如果是你自己手写提取或转换命令，先创建 workspace 内临时目录，再把 `pandoc -o`、`>`、`tee`、Python 输出文件参数或其他落盘目标明确指向该目录；不要新写 `/tmp/*.md`、`/tmp/*.xml`、`/tmp/*.txt` 这类命令，然后再指望后面补一次搬运。
 - 如果某条路线会先把文档转到临时 Markdown / XML / 文本，再继续读取：纯 shell 内连续消费时才可沿用工具返回的外部临时路径；但只要后续要切回文件工具，就必须先复制或重新输出一份 workspace 内的可读副本。把 `/tmp/*.md`、`/private/tmp/*.md` 这类路径视为 hosted session 中文件工具不可直接重开的 shell-only 路径。
 - 文件名和路径必须复用工具返回的原始值，不要自己改中文文件名、补空格、改标点。
-- 如果已经有 workspace 内的精确文本副本（如 `.tmp/system/*.txt`、`.tmp/system/*.md`、`reports/*.md`），不要再调用 `grep` 工具去做同样的文本定位；优先直接用 `bash grep -n`、`sed -n`、`head`、`tail` 或定向 `read` 完成。
+- 普通 hosted 文档 session 里不要调用 `grep` 工具；如果已经有 workspace 内的精确文本副本（如 `.tmp/system/*.txt`、`.tmp/system/*.md`、`reports/*.md`），一律直接用 `bash grep -n`、`sed -n`、`head`、`tail` 或定向 `read` 完成文本定位。
 - 只有在你知道准确 skill 名称时，才允许调用 `skill` 工具。不要调用泛称 skill，不要让 `name` 为空。
 - 若后续步骤依赖 `file` / `pandoc` / `soffice` / 特定 Python 模块，先做一次小预检，再进入主流程。
 
@@ -143,6 +143,7 @@ find . -maxdepth 3 -type f \( -iname '*.docx' -o -iname '*.doc' -o -iname '*.pdf
 - 当目标交付物是 `.docx` 且任务属于长篇技术材料、申报材料、方案、白皮书、报告等长文档时，优先先写 Markdown 草稿，再用 `pandoc` 生成最终 `.docx`。
 - 如果用户接受 Word、`.docx` 或“Markdown / Word 二选一”，且任务属于正式 prose 文档交付（如技术材料、申报材料、方案、白皮书、报告、点对点解决方案等），默认同时保留一份稳定的 Markdown 源稿，再生成并交付 `.docx`；不要在这种场景下只以 Markdown 收口，除非用户明确只要 Markdown，或当前工具链无法生成 `.docx` 且你已经明确报告 blocker。
 - 最终 `.docx` 交付件优先直接生成到 `<WORKSPACE>/outputs/`、workspace 根目录或用户指定的稳定交付路径；不要把 `.tmp/system/*.docx` 当成默认 `target_doc`，也不要在收尾阶段才把“临时 `.docx` 是否要搬运”留给自己临场决定。
+- 当最终交付路径位于 `outputs/`、`reports/` 或其他尚未创建的稳定目录时，先 `mkdir -p` 该目录，再执行最终的 `pandoc` / `cp` / `mv` / 生成命令；不要先直接写目标文件，等到“目录不存在”报错后再补救。
 - 除非任务明确要求复杂版式、图文混排或精细页眉页脚控制，否则不要直接拼接超长 JS 字符串去生成整篇 `.docx`；这种路线在长中文文档里极易因为引号、转义或超长代码而失控。
 - 若必须使用 `docx-js` 或自定义生成脚本，脚本可以放在 `<WORKSPACE>/.tmp/`、`reports/` 或其他 workspace 内的非交付路径，最终 `target_doc` 必须是实际 Office 文档而不是脚本源码。
 - 不要把 `generate-docx.js`、`build-docx.py`、临时转换脚本或其他 helper 文件留在 workspace 根目录、`outputs/` 或其他用户可见稳定交付路径；如果使用了辅助生成脚本，它必须放在 `<WORKSPACE>/.tmp/`、`reports/` 或其他非交付路径，不要把脚本本身报成生成产物或最终交付物。

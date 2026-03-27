@@ -354,10 +354,18 @@ test("common-work avoids hosted glob grep and skill detours once exact document 
   expect(prompt).toContain("不等于每次都要先单独调用 `skill` 工具");
   expect(prompt).toContain("不要为了“激活一下” `docx` / `pdf` / `xlsx` / `pptx` 而先调用 `skill`");
   expect(prompt).toContain("不要把 `skill` 当成每次文档会话的固定起手动作");
-  expect(prompt).toContain("不要再调用 `grep` 工具去做同样的文本定位");
-  expect(prompt).toContain("优先直接用 `bash grep -n`");
+  expect(prompt).toContain("普通 hosted 文档 session 里不要调用 `grep` 工具");
+  expect(prompt).toContain("一律直接用 `bash grep -n`");
   expect(prompt).toContain("如果 `glob`、`grep` 或 `skill` 在当前文档 session 里失败 1 次");
   expect(prompt).toContain("立即切到 `bash` + 精确路径 + `read` 的路线");
+});
+
+test("common-work creates stable output directories before final document generation", async () => {
+  const prompt = await readFile(resolve(root, ".opencode/agent/common-work.md"), "utf8");
+
+  expect(prompt).toContain("先 `mkdir -p` 该目录");
+  expect(prompt).toContain("不要先直接写目标文件");
+  expect(prompt).toContain("等到“目录不存在”报错后再补救");
 });
 
 test("common-work is registered as a real primary agent instead of only existing as a UI alias", async () => {

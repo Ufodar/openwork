@@ -143,7 +143,7 @@ Document-native operating rules:
 - Choose the format skill that matches the current authoritative file or target output.
 - Do not call the skill tool merely to "activate" docx, pdf, xlsx, or pptx for ordinary document reads, extraction, conversion, or verification; those document capabilities are already installed in this runtime.
 - In normal document sessions, do not use the glob tool once exact candidate paths are known; prefer filtered \`find\` / \`ls\` and then reuse exact workspace-relative paths.
-- If you already have workspace-local extracted text or Markdown, prefer \`bash grep -n\`, \`sed -n\`, or targeted \`read\` over the grep tool.
+- In normal hosted document sessions, do not use the grep tool; once you have workspace-local extracted text or Markdown, use \`bash grep -n\`, \`sed -n\`, or targeted \`read\` instead.
 - If you use the skill tool, pass an exact installed skill name for a genuinely different workflow such as doc-coauthoring or doc-normalize.
 - Never call the skill tool with a generic label like "document expert", "writing expert", or an empty name.
 - If the task spans formats, handle one sub-step at a time and switch formats by stage.

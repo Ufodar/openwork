@@ -17,8 +17,20 @@ describe("filterSessionSkillsForContext", () => {
     { name: "openwork-debug", path: ".opencode/skills/openwork-debug/SKILL.md", description: "Debug sidecars" },
   ];
 
-  test("keeps general sessions unchanged", () => {
-    expect(filterSessionSkillsForContext(skills, { view: "session" })).toEqual(skills);
+  test("keeps general sessions unchanged in developer mode", () => {
+    expect(filterSessionSkillsForContext(skills, { view: "session", developerMode: true })).toEqual(skills);
+  });
+
+  test("hides internal-only skills for normal general sessions", () => {
+    expect(
+      filterSessionSkillsForContext(skills, { view: "session", developerMode: false }).map((entry) => entry.name),
+    ).toEqual(["docx", "pdf", "doc-normalize", "content-research-writer", "status-report-writer"]);
+  });
+
+  test("keeps full skill list for developer mode general sessions", () => {
+    expect(
+      filterSessionSkillsForContext(skills, { view: "session", developerMode: true }).map((entry) => entry.name),
+    ).toEqual(skills.map((entry) => entry.name));
   });
 
   test("shows a document-focused subset for document-agent sessions", () => {
@@ -52,8 +64,31 @@ describe("filterSessionSlashCommandsForContext", () => {
     { id: "mcp:search", name: "search", description: "Search external sources", source: "mcp" },
   ];
 
-  test("keeps general-session slash commands unchanged", () => {
-    expect(filterSessionSlashCommandsForContext(commands, { view: "session" })).toEqual(commands);
+  test("keeps general-session slash commands unchanged in developer mode", () => {
+    expect(filterSessionSlashCommandsForContext(commands, { view: "session", developerMode: true })).toEqual(commands);
+  });
+
+  test("hides internal-only skill commands for normal general sessions", () => {
+    expect(
+      filterSessionSlashCommandsForContext(commands, { view: "session", developerMode: false }).map(
+        (entry) => `${entry.source}:${entry.name}`,
+      ),
+    ).toEqual([
+      "command:compact",
+      "skill:docx",
+      "skill:pdf",
+      "skill:content-research-writer",
+      "skill:status-report-writer",
+      "mcp:search",
+    ]);
+  });
+
+  test("keeps full slash command list for developer mode general sessions", () => {
+    expect(
+      filterSessionSlashCommandsForContext(commands, { view: "session", developerMode: true }).map(
+        (entry) => `${entry.source}:${entry.name}`,
+      ),
+    ).toEqual(commands.map((entry) => `${entry.source}:${entry.name}`));
   });
 
   test("pins compact, keeps non-skill commands, and removes irrelevant skills for document-writer sessions", () => {

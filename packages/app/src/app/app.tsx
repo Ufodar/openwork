@@ -4705,6 +4705,7 @@ export default function App() {
     view: (currentView() === "login" ? "dashboard" : currentView()) as View,
     agent: selectedSessionAgent(),
     agentLock: selectedSessionAgentLock(),
+    developerMode: developerMode(),
   }));
 
   const sessionSkills = createMemo(() =>

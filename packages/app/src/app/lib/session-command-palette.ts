@@ -5,6 +5,7 @@ type SessionCommandPaletteContext = {
   view?: View | null;
   agent?: string | null;
   agentLock?: string | null;
+  developerMode?: boolean | null;
 };
 
 type DocumentSessionMode = "document-agent" | "document-writer";
@@ -25,7 +26,6 @@ const DOCUMENT_AGENT_SKILL_PRIORITY = [
   "content-research-writer",
   "internal-comms",
   "image-enhancer",
-  "file-organizer",
 ] as const;
 
 const DOCUMENT_WRITER_SKILL_PRIORITY = [
@@ -38,12 +38,43 @@ const DOCUMENT_WRITER_SKILL_PRIORITY = [
   "xlsx",
   "pptx",
   "image-enhancer",
-  "file-organizer",
+] as const;
+
+const GENERAL_SESSION_SKILL_PRIORITY = [
+  "docx",
+  "pdf",
+  "xlsx",
+  "pptx",
+  "doc-normalize",
+  "doc-coauthoring",
+  "content-research-writer",
+  "internal-comms",
+  "image-enhancer",
 ] as const;
 
 const DOCUMENT_SKILL_EXACT_ALLOW = new Set<string>([
   ...DOCUMENT_AGENT_SKILL_PRIORITY,
   ...DOCUMENT_WRITER_SKILL_PRIORITY,
+]);
+
+const HIDDEN_FROM_NON_DEVELOPER_SESSIONS = new Set<string>([
+  "browser-setup-devtools",
+  "cargo-lock-manager",
+  "changelog-generator",
+  "frontend-design",
+  "get-started",
+  "mcp-builder",
+  "opencode-bridge",
+  "opencode-mirror",
+  "opencode-primitives",
+  "openwork-core",
+  "openwork-debug",
+  "openwork-docker-chrome-mcp",
+  "openwork-orchestrator-npm-publish",
+  "release",
+  "skill-creator",
+  "solidjs-patterns",
+  "tauri-solidjs",
 ]);
 
 const normalizeKey = (value: string | null | undefined) =>
@@ -72,6 +103,9 @@ const skillPriorityIndex = (name: string, mode: DocumentSessionMode) => {
   return priorities.indexOf(name as (typeof priorities)[number]);
 };
 
+const generalSkillPriorityIndex = (name: string) =>
+  GENERAL_SESSION_SKILL_PRIORITY.indexOf(name as (typeof GENERAL_SESSION_SKILL_PRIORITY)[number]);
+
 const scoreDocumentSkill = (
   skill: SkillLike,
   mode: DocumentSessionMode,
@@ -88,6 +122,18 @@ const scoreDocumentSkill = (
   return null;
 };
 
+const scoreGeneralSessionSkill = (skill: SkillLike): number | null => {
+  const normalizedName = normalizeKey(skill.name);
+  if (!normalizedName) return null;
+  if (HIDDEN_FROM_NON_DEVELOPER_SESSIONS.has(normalizedName)) return null;
+
+  const priority = generalSkillPriorityIndex(normalizedName);
+  if (priority !== -1) {
+    return 10_000 - priority * 100;
+  }
+  return 100;
+};
+
 const compareRankedSkills = <T extends SkillLike>(mode: DocumentSessionMode) =>
   (left: T, right: T) => {
     const leftScore = scoreDocumentSkill(left, mode) ?? Number.NEGATIVE_INFINITY;
@@ -100,8 +146,18 @@ export function filterSessionSkillsForContext(
   skills: SkillCard[],
   context: SessionCommandPaletteContext,
 ): SkillCard[] {
+  if (context.developerMode) return skills;
   const mode = resolveDocumentSessionMode(context);
-  if (!mode) return skills;
+  if (!mode) {
+    const ranked = skills.filter((skill) => scoreGeneralSessionSkill(skill) !== null);
+    if (!ranked.length) return skills;
+    return ranked.slice().sort((left, right) => {
+      const leftScore = scoreGeneralSessionSkill(left) ?? Number.NEGATIVE_INFINITY;
+      const rightScore = scoreGeneralSessionSkill(right) ?? Number.NEGATIVE_INFINITY;
+      if (leftScore !== rightScore) return rightScore - leftScore;
+      return left.name.localeCompare(right.name);
+    });
+  }
   const ranked = skills.filter((skill) => scoreDocumentSkill(skill, mode) !== null);
   if (!ranked.length) return skills;
   return ranked.slice().sort(compareRankedSkills(mode));
@@ -111,8 +167,24 @@ export function filterSessionSlashCommandsForContext(
   commands: SlashCommandOption[],
   context: SessionCommandPaletteContext,
 ): SlashCommandOption[] {
+  if (context.developerMode) return commands;
   const mode = resolveDocumentSessionMode(context);
-  if (!mode) return commands;
+  if (!mode) {
+    const pinnedCommands = commands.filter((entry) => entry.source !== "skill" && entry.name === "compact");
+    const otherCommands = commands.filter((entry) => entry.source !== "skill" && entry.name !== "compact");
+    const rankedSkills = commands
+      .filter((entry) => entry.source === "skill" && scoreGeneralSessionSkill(entry) !== null)
+      .slice()
+      .sort((left, right) => {
+        const leftScore = scoreGeneralSessionSkill(left) ?? Number.NEGATIVE_INFINITY;
+        const rightScore = scoreGeneralSessionSkill(right) ?? Number.NEGATIVE_INFINITY;
+        if (leftScore !== rightScore) return rightScore - leftScore;
+        return left.name.localeCompare(right.name);
+      });
+
+    if (!rankedSkills.length) return commands;
+    return [...pinnedCommands, ...rankedSkills, ...otherCommands];
+  }
 
   const pinnedCommands = commands.filter((entry) => entry.source !== "skill" && entry.name === "compact");
   const otherCommands = commands.filter((entry) => entry.source !== "skill" && entry.name !== "compact");

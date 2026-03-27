@@ -22,7 +22,6 @@
 - `content-research-writer`
 - `internal-comms`
 - `image-enhancer`
-- `file-organizer`
 
 补充规则：
 
@@ -57,7 +56,6 @@
   - `doc-coauthoring`
   - `doc-normalize`
   - `docx`
-  - `file-organizer`
   - `image-enhancer`
   - `internal-comms`
   - `pdf`
@@ -72,9 +70,11 @@
 - `artifacts-builder`
 - `brand-guidelines`
 - `canvas-design`
+- `changelog-generator`
 - `competitive-ads-extractor`
 - `developer-growth-analysis`
 - `domain-name-brainstormer`
+- `file-organizer`
 - `invoice-organizer`
 - `lead-research-assistant`
 - `meeting-insights-analyzer`
@@ -115,24 +115,24 @@
 - `Notion`
   - 用于内部知识库、需求页、决策记录、资料页。
   - 官方文档：<https://developers.notion.com/docs/mcp>
+- `GitHub`
+  - 用于 repo 关联的 issue / PR / release / README / 设计文档。
+  - 官方文档：<https://docs.github.com/en/copilot/concepts/context/mcp>
+  - 官方 GitHub MCP Server：<https://docs.github.com/en/copilot/how-tos/provide-context/use-mcp/use-the-github-mcp-server>
 - `Linear`
   - 适合 OpenWork 自身的迭代计划、issue 跟踪、项目执行。
   - 当前项目里已有 quick-connect，保留是合理的。
 - `Context7`
   - 用于 SDK / API / 框架 / 产品官方文档检索，适合“文档里要写技术依据、接口说明、产品能力边界”的场景。
   - 官方项目：<https://github.com/upstash/context7>
-- `GitHub`
-  - 用于 repo 关联的 issue / PR / release / README / 设计文档。
-  - 官方文档：<https://docs.github.com/en/copilot/concepts/context/mcp>
 - 浏览器 MCP：`Playwright` 或现有 `Control Chrome`
   - 用于登录后页面、真实渲染验证、截图、网页内容无法稳定直接抓取时。
   - 官方 Playwright MCP：<https://github.com/microsoft/playwright-mcp>
-- `Sentry`
-  - 只在 OpenWork 自身线上故障分析、release 回归、错误追踪场景下保留。
-  - 不属于文档会话默认 MCP，但对产品运维仍有价值。
 
 ### Do not keep by default
 
+- `Sentry`
+  - 适合 OpenWork 自身线上故障分析、release 回归、错误追踪，但不属于文档会话默认 MCP。
 - `filesystem`
   - hosted 文档会话已经有 `<WORKSPACE>` 文件工具边界；再加一层 `filesystem` MCP 只会重复能力并扩大误用面。
 - `memory`
@@ -172,8 +172,7 @@
 2. common-work 提示层
    - 明确写死“格式优先、补充按阶段启用、MCP 小栈默认、不要为流行而接入”。
 3. MCP quick-connect 层
-   - 保留 `Notion / Linear / Context7 / Sentry / Control Chrome`
-   - 增补 `GitHub` 前，先确认 OpenWork 里采用哪种稳定接入方式
-   - 删掉 `HubSpot / Stripe`
+   - 保留 `Notion / GitHub / Linear / Context7 / Control Chrome`
+   - 删掉 `Sentry / HubSpot / Stripe`
 
 这样既能减少新会话噪音，也不会把 `common-work` 变成新的“大杂烩总控 prompt”。

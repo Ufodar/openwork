@@ -186,6 +186,7 @@ find . -maxdepth 3 -type f \( -iname '*.docx' -o -iname '*.doc' -o -iname '*.pdf
 - 如果必须写 `Host:` 行或等价配置，统一使用 `<SERVICE_HOST>` 这一类明确变量名；不要再自造 `<API_HOST>`、`<HOSTNAME>`、`<HOST>` 等新占位名，避免同一文档里变量口径漂移。
 - 不要把自造 host/域名混成“可直接调用的真实接口地址”；如果某个接口 host 无法从来源中确认，就把 host 留空、写成占位变量，或明确标注为示意。
 - 即使在 JSON 字段、回调地址、节点地址、对象存储端点、Webhook 配置、通知邮箱或响应载荷里，也优先使用 `<CALLBACK_URL>`、`<NODE_ID>`、`<NODE_ADDRESS>`、`<SERVICE_HOST>`、`<OBJECT_STORAGE_ENDPOINT>`、`<OPS_EMAIL_GROUP>` 这类显式占位变量；不要随手填 `app.example.com`、`node-01.example.com`、`gpu-cluster-01.internal.example.com`、`s3.example.com`、`https://example.com/webhook/...`、`ops-team@example.com` 之类貌似完整但没有来源支撑的地址。
+- 任何 `*.example.com`、`*@example.com`、`internal.example.com`、`kubernetes.example.com`、`admin@example.com`、`security-team@example.com` 这类默认演示域名/邮箱，也视为无来源伪值；如果没有真实来源，就改成 `<SERVICE_HOST>`、`<CONTACT_EMAIL>`、`<OPS_EMAIL_GROUP>`、`<CALLBACK_URL>` 这类显式占位变量，不要把它们写进最终正文、JSON、表格或 API 示例。
 - 不要写 `https://<APP_HOST>/callback/...`、`https://<SERVICE_HOST>/webhook/...` 这类 callback 占位绝对 URL；如果来源没有给出真实回调 host，就把回调地址直接写成 `<CALLBACK_URL>`，或只保留相对回调路径并单独说明 host 未定。
 - 不要写 `https://callback.example.com/...` 这类看起来完整但没有来源支撑的回调地址；把回调地址直接写成 `<CALLBACK_URL>`，或改成相对回调路径并单独说明 host 未定。
 - 不要写 `https://logs.example.com/...` 这类看起来完整但没有来源支撑的日志链接；把日志链接写成 `<LOG_STREAM_URL>` 或其他显式占位字段。
@@ -220,8 +221,9 @@ find . -maxdepth 3 -type f \( -iname '*.docx' -o -iname '*.doc' -o -iname '*.pdf
   - 关键章节或关键表格是否存在
   - 主要事实是否仍然正确
   - 版式是否明显偏离来源模板
+- `ls`、`glob outputs/*`、只看文件存在，或只看最终总结里的路径，不算 final verification；必须做真实文本回读或显式文本扫描。
 - 完成前做一次显式扫描，检查最终交付物和准备发给用户的总结里是否残留高风险字符串，例如 `example.com`、`@example.com`、`<ACCESS_TOKEN>`、`<access_token>`、`Bearer <ACCESS_TOKEN>`、`Bearer <access_token>`、`YourSecurePassword123!`、`https://example.com/webhooks/`、`https://<`、`http://<`、`<API_HOST>`、`<APP_HOST>`、`/root/.openwork`、`documents/sessions/`、`.tmp/system`；如果命中这些高风险残留，就先改写为稳定相对路径、相对 API 路径、统一的 hostless 占位变量或显式占位字段，再交付。
-- 如果最终交付物里包含 API 示例、JSON、Webhook 配置或鉴权字段，收尾时至少跑一次显式文本扫描；优先使用 `grep -RniE` 这类可复现命令，例如 `grep -RniE 'example\\.com|@example\\.com|<access_token>|<ACCESS_TOKEN>|YourSecurePassword123!' outputs reports .`；常用扫描模式至少覆盖 `example\\.com|@example\\.com|<access_token>|<ACCESS_TOKEN>|YourSecurePassword123!`；命中后先改写，再交付。
+- 如果最终交付物里包含 API 示例、JSON、Webhook 配置或鉴权字段，收尾时至少跑一次显式文本扫描；优先使用 `grep -RniE` 这类可复现命令，例如 `grep -RniE 'example\\.com|@example\\.com|<access_token>|<ACCESS_TOKEN>|YourSecurePassword123!' outputs reports .`；常用扫描模式至少覆盖 `example\\.com|@example\\.com|<access_token>|<ACCESS_TOKEN>|YourSecurePassword123!`；命中后必须回到稳定源稿或最终正文改写，再重新生成 `.docx` / `.pdf` 等交付件，并重新运行同一条扫描直到无命中为止。
 - 同时检查 workspace 根目录、`outputs/` 和其他稳定交付路径里是否残留 `generate-docx.js`、`*.py`、`*.ts`、`*.js` 这类仅用于生成文档的 helper 文件；如果有，就先移回 `.tmp/` 或 `reports/`，不要让它们进入最终交付清单。
 - 对多系统 proposal-style 文档，完成前还必须额外检查：
   - 标题是否仍保持语义化，而不是出现双层编号或手打编号伪装结构

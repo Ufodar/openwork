@@ -413,6 +413,8 @@ test("common-work defaults API examples to relative paths and hostless placehold
   expect(prompt).toContain("`gpu-cluster-01.internal.example.com`");
   expect(prompt).toContain("`s3.example.com`");
   expect(prompt).toContain("`ops-team@example.com`");
+  expect(prompt).toContain("任何 `*.example.com`、`*@example.com`");
+  expect(prompt).toContain("`internal.example.com`、`kubernetes.example.com`、`admin@example.com`、`security-team@example.com`");
   expect(prompt).toContain("`<LOGIN_USERNAME>`、`<CONTACT_EMAIL>`、`<PHONE_NUMBER>`、`<ACCOUNT_ID>`");
   expect(prompt).toContain("`<NODE_ADDRESS>`");
   expect(prompt).toContain("`<OBJECT_STORAGE_ENDPOINT>`");
@@ -459,6 +461,8 @@ test("common-work forbids placeholder credentials in final API examples", async 
   expect(prompt).toContain("不要为了凑齐登录示例");
   expect(prompt).toContain("`grep -RniE`");
   expect(prompt).toContain("`example\\\\.com|@example\\\\.com|<access_token>|<ACCESS_TOKEN>|YourSecurePassword123!`");
+  expect(prompt).toContain("`ls`、`glob outputs/*`、只看文件存在");
+  expect(prompt).toContain("并重新运行同一条扫描直到无命中为止");
 });
 
 test("common-work keeps helper generator scripts out of user-visible deliverable paths", async () => {

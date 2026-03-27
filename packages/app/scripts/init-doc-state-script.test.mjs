@@ -93,3 +93,48 @@ test("init_doc_state.py ignores hidden metadata and existing state artifacts whe
     await rm(workspace, { recursive: true, force: true });
   }
 });
+
+test("init_doc_state.py ignores hosted runtime internals when collecting sources", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "doc-init-hosted-ignore-"));
+
+  try {
+    await mkdir(join(workspace, ".openwork-runtime", "opencode", "config", "node_modules", "fixture"), { recursive: true });
+    await mkdir(join(workspace, ".tmp", "system"), { recursive: true });
+    await mkdir(join(workspace, ".opencode", "skills", "docx"), { recursive: true });
+
+    await writeFile(join(workspace, "真实源文档.docx"), "placeholder", "utf8");
+    await writeFile(join(workspace, "参考资料.pdf"), "placeholder", "utf8");
+    await writeFile(
+      join(workspace, ".openwork-runtime", "opencode", "config", "node_modules", "fixture", "README.txt"),
+      "should-not-be-indexed",
+      "utf8",
+    );
+    await writeFile(join(workspace, ".tmp", "system", "scratch.md"), "temporary", "utf8");
+    await writeFile(join(workspace, ".opencode", "skills", "docx", "LICENSE.txt"), "skill-license", "utf8");
+
+    const proc = Bun.spawn([
+      "python3",
+      scriptPath,
+      "--workspace", workspace,
+      "--goal", "整理参考材料",
+    ], {
+      cwd: "/Users/storm/Documents/code/studyProject/opencode-docx/openwork",
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    const stderr = await new Response(proc.stderr).text();
+    const exitCode = await proc.exited;
+
+    expect(exitCode).toBe(0);
+    expect(stderr.trim()).toBe("");
+
+    const manifest = JSON.parse(await readFile(join(workspace, ".worktree", "sources", "manifest.json"), "utf8"));
+    expect(manifest.sources.map((item) => item.relativePath)).toEqual([
+      "参考资料.pdf",
+      "真实源文档.docx",
+    ]);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});

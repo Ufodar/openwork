@@ -139,10 +139,14 @@ const BOOTSTRAP_INDEX_PATH = join(BOOTSTRAP_STATE_DIR, "index.json");
 const BOOTSTRAP_CONVENTIONS_PATH = join(BOOTSTRAP_STATE_DIR, "conventions.md");
 const BOOTSTRAP_IGNORED_TOP_LEVEL = new Set([
     ".opencode",
+    ".openwork-runtime",
     ".worktree",
     ".bid",
+    ".tmp",
+    "artifacts",
     "reports",
     "outputs",
+    "tmp",
 ]);
 const BOOTSTRAP_ALLOWED_EXTENSIONS = new Set([
     ...WORD_EXTENSIONS,
@@ -273,6 +277,7 @@ async function writeJsonAtomic(path: string, payload: unknown): Promise<void> {
 
 function isBootstrapVisibleSegment(name: string): boolean {
     if (!name || name === "." || name === "..") return false;
+    if (name.startsWith(".")) return false;
     if (BOOTSTRAP_IGNORED_TOP_LEVEL.has(name)) return false;
     if (name === "opencode.json" || name === "opencode.jsonc") return false;
     return true;

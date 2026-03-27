@@ -73,6 +73,49 @@ Immediate blocker:
 
 ## Latest Findings
 
+### 2026-03-27: hosted bootstrap source inventory was polluted by runtime-internal files, which masked the real local-source set
+
+What was observed:
+- a live pod `common-work` diagnostic session had only 2 user-uploaded `.docx` files in the runtime root
+- but its bootstrap state claimed `Uploaded 83 source documents`
+- `.worktree/sources/manifest.json` included runtime-internal paths such as:
+  - `.openwork-runtime/**`
+  - `.opencode/**`
+  - `.tmp/**`
+  - `node_modules` descendants
+
+Why this matters:
+- this makes the state surface noisy and untrustworthy for early routing
+- if `common-work` is told to read bootstrap state first, a polluted manifest can still push it away from the actual uploaded source docs
+- this is a real hosted parity issue, not just a prompt-quality issue
+
+Root cause:
+- server-side `refreshBootstrapDocumentState()` bootstrap discovery did not exclude enough hidden/runtime-internal segments
+- the repo-owned `init_doc_state.py` bootstrap helper also needed explicit alignment with the same hosted ignore model
+
+What changed locally:
+- server bootstrap discovery now ignores hidden/internal runtime paths such as:
+  - `.openwork-runtime`
+  - `.tmp`
+  - `.opencode`
+  - `tmp`
+  - `artifacts`
+  - other hidden segments
+- `init_doc_state.py` was aligned to the same hidden/runtime-internal ignore behavior
+- `common-work` now explicitly says:
+  - if `.worktree/index.json` / `.worktree/sources/manifest.json` already exist, read them before any external search
+  - if the manifest is dominated by runtime-internal paths, treat it as noise and fall back to visible user source docs
+
+Local verification:
+- `bun test packages/server/src/document.bootstrap-state.test.ts`
+- `bun test packages/app/scripts/init-doc-state-script.test.mjs`
+- `bun test packages/app/scripts/doc-subagent-prompts.test.mjs`
+- all passing
+
+Interpretation:
+- the next pod A/B rerun should be materially cleaner because the state surface itself will no longer tell the agent that dozens of internal runtime files are “uploaded sources”
+- only after this fix is deployed does it make sense to judge whether any remaining early `bocha-search` churn is still a pure prompt-routing issue
+
 ### 2026-03-27: runtime skill pruning design was correct, first persistence mechanism was wrong
 
 What happened:

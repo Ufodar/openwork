@@ -460,6 +460,16 @@ test("common-work keeps drafting-stage routing anchored on local source document
   expect(prompt).toContain("先回到本地资料继续提取");
 });
 
+test("common-work checks bootstrap state before external search and ignores noisy runtime-internal manifest entries", async () => {
+  const prompt = await readFile(resolve(root, ".opencode/agent/common-work.md"), "utf8");
+
+  expect(prompt).toContain("如果 `.worktree/index.json`、`.worktree/sources/manifest.json` 或等价状态面已经存在，先读取这些状态文件");
+  expect(prompt).toContain("再决定要读哪些本地源文档");
+  expect(prompt).toContain("不要在读状态面之前就转去联网搜索");
+  expect(prompt).toContain("如果 bootstrap manifest / source inventory 里的大多数条目落在 `.openwork-runtime`、`.opencode`、`.tmp`");
+  expect(prompt).toContain("把这类条目视为噪音");
+});
+
 test("common-work routes document sessions through a small document-focused supplement skill set", async () => {
   const prompt = await readFile(resolve(root, ".opencode/agent/common-work.md"), "utf8");
 

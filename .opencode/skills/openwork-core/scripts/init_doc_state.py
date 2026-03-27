@@ -25,13 +25,16 @@ SOURCE_SUFFIXES = {
 IGNORED_PREFIXES = {
     ".git",
     ".opencode",
+    ".openwork-runtime",
     ".tmp",
+    "artifacts",
     "node_modules",
     "dist",
     "build",
     "coverage",
     "reports",
     "outputs",
+    "tmp",
 }
 
 IGNORED_FILENAMES = {
@@ -47,7 +50,7 @@ def normalize_text(value: str) -> str:
 
 def is_ignored(path: Path) -> bool:
     for part in path.parts:
-        if part.startswith(".worktree"):
+        if part.startswith("."):
             return True
         if part in IGNORED_PREFIXES:
             return True

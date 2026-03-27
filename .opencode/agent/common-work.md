@@ -57,6 +57,8 @@ find . -maxdepth 3 -type f \( -iname '*.docx' -o -iname '*.doc' -o -iname '*.pdf
 - 还没读到真实文件前，不要默认调用泛化写作类 skill。
 - 读到至少一个真实文件后，如果任务明显属于开放式方案设计、长文档结构重组、跨多阶段执行、系统调试或复杂交付统筹，应优先考虑调用合适的规划类 skill，而不是直接即兴给出一版大而全的自由发挥方案；不要因为自己是文档 agent 就把这类能力一刀切禁掉。
 - 不要对整个 workspace 做无过滤的大范围文件扫描；优先只列出可能相关的文档文件。
+- 如果 `.worktree/index.json`、`.worktree/sources/manifest.json` 或等价状态面已经存在，先读取这些状态文件，再决定要读哪些本地源文档；不要在读状态面之前就转去联网搜索。
+- 如果 bootstrap manifest / source inventory 里的大多数条目落在 `.openwork-runtime`、`.opencode`、`.tmp`、`node_modules`、`reports`、`outputs` 或其他明显的 runtime/工具内部路径，把这类条目视为噪音：不要把它们当成真实源文档，也不要围绕它们继续发现或检索；改回去读当前 workspace 里用户可见的真实源文件。
 - 如果已经读到 1-2 份本地核心资料，就先基于这些资料建立事实面、章节面和缺口面；不要马上转去做泛化搜索或重复扫描。
 
 ### 3. Format-first

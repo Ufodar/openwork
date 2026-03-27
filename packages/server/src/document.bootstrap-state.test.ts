@@ -83,9 +83,9 @@ describe("refreshBootstrapDocumentState", () => {
     });
   });
 
-  test("refreshes bootstrap narration while the workspace is still in intake", async () => {
-    const runtimeDir = await mkdtemp(join(tmpdir(), "openwork-doc-bootstrap-refresh-"));
-    await writeFile(join(runtimeDir, "a.docx"), "docx", "utf8");
+test("refreshes bootstrap narration while the workspace is still in intake", async () => {
+  const runtimeDir = await mkdtemp(join(tmpdir(), "openwork-doc-bootstrap-refresh-"));
+  await writeFile(join(runtimeDir, "a.docx"), "docx", "utf8");
 
     await refreshBootstrapDocumentState(runtimeDir);
 
@@ -93,8 +93,37 @@ describe("refreshBootstrapDocumentState", () => {
     await refreshBootstrapDocumentState(runtimeDir);
 
     const index = JSON.parse(await readFile(join(runtimeDir, ".worktree", "index.json"), "utf8"));
-    expect(index.phase).toBe("intake");
-    expect(index.summary).toContain("Uploaded 2 source documents");
-    expect(index.current_focus).toContain("Compile uploaded documents");
-  });
+  expect(index.phase).toBe("intake");
+  expect(index.summary).toContain("Uploaded 2 source documents");
+  expect(index.current_focus).toContain("Compile uploaded documents");
+});
+
+test("ignores hosted runtime internals when building bootstrap source inventory", async () => {
+  const runtimeDir = await mkdtemp(join(tmpdir(), "openwork-doc-bootstrap-hosted-"));
+
+  await mkdir(join(runtimeDir, ".openwork-runtime", "opencode", "config", "node_modules", "fixture"), { recursive: true });
+  await mkdir(join(runtimeDir, ".tmp", "system"), { recursive: true });
+  await mkdir(join(runtimeDir, ".opencode", "skills", "docx"), { recursive: true });
+
+  await writeFile(join(runtimeDir, "真实源文档.docx"), "docx", "utf8");
+  await writeFile(join(runtimeDir, "参考资料.pdf"), "pdf", "utf8");
+  await writeFile(
+    join(runtimeDir, ".openwork-runtime", "opencode", "config", "node_modules", "fixture", "README.txt"),
+    "should-not-be-indexed",
+    "utf8",
+  );
+  await writeFile(join(runtimeDir, ".tmp", "system", "scratch.md"), "temporary", "utf8");
+  await writeFile(join(runtimeDir, ".opencode", "skills", "docx", "LICENSE.txt"), "skill-license", "utf8");
+
+  await refreshBootstrapDocumentState(runtimeDir);
+
+  const index = JSON.parse(await readFile(join(runtimeDir, ".worktree", "index.json"), "utf8"));
+  const manifest = JSON.parse(await readFile(join(runtimeDir, ".worktree", "sources", "manifest.json"), "utf8"));
+
+  expect(index.summary).toContain("Uploaded 2 source documents");
+  expect(manifest.sources.map((item: any) => item.relativePath)).toEqual([
+    "参考资料.pdf",
+    "真实源文档.docx",
+  ]);
+});
 });

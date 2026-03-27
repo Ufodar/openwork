@@ -83,6 +83,7 @@ find . -maxdepth 3 -type f \( -iname '*.docx' -o -iname '*.doc' -o -iname '*.pdf
 
 - 不要直接对 `.docx` / `.xlsx` / `.pptx` 使用 `read`；先走对应格式能力、文本提取或中间产物。
 - 任何由 `pandoc`、`python`、`unzip`、格式转换脚本或 shell 生成的中间产物，默认写到 `<WORKSPACE>/.tmp/system/`、`<WORKSPACE>/.tmp/` 或 `<WORKSPACE>/tmp/`；不要把系统 `/tmp` 当成 hosted 文档流程的常规落点，也不要把这些中间路径误当成最终交付路径。
+- 当你第一次把 `.docx` / `.doc` / `.pdf` 转成 `.md` / `.txt` / `.xml` 供后续 `read`、`grep`、`write` 或其他文件工具继续使用时，第一条转换命令就先创建 workspace 内临时目录，并把输出直接写到 `<WORKSPACE>/.tmp/system/`、`<WORKSPACE>/.tmp/` 或其他 workspace 内路径；不要先试 `/tmp/...` 再根据权限报错回退。
 - 如果是你自己手写提取或转换命令，先创建 workspace 内临时目录，再把 `pandoc -o`、`>`、`tee`、Python 输出文件参数或其他落盘目标明确指向该目录；不要新写 `/tmp/*.md`、`/tmp/*.xml`、`/tmp/*.txt` 这类命令，然后再指望后面补一次搬运。
 - 如果某条路线会先把文档转到临时 Markdown / XML / 文本，再继续读取：纯 shell 内连续消费时才可沿用工具返回的外部临时路径；但只要后续要切回文件工具，就必须先复制或重新输出一份 workspace 内的可读副本。把 `/tmp/*.md`、`/private/tmp/*.md` 这类路径视为 hosted session 中文件工具不可直接重开的 shell-only 路径。
 - 文件名和路径必须复用工具返回的原始值，不要自己改中文文件名、补空格、改标点。

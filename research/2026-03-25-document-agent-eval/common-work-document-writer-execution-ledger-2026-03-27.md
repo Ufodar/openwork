@@ -68,11 +68,15 @@ Stage 1 status:
 - in progress
 
 Immediate blocker:
-- local baseline evidence is now good on all three user-facing concerns:
+- fresh local evidence is good on all three user-facing concerns:
   - no current local evidence of `external_directory` / repo-external drift in `common-work`
   - runtime session skill surface is physically pruned to the intended document subset
   - history re-entry tests still restore the intended TSX/view
-- the remaining blocker is live pod deployment verification: the latest baseline tightening commit is pushed to GitHub and Gitee, but pod-side `git pull --ff-only` / `restart-pod.sh --force` is currently blocked by intermittent SSH / edge timeout; live HTTP health is up, but the pod has not yet been confirmed on the newest commit
+- live pod verification has now cleared most of the baseline, but one hosted detour remains:
+  - fresh `document-agent/common-work` session creation is currently succeeding again on pod
+  - live runtime skill pruning and server-side session-view persistence are confirmed on pod
+  - live browser re-entry from history is opening `/document-agent/:sessionId` correctly
+  - remaining blocker: early hosted `common-work` still burns one denied `pandoc ... -o /tmp/*.md` attempt before rerouting to `<WORKSPACE>/.tmp/system/`
 
 ## Latest Findings
 
@@ -313,6 +317,64 @@ Interpretation:
 - local `common-work` is now materially closer to the intended hosted behavior in the early phase
 - the remaining common-work parity question is no longer about obvious workspace escapes; it is about whether hosted search routing is still noisier than local raw OpenCode
 
+### 2026-03-27: live pod baseline verification now confirms skill pruning, session-view persistence, and correct history re-entry
+
+Live checks on the current pod:
+- fresh `POST /w/<workspaceId>/opencode/session` for `document-agent/common-work` returned `200`
+- the created runtime directory physically contained only:
+  - `doc-coauthoring`
+  - `doc-normalize`
+  - `docx`
+  - `pdf`
+  - `pptx`
+  - `xlsx`
+- the same live runtime `opencode.jsonc` currently carried:
+  - `bocha-search`
+  - `openwork-knowledge`
+- the user workspace `.opencode/openwork.json` on pod contains persisted `sessions` entries with `view`, `agent`, and `agentLock`
+- a real browser check on `http://192.168.5.10:32765` showed:
+  - creating a new 文档智能体 session navigates to `/document-agent/<sessionId>`
+  - returning to `/dashboard/agents`
+  - clicking that session in the history list reopens the same `/document-agent/<sessionId>` route instead of collapsing to `/session/<sessionId>`
+
+Interpretation:
+- the “history session reopens into the wrong TSX” baseline is no longer reproducing on the current pod build
+- runtime `.opencode/skills` pruning is working live, not just in local tests
+- server-side view persistence now uses the correct OpenWork config surface and is populated on pod
+
+### 2026-03-27: latest live hosted Qin diagnostic narrowed the remaining hosted detour to one denied `/tmp` conversion
+
+Scenario:
+- `OPENWORK_COMPARE_SCENARIO=qin OPENWORK_COMPARE_MODE=diagnostic QIN_ABC_LANES=pod node tmp/qin-abc-minimax.mjs`
+
+Findings:
+- routing diagnostics on pod:
+  - `externalPathTouchCount = 0`
+  - `systemTempTouchCount = 0`
+  - `directOfficeReadCount = 0`
+  - `issueCounts = { "access-denied": 1 }`
+- the one live denial was:
+  - `pandoc --track-changes=all "融合算力云平台白皮书.docx" -o /tmp/fusion_whitepaper.md`
+- the agent then immediately rerouted correctly to:
+  - `mkdir -p .tmp/system && pandoc --track-changes=all "融合算力云平台白皮书.docx" -o .tmp/system/fusion_whitepaper.md`
+
+Interpretation:
+- this is no longer a session-isolation bug or `external_directory` bug
+- the remaining waste is an early guidance issue: `common-work` still needs to stop trying the first extraction command against `/tmp`
+
+### 2026-03-27: next baseline fix removes the empty default knowledge MCP and hardens the first conversion rule
+
+Local fix prepared:
+- fresh session-create no longer injects `openwork-knowledge` by default when the session has no attached knowledge
+- `common-work` now explicitly requires the first `.docx/.doc/.pdf -> .md/.txt/.xml` conversion command to create a workspace-local temp directory and write there directly, instead of probing `/tmp` first
+
+Local verification:
+- `bun test packages/server/src/server.proxy-session-create.test.ts`
+- `bun test packages/app/scripts/doc-subagent-prompts.test.mjs`
+- `bun test packages/server/src/session-workspaces.test.ts packages/app/src/app/lib/session-preferences.test.ts packages/app/src/app/context/session.runtime-directory-hydration.test.ts`
+- `git diff --check -- packages/server/src/server.ts packages/server/src/server.proxy-session-create.test.ts .opencode/agent/common-work.md packages/app/scripts/doc-subagent-prompts.test.mjs`
+- all passing
+
 ## Files Touched In Current Stage
 
 - `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/packages/server/src/session-workspaces.ts`
@@ -321,6 +383,8 @@ Interpretation:
 - `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/packages/server/src/server.proxy-session-create.test.ts`
 - `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/packages/app/src/app/app.tsx`
 - `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/packages/app/src/app/app.create-session-runtime-profile.test.ts`
+- `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/packages/app/scripts/doc-subagent-prompts.test.mjs`
+- `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/.opencode/agent/common-work.md`
 
 ## Current Working Rules
 
@@ -335,11 +399,11 @@ Interpretation:
 
 ## Next Actions
 
-1. Commit the newest `common-work` prompt / diagnostics / ledger updates, then push to GitHub and Gitee.
-2. Keep retrying pod `git pull --ff-only` + `bash scripts/restart-pod.sh --force` until SSH is usable again.
-3. After pod deploy succeeds, confirm the live pod commit and re-run a minimal hinted document-session create check.
-4. Confirm on the updated pod:
-   - runtime skill folder is physically pruned to the intended subset
-   - runtime MCP surface is physically pruned to the intended subset
+1. Commit the newest `common-work` prompt / proxy-session-create / ledger updates, then push to GitHub and Gitee.
+2. On pod, `git pull --ff-only` and run `bash scripts/restart-pod.sh --force`.
+3. After deploy, re-check on pod:
+   - fresh document-session runtime MCP surface no longer includes empty default `openwork-knowledge`
+   - runtime skill folder is still physically pruned to the intended subset
    - history view behavior still opens the intended TSX
-5. Then continue Stage 2 low-token `common-work` A/B work, focusing first on remaining hosted search-routing drift (`bocha-search`) rather than external-path drift.
+4. Re-run the low-token hosted Qin diagnostic and verify the early denied `/tmp/*.md` conversion no longer appears.
+5. Only after that baseline is clean, continue Stage 2 `common-work` A/B work focused on hosted-vs-local quality and remaining search-routing drift.

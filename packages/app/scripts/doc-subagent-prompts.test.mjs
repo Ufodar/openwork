@@ -268,6 +268,8 @@ test("common-work keeps hosted document temp artifacts workspace-local and treat
   expect(prompt).toContain("必须先复制或重新输出到 `<WORKSPACE>/.tmp/system/`");
   expect(prompt).toContain("不要新写 `/tmp/*.md`、`/tmp/*.xml`、`/tmp/*.txt` 这类命令");
   expect(prompt).toContain("把 `/tmp/*.md`、`/private/tmp/*.md` 这类路径视为 hosted session 中文件工具不可直接重开的 shell-only 路径");
+  expect(prompt).toContain("第一条转换命令就先创建 workspace 内临时目录");
+  expect(prompt).toContain("不要先试 `/tmp/...` 再根据权限报错回退");
   expect(prompt).toContain("如果已经在 `.tmp` 下生成了用户最终需要的");
   expect(prompt).toContain("在最终总结里只引用这份稳定路径");
   expect(prompt).toContain("如果最终交付物仍只存在于 `.tmp`，不算完成");

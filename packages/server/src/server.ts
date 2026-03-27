@@ -1431,36 +1431,21 @@ export async function proxyOpencodeRequest(input: {
             input.sessionRuntimeService.registerSessionRuntime(workspaceId, createdSessionId, provisionedStartedRuntime);
             provisionedStartedRuntime = null;
           }
-          if (workspace) {
+          if (workspace && enableDocumentStateForProvisionedSession) {
             try {
-              const issued = await input.runtimeKnowledgeTokens.issue({
+              const docStateIssued = await input.runtimeDocumentStateTokens.issue({
                 workspaceId,
                 sessionId: createdSessionId,
                 runtimeId: provisionedRuntimeEntry?.runtimeId ?? provisionedRuntime.runtimeId,
               });
-              await writeRuntimeKnowledgeCarrierConfig({
+              await writeRuntimeDocumentStateCarrierConfig({
                 workspacePath: workspace.path,
                 runtimeDir: provisionedRuntimeEntry?.runtimeDir ?? provisionedRuntime.runtimeDir,
-                mcpUrl: `${input.openworkBaseUrl}/workspace/${encodeURIComponent(workspaceId)}/knowledge/mcp`,
-                runtimeToken: issued.token,
-                attachedKnowledge: [],
+                mcpUrl: `${input.openworkBaseUrl}/workspace/${encodeURIComponent(workspaceId)}/doc-state/mcp`,
+                runtimeToken: docStateIssued.token,
               });
-              if (enableDocumentStateForProvisionedSession) {
-                const docStateIssued = await input.runtimeDocumentStateTokens.issue({
-                  workspaceId,
-                  sessionId: createdSessionId,
-                  runtimeId: provisionedRuntimeEntry?.runtimeId ?? provisionedRuntime.runtimeId,
-                });
-                await writeRuntimeDocumentStateCarrierConfig({
-                  workspacePath: workspace.path,
-                  runtimeDir: provisionedRuntimeEntry?.runtimeDir ?? provisionedRuntime.runtimeDir,
-                  mcpUrl: `${input.openworkBaseUrl}/workspace/${encodeURIComponent(workspaceId)}/doc-state/mcp`,
-                  runtimeToken: docStateIssued.token,
-                });
-              }
             } catch (error) {
-              console.warn("[openwork-server] Failed to provision runtime knowledge carrier:", error);
-              await input.runtimeKnowledgeTokens.revokeRuntime(workspaceId, createdSessionId, provisionedRuntimeEntry?.runtimeId ?? provisionedRuntime.runtimeId);
+              console.warn("[openwork-server] Failed to provision runtime document-state carrier:", error);
               await input.runtimeDocumentStateTokens.revokeRuntime(workspaceId, createdSessionId, provisionedRuntimeEntry?.runtimeId ?? provisionedRuntime.runtimeId);
             }
           }

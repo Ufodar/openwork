@@ -52,7 +52,7 @@ describe("proxyOpencodeRequest session creation", () => {
     };
   });
 
-  test("provisions only the runtime knowledge overlay for a standard session", async () => {
+  test("does not provision runtime knowledge overlays for a standard session with no attached knowledge", async () => {
     globalThis.fetch = (async () =>
       new Response(JSON.stringify({ id: "ses_created", title: "Created Session" }), {
         status: 200,
@@ -92,17 +92,16 @@ describe("proxyOpencodeRequest session creation", () => {
       instructions?: string[];
     };
     const runtimeInstructionRaw = await readFile(join(runtime?.runtimeDir ?? "", ".opencode", "openwork-runtime.md"), "utf8");
-    const instructionRaw = await readFile(join(runtime?.runtimeDir ?? "", ".opencode", "openwork-knowledge.md"), "utf8");
     expect(parsed.model).toBe("test-model");
     expect(parsed.mcp?.filesystem).toBeTruthy();
-    expect(parsed.mcp?.["openwork-knowledge"]).toBeTruthy();
+    expect(parsed.mcp?.["openwork-knowledge"]).toBeUndefined();
     expect(parsed.instructions).toContain(".opencode/openwork-runtime.md");
-    expect(parsed.instructions).toContain(".opencode/openwork-knowledge.md");
+    expect(parsed.instructions ?? []).not.toContain(".opencode/openwork-knowledge.md");
     expect(parsed.instructions ?? []).not.toContain(".opencode/doc-state.md");
     expect(runtimeInstructionRaw).toContain("<WORKSPACE>/.tmp/system");
-    expect(instructionRaw).toContain("openwork_knowledge_list_attached");
     expect(parsed.mcp?.doc_state).toBeUndefined();
     expect(await exists(join(runtime?.runtimeDir ?? "", ".tmp", "system"))).toBe(true);
+    await expect(readFile(join(runtime?.runtimeDir ?? "", ".opencode", "openwork-knowledge.md"), "utf8")).rejects.toThrow();
     await expect(readFile(join(runtime?.runtimeDir ?? "", ".opencode", "doc-state.md"), "utf8")).rejects.toThrow();
   });
 
@@ -146,10 +145,13 @@ describe("proxyOpencodeRequest session creation", () => {
     const docStateInstructionRaw = await readFile(join(runtime?.runtimeDir ?? "", ".opencode", "doc-state.md"), "utf8");
 
     expect(parsed.mcp?.doc_state).toBeTruthy();
+    expect(parsed.mcp?.["openwork-knowledge"]).toBeUndefined();
     expect(parsed.instructions).toContain(".opencode/openwork-runtime.md");
     expect(parsed.instructions).toContain(".opencode/doc-state.md");
+    expect(parsed.instructions ?? []).not.toContain(".opencode/openwork-knowledge.md");
     expect(runtimeInstructionRaw).toContain("workspace-local temp directory");
     expect(docStateInstructionRaw).toContain("doc_state_state_get_brief");
+    await expect(readFile(join(runtime?.runtimeDir ?? "", ".opencode", "openwork-knowledge.md"), "utf8")).rejects.toThrow();
   });
 
   test("uses preferred session hints for runtime pruning without forwarding them to OpenCode", async () => {

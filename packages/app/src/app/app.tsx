@@ -2537,6 +2537,9 @@ export default function App() {
           slug: s.slug,
           time: s.time,
           directory: s.directory,
+          openworkPreferredView: normalizeStoredView((s as Record<string, unknown>).openworkPreferredView),
+          openworkPreferredAgent: normalizeStoredAgent((s as Record<string, unknown>).openworkPreferredAgent),
+          openworkPreferredAgentLock: normalizeStoredAgent((s as Record<string, unknown>).openworkPreferredAgentLock),
         })),
       }));
     }

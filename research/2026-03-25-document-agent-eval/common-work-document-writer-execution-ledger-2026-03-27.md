@@ -68,15 +68,12 @@ Stage 1 status:
 - in progress
 
 Immediate blocker:
-- fresh local evidence is good on all three user-facing concerns:
-  - no current local evidence of `external_directory` / repo-external drift in `common-work`
-  - runtime session skill surface is physically pruned to the intended document subset
-  - history re-entry tests still restore the intended TSX/view
-- live pod verification has now cleared most of the baseline, but one hosted detour remains:
-  - fresh `document-agent/common-work` session creation is currently succeeding again on pod
-  - live runtime skill pruning and server-side session-view persistence are confirmed on pod
-  - live browser re-entry from history is opening `/document-agent/:sessionId` correctly
-  - remaining blocker: early hosted `common-work` still burns one denied `pandoc ... -o /tmp/*.md` attempt before rerouting to `<WORKSPACE>/.tmp/system/`
+- Stage 1 is now locally green again after a second history-reentry hardening pass:
+  - document-session runtime skill pruning is still enforced at the server/runtime layer
+  - runtime session metadata now persists `preferredView / preferredAgent / preferredAgentLock` in the session workspace store
+  - history resolution no longer depends only on root `.opencode/openwork.json`
+  - old runtime directories can now recover document-session view metadata from `.opencode/openwork-runtime-profile.json`
+- remaining blocker is live pod verification of this new fallback path plus a fresh hosted check of early `common-work` detours
 
 ## Latest Findings
 
@@ -218,6 +215,51 @@ Why:
 - an earlier corrected local Qin diagnostic showed a real parity trap:
   - `grep` touched `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/.opencode`
   - this was outside the session runtime workspace
+
+### 2026-03-27: history re-entry was hardened away from root-config fragility
+
+What broke:
+- live pod showed a real mismatch after logout/relogin:
+  - clicking a historical `document-agent` session could reopen `/session/:id`
+  - the matching root workspace `.opencode/openwork.json` did not reliably retain the session view metadata
+- browser-local `openwork.sessionPrefs.v1` is cleared on logout, so relying on local storage alone is not acceptable for hosted history re-entry
+
+What changed locally:
+- `SessionWorkspaceService` now persists:
+  - `preferredView`
+  - `preferredAgent`
+  - `preferredAgentLock`
+- server-side session listing now returns:
+  - `openworkPreferredView`
+  - `openworkPreferredAgent`
+  - `openworkPreferredAgentLock`
+- historical isolated sessions without stored metadata can now recover the same view hints from runtime `.opencode/openwork-runtime-profile.json`
+- app-side session preference resolution now accepts session-list hints as a fallback beneath explicit stored prefs
+- the session page now passes the full session item hint set when opening history entries, so reopening does not depend on root config sync succeeding first
+
+Why this design is better:
+- the runtime profile already exists for hosted document sessions and survives independently of flaky root config patching
+- the session workspace store is already the durable authority for hosted runtime directories
+- local explicit prefs still win, so this does not overwrite deliberate user changes
+
+Local verification:
+- `bun test packages/app/src/app/context/session.runtime-directory-hydration.test.ts packages/app/src/app/app.session-prefs-remote-baseline.test.ts packages/app/src/app/lib/session-preferences.test.ts packages/server/src/session-workspaces.test.ts packages/server/src/server.proxy-session-list.test.ts`
+- touched-file compile filter is clean:
+  - `packages/app/src/app/app.tsx`
+  - `packages/app/src/app/pages/session.tsx`
+  - `packages/app/src/app/types.ts`
+  - `packages/app/src/app/lib/session-preferences.ts`
+  - `packages/server/src/server.ts`
+  - `packages/server/src/session-history-recovery.ts`
+  - `packages/server/src/session-workspaces.ts`
+
+Remaining live check:
+- push -> `gitee`/`origin`
+- pod `git pull --ff-only`
+- `bash scripts/restart-pod.sh --force`
+- verify:
+  - historical `document-agent` click reopens `/document-agent/:id`
+  - fresh runtime `.opencode/skills` only contains the document allowlist
 - hosted runtimes would reject that route, so leaving it in local `common-work` behavior would mask a real local-vs-hosted mismatch
 
 Verification:

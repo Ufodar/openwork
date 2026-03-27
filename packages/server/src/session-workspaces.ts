@@ -39,6 +39,9 @@ export type SessionWorkspaceEntry = {
   runtimeDir: string;
   createdAt: number;
   opencodeRuntime?: IsolatedOpencodeRuntime;
+  preferredView?: string | null;
+  preferredAgent?: string | null;
+  preferredAgentLock?: string | null;
 };
 
 type RuntimeKnowledgeInstructionRecord = {
@@ -236,6 +239,10 @@ async function readStore(path: string): Promise<SessionWorkspaceStore> {
       const runtimeId = typeof record.runtimeId === "string" ? record.runtimeId.trim() : "";
       const runtimeDir = typeof record.runtimeDir === "string" ? record.runtimeDir.trim() : "";
       const createdAt = typeof record.createdAt === "number" ? record.createdAt : Date.now();
+      const preferredView = typeof record.preferredView === "string" ? record.preferredView.trim() || null : null;
+      const preferredAgent = typeof record.preferredAgent === "string" ? record.preferredAgent.trim() || null : null;
+      const preferredAgentLock =
+        typeof record.preferredAgentLock === "string" ? record.preferredAgentLock.trim() || null : null;
       const opencodeRuntimeRecord =
         record.opencodeRuntime && typeof record.opencodeRuntime === "object"
           ? record.opencodeRuntime as Partial<IsolatedOpencodeRuntime>
@@ -270,7 +277,15 @@ async function readStore(path: string): Promise<SessionWorkspaceStore> {
             }
           : undefined;
       if (!sessionId.trim() || !runtimeId || !runtimeDir) continue;
-      workspaces[sessionId] = { runtimeId, runtimeDir, createdAt, opencodeRuntime };
+      workspaces[sessionId] = {
+        runtimeId,
+        runtimeDir,
+        createdAt,
+        opencodeRuntime,
+        preferredView,
+        preferredAgent,
+        preferredAgentLock,
+      };
     }
     return { schemaVersion: 2, updatedAt: Date.now(), workspaces };
   } catch {
@@ -728,6 +743,9 @@ export class SessionWorkspaceService {
       runtimeDir: entry.runtimeDir,
       createdAt: entry.createdAt,
       opencodeRuntime: entry.opencodeRuntime,
+      preferredView: normalizeOptionalString(entry.preferredView),
+      preferredAgent: normalizeOptionalString(entry.preferredAgent),
+      preferredAgentLock: normalizeOptionalString(entry.preferredAgentLock),
     };
     await writeStore(resolveSessionWorkspacePath(ws), store.workspaces);
   }

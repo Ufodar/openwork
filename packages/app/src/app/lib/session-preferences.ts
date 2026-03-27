@@ -142,9 +142,13 @@ const inferLegacySessionPreferences = (title?: string | null): {
 
 export const resolveSessionPreferences = (input: {
   stored?: OpenworkSessionPrefs | null;
+  hint?: OpenworkSessionPrefs | null;
   title?: string | null;
 }): ResolvedSessionPreferences => {
-  const stored = input.stored ?? null;
+  const stored = {
+    ...(input.hint ?? {}),
+    ...(input.stored ?? {}),
+  } satisfies OpenworkSessionPrefs;
   const storedView = resolveStoredSessionView(stored?.view);
   const storedAgent = normalizeStoredAgent(stored?.agent);
   const storedAgentLock = normalizeStoredAgent(stored?.agentLock);

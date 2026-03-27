@@ -22,6 +22,9 @@ export type SidebarSessionItem = {
     created?: number | null;
   };
   directory?: string | null;
+  openworkPreferredView?: View | null;
+  openworkPreferredAgent?: string | null;
+  openworkPreferredAgentLock?: string | null;
 };
 
 export type WorkspaceSessionGroup = {

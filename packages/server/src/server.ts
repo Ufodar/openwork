@@ -30,7 +30,7 @@ import { createConfiguredRagflowClient, type RagflowClient } from "./ragflow.js"
 import { RuntimeDocumentStateTokenService } from "./runtime-document-state-tokens.js";
 import { RuntimeKnowledgeTokenService } from "./runtime-knowledge-tokens.js";
 import { SessionOwnershipService } from "./session-ownership.js";
-import { recoverWorkspaceSessionRecords } from "./session-history-recovery.js";
+import { readRuntimeProfilePreferences, recoverWorkspaceSessionRecords } from "./session-history-recovery.js";
 import {
   buildSessionPermissionRules,
   provisionSessionWorkspace,
@@ -842,6 +842,9 @@ function parseListedSession(value: unknown): {
 
 type WorkspaceListedSession = NonNullable<ReturnType<typeof parseListedSession>> & {
   ownerKey: string;
+  openworkPreferredView?: string | null;
+  openworkPreferredAgent?: string | null;
+  openworkPreferredAgentLock?: string | null;
 };
 
 async function listWorkspaceSessions(input: {
@@ -912,6 +915,9 @@ async function listWorkspaceSessions(input: {
         return {
           ...parsed,
           directory,
+          openworkPreferredView: recoveredById.get(parsed.id)?.openworkPreferredView ?? null,
+          openworkPreferredAgent: recoveredById.get(parsed.id)?.openworkPreferredAgent ?? null,
+          openworkPreferredAgentLock: recoveredById.get(parsed.id)?.openworkPreferredAgentLock ?? null,
           ownerKey: owner.ownerKey,
         } satisfies WorkspaceListedSession;
       }),
@@ -925,6 +931,10 @@ async function listWorkspaceSessions(input: {
   for (const [sessionId, owner] of targetEntries) {
     const runtimeEntry = runtimeEntries.get(sessionId);
     if (!runtimeEntry?.opencodeRuntime || runtimeEntry.opencodeRuntime.mode !== "isolated_process") continue;
+    const runtimeProfilePreferences =
+      runtimeEntry.preferredView || runtimeEntry.preferredAgent || runtimeEntry.preferredAgentLock
+        ? null
+        : await readRuntimeProfilePreferences(runtimeEntry.runtimeDir);
     const runningWorkspace = input.sessionRuntimeService?.peekSessionWorkspace(
       input.workspace,
       input.workspace.id,
@@ -946,6 +956,21 @@ async function listWorkspaceSessions(input: {
             merged.set(sessionId, {
               ...parsed,
               directory,
+              openworkPreferredView:
+                runtimeEntry.preferredView ??
+                runtimeProfilePreferences?.openworkPreferredView ??
+                recoveredById.get(sessionId)?.openworkPreferredView ??
+                null,
+              openworkPreferredAgent:
+                runtimeEntry.preferredAgent ??
+                runtimeProfilePreferences?.openworkPreferredAgent ??
+                recoveredById.get(sessionId)?.openworkPreferredAgent ??
+                null,
+              openworkPreferredAgentLock:
+                runtimeEntry.preferredAgentLock ??
+                runtimeProfilePreferences?.openworkPreferredAgentLock ??
+                recoveredById.get(sessionId)?.openworkPreferredAgentLock ??
+                null,
               ownerKey: owner.ownerKey,
             });
             continue;
@@ -971,6 +996,10 @@ async function listWorkspaceSessions(input: {
       directory: runtimeEntry.runtimeDir,
       createdAt: runtimeEntry.createdAt ?? owner.updatedAt ?? null,
       updatedAt: owner.updatedAt ?? runtimeEntry.createdAt ?? null,
+      openworkPreferredView: runtimeEntry.preferredView ?? runtimeProfilePreferences?.openworkPreferredView ?? null,
+      openworkPreferredAgent: runtimeEntry.preferredAgent ?? runtimeProfilePreferences?.openworkPreferredAgent ?? null,
+      openworkPreferredAgentLock:
+        runtimeEntry.preferredAgentLock ?? runtimeProfilePreferences?.openworkPreferredAgentLock ?? null,
       ownerKey: owner.ownerKey,
     });
   }
@@ -1246,6 +1275,7 @@ export async function proxyOpencodeRequest(input: {
     workspace && workspaceId && pathSessionId
       ? await input.sessionWorkspaces.getWorkspace(workspaceId, pathSessionId)
       : null;
+  let sessionProvisioningHints: SessionRuntimeProvisioningHints | null = null;
   let provisionedRuntime: { runtimeId: string; runtimeDir: string } | null = null;
   let provisionedRuntimeEntry: SessionWorkspaceEntry | null = null;
   let provisionedStartedRuntime: StartedSessionRuntime | null = null;
@@ -1275,6 +1305,7 @@ export async function proxyOpencodeRequest(input: {
       preferredAgentLock:
         typeof payload.openworkPreferredAgentLock === "string" ? payload.openworkPreferredAgentLock.trim() || null : null,
     };
+    sessionProvisioningHints = provisioningHints;
     delete payload.openworkPreferredView;
     delete payload.openworkPreferredAgent;
     delete payload.openworkPreferredAgentLock;
@@ -1426,6 +1457,9 @@ export async function proxyOpencodeRequest(input: {
             runtimeDir: provisionedRuntimeEntry?.runtimeDir ?? provisionedRuntime.runtimeDir,
             createdAt: provisionedRuntimeEntry?.createdAt ?? Date.now(),
             opencodeRuntime: provisionedRuntimeEntry?.opencodeRuntime,
+            preferredView: sessionProvisioningHints?.preferredView ?? null,
+            preferredAgent: sessionProvisioningHints?.preferredAgent ?? null,
+            preferredAgentLock: sessionProvisioningHints?.preferredAgentLock ?? null,
           });
           if (provisionedStartedRuntime && input.sessionRuntimeService) {
             input.sessionRuntimeService.registerSessionRuntime(workspaceId, createdSessionId, provisionedStartedRuntime);

@@ -283,4 +283,151 @@ describe("proxyOpencodeRequest session listing", () => {
     expect(payload[0]?.directory).toBe(runtimeDir);
     expect(fetchCount).toBe(0);
   });
+
+  test("includes preferred view metadata from isolated session workspace entries", async () => {
+    globalThis.fetch = (async () => {
+      throw new Error("shared session list should not be queried for isolated sessions");
+    }) as typeof fetch;
+
+    const workspacePath = await mkdir(join(tmpdir(), `openwork-session-view-metadata-${Date.now()}`), { recursive: true });
+    const runtimeDir = join(workspacePath, "documents", "sessions", "runtime-doc-agent");
+    await mkdir(runtimeDir, { recursive: true });
+
+    const workspace: WorkspaceInfo = {
+      id: "ws_doc_agent",
+      name: "doc-agent",
+      path: workspacePath,
+      workspaceType: "local",
+      baseUrl: "http://127.0.0.1:33459",
+    };
+
+    const sessionOwnership = {
+      listEntries: async () => ({
+        ses_doc_agent: { ownerKey: "host-owner", updatedAt: 1 },
+      }),
+    } as unknown as SessionOwnershipService;
+
+    const sessionWorkspaces = {
+      getWorkspace: async () => ({
+        runtimeId: "runtime-doc-agent",
+        runtimeDir,
+        createdAt: 1,
+        preferredView: "document-agent",
+        preferredAgent: "common-work",
+        preferredAgentLock: "common-work",
+        opencodeRuntime: {
+          mode: "isolated_process",
+          rootDir: join(runtimeDir, ".openwork-runtime", "opencode"),
+          configDir: join(runtimeDir, ".openwork-runtime", "opencode", "config"),
+          configHomeDir: join(runtimeDir, ".openwork-runtime", "opencode", "config-home"),
+          dataDir: join(runtimeDir, ".openwork-runtime", "opencode", "data"),
+          stateDir: join(runtimeDir, ".openwork-runtime", "opencode", "state"),
+          cacheDir: join(runtimeDir, ".openwork-runtime", "opencode", "cache"),
+          bindHost: "127.0.0.1",
+        },
+      }),
+    } as unknown as SessionWorkspaceService;
+
+    const response = await proxyOpencodeRequest({
+      request: new Request(
+        `http://openwork.local/w/${workspace.id}/opencode/session?directory=${encodeURIComponent(workspacePath)}`,
+        { method: "GET" },
+      ),
+      url: new URL(`http://openwork.local/w/${workspace.id}/opencode/session?directory=${encodeURIComponent(workspacePath)}`),
+      workspace,
+      proxyPath: "/session",
+      actor: { type: "remote", scope: "owner", tokenHash: "host-owner" },
+      sessionOwnership,
+      sessionWorkspaces,
+      runtimeKnowledgeTokens: { revokeRuntime: async () => undefined, issue: async () => ({ token: "", expiresAt: 0 }), resolve: async () => null } as any,
+      runtimeDocumentStateTokens: { revokeRuntime: async () => undefined, issue: async () => ({ token: "", expiresAt: 0 }), resolve: async () => null } as any,
+      openworkBaseUrl: "http://127.0.0.1:8789",
+      sessionRuntimeService: {
+        peekSessionWorkspace: () => null,
+      } as any,
+    });
+
+    const payload = await response.json() as Array<Record<string, unknown>>;
+    expect(payload[0]?.id).toBe("ses_doc_agent");
+    expect(payload[0]?.openworkPreferredView).toBe("document-agent");
+    expect(payload[0]?.openworkPreferredAgent).toBe("common-work");
+    expect(payload[0]?.openworkPreferredAgentLock).toBe("common-work");
+  });
+
+  test("recovers preferred view metadata from runtime profiles for historical isolated sessions", async () => {
+    globalThis.fetch = (async () => new Response(JSON.stringify([]), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    })) as typeof fetch;
+
+    const workspacePath = await mkdir(join(tmpdir(), `openwork-session-runtime-profile-${Date.now()}`), { recursive: true });
+    const runtimeDir = join(workspacePath, "documents", "sessions", "runtime-profile-1");
+    await mkdir(join(runtimeDir, ".opencode"), { recursive: true });
+    await writeFile(
+      join(runtimeDir, ".opencode", "openwork-runtime-profile.json"),
+      JSON.stringify({
+        id: "document-agent",
+        skillAllowlist: ["docx"],
+        mcpAllowlist: ["doc_state"],
+      }),
+      "utf8",
+    );
+
+    const workspace: WorkspaceInfo = {
+      id: "ws_runtime_profile",
+      name: "runtime-profile",
+      path: workspacePath,
+      workspaceType: "local",
+      baseUrl: "http://127.0.0.1:33459",
+    };
+
+    const sessionOwnership = {
+      listEntries: async () => ({
+        ses_runtime_profile: { ownerKey: "host-owner", updatedAt: 1 },
+      }),
+    } as unknown as SessionOwnershipService;
+
+    const sessionWorkspaces = {
+      getWorkspace: async () => ({
+        runtimeId: "runtime-profile-1",
+        runtimeDir,
+        createdAt: 1,
+        opencodeRuntime: {
+          mode: "isolated_process",
+          rootDir: join(runtimeDir, ".openwork-runtime", "opencode"),
+          configDir: join(runtimeDir, ".openwork-runtime", "opencode", "config"),
+          configHomeDir: join(runtimeDir, ".openwork-runtime", "opencode", "config-home"),
+          dataDir: join(runtimeDir, ".openwork-runtime", "opencode", "data"),
+          stateDir: join(runtimeDir, ".openwork-runtime", "opencode", "state"),
+          cacheDir: join(runtimeDir, ".openwork-runtime", "opencode", "cache"),
+          bindHost: "127.0.0.1",
+        },
+      }),
+    } as unknown as SessionWorkspaceService;
+
+    const response = await proxyOpencodeRequest({
+      request: new Request(
+        `http://openwork.local/w/${workspace.id}/opencode/session?directory=${encodeURIComponent(workspacePath)}`,
+        { method: "GET" },
+      ),
+      url: new URL(`http://openwork.local/w/${workspace.id}/opencode/session?directory=${encodeURIComponent(workspacePath)}`),
+      workspace,
+      proxyPath: "/session",
+      actor: { type: "remote", scope: "owner", tokenHash: "host-owner" },
+      sessionOwnership,
+      sessionWorkspaces,
+      runtimeKnowledgeTokens: { revokeRuntime: async () => undefined, issue: async () => ({ token: "", expiresAt: 0 }), resolve: async () => null } as any,
+      runtimeDocumentStateTokens: { revokeRuntime: async () => undefined, issue: async () => ({ token: "", expiresAt: 0 }), resolve: async () => null } as any,
+      openworkBaseUrl: "http://127.0.0.1:8789",
+      sessionRuntimeService: {
+        peekSessionWorkspace: () => null,
+      } as any,
+    });
+
+    const payload = await response.json() as Array<Record<string, unknown>>;
+    expect(payload[0]?.id).toBe("ses_runtime_profile");
+    expect(payload[0]?.openworkPreferredView).toBe("document-agent");
+    expect(payload[0]?.openworkPreferredAgent).toBe("common-work");
+    expect(payload[0]?.openworkPreferredAgentLock).toBe("common-work");
+  });
 });

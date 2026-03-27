@@ -57,6 +57,41 @@ describe("mergeOpenworkSessionPrefs", () => {
 });
 
 describe("resolveSessionPreferences", () => {
+  test("uses session-list hints when stored prefs are missing", () => {
+    const resolved = resolveSessionPreferences({
+      hint: {
+        view: "document-agent",
+        agent: "common-work",
+        agentLock: "common-work",
+      },
+      title: "Generated title",
+    });
+
+    expect(resolved.view).toEqual({ value: "document-agent", source: "stored" });
+    expect(resolved.agent).toEqual({ value: "common-work", source: "stored" });
+    expect(resolved.agentLock).toEqual({ value: "common-work", source: "stored" });
+  });
+
+  test("keeps explicit stored prefs authoritative over session-list hints", () => {
+    const resolved = resolveSessionPreferences({
+      stored: {
+        view: "document-writer",
+        agent: "document-writer",
+        agentLock: "document-writer",
+      },
+      hint: {
+        view: "document-agent",
+        agent: "common-work",
+        agentLock: "common-work",
+      },
+      title: "Generated title",
+    });
+
+    expect(resolved.view).toEqual({ value: "document-writer", source: "stored" });
+    expect(resolved.agent).toEqual({ value: "document-writer", source: "stored" });
+    expect(resolved.agentLock).toEqual({ value: "document-writer", source: "stored" });
+  });
+
   test("preserves a stored document-writer view instead of collapsing it to document-agent", () => {
     const resolved = resolveSessionPreferences({
       stored: {

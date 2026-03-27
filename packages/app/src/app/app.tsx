@@ -2390,6 +2390,9 @@ export default function App() {
           slug: session.slug,
           time: session.time,
           directory: session.directory,
+          openworkPreferredView: normalizeStoredView((session as Record<string, unknown>).openworkPreferredView),
+          openworkPreferredAgent: normalizeStoredAgent((session as Record<string, unknown>).openworkPreferredAgent),
+          openworkPreferredAgentLock: normalizeStoredAgent((session as Record<string, unknown>).openworkPreferredAgentLock),
         }));
 
         setSidebarSessionsByWorkspaceId((prev) => ({
@@ -3066,9 +3069,13 @@ export default function App() {
     return resolveStoredRagflowSelection(openworkSessionPrefsById()[id] ?? null);
   };
 
-  const resolveSessionPreferenceState = (sessionId: string, options?: { title?: string | null }) =>
+  const resolveSessionPreferenceState = (
+    sessionId: string,
+    options?: { title?: string | null; hint?: OpenworkSessionPrefs | null },
+  ) =>
     resolveSessionPreferences({
       stored: getStoredSessionPrefs(sessionId),
+      hint: options?.hint,
       title: options?.title,
     });
 
@@ -3720,7 +3727,10 @@ export default function App() {
     persistSessionPreferredView(sessionId, "document-writer").catch(() => undefined);
   });
 
-  const openSessionInPreferredView = async (sessionId: string, options?: { title?: string | null }): Promise<void> => {
+  const openSessionInPreferredView = async (
+    sessionId: string,
+    options?: { title?: string | null; hint?: OpenworkSessionPrefs | null },
+  ): Promise<void> => {
     const id = sessionId.trim();
     if (!id) return;
     try {
@@ -3728,7 +3738,7 @@ export default function App() {
     } catch {
       // ignore
     }
-    const resolvedPrefs = resolveSessionPreferenceState(id, { title: options?.title });
+    const resolvedPrefs = resolveSessionPreferenceState(id, { title: options?.title, hint: options?.hint });
     const resolved = resolvedPrefs.view.value;
     const resolvedLock = resolvedPrefs.agentLock.value;
     if (resolvedLock) {
@@ -5523,10 +5533,11 @@ export default function App() {
           : (options.agentLock?.trim() ?? "") || null;
       const nextView = options?.view ?? "session";
 
-      let rawResult: Awaited<ReturnType<typeof c.session.create>>;
+      type SessionCreateFn = NonNullable<ReturnType<typeof client>>["session"]["create"];
+      let rawResult: Awaited<ReturnType<SessionCreateFn>>;
       try {
         mark("session:create:start");
-        rawResult = await (c.session.create as (payload: Record<string, unknown>) => Promise<Awaited<ReturnType<typeof c.session.create>>> )({
+        rawResult = await (c.session.create as (payload: Record<string, unknown>) => Promise<Awaited<ReturnType<SessionCreateFn>>>)({
           directory: resolveActiveClientWorkspaceRoot(),
           title: title || undefined,
           openworkEnableDocState: options?.enableDocumentState === true ? true : undefined,
@@ -5568,6 +5579,9 @@ export default function App() {
         slug: session.slug,
         time: session.time,
         directory: session.directory,
+        openworkPreferredView: normalizeStoredView(nextView),
+        openworkPreferredAgent: normalizeStoredAgent(requestedAgent),
+        openworkPreferredAgentLock: normalizeStoredAgent(requestedAgentLock),
       };
       const wsId = workspaceStore.activeWorkspaceId().trim();
       if (wsId) {

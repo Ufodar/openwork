@@ -14,6 +14,7 @@ import type {
   ProviderListItem,
   SettingsTab,
   SkillCard,
+  SidebarSessionItem,
   TodoItem,
   View,
   WorkspaceConnectionState,
@@ -98,7 +99,13 @@ export type SessionViewProps = {
   selectedSessionId: string | null;
   routeSessionHydratingId: string | null;
   setView: (view: View, sessionId?: string) => void;
-  openSessionInPreferredView: (sessionId: string, options?: { title?: string | null }) => void | Promise<void>;
+  openSessionInPreferredView: (
+    sessionId: string,
+    options?: {
+      title?: string | null;
+      hint?: { view?: View | null; agent?: string | null; agentLock?: string | null } | null;
+    },
+  ) => void | Promise<void>;
   tab: DashboardTab;
   setTab: (tab: DashboardTab) => void;
   setSettingsTab: (tab: SettingsTab) => void;
@@ -2224,17 +2231,26 @@ export default function SessionView(props: SessionViewProps) {
     props.setPrompt(draft.text);
   };
 
-  const openSessionFromList = (workspaceId: string, sessionId: string, sessionTitle?: string | null) => {
+  const openSessionFromList = (workspaceId: string, session: SidebarSessionItem) => {
+    const sessionId = session.id.trim();
     if (!sessionId) return;
+    const hint =
+      session.openworkPreferredView || session.openworkPreferredAgent || session.openworkPreferredAgentLock
+        ? {
+            view: session.openworkPreferredView ?? null,
+            agent: session.openworkPreferredAgent ?? null,
+            agentLock: session.openworkPreferredAgentLock ?? null,
+          }
+        : null;
     // Route-driven selection: navigate first and let the route effect own selectSession.
     if (workspaceId === props.activeWorkspaceId) {
-      void props.openSessionInPreferredView(sessionId, { title: sessionTitle ?? null });
+      void props.openSessionInPreferredView(sessionId, { title: session.title ?? null, hint });
       return;
     }
     // For different workspace, activate workspace first
     void (async () => {
       await Promise.resolve(props.activateWorkspace(workspaceId));
-      void props.openSessionInPreferredView(sessionId, { title: sessionTitle ?? null });
+      void props.openSessionInPreferredView(sessionId, { title: session.title ?? null, hint });
     })();
   };
 
@@ -2359,7 +2375,10 @@ export default function SessionView(props: SessionViewProps) {
           : tr("session.meta_switch"),
       action: () => {
         closeCommandPalette();
-        openSessionFromList(item.workspaceId, item.sessionId);
+        openSessionFromList(item.workspaceId, {
+          id: item.sessionId,
+          title: item.title,
+        });
       },
     }));
   });
@@ -2752,12 +2771,12 @@ export default function SessionView(props: SessionViewProps) {
                                         ? "bg-dls-active text-dls-text"
                                         : "hover:bg-dls-hover"
                                     }`}
-                                    onClick={() => openSessionFromList(workspace().id, session.id, session.title)}
+                                    onClick={() => openSessionFromList(workspace().id, session)}
                                     onKeyDown={(event) => {
                                       if (event.key !== "Enter" && event.key !== " ") return;
                                       if (event.isComposing || event.keyCode === 229) return;
                                       event.preventDefault();
-                                      openSessionFromList(workspace().id, session.id, session.title);
+                                      openSessionFromList(workspace().id, session);
                                     }}
                                     >
                                     <span class="text-sm text-dls-text truncate mr-2 font-medium">
@@ -2825,12 +2844,12 @@ export default function SessionView(props: SessionViewProps) {
                                           ? "bg-dls-active text-dls-text"
                                           : "hover:bg-dls-hover"
                                       }`}
-                                      onClick={() => openSessionFromList(workspace().id, session.id, session.title)}
+                                      onClick={() => openSessionFromList(workspace().id, session)}
                                       onKeyDown={(event) => {
                                         if (event.key !== "Enter" && event.key !== " ") return;
                                         if (event.isComposing || event.keyCode === 229) return;
                                         event.preventDefault();
-                                        openSessionFromList(workspace().id, session.id, session.title);
+                                        openSessionFromList(workspace().id, session);
                                       }}
                                     >
                                       <span class="text-sm text-dls-text truncate mr-2 font-medium">

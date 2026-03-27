@@ -448,6 +448,9 @@ describe("provisionSessionWorkspace", () => {
         tempDir: "/tmp/runtime-1/.tmp/system",
         bindHost: "127.0.0.1",
       },
+      preferredView: "document-agent",
+      preferredAgent: "common-work",
+      preferredAgentLock: "common-work",
     });
 
     const stored = await service.getWorkspace("ws_1", "ses_1");
@@ -456,6 +459,12 @@ describe("provisionSessionWorkspace", () => {
     expect(stored?.opencodeRuntime?.configDir).toBe("/tmp/runtime-1/.openwork-runtime/opencode/config");
     expect(stored?.opencodeRuntime?.configHomeDir).toBe("/tmp/runtime-1/.openwork-runtime/opencode/config-home");
     expect(stored?.opencodeRuntime?.tempDir).toBe("/tmp/runtime-1/.tmp/system");
+    expect(stored?.preferredView).toBe("document-agent");
+    expect(stored?.preferredAgent).toBe("common-work");
+    expect(stored?.preferredAgentLock).toBe("common-work");
     expect(listed.ses_1?.opencodeRuntime?.mode).toBe("isolated_process");
+    expect(listed.ses_1?.preferredView).toBe("document-agent");
+    expect(listed.ses_1?.preferredAgent).toBe("common-work");
+    expect(listed.ses_1?.preferredAgentLock).toBe("common-work");
   });
 });

@@ -54,20 +54,6 @@ export const MCP_QUICK_CONNECT: McpDirectoryInfo[] = [
     oauth: true,
   },
   {
-    name: "Stripe",
-    description: "Inspect payments, invoices, and subscriptions.",
-    url: "https://mcp.stripe.com",
-    type: "remote",
-    oauth: true,
-  },
-  {
-    name: "HubSpot",
-    description: "CRM notes, companies, and pipeline status.",
-    url: "https://mcp.hubspot.com/anthropic",
-    type: "remote",
-    oauth: true,
-  },
-  {
     name: "Context7",
     description: "Search product docs with richer context.",
     url: "https://mcp.context7.com/mcp",

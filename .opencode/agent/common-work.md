@@ -62,6 +62,15 @@ find . -maxdepth 3 -type f \( -iname '*.docx' -o -iname '*.doc' -o -iname '*.pdf
 
 一次只围绕当前阶段最关键的一个格式工作。跨格式任务按阶段切换，不要一上来加载一堆 skill。
 
+读到真实文件后，只有在当前阶段确实需要时，才切到这些补充 skill：
+
+- 长篇方案、申报材料、技术说明、提纲共创或章节重组 → `doc-coauthoring`
+- 需要联网补充依据、整理引用、补章节级 research support → `content-research-writer`
+- 产物本质上是内部汇报、FAQ、项目更新、领导汇报类文稿 → `internal-comms`
+- 文档交付依赖截图、扫描图、插图清晰度 → `image-enhancer`
+
+补充 skill 只作为阶段性增强，不替代格式 skill，也不要一次同时拉起多个“看起来都可能有用”的 skill。
+
 ### 4. Binary and path safety
 
 - 不要直接对 `.docx` / `.xlsx` / `.pptx` 使用 `read`；先走对应格式能力、文本提取或中间产物。
@@ -184,11 +193,15 @@ find . -maxdepth 3 -type f \( -iname '*.docx' -o -iname '*.doc' -o -iname '*.pdf
 这里只保留当前真正可信的最小路由：
 
 1. 默认只优先使用格式 skill：`docx`、`pdf`、`xlsx`、`pptx`
-2. 用户要求整篇结构/格式规范化时，优先单独走 `doc-normalize`
-3. `writing-plans` 用于明显跨多轮、多文件、多输出物、系统调试或长文档统筹任务；满足这些特征时，优先考虑它，而不是直接手写长计划
-4. `systematic-debugging` 只用于连续失败、环境异常或结果明显对不上
-5. `verification-before-completion` 只用于准备对外宣称完成之前
-6. 泛化写作、整理、头脑风暴类 skill 不作为起手默认路线；但在你已读过真实文件、且这些 skill 能实质提升方案拆解、结构设计、任务执行顺序或长任务统筹时，应主动使用，不要求必须等用户点名
+2. 长篇方案、申报材料、技术说明、提纲共创或章节重组时，优先考虑 `doc-coauthoring`
+3. 用户要求整篇结构/格式规范化时，优先单独走 `doc-normalize`
+4. 需要联网补充依据、整理引用或章节级 research support 时，优先考虑 `content-research-writer`
+5. 内部汇报、FAQ、周报、领导更新或项目更新类文稿，优先考虑 `internal-comms`
+6. 截图、插图、扫描图质量明显影响交付时，优先考虑 `image-enhancer`
+7. `writing-plans` 用于明显跨多轮、多文件、多输出物、系统调试或长文档统筹任务；满足这些特征时，优先考虑它，而不是直接手写长计划
+8. `systematic-debugging` 只用于连续失败、环境异常或结果明显对不上
+9. `verification-before-completion` 只用于准备对外宣称完成之前
+10. 泛化写作、整理、头脑风暴类 skill 不作为起手默认路线；但在你已读过真实文件、且这些 skill 能实质提升方案拆解、结构设计、任务执行顺序或长任务统筹时，应主动使用，不要求必须等用户点名
 
 ## Workflow
 

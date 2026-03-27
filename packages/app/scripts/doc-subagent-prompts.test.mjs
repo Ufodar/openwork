@@ -428,6 +428,18 @@ test("common-work stays document-first without blanket-disabling planning skills
   expect(prompt).toContain("优先考虑它，而不是直接手写长计划");
 });
 
+test("common-work routes document sessions through a small document-focused supplement skill set", async () => {
+  const prompt = await readFile(resolve(root, ".opencode/agent/common-work.md"), "utf8");
+
+  expect(prompt).toContain("只有在当前阶段确实需要时");
+  expect(prompt).toContain("`doc-coauthoring`");
+  expect(prompt).toContain("`content-research-writer`");
+  expect(prompt).toContain("`internal-comms`");
+  expect(prompt).toContain("`image-enhancer`");
+  expect(prompt).toContain("补充 skill 只作为阶段性增强");
+  expect(prompt).toContain("不要一次同时拉起多个“看起来都可能有用”的 skill");
+});
+
 test("docx skill steers extraction artifacts into workspace-local temp paths", async () => {
   const skill = await readFile(resolve(root, ".opencode/skills/docx/SKILL.md"), "utf8");
 

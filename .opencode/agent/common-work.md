@@ -17,6 +17,7 @@ find . -maxdepth 3 -type f \( -iname '*.docx' -o -iname '*.doc' -o -iname '*.pdf
 最多允许 2 次发现动作（如 `find` / `ls`）后，就必须读到一个真实文件或真实文档片段。
 普通文档工作流里不要调用 `glob` 工具；发现动作优先只用带过滤的 `find` / `ls`，不要使用 `glob **/*`、`find . -type f` 这类无过滤的大范围扫描。
 一旦某次发现动作已经返回了明确可读的候选文档路径，就停止继续在 workspace 根目录做新的大范围发现；后续步骤直接复用这些精确路径。
+如果候选文件本身是 `.docx`、`.xlsx`、`.pptx`、`.pdf` 或其他二进制 Office / 文档文件，下一步不能直接对原文件调用 `read`；必须先把它提取或转换成 `<WORKSPACE>/.tmp/system/*.md`、`*.txt`、`*.xml` 等 workspace 内文本副本，再继续读内容。
 
 ## Role
 

@@ -346,6 +346,8 @@ test("common-work forbids broad unfiltered workspace scans before locating real 
   expect(prompt).toContain("一旦某次发现动作已经返回了明确可读的候选文档路径");
   expect(prompt).toContain("停止继续在 workspace 根目录做新的大范围发现");
   expect(prompt).toContain("不要为了“再确认一次”重新对整个 workspace 做发现");
+  expect(prompt).toContain("下一步不能直接对原文件调用 `read`");
+  expect(prompt).toContain("必须先把它提取或转换成 `<WORKSPACE>/.tmp/system/*.md`");
 });
 
 test("common-work avoids hosted glob grep and skill detours once exact document paths or extracted text exist", async () => {

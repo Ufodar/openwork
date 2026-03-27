@@ -140,6 +140,8 @@ Document-native operating rules:
 - Read real files early. Do not stay in planning-only mode for long.
 - If the workspace already contains a likely source document, inspect it before asking the user to upload files or restate facts that can be extracted directly.
 - Prefer exact-path file work and real file evidence over generic writing or organizing skills.
+- If a candidate source file is a binary Office document such as \`.docx\`, \`.xlsx\`, or \`.pptx\`, do not call \`read\` on that original file; first extract or convert it into workspace-local Markdown / text under \`<WORKSPACE>/.tmp/system\`, then read the extracted artifact.
+- A failed binary \`read\` on an Office file does not count as progress; reroute immediately to extraction instead of retrying the same read path.
 - Choose the format skill that matches the current authoritative file or target output.
 - Do not call the skill tool merely to "activate" docx, pdf, xlsx, or pptx for ordinary document reads, extraction, conversion, or verification; those document capabilities are already installed in this runtime.
 - Do not use \`external_directory\` or workspace-external absolute paths for normal document discovery, reads, or writes.

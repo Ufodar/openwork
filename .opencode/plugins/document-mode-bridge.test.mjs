@@ -9,4 +9,6 @@ test("document mode bridge forbids external-directory detours for document-heavy
   expect(file).toContain("create \\`<WORKSPACE>/.tmp/system\\`");
   expect(file).toContain("Do not \"probe\" \\`/tmp/*\\`");
   expect(file).toContain("parent directories, sibling session folders, or repo-root files");
+  expect(file).toContain("do not call \\`read\\` on that original file");
+  expect(file).toContain("A failed binary \\`read\\` on an Office file does not count as progress");
 });

@@ -424,12 +424,24 @@ async function loginPod() {
   });
 }
 
-async function createSession({ baseUrl, token, workspaceId, title, enableDocumentState = false }) {
+async function createSession({
+  baseUrl,
+  token,
+  workspaceId,
+  title,
+  enableDocumentState = false,
+  preferredView = null,
+  preferredAgent = null,
+  preferredAgentLock = null,
+}) {
   return requestJson(`${baseUrl}/w/${encodeURIComponent(workspaceId)}/opencode/session`, token, {
     method: "POST",
     body: JSON.stringify({
       title,
       openworkEnableDocState: enableDocumentState ? true : undefined,
+      openworkPreferredView: preferredView || undefined,
+      openworkPreferredAgent: preferredAgent || undefined,
+      openworkPreferredAgentLock: preferredAgentLock || undefined,
     }),
   });
 }
@@ -863,6 +875,9 @@ async function runOpenWorkCommonWorkLane({
     workspaceId,
     title: `${SCENARIO_KEY}-${lane}-common-work-${Date.now()}`,
     enableDocumentState: false,
+    preferredView: "document-agent",
+    preferredAgent: "common-work",
+    preferredAgentLock: "common-work",
   });
   const sessionId = created.id;
   log("lane.session", { lane, sessionId, workspaceId, directory });

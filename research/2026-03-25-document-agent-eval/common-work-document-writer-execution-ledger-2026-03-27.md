@@ -68,7 +68,7 @@ Stage 1 status:
 - in progress
 
 Immediate blocker:
-- pod-side live verification is still partially blocked by intermittent SSH / edge timeout; local code and tests are green, but the latest runtime folder listing on pod still needs a fresh check after republish
+- the latest baseline tightening commit is pushed to GitHub and Gitee, but pod-side `git pull --ff-only` / `restart-pod.sh --force` is currently blocked by intermittent SSH / edge timeout; live HTTP health is up, but the pod has not yet been confirmed on the newest commit
 
 ## Latest Findings
 
@@ -151,6 +151,55 @@ Interpretation:
 - the current concern around `external_directory` / workspace-external writes is not showing up as a local parity gap in the first low-token Qin pass
 - the remaining parity question is still pod/common-work behavior under hosted runtime, not local raw behavior
 
+### 2026-03-27: compare harness was corrected to create real document-agent/common-work hosted sessions
+
+What was wrong:
+- the hosted/local `common-work` compare harness originally created generic OpenWork sessions
+- it did not forward:
+  - `openworkPreferredView=document-agent`
+  - `openworkPreferredAgent=common-work`
+  - `openworkPreferredAgentLock=common-work`
+
+Why it mattered:
+- some earlier hosted diagnostics were under-testing the real runtime profile
+- runtime pruning and hosted session surface can only be trusted when these hints are forwarded
+
+Fix:
+- `tmp/qin-abc-minimax.mjs` now forwards the preferred runtime profile hints when creating hosted `common-work` sessions
+- regression guard added in `packages/app/scripts/qin-compare-harness.test.mjs`
+
+Verification:
+- `bun test packages/app/scripts/qin-compare-harness.test.mjs`
+- `node --check tmp/qin-abc-minimax.mjs`
+
+### 2026-03-27: corrected hosted Qin diagnostic shows no external-path drift on the current pod build
+
+Scenario:
+- `QIN_ABC_LANES=pod OPENWORK_COMPARE_MODE=diagnostic node tmp/qin-abc-minimax.mjs`
+- with the corrected hosted session-create hints enabled
+
+Findings on the current deployed pod build:
+- session creation succeeded for a real `document-agent/common-work` session
+- upload completed for both Qin source documents
+- routing diagnostics:
+  - `externalPathTouchCount = 0`
+  - `systemTempTouchCount = 0`
+  - `directOfficeReadCount = 0`
+  - `broadDiscoveryCount = 0`
+- early tool burst:
+  - `bash: 4`
+  - `glob: 1`
+  - `skill: 1`
+  - `read: 1`
+  - `bocha-search: 3`
+  - `todowrite: 1`
+  - `write: 1` (aborted only because the diagnostic run intentionally stopped early)
+
+Interpretation:
+- the hosted regression is not currently about `external_directory`, system temp reopening, or direct Office reads
+- the more credible hosted/common-work weakness in the early phase is still search routing churn, especially repeated `bocha-search` calls before enough local-document grounding
+- the pod used in this diagnostic still reported OpenCode `version = 1.3.2`, so the result describes the current deployed build, not yet the newest local baseline commit
+
 ## Files Touched In Current Stage
 
 - `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/packages/server/src/session-workspaces.ts`
@@ -173,13 +222,11 @@ Interpretation:
 
 ## Next Actions
 
-1. Commit the reduced document-session skill/MCP surface and prompt/palette alignment.
-2. Push to GitHub and Gitee.
-3. Pull on pod and restart.
-4. Re-run a minimal live document-session create check on pod.
-5. Confirm on pod:
-   - session creation succeeds
+1. Commit the compare-harness hint fix and refreshed ledger notes.
+2. Keep retrying pod `git pull --ff-only` + `bash scripts/restart-pod.sh --force` until SSH is usable again.
+3. After pod deploy succeeds, confirm the live pod commit and re-run a minimal hinted document-session create check.
+4. Confirm on the updated pod:
    - runtime skill folder is physically pruned to the intended subset
    - runtime MCP surface is physically pruned to the intended subset
    - history view behavior still opens the intended TSX
-6. Once that is confirmed, continue Stage 2 with low-token `common-work` A/B diagnostics against local raw OpenCode, then only escalate to longer runs when a parity gap is real.
+5. Then continue Stage 2 low-token `common-work` A/B work, focusing first on early search-routing drift rather than external-path drift.

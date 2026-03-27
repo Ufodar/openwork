@@ -52,6 +52,7 @@ import { resolveDashboardClientConnected } from "./lib/dashboard-client-status";
 import { shouldAutoConnectWebClient } from "./lib/web-autoconnect";
 import { reconcileOpenworkServerProbe } from "./lib/openwork-server-status";
 import {
+  mergeOpenworkSessionPrefs,
   type OpenworkSessionPrefs,
   normalizeStoredAgent,
   normalizeStoredRagflowTopK,
@@ -3121,10 +3122,13 @@ export default function App() {
         }
         const openwork = config.openwork && typeof config.openwork === "object" ? (config.openwork as Record<string, unknown>) : {};
         const prefs = parseOpenworkSessionPrefs(openwork);
-        setOpenworkSessionPrefsById(prefs);
+        // Remote config should not erase valid local session-view hints when the
+        // server snapshot simply has not caught up yet.
+        const mergedPrefs = mergeOpenworkSessionPrefs(openworkSessionPrefsById(), prefs);
+        setOpenworkSessionPrefsById(mergedPrefs);
         setOpenworkSessionPrefsWorkspaceId(workspaceId);
         setOpenworkSessionPrefsLoaded(true);
-        writeLocalOpenworkSessionPrefs(prefs);
+        writeLocalOpenworkSessionPrefs(mergedPrefs);
       } catch {
         if ((openworkServerWorkspaceId() ?? "").trim() !== workspaceId) return;
         setOpenworkSessionPrefsWorkspaceId(workspaceId);

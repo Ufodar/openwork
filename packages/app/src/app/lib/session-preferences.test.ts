@@ -1,6 +1,60 @@
 import { describe, expect, test } from "bun:test";
 
-import { resolveSessionPreferences, resolveStoredRagflowSelection } from "./session-preferences";
+import {
+  mergeOpenworkSessionPrefs,
+  resolveSessionPreferences,
+  resolveStoredRagflowSelection,
+} from "./session-preferences";
+
+describe("mergeOpenworkSessionPrefs", () => {
+  test("preserves local-only session prefs when the remote config is missing them", () => {
+    expect(
+      mergeOpenworkSessionPrefs(
+        {
+          ses_local: {
+            view: "document-agent",
+            agent: "common-work",
+            agentLock: "common-work",
+          },
+        },
+        {},
+      ),
+    ).toEqual({
+      ses_local: {
+        view: "document-agent",
+        agent: "common-work",
+        agentLock: "common-work",
+      },
+    });
+  });
+
+  test("keeps remote entries authoritative when the same session exists on both sides", () => {
+    expect(
+      mergeOpenworkSessionPrefs(
+        {
+          ses_same: {
+            view: "document-agent",
+            agent: "common-work",
+            agentLock: "common-work",
+          },
+        },
+        {
+          ses_same: {
+            view: "document-writer",
+            agent: "document-writer",
+            agentLock: "document-writer",
+          },
+        },
+      ),
+    ).toEqual({
+      ses_same: {
+        view: "document-writer",
+        agent: "document-writer",
+        agentLock: "document-writer",
+      },
+    });
+  });
+});
 
 describe("resolveSessionPreferences", () => {
   test("preserves a stored document-writer view instead of collapsing it to document-agent", () => {

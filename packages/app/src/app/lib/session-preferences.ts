@@ -84,6 +84,21 @@ export const resolveStoredRagflowSelection = (
   };
 };
 
+export const mergeOpenworkSessionPrefs = (
+  local?: Record<string, OpenworkSessionPrefs> | null,
+  remote?: Record<string, OpenworkSessionPrefs> | null,
+): Record<string, OpenworkSessionPrefs> => {
+  const merged: Record<string, OpenworkSessionPrefs> = {
+    ...(local ?? {}),
+  };
+
+  for (const [sessionId, prefs] of Object.entries(remote ?? {})) {
+    merged[sessionId] = { ...prefs };
+  }
+
+  return merged;
+};
+
 const resolveStoredSessionView = (value: unknown): ResolvedSessionView | null => {
   const view = normalizeStoredView(value);
   if (view === "document-writer") return "document-writer";

@@ -448,6 +448,65 @@ Reason:
   - Qin: hosted clearly stronger
   - `ly`: hosted cleaner and arguably stronger, but the quality gap is not yet definitive enough to close the entire stage without one more judgment pass
 
+### 2026-03-28: refreshed `wjw` A/B under the deterministic delivery gate shows both lanes pass, while hosted remains the cleaner and faster route
+
+Rerun:
+- `OPENWORK_COMPARE_SCENARIO=wjw OPENWORK_COMPARE_MODE=diagnostic QIN_ABC_LANES=raw,pod OPENWORK_COMPARE_DIAGNOSTIC_TIMEOUT_MS=300000 node tmp/qin-abc-minimax.mjs`
+
+Hosted result:
+- generated:
+  - `outputs/海滨医院点对点解决方案.md`
+  - `outputs/海滨医院点对点解决方案.docx`
+- `deliveryGateOk = true`
+- elapsed:
+  - upload about `22965 ms`
+  - run about `148429 ms`
+- route quality:
+  - `broadDiscoveryCount = 0`
+  - `systemTempTouchCount = 0`
+  - `externalPathTouchCount = 0`
+  - `directOfficeReadCount = 0`
+  - `toolIssues = 0`
+- route shape stayed compact and document-local:
+  - `bash` extraction into `.tmp/system/*.md`
+  - targeted `read`
+  - limited `grep`
+  - one stable `write` into `outputs/**`
+  - final delivery gate scan
+
+Raw result:
+- generated:
+  - `outputs/点对点解决方案.md`
+  - `outputs/点对点解决方案.docx`
+- `deliveryGateOk = true`
+- elapsed:
+  - about `274696 ms`
+- route was still noisier:
+  - extra `filesystem_list_directory`
+  - one `skill`
+  - duplicate `filesystem_write_file` to the same target
+  - malformed `export` JSON again, forcing `run-jsonl` fallback
+
+Interpretation:
+- on `wjw`, hosted no longer wins by “raw fails while hosted passes”
+- instead it wins on:
+  - shorter route
+  - faster completion
+  - cleaner trace with less filesystem churn
+  - no export-side parse breakage
+
+Decision:
+- count refreshed `wjw` as a hosted route-quality win and a hosted stability win
+- keep Stage 2 open for one final judgment pass, because the new gate now shows:
+  - `Qin`: hosted clear win
+  - `wjw`: both pass, hosted cleaner/faster
+  - `ly`: both pass, hosted cleaner and more prompt-faithful
+
+Reason:
+- the deterministic gate removed the old ambiguity around “did it really deliver a clean artifact”
+- but once both lanes pass the gate, closing Stage 2 still requires a stronger claim than mere route cleanliness
+- the remaining question is whether the current benchmark set already justifies “hosted common-work is stronger than raw”, or whether one more higher-discrimination content judgment pass is needed before moving to Stage 3
+
 ### Task 3: isolate `document-writer` from `common-work`
 
 Status:

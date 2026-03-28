@@ -12,7 +12,12 @@ SYSTEM_MATERIAL_HINTS = {
     "申报材料",
     "技术材料",
     "建设方案",
-    "三大系统",
+    "实施方案",
+    "解决方案",
+    "技术方案",
+    "需求说明",
+    "系统架构",
+    "接口规范",
     "api调用示例",
     "api 调用示例",
 }
@@ -22,22 +27,34 @@ SYSTEM_MATERIAL_KEYWORDS = {
     "调度", "时延", "带宽", "丢包", "路径", "算网", "监控", "告警", "审计",
     "安全", "等保", "api", "rest", "restful", "grpc", "互联互通", "标识",
     "认证", "ldap", "oauth", "rbac", "prometheus", "grafana", "网关", "多云",
-    "agent", "拓扑", "资源池", "集群",
+    "agent", "拓扑", "资源池", "集群", "架构", "模块", "组件", "部署",
+    "集成", "对接", "接口", "实施", "交付", "数据流", "控制流", "流程",
+    "需求", "约束", "适配", "兼容", "治理", "监测", "监控",
 }
 
 GENERAL_SYSTEM_FACT_KEYWORDS = {
     "架构", "展示层", "业务层", "中间层", "通信层", "目标层", "容器化", "前后端分离",
     "prometheus", "zabbix", "influxdb", "elasticsearch", "kafka", "mysql", "redis",
     "gpu", "虚拟机", "k8s", "ldap", "oauth", "rbac", "审计", "告警", "拓扑", "协议",
+    "模块", "组件", "接口", "集成", "部署", "数据流", "控制流", "流程", "需求", "约束",
 }
 
 TOPIC_ORDER = {
-    "resource-aggregation": 0,
-    "scheduling": 1,
-    "security-monitoring": 2,
-    "api-interoperability": 3,
-    "identifier-system": 4,
-    "general": 5,
+    "architecture-design": 0,
+    "implementation-path": 1,
+    "integration-interface": 2,
+    "security-governance": 3,
+    "compute-capability": 4,
+    "compute-platform": 5,
+    "compatibility-requirements": 6,
+    "facility-design": 7,
+    "facility-capacity": 8,
+    "resource-aggregation": 9,
+    "scheduling": 10,
+    "security-monitoring": 11,
+    "api-interoperability": 12,
+    "identifier-system": 13,
+    "general": 14,
 }
 
 NOISE_KEYWORDS = {
@@ -154,14 +171,22 @@ def infer_topic(statement: str) -> str:
         return "api-interoperability"
     if any(keyword in lowered for keyword in ["标识", "编码", "资源描述符", "ontology", "本体", "标签体系"]):
         return "identifier-system"
+    if any(keyword in lowered for keyword in ["架构", "模块", "组件", "分层", "拓扑", "部署结构"]):
+        return "architecture-design"
+    if any(keyword in lowered for keyword in ["实施", "落地", "交付", "联调", "协同", "流程", "步骤", "里程碑"]):
+        return "implementation-path"
+    if any(keyword in lowered for keyword in ["集成", "对接", "交换", "同步", "调用链", "互通", "接口适配"]):
+        return "integration-interface"
+    if any(keyword in lowered for keyword in ["治理", "风控", "约束", "风险", "合规", "规范"]):
+        return "security-governance"
     if "fp64" in lowered:
-        return "fp64-capability"
+        return "compute-capability"
     if "fp16" in lowered:
-        return "fp16-capability"
+        return "compute-capability"
     if "液冷" in statement or "风冷" in statement:
-        return "cooling-method"
+        return "facility-design"
     if "机柜" in statement and ("40kw" in lowered or "150kw" in lowered):
-        return "rack-power"
+        return "facility-capacity"
     if "预算" in statement or "控制价" in statement:
         return "commercial-baseline"
     if "工期" in statement or "交付" in statement or "调试完成" in statement:
@@ -173,11 +198,11 @@ def infer_topic(statement: str) -> str:
     if "付款" in statement or "预付" in statement:
         return "payment"
     if "节点" in statement and ("gpu" in lowered or "智算" in statement):
-        return "ai-nodes"
+        return "compute-platform"
     if "超算" in statement:
-        return "hpc"
+        return "compute-platform"
     if "信创" in statement:
-        return "xinchuang-cloud"
+        return "compatibility-requirements"
     return "general"
 
 

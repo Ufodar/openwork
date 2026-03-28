@@ -160,3 +160,128 @@ test("merge_doc_state.py drops payment and UML noise for explicit multi-system s
     await rm(workspace, { recursive: true, force: true });
   }
 });
+
+test("merge_doc_state.py uses generic topic labels for specialized technical facts instead of sample-specific names", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "doc-merge-generic-topics-"));
+
+  try {
+    await mkdir(join(workspace, ".worktree", "sources"), { recursive: true });
+
+    await writeFile(
+      join(workspace, ".worktree", "index.json"),
+      JSON.stringify({
+        summary: "请基于资料撰写一份通用技术方案。",
+      }, null, 2),
+      "utf8",
+    );
+    await writeFile(
+      join(workspace, ".worktree", "sources", "manifest.json"),
+      JSON.stringify({
+        goal: "请基于当前资料形成一份通用技术方案，重点说明兼容性约束、算力能力与部署条件。",
+        target_doc: "outputs/generic-technical-plan.docx",
+        sources: [
+          { docId: "src-001", title: "技术规格说明", role: "规格说明", relativePath: "技术规格说明.docx" },
+        ],
+      }, null, 2),
+      "utf8",
+    );
+    await writeFile(
+      join(workspace, ".worktree", "sources", "src-001.json"),
+      JSON.stringify({
+        docId: "src-001",
+        title: "技术规格说明",
+        role: "规格说明",
+        relativePath: "技术规格说明.docx",
+        summary: "规格说明覆盖兼容性、计算能力和机房部署约束。",
+        section_briefs: [
+          {
+            title: "兼容性要求",
+            locator: "paragraph:10",
+            summary: "方案需兼容信创环境并适配国产化基础软件。",
+            key_points: [
+              {
+                statement: "方案需兼容信创环境部署并适配国产化基础软件。",
+                locator: "paragraph:10",
+              },
+            ],
+          },
+          {
+            title: "计算能力",
+            locator: "paragraph:20",
+            summary: "平台需支持 FP64 科学计算与 FP16 混合精度能力。",
+            key_points: [
+              {
+                statement: "平台需支持 FP64 科学计算与 FP16 混合精度能力。",
+                locator: "paragraph:20",
+              },
+            ],
+          },
+          {
+            title: "机房条件",
+            locator: "paragraph:30",
+            summary: "机房采用液冷机柜设计，单柜功率可达40kW。",
+            key_points: [
+              {
+                statement: "机房采用液冷机柜设计，单柜功率可达40kW。",
+                locator: "paragraph:30",
+              },
+            ],
+          },
+        ],
+        facts: [
+          {
+            statement: "方案需兼容信创环境部署并适配国产化基础软件。",
+            locator: "paragraph:10",
+            evidence: "方案需兼容信创环境部署并适配国产化基础软件。",
+          },
+          {
+            statement: "平台需支持 FP64 科学计算与 FP16 混合精度能力。",
+            locator: "paragraph:20",
+            evidence: "平台需支持 FP64 科学计算与 FP16 混合精度能力。",
+          },
+          {
+            statement: "机房采用液冷机柜设计，单柜功率可达40kW。",
+            locator: "paragraph:30",
+            evidence: "机房采用液冷机柜设计，单柜功率可达40kW。",
+          },
+        ],
+        claims: [],
+        gaps: [],
+        open_questions: [],
+      }, null, 2),
+      "utf8",
+    );
+
+    const proc = Bun.spawn([
+      "python3",
+      scriptPath,
+      "--workspace", workspace,
+      "--goal",
+      "请基于当前资料形成一份通用技术方案，重点说明兼容性约束、算力能力与部署条件。",
+      "--target-doc", "outputs/generic-technical-plan.docx",
+    ], {
+      cwd: "/Users/storm/Documents/code/studyProject/opencode-docx/openwork",
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    const stderr = await new Response(proc.stderr).text();
+    const exitCode = await proc.exited;
+
+    expect(exitCode).toBe(0);
+    expect(stderr.trim()).toBe("");
+
+    const facts = JSON.parse(await readFile(join(workspace, ".worktree", "facts.json"), "utf8"));
+    const topics = facts.canonical_facts.map((item) => item.topic);
+
+    expect(topics).toContain("compatibility-requirements");
+    expect(topics).toContain("compute-capability");
+    expect(topics).toContain("facility-design");
+    expect(topics).not.toContain("fp64-capability");
+    expect(topics).not.toContain("fp16-capability");
+    expect(topics).not.toContain("xinchuang-cloud");
+    expect(topics).not.toContain("hpc");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});

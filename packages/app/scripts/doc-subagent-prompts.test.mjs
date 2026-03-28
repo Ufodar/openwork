@@ -21,6 +21,8 @@ test("document-writer agent entrypoint uses orchestrator-style delegation rules"
 
   expect(agentPrompt).toContain("Your job is to keep the control loop coherent");
   expect(agentPrompt).toContain("formal document and multi-document workflow tasks");
+  expect(agentPrompt).toContain("正式文档工作流主代理");
+  expect(agentPrompt).not.toContain("标书写作助手主代理");
   expect(agentPrompt).not.toContain("bid-writing and formal document work");
   expect(agentPrompt).toContain("call `doc-intake`");
   expect(agentPrompt).toContain("do not call non-`doc-*` agents");

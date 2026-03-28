@@ -21,6 +21,15 @@ SYSTEM_SUBSECTIONS = [
 ]
 
 GENERIC_TECHNICAL_TOPICS = [
+    "architecture-design",
+    "implementation-path",
+    "integration-interface",
+    "security-governance",
+    "compute-capability",
+    "compute-platform",
+    "compatibility-requirements",
+    "facility-design",
+    "facility-capacity",
     "resource-aggregation",
     "scheduling",
     "security-monitoring",
@@ -30,6 +39,8 @@ GENERIC_TECHNICAL_TOPICS = [
 ]
 
 GENERIC_SUPPORT_TOPICS = [
+    "requirement-scope",
+    "delivery-planning",
     "timeline",
     "warranty",
     "commercial-baseline",
@@ -37,6 +48,8 @@ GENERIC_SUPPORT_TOPICS = [
 ]
 
 GENERIC_RISK_TOPICS = [
+    "risk-constraint",
+    "compatibility-requirements",
     "general",
     "timeline",
     "warranty",
@@ -163,6 +176,8 @@ def infer_generic_heading_topics(title: str) -> list[str]:
     lowered = normalize_text(title)
     if any(keyword in lowered for keyword in ["风险", "待确认", "问题", "缺口", "约束"]):
         return GENERIC_RISK_TOPICS
+    if any(keyword in lowered for keyword in ["计划", "里程碑", "分工", "协作", "排期", "阶段"]):
+        return dedupe_preserve_order([*GENERIC_SUPPORT_TOPICS, "implementation-path"])
     if any(keyword in lowered for keyword in ["证据", "依据", "参考", "来源"]):
         return dedupe_preserve_order([*GENERIC_TECHNICAL_TOPICS, *GENERIC_SUPPORT_TOPICS])
     if any(keyword in lowered for keyword in ["路径", "方案", "设计", "实施", "架构", "重组", "协同", "对应"]):
@@ -329,13 +344,21 @@ def build_goal_profile(goal: str, manifest: dict, canonical_facts: list[dict]) -
             "算力", "资源", "纳管", "k8s", "虚拟机", "裸金属", "gpu", "标签", "调度", "时延", "带宽",
             "丢包", "路径", "算网", "监控", "告警", "审计", "安全", "等保", "api", "rest", "grpc",
             "互联互通", "标识", "认证", "ldap", "oauth", "rbac", "prometheus", "grafana", "网关",
+            "架构", "模块", "组件", "实施", "部署", "流程", "集成", "对接", "数据", "治理",
+            "需求", "约束", "目标", "能力", "规范", "标准",
         })
         preferred_topics.update({
+            "architecture-design", "implementation-path", "integration-interface", "security-governance",
+            "compute-capability", "compute-platform", "compatibility-requirements",
+            "facility-design", "facility-capacity", "requirement-scope", "delivery-planning",
             "resource-aggregation", "scheduling", "security-monitoring", "api-interoperability", "identifier-system",
         })
     elif "点对点" in goal or "solution" in lowered or "方案" in goal:
-        keywords.update({"需求", "方案", "实施", "技术", "项目", "系统", "接口", "架构", "风险", "约束"})
-        preferred_topics.update([*GENERIC_TECHNICAL_TOPICS, *GENERIC_SUPPORT_TOPICS])
+        keywords.update({
+            "需求", "方案", "实施", "技术", "项目", "系统", "接口", "架构", "风险", "约束",
+            "模块", "组件", "部署", "集成", "对接", "数据", "协同", "交付", "计划",
+        })
+        preferred_topics.update([*GENERIC_TECHNICAL_TOPICS, *GENERIC_SUPPORT_TOPICS, *GENERIC_RISK_TOPICS])
     else:
         keywords.update({"项目", "技术", "系统", "平台"})
         preferred_topics.update({"general"})

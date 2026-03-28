@@ -1,0 +1,132 @@
+import { expect, test } from "bun:test";
+
+import {
+  detectStalledPendingTools,
+  summarizePendingToolStates,
+} from "./session-settle-guards.mjs";
+
+test("summarizePendingToolStates captures pending tool shape", () => {
+  const messages = [{
+    parts: [
+      {
+        type: "tool",
+        tool: "write",
+        state: {
+          status: "pending",
+          input: { filePath: "outputs/demo.md" },
+          raw: "{\"filePath\":\"outputs/demo.md\"}",
+        },
+      },
+    ],
+  }];
+
+  expect(summarizePendingToolStates(messages)).toEqual([
+    {
+      tool: "write",
+      status: "pending",
+      raw: "{\"filePath\":\"outputs/demo.md\"}",
+      inputKeys: ["filePath"],
+      malformed: false,
+    },
+  ]);
+});
+
+test("detectStalledPendingTools flags malformed pending tools on the short timeout", () => {
+  const messages = [{
+    parts: [
+      {
+        type: "tool",
+        tool: "bash",
+        state: {
+          status: "pending",
+          input: {},
+          raw: "",
+        },
+      },
+    ],
+  }];
+
+  expect(
+    detectStalledPendingTools({
+      messages,
+      lastProgressAt: 0,
+      now: 31_000,
+      malformedPendingToolTimeoutMs: 30_000,
+      stalledPendingToolTimeoutMs: 120_000,
+    }),
+  ).toEqual({
+    kind: "malformed-pending-tool",
+    pendingTools: [
+      {
+        tool: "bash",
+        status: "pending",
+        raw: "",
+        inputKeys: [],
+        malformed: true,
+      },
+    ],
+  });
+});
+
+test("detectStalledPendingTools flags generic stalled pending tools on the long timeout", () => {
+  const messages = [{
+    parts: [
+      {
+        type: "tool",
+        tool: "write",
+        state: {
+          status: "running",
+          input: { filePath: "outputs/demo.md" },
+          raw: "{\"filePath\":\"outputs/demo.md\"}",
+        },
+      },
+    ],
+  }];
+
+  expect(
+    detectStalledPendingTools({
+      messages,
+      lastProgressAt: 0,
+      now: 121_000,
+      malformedPendingToolTimeoutMs: 30_000,
+      stalledPendingToolTimeoutMs: 120_000,
+    }),
+  ).toEqual({
+    kind: "stalled-pending-tool",
+    pendingTools: [
+      {
+        tool: "write",
+        status: "running",
+        raw: "{\"filePath\":\"outputs/demo.md\"}",
+        inputKeys: ["filePath"],
+        malformed: false,
+      },
+    ],
+  });
+});
+
+test("detectStalledPendingTools stays quiet when no pending tools exist", () => {
+  const messages = [{
+    parts: [
+      {
+        type: "tool",
+        tool: "write",
+        state: {
+          status: "completed",
+          input: { filePath: "outputs/demo.md" },
+          raw: "{\"filePath\":\"outputs/demo.md\"}",
+        },
+      },
+    ],
+  }];
+
+  expect(
+    detectStalledPendingTools({
+      messages,
+      lastProgressAt: 0,
+      now: 999_999,
+      malformedPendingToolTimeoutMs: 30_000,
+      stalledPendingToolTimeoutMs: 120_000,
+    }),
+  ).toBeNull();
+});

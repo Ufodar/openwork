@@ -19,6 +19,7 @@ import {
 } from "./doc-subagent-simulate-lib.mjs";
 import { joinVisibleAssistantText } from "./_assistant-text.mjs";
 import { resolveSimulationModel } from "./doc-subagent-model-config.mjs";
+import { detectStalledPendingTools } from "./session-settle-guards.mjs";
 
 import {
   findFreePort,
@@ -284,6 +285,17 @@ async function waitForSessionSettled(client, sessionId, runPrompt, {
       if (fingerprint !== lastFingerprint) {
         lastFingerprint = fingerprint;
         lastProgressAt = now();
+      }
+
+      const stalledPendingTools = detectStalledPendingTools({
+        messages,
+        lastProgressAt,
+        now: now(),
+      });
+      if (stalledPendingTools) {
+        throw new Error(
+          `${stalledPendingTools.kind}: ${JSON.stringify(stalledPendingTools.pendingTools.slice(0, 3))}`,
+        );
       }
 
       if (!hasAnyAssistantMessage(messages) && now() - lastProgressAt >= noProgressTimeoutMs) {

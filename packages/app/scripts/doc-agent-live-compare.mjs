@@ -11,6 +11,7 @@ import {
 
 import { joinVisibleAssistantText } from "./_assistant-text.mjs";
 import { FORMAL_DOCUMENT_BENCHMARKS_BY_ID } from "./document-workflow-benchmarks.mjs";
+import { detectStalledPendingTools } from "./session-settle-guards.mjs";
 
 const OPENWORK_BASE = process.env.OPENWORK_BASE ?? "http://192.168.5.10:32765/openwork";
 const USERNAME = process.env.OPENWORK_USERNAME ?? "fuda";
@@ -407,6 +408,17 @@ async function waitForSessionSettled(
       if (fingerprint !== lastFingerprint) {
         lastFingerprint = fingerprint;
         lastProgressAt = performance.now();
+      }
+
+      const stalledPendingTools = detectStalledPendingTools({
+        messages,
+        lastProgressAt,
+        now: performance.now(),
+      });
+      if (stalledPendingTools) {
+        throw new Error(
+          `${stalledPendingTools.kind}: ${JSON.stringify(stalledPendingTools.pendingTools.slice(0, 3))}`,
+        );
       }
 
       if (!hasAnyAssistantMessage(messages) && performance.now() - lastProgressAt >= noProgressTimeoutMs) {

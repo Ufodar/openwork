@@ -2646,3 +2646,73 @@ Immediate next step:
 - pull and restart/recover on pod
 - rerun the same pod-local `formal-wjw-multi-doc` compare
 - then record whether `document-writer` can finally complete against the same formal corpus
+
+### 2026-03-28: after the writer profile fix, the next formal WJW blocker moved to a hung `common-work` lane, so the compare harness now gets a fast-fail guard
+
+What happened after deploying `a86b74c9`:
+- pod health stayed green
+- a fresh writer probe immediately verified that new listed writer sessions now expose:
+  - `openworkPreferredView = document-writer`
+  - `openworkPreferredAgent = document-writer`
+  - `openworkPreferredAgentLock = document-writer`
+- this confirmed the previous writer-session-list bug is fixed on pod
+
+New live blocker:
+- rerunning pod-local `formal-wjw-multi-doc` no longer failed at writer-session creation
+- instead, the compare stalled on the `common-work` lane before the writer lane could begin
+- direct session inspection of:
+  - `ses_2cb9e6884ffe2yPsTyhClcbdjv`
+  showed a real malformed-tool-call hang:
+  - first observed:
+    - `write`
+    - `status = pending`
+    - `state.input = {}`
+    - `state.raw = ""`
+  - later observed:
+    - `bash`
+    - `status = pending`
+    - `state.input = {}`
+    - `state.raw = ""`
+- the lane had already produced:
+  - `reports/requirements-breakdown.md`
+  but had not yet produced any `outputs/**` artifact
+
+Interpretation:
+- this is not another writer-profile bug
+- it is also not “the service is down”
+- it is a long-form formal-benchmark hang where the active lane starts emitting empty pending tool calls instead of progressing normally
+- without a harness guard, `doc-agent-live-compare.mjs` can sit on this state until the full long timeout, which wastes time and obscures the real failure mode
+
+Local harness hardening now added:
+- new helper module:
+  - `packages/app/scripts/session-settle-guards.mjs`
+- new regression coverage:
+  - `packages/app/scripts/session-settle-guards.test.mjs`
+- current behavior:
+  - malformed empty pending tool calls now trigger:
+    - `malformed-pending-tool`
+    after a short timeout
+  - generic stuck pending tool states still trigger:
+    - `stalled-pending-tool`
+    on the longer timeout
+- integrated into:
+  - `packages/app/scripts/doc-agent-live-compare.mjs`
+  - `packages/app/scripts/doc-subagent-simulate.mjs`
+
+Verification:
+- `bun test packages/app/scripts/session-settle-guards.test.mjs`
+  - `4 pass`
+  - `0 fail`
+- `node --check packages/app/scripts/doc-agent-live-compare.mjs packages/app/scripts/doc-subagent-simulate.mjs packages/app/scripts/session-settle-guards.mjs`
+  - pass
+
+Decision:
+- stop spending long wall-clock time waiting for a hung lane that is already malformed
+- ship the fast-fail harness guard first
+- then rerun the formal benchmark so the next result cleanly distinguishes:
+  - real content/workflow progress
+  - malformed pending-tool hangs
+
+Reason:
+- this saves time immediately
+- it also makes the next A/B evidence more trustworthy, because a hung lane will now fail with the real reason instead of being misread as “still running”

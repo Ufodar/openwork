@@ -71,6 +71,176 @@ Immediate blocker:
 - no active Stage 1 blocker remains on the current pod build
 - Stage 2 now needs to prove `common-work` is actually stronger than local raw OpenCode, not just free of the hosted regressions
 
+## 2026-03-28 Status Checkpoint
+
+### Task 1: user-facing baseline for `common-work`
+
+Status:
+- mostly complete and currently usable on pod
+- the three explicit baseline subitems are live-green on the latest deployed build:
+  - hosted sessions are not drifting into `external_directory`, parent/sibling session folders, or `/tmp` reopen paths on the successful WJW / Qin runs
+  - fresh hosted `common-work` runtimes physically prune `.opencode/skills` down to:
+    - `doc-coauthoring`
+    - `doc-normalize`
+    - `docx`
+    - `pdf`
+    - `pptx`
+    - `xlsx`
+  - the inspected live runtime `opencode.jsonc` only exposed:
+    - `bocha-search`
+  - history-session reopening remains green in the local regression suite, and no new live regression has been found after the earlier pod browser verification
+
+Problems found in this checkpoint window:
+- one Qin rerun on pod briefly regressed to a stochastic direct binary read:
+  - first bad call:
+    - `read 天河监控运维一体化平台软件介绍v0.3.docx`
+  - the compare harness intentionally aborted after catching that `direct-office-read`
+- this showed that the baseline path rules were correct in principle, but not yet positioned strongly enough in the runtime guidance
+
+What was changed:
+- deployed commit `2791943b`:
+  - `Tighten final placeholder sweeps in common-work`
+- deployed commit `3e7d9164`:
+  - `Enforce final output sweeps for common-work`
+- deployed commit `d8acc3d1`:
+  - `Front-load office extraction rules for document sessions`
+- files changed across these fixes:
+  - `.opencode/agent/common-work.md`
+  - `packages/app/scripts/doc-subagent-prompts.test.mjs`
+  - `.opencode/plugins/document-mode-bridge.js`
+  - `.opencode/plugins/document-mode-bridge.test.mjs`
+
+Decisions:
+- keep Task 1 functionally green for the three baseline items, but do not over-claim that all document quality regressions are solved
+- treat the direct-Office-read relapse as a routing-hardening issue, not as evidence that session isolation or skill pruning regressed again
+
+Reason:
+- the regression did not touch:
+  - runtime skill pruning
+  - runtime MCP pruning
+  - history-session view restoration
+  - hosted file-boundary safety
+- it was a model-routing mistake inside an otherwise healthy hosted session
+
+### Task 2: local raw OpenCode vs pod `common-work` A/B
+
+Status:
+- in progress
+- medium-size WJW and Qin A/B work is complete
+- large formal benchmark work under `/Users/storm/Pictures/开发参考文件/标书agent开发相关文件/` has been selected but not yet started because Stage 2 still has one unresolved output-quality gap
+
+What the A/B runs proved:
+- WJW:
+  - pod `common-work` is now cleaner than raw on temp-path handling and no longer burns the early hosted `/tmp` reopen route
+- Qin:
+  - pod `common-work` can be cleaner and faster than raw on route quality
+  - raw still shows weaker behavior such as:
+    - `filesystem_list_directory`
+    - unnecessary `skill`
+    - `webfetch`
+    - malformed export JSON fallback
+
+Problems found:
+- final-result quality is still not consistently stronger than raw
+- on successful Qin pod completions, generated `.docx` files still retained fabricated placeholders such as:
+  - `k8s.cluster.example.com`
+  - `app.example.com`
+  - `ops-team@example.com`
+  - `<access_token>` / `Bearer <access_token>`
+- tool traces showed the model still skipping the intended final `grep -RniE ...` sweep and ending with `ls` / file existence checks instead
+
+What was changed:
+- `common-work.md` was tightened twice to:
+  - forbid placeholder credentials more explicitly
+  - require explicit final scans
+  - state that `ls` / `glob outputs/*` does not count as final verification
+  - require rewrite + regenerate + re-scan if high-risk strings are found
+- after the direct-Office-read regression, the extraction-first rule was moved earlier:
+  - into the opening discovery contract of `common-work.md`
+  - into `document-mode-bridge.js`
+
+Tests run:
+- session/history/view regressions:
+  - `bun test packages/app/src/app/lib/session-preferences.test.ts packages/app/src/app/lib/session-preferences.test.mjs packages/app/src/app/pages/dashboard.history-session-hints.test.mjs packages/app/src/app/lib/session-view-routing.test.ts packages/app/src/app/context/session.runtime-directory-hydration.test.ts packages/app/src/app/app.session-command-order.test.ts`
+  - result:
+    - `25 pass`
+    - `0 fail`
+- runtime-surface regressions:
+  - `bun test packages/server/src/session-workspaces.test.ts packages/server/src/server.proxy-session-create.test.ts`
+  - result:
+    - `15 pass`
+    - `0 fail`
+- prompt regressions:
+  - `bun test packages/app/scripts/doc-subagent-prompts.test.mjs`
+  - result:
+    - `39 pass`
+    - `0 fail`
+
+Decisions:
+- keep Task 2 open
+- do not yet declare `common-work` stronger than local raw OpenCode on final deliverable quality
+- stop relying only on tail-end prompt rules for quality gates
+
+Reason:
+- the model repeatedly ignored long tail-end cleanup instructions
+- moving the most important rules to the earliest runtime guidance is a better bet than continuing to add weaker wording near the bottom of a long prompt
+
+Current local pending work for Task 2:
+- one uncommitted bridge-only hardening is now present locally:
+  - `.opencode/plugins/document-mode-bridge.js`
+- it adds a short “Non-negotiable hosted document guardrails” block covering:
+  - no direct `read` on original Office binaries
+  - no `/tmp` reopenable outputs
+  - mandatory final `grep` sweep before delivery
+- this has not yet been committed or redeployed at the time of this checkpoint
+
+### Task 3: isolate `document-writer` from `common-work`
+
+Status:
+- not started by design
+
+Decision:
+- keep Task 3 blocked until Task 2 proves that `common-work` is stronger than local raw OpenCode on final-result quality, not just on route cleanliness
+
+Reason:
+- starting the shared-path audit too early risks mixing `document-writer`-specific decisions into a still-moving `common-work` baseline
+
+### Task 4: generalize `document-writer`
+
+Status:
+- not started
+
+Decision:
+- do not begin removing Qin-specific heuristics or reshaping `document-writer` yet
+
+Reason:
+- user-mandated order requires:
+  - Task 1 baseline closed first
+  - then Task 2 A/B proof
+  - then Task 3 shared-path audit
+  - only then Task 4 generalization
+
+### Current checkpoint conclusion
+
+- Task 1:
+  - baseline subitems are functionally green on pod
+- Task 2:
+  - route-level parity is already strong on WJW and often strong on Qin
+  - final-output quality is still the blocking gap
+- Task 3:
+  - not started
+- Task 4:
+  - not started
+
+Primary open problem right now:
+- `common-work` still does not execute the final output sweep reliably enough, so fabricated hosts/emails/tokens can survive into generated `.docx` output even when the route itself is otherwise clean
+
+Immediate next move after this checkpoint:
+- finish the uncommitted `document-mode-bridge.js` front-loaded guardrail block
+- redeploy it to pod
+- rerun Qin again
+- if fabricated placeholders still survive after that, stop treating this as a prompt-only problem and add a harder runtime-side quality gate
+
 ## Latest Findings
 
 ### 2026-03-27: WJW rerun after commit `dc438fc9` removed the last hosted `/tmp` first-shot detour entirely

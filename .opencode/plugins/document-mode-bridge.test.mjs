@@ -5,6 +5,9 @@ import { join } from "node:path";
 test("document mode bridge forbids external-directory detours for document-heavy sessions", () => {
   const file = readFileSync(join(import.meta.dir, "document-mode-bridge.js"), "utf8");
 
+  expect(file).toContain("Non-negotiable hosted document guardrails");
+  expect(file).toContain("Before delivery, run a real text sweep such as");
+  expect(file).toContain("\\`ls\\` or \\`glob\\` is not a substitute");
   expect(file).toContain("Do not use \\`external_directory\\`");
   expect(file).toContain("create \\`<WORKSPACE>/.tmp/system\\`");
   expect(file).toContain("Do not \"probe\" \\`/tmp/*\\`");

@@ -1,4 +1,3 @@
-import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
 import { performance } from "node:perf_hooks";
 
@@ -6,6 +5,7 @@ import {
   createHostedOpenworkClient,
   createHostedOpenworkSession,
   fetchHostedSessionRecord,
+  uploadHostedDocument,
 } from "./_util.mjs";
 
 const OPENWORK_BASE = process.env.OPENWORK_BASE ?? "http://192.168.5.10:32765/openwork";
@@ -113,19 +113,6 @@ async function login() {
     method: "POST",
     body: JSON.stringify({ username: USERNAME, password: PASSWORD }),
   });
-}
-
-async function uploadDocument({ token, workspaceId, sessionId, localPath }) {
-  const payload = await readFile(localPath);
-  const form = new FormData();
-  form.append("file", new File([payload], basename(localPath)));
-  const response = await fetch(
-    `${OPENWORK_BASE}/w/${encodeURIComponent(workspaceId)}/document/upload?session=${encodeURIComponent(sessionId)}`,
-    { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: form },
-  );
-  const text = await response.text();
-  if (!response.ok) throw new Error(text || `upload failed ${response.status}`);
-  return text ? JSON.parse(text) : null;
 }
 
 async function debugWaitForSessionSettled(client, sessionId, runPrompt, options = {}) {
@@ -258,7 +245,15 @@ async function main() {
   await sleep(8_000);
   for (const docPath of SCENARIO.docs) {
     console.log("[upload-start]", basename(docPath));
-    await uploadDocument({ token, workspaceId, sessionId, localPath: docPath });
+    await uploadHostedDocument({
+      baseUrl: OPENWORK_BASE,
+      token,
+      workspaceId,
+      sessionId,
+      localPath: docPath,
+      attempts: Number.parseInt(process.env.OPENWORK_UPLOAD_ATTEMPTS ?? "4", 10),
+      retryDelayMs: Number.parseInt(process.env.OPENWORK_UPLOAD_RETRY_DELAY_MS ?? "1500", 10),
+    });
     console.log("[upload-done]", basename(docPath));
   }
   await debugWaitForSessionSettled(

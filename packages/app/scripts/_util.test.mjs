@@ -6,6 +6,7 @@ import {
   buildHostedSessionCreateBody,
   fetchHostedSessionRecord,
   findHostedSessionRecord,
+  uploadHostedDocument,
 } from "./_util.mjs";
 
 test("buildHostedOpenworkClientOptions omits directory so hosted sessions stay runtime-scoped", () => {
@@ -177,6 +178,43 @@ test("fetchHostedSessionRecord keeps polling until profile metadata matches the 
     assert.equal(record?.openworkPreferredView, "document-agent");
     assert.equal(record?.openworkPreferredAgent, "common-work");
     assert.equal(record?.openworkPreferredAgentLock, "common-work");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("uploadHostedDocument retries transient failures and preserves an explicit destination path", async () => {
+  const originalFetch = globalThis.fetch;
+  const seenBodies = [];
+  let callCount = 0;
+  globalThis.fetch = async (_input, init) => {
+    callCount += 1;
+    seenBodies.push(init?.body);
+    if (callCount === 1) {
+      throw new Error("socket hang up");
+    }
+    return new Response(JSON.stringify({ name: "docs/uploaded.docx" }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+
+  try {
+    const uploadedName = await uploadHostedDocument({
+      baseUrl: "http://127.0.0.1:8789/openwork",
+      token: "secret-token",
+      workspaceId: "ws_1",
+      sessionId: "ses_1",
+      localPath: import.meta.filename,
+      destPath: "docs/uploaded.docx",
+      attempts: 2,
+      retryDelayMs: 0,
+    });
+
+    assert.equal(callCount, 2);
+    assert.equal(uploadedName, "docs/uploaded.docx");
+    assert.equal(typeof seenBodies[0]?.get, "function");
+    assert.equal(seenBodies[0].get("path"), "docs/uploaded.docx");
   } finally {
     globalThis.fetch = originalFetch;
   }

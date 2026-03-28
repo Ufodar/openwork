@@ -2490,3 +2490,77 @@ Current blocker after this round:
   - keep the compare harness fixes
   - use the healthier transport path available at the moment
   - complete at least one formal hosted `common-work` vs `document-writer` run and then score the outputs
+
+### 2026-03-28: formal benchmark transport was hardened locally, and the next hosted run will move onto the pod instead of relying on the local tunnel upload path
+
+What happened:
+- live checks confirmed the earlier “service down” suspicion was false:
+  - pod repo head:
+    - `73669444`
+  - pod backend:
+    - `127.0.0.1:8789/health -> ok`
+  - pod web:
+    - `127.0.0.1:32765/openwork/health -> ok`
+- the actual unstable surface was the local tunnel + upload leg:
+  - first tunnel on `127.0.0.1:28890` became flaky
+  - a fresh tunnel on `127.0.0.1:28891` could answer `/health`, but the first formal `formal-wjw-multi-doc` retry still failed during:
+    - `uploadDocument`
+  - failing session:
+    - `ses_2cbc45510ffeES1Q0CsZcgdi6H`
+  - error shape:
+    - `fetch failed`
+- this means the current blocker is not runtime provisioning, not writer/common-work prompts, and not pod service health; it is the transport used to upload benchmark documents from the local machine into the hosted session
+
+Decision:
+- stop treating the local tunnel upload path as the primary benchmark route
+- harden the harnesses locally first, then run the next formal benchmark from inside the pod with pod-local benchmark files
+- keep recording every move in this ledger so another tool can resume without rediscovery
+
+What was changed locally:
+- added a shared hosted upload helper with bounded retries:
+  - `packages/app/scripts/_util.mjs`
+    - new:
+      - `uploadHostedDocument(...)`
+- replaced duplicated one-off upload implementations in the profile-sensitive harnesses:
+  - `packages/app/scripts/doc-agent-live-compare.mjs`
+  - `packages/app/scripts/qin-one-shot-compare.mjs`
+  - `packages/app/scripts/run-qin-doc-writer.mjs`
+  - `packages/app/scripts/doc-subagent-simulate.mjs`
+  - `packages/app/scripts/qin-common-work-debug.mjs`
+- made the formal benchmark corpus root configurable so the same benchmark catalog can run:
+  - on the local workstation
+  - or on the pod after copying the selected corpus there
+  - implementation:
+    - `packages/app/scripts/document-workflow-benchmarks.mjs`
+    - new exported constant:
+      - `DEFAULT_FORMAL_DOCUMENT_BENCHMARK_SOURCE_ROOT`
+    - new builder:
+      - `buildFormalDocumentBenchmarks(sourceRoot)`
+- kept the default local source root unchanged, so existing local benchmark tests still validate the real source corpus under:
+  - `/Users/storm/Pictures/开发参考文件/标书agent开发相关文件`
+
+New verification:
+- `node --test packages/app/scripts/_util.test.mjs`
+  - result:
+    - `6 pass`
+    - `0 fail`
+- `bun test packages/app/scripts/document-workflow-benchmarks.test.mjs packages/app/scripts/profile-sensitive-harnesses.test.mjs packages/app/scripts/qin-compare-harness.test.mjs`
+  - result:
+    - `6 pass`
+    - `0 fail`
+- `node --check packages/app/scripts/doc-agent-live-compare.mjs packages/app/scripts/qin-one-shot-compare.mjs packages/app/scripts/run-qin-doc-writer.mjs packages/app/scripts/doc-subagent-simulate.mjs packages/app/scripts/qin-common-work-debug.mjs`
+  - result:
+    - pass
+- `git diff --check -- packages/app/scripts/_util.mjs packages/app/scripts/_util.test.mjs packages/app/scripts/document-workflow-benchmarks.mjs packages/app/scripts/document-workflow-benchmarks.test.mjs packages/app/scripts/doc-agent-live-compare.mjs packages/app/scripts/qin-one-shot-compare.mjs packages/app/scripts/run-qin-doc-writer.mjs packages/app/scripts/doc-subagent-simulate.mjs packages/app/scripts/qin-common-work-debug.mjs`
+  - result:
+    - pass
+
+Interpretation:
+- the benchmark harness surface is now better aligned with the actual operational problem:
+  - profile-sensitive session creation stays explicit
+  - upload retries no longer depend on five duplicated script implementations
+  - the formal benchmark set can now be relocated to the pod instead of being pinned to the workstation-only source root
+- the next highest-signal move is:
+  - copy the smaller formal `wjw` benchmark files onto the pod
+  - run `doc-agent-live-compare.mjs formal-wjw-multi-doc` directly against `http://127.0.0.1:8789`
+  - score `common-work` vs `document-writer` without the unstable local tunnel upload path

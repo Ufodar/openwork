@@ -7,6 +7,7 @@ import {
   createHostedOpenworkClient,
   createHostedOpenworkSession,
   fetchHostedSessionRecord,
+  uploadHostedDocument,
 } from "./_util.mjs";
 
 import { joinVisibleAssistantText } from "./_assistant-text.mjs";
@@ -162,23 +163,6 @@ async function login() {
   });
 }
 
-async function uploadDocument({ token, workspaceId, sessionId, localPath }) {
-  const form = new FormData();
-  form.append("file", Bun.file(localPath));
-  const response = await fetch(
-    `${OPENWORK_BASE}/w/${encodeURIComponent(workspaceId)}/document/upload?session=${encodeURIComponent(sessionId)}`,
-    {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-      body: form,
-    },
-  );
-  const text = await response.text();
-  if (!response.ok) throw new Error(text || `upload failed ${response.status}`);
-  const parsed = text ? JSON.parse(text) : null;
-  return typeof parsed?.name === "string" ? parsed.name : basename(localPath);
-}
-
 async function listDocuments({ token, workspaceId, sessionId }) {
   return requestJson(
     `${OPENWORK_BASE}/w/${encodeURIComponent(workspaceId)}/documents?session=${encodeURIComponent(sessionId)}`,
@@ -322,7 +306,15 @@ async function main() {
   const uploaded = [];
   for (const path of DOCS) {
     console.error(`[qin-doc-writer] uploading=${basename(path)}`);
-    const uploadedName = await uploadDocument({ token, workspaceId, sessionId, localPath: path });
+    const uploadedName = await uploadHostedDocument({
+      baseUrl: OPENWORK_BASE,
+      token,
+      workspaceId,
+      sessionId,
+      localPath: path,
+      attempts: Number.parseInt(process.env.OPENWORK_UPLOAD_ATTEMPTS ?? "4", 10),
+      retryDelayMs: Number.parseInt(process.env.OPENWORK_UPLOAD_RETRY_DELAY_MS ?? "1500", 10),
+    });
     uploaded.push(uploadedName);
     console.error(`[qin-doc-writer] uploaded=${uploadedName}`);
   }

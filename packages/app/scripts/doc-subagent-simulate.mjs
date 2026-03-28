@@ -9,6 +9,7 @@ import {
   createHostedOpenworkSession,
   fetchHostedSessionRecord,
   makeClient,
+  uploadHostedDocument,
 } from "./_util.mjs";
 
 import {
@@ -140,29 +141,6 @@ async function requestJson(url, token, init = {}) {
     throw new Error(text || `Request failed (${response.status})`);
   }
   return text ? JSON.parse(text) : null;
-}
-
-async function uploadDocument({ baseUrl, token, workspaceId, sessionId, localPath, destPath }) {
-  const payload = await readFile(localPath);
-  const form = new FormData();
-  form.append("file", new File([payload], basename(localPath)));
-  if (destPath) {
-    form.append("path", destPath);
-  }
-  const response = await fetch(
-    `${baseUrl}/w/${encodeURIComponent(workspaceId)}/document/upload?session=${encodeURIComponent(sessionId)}`,
-    {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-      body: form,
-    },
-  );
-  const text = await response.text();
-  if (!response.ok) {
-    throw new Error(text || `Document upload failed (${response.status})`);
-  }
-  const parsed = text ? JSON.parse(text) : null;
-  return typeof parsed?.name === "string" ? parsed.name : basename(localPath);
 }
 
 function parseModelRefStrict(raw) {
@@ -503,12 +481,14 @@ async function runScenario({ baseUrl, token, workspaceId, client, scenario }) {
   assert.equal(sessionProfile?.openworkPreferredAgentLock, "document-writer");
   const uploaded = [];
   for (const docPath of scenario.docs) {
-    const name = await uploadDocument({
+    const name = await uploadHostedDocument({
       baseUrl,
       token,
       workspaceId,
       sessionId: session.id,
       localPath: docPath,
+      attempts: Number.parseInt(process.env.OPENWORK_UPLOAD_ATTEMPTS ?? "4", 10),
+      retryDelayMs: Number.parseInt(process.env.OPENWORK_UPLOAD_RETRY_DELAY_MS ?? "1500", 10),
     });
     uploaded.push(name);
   }

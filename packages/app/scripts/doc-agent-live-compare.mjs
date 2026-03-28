@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 
@@ -6,6 +6,7 @@ import {
   createHostedOpenworkClient,
   createHostedOpenworkSession,
   fetchHostedSessionRecord,
+  uploadHostedDocument,
 } from "./_util.mjs";
 
 import { joinVisibleAssistantText } from "./_assistant-text.mjs";
@@ -289,26 +290,6 @@ async function login() {
   });
 }
 
-async function uploadDocument({ token, workspaceId, sessionId, localPath }) {
-  const payload = await readFile(localPath);
-  const form = new FormData();
-  form.append("file", new File([payload], basename(localPath)));
-  const response = await fetch(
-    `${OPENWORK_BASE}/w/${encodeURIComponent(workspaceId)}/document/upload?session=${encodeURIComponent(sessionId)}`,
-    {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-      body: form,
-    },
-  );
-  const text = await response.text();
-  if (!response.ok) {
-    throw new Error(text || `upload failed ${response.status}`);
-  }
-  const parsed = text ? JSON.parse(text) : null;
-  return typeof parsed?.name === "string" ? parsed.name : basename(localPath);
-}
-
 async function listDocuments({ token, workspaceId, sessionId }) {
   return requestJson(
     `${OPENWORK_BASE}/w/${encodeURIComponent(workspaceId)}/documents?session=${encodeURIComponent(sessionId)}`,
@@ -517,7 +498,17 @@ async function runVariant({
   for (const docPath of scenario.docs) {
     const name = basename(docPath);
     try {
-      uploaded.push(await uploadDocument({ token, workspaceId, sessionId, localPath: docPath }));
+      uploaded.push(
+        await uploadHostedDocument({
+          baseUrl: OPENWORK_BASE,
+          token,
+          workspaceId,
+          sessionId,
+          localPath: docPath,
+          attempts: Number.parseInt(process.env.OPENWORK_UPLOAD_ATTEMPTS ?? "4", 10),
+          retryDelayMs: Number.parseInt(process.env.OPENWORK_UPLOAD_RETRY_DELAY_MS ?? "1500", 10),
+        }),
+      );
     } catch (cause) {
       throw buildStepError({
         label,

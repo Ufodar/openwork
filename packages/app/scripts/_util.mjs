@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import { readFile } from "node:fs/promises";
 import net from "node:net";
 import { realpathSync, statSync } from "node:fs";
+import { basename } from "node:path";
 
 import { createOpencodeClient } from "@opencode-ai/sdk/v2/client";
 
@@ -10,6 +12,10 @@ function normalizeOptionalString(value) {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   return trimmed || null;
+}
+
+function sleep(ms) {
+  return new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
 }
 
 export function makeClient({ baseUrl, directory }) {
@@ -191,6 +197,63 @@ export async function fetchHostedSessionRecord({
 
   throw new Error(
     `Timed out waiting for hosted session record ${sessionId}; last payload keys=${Object.keys(lastPayload ?? {}).join(",")} last record view=${normalizeOptionalString(lastRecord?.openworkPreferredView)} agent=${normalizeOptionalString(lastRecord?.openworkPreferredAgent)} lock=${normalizeOptionalString(lastRecord?.openworkPreferredAgentLock)}`,
+  );
+}
+
+export async function uploadHostedDocument({
+  baseUrl,
+  token,
+  workspaceId,
+  sessionId,
+  localPath,
+  destPath,
+  attempts = 3,
+  retryDelayMs = 1_500,
+}) {
+  assert.ok(baseUrl && baseUrl.trim(), "baseUrl is required");
+  assert.ok(token && token.trim(), "token is required");
+  assert.ok(workspaceId && workspaceId.trim(), "workspaceId is required");
+  assert.ok(sessionId && sessionId.trim(), "sessionId is required");
+  assert.ok(localPath && localPath.trim(), "localPath is required");
+  assert.ok(Number.isInteger(attempts) && attempts >= 1, "attempts must be >= 1");
+  assert.ok(Number.isInteger(retryDelayMs) && retryDelayMs >= 0, "retryDelayMs must be >= 0");
+
+  const payload = await readFile(localPath);
+  const normalizedDestPath = normalizeOptionalString(destPath);
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const form = new FormData();
+    form.append("file", new File([payload], basename(localPath)));
+    if (normalizedDestPath) {
+      form.append("path", normalizedDestPath);
+    }
+
+    try {
+      const response = await fetch(
+        `${baseUrl.replace(/\/+$/, "")}/w/${encodeURIComponent(workspaceId)}/document/upload?session=${encodeURIComponent(sessionId)}`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+          body: form,
+        },
+      );
+      const text = await response.text();
+      if (!response.ok) {
+        throw new Error(text || `upload failed ${response.status}`);
+      }
+      const parsed = text ? JSON.parse(text) : null;
+      return typeof parsed?.name === "string" ? parsed.name : basename(localPath);
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      if (attempt < attempts) {
+        await sleep(retryDelayMs * attempt);
+      }
+    }
+  }
+
+  throw new Error(
+    `upload failed after ${attempts} attempt(s) for ${basename(localPath)}: ${lastError instanceof Error ? lastError.message : String(lastError)}`,
   );
 }
 

@@ -134,17 +134,41 @@ export function findHostedSessionRecord(payload, sessionId) {
   return items.find((item) => item?.id === sessionId) ?? null;
 }
 
+function hostedSessionProfileMatches(record, expectations) {
+  if (!record || !expectations || typeof expectations !== "object") return true;
+
+  const checks = [
+    ["openworkPreferredView", expectations.preferredView],
+    ["openworkPreferredAgent", expectations.preferredAgent],
+    ["openworkPreferredAgentLock", expectations.preferredAgentLock],
+  ];
+
+  for (const [key, expected] of checks) {
+    const normalizedExpected = normalizeOptionalString(expected);
+    if (!normalizedExpected) continue;
+    if (normalizeOptionalString(record?.[key]) !== normalizedExpected) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 export async function fetchHostedSessionRecord({
   baseUrl,
   workspaceId,
   token,
   sessionId,
   workspacePath,
+  preferredView,
+  preferredAgent,
+  preferredAgentLock,
   timeoutMs = 15_000,
   pollMs = 500,
 }) {
   const startedAt = Date.now();
   let lastPayload = null;
+  let lastRecord = null;
 
   while (Date.now() - startedAt < timeoutMs) {
     const payload = await requestHostedOpenworkJson({
@@ -156,12 +180,17 @@ export async function fetchHostedSessionRecord({
     });
     lastPayload = payload;
     const record = findHostedSessionRecord(payload, sessionId);
-    if (record) return record;
+    if (record) {
+      lastRecord = record;
+      if (hostedSessionProfileMatches(record, { preferredView, preferredAgent, preferredAgentLock })) {
+        return record;
+      }
+    }
     await new Promise((resolveDelay) => setTimeout(resolveDelay, pollMs));
   }
 
   throw new Error(
-    `Timed out waiting for hosted session record ${sessionId}; last payload keys=${Object.keys(lastPayload ?? {}).join(",")}`,
+    `Timed out waiting for hosted session record ${sessionId}; last payload keys=${Object.keys(lastPayload ?? {}).join(",")} last record view=${normalizeOptionalString(lastRecord?.openworkPreferredView)} agent=${normalizeOptionalString(lastRecord?.openworkPreferredAgent)} lock=${normalizeOptionalString(lastRecord?.openworkPreferredAgentLock)}`,
   );
 }
 

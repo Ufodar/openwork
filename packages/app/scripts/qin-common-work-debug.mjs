@@ -249,6 +249,9 @@ async function main() {
     workspaceId,
     sessionId,
     workspacePath: auth.workspace.path,
+    preferredView: "document-agent",
+    preferredAgent: "common-work",
+    preferredAgentLock: "common-work",
   });
   console.log("[session]", sessionId);
   console.log("[session-profile]", JSON.stringify(sessionProfile));

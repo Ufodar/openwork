@@ -462,6 +462,7 @@ async function runVariant({
   let sessionId = null;
   let created;
   let sessionProfile = null;
+  const requireStrictProfile = enableDocumentState || preferredView === "document-writer";
   try {
     created = await createHostedOpenworkSession({
       baseUrl: OPENWORK_BASE,
@@ -480,11 +481,17 @@ async function runVariant({
       workspaceId,
       sessionId,
       workspacePath,
+      preferredView: requireStrictProfile ? preferredView : undefined,
+      preferredAgent: requireStrictProfile ? preferredAgent : undefined,
+      preferredAgentLock: requireStrictProfile ? preferredAgentLock : undefined,
     });
     if (
-      sessionProfile?.openworkPreferredView !== preferredView ||
-      sessionProfile?.openworkPreferredAgent !== preferredAgent ||
-      sessionProfile?.openworkPreferredAgentLock !== preferredAgentLock
+      requireStrictProfile &&
+      (
+        sessionProfile?.openworkPreferredView !== preferredView ||
+        sessionProfile?.openworkPreferredAgent !== preferredAgent ||
+        sessionProfile?.openworkPreferredAgentLock !== preferredAgentLock
+      )
     ) {
       throw new Error(
         `profile mismatch view=${sessionProfile?.openworkPreferredView} agent=${sessionProfile?.openworkPreferredAgent} lock=${sessionProfile?.openworkPreferredAgentLock}`,

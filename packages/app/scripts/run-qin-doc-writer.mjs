@@ -312,6 +312,9 @@ async function main() {
     workspaceId,
     sessionId,
     workspacePath: auth.workspace.path,
+    preferredView: "document-writer",
+    preferredAgent: "document-writer",
+    preferredAgentLock: "document-writer",
   });
   console.error(`[qin-doc-writer] session=${sessionId}`);
   console.error(`[qin-doc-writer] profile=${JSON.stringify(sessionProfile)}`);

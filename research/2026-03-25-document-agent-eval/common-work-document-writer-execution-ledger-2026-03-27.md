@@ -2415,3 +2415,78 @@ Current status after this local pass:
   - restore stable pod SSH/git reachability
   - sync the latest local commit set onto pod
   - run the formal hosted `common-work` vs `document-writer` benchmark on the updated build
+
+### 2026-03-28: formal compare resumed, then exposed a live `common-work` profile-metadata gap
+
+What happened:
+- pod code was successfully synced to:
+  - `b3f92888`
+- direct health checks stayed green:
+  - local tunnel `127.0.0.1:28890/health`
+  - pod backend `127.0.0.1:8789/health`
+  - pod web `127.0.0.1:32765/openwork/health`
+- the formal compare path was resumed against:
+  - `formal-single-long-tech-rewrite`
+
+Live finding 1:
+- `document-writer` profile enforcement was valid, but `common-work` profile enforcement turned out to be too strict for the current hosted pod
+- repeated live compare runs showed:
+  - `createSession` itself succeeded for `common-work`
+  - but the follow-up scoped session list kept returning:
+    - `openworkPreferredView = null`
+    - `openworkPreferredAgent = null`
+    - `openworkPreferredAgentLock = null`
+- this persisted even after the harness was upgraded to wait for profile metadata instead of returning on the first record
+
+Interpretation:
+- in the current hosted deployment, `common-work` is still explicitly invoked as the prompt agent and does not require the `document-writer` style runtime profile to execute correctly
+- therefore, treating `null/null/null` on the listed `common-work` session as a hard failure was a harness bug, not a product-quality signal
+- `document-writer` remains different:
+  - its dedicated runtime profile still matters because the runtime support, skills, and view contract are genuinely profile-sensitive
+
+What was changed locally:
+- `packages/app/scripts/_util.mjs`
+  - `fetchHostedSessionRecord(...)` now supports expected runtime-profile hints and keeps polling until the listed session record matches those hints
+  - timeout errors now include the last observed profile values for easier live diagnosis
+- `packages/app/scripts/doc-agent-live-compare.mjs`
+  - strict profile enforcement is now gated behind:
+    - `enableDocumentState`
+    - or explicit `document-writer` view
+  - `common-work` still sends profile hints on create, but the compare no longer aborts when the hosted list response leaves those fields null
+- `packages/app/scripts/qin-one-shot-compare.mjs`
+  - same relaxation for the non-writer lane
+- `packages/app/scripts/profile-sensitive-harnesses.test.mjs`
+  - now locks the presence of the new `requireStrictProfile` guard
+- `packages/app/scripts/_util.test.mjs`
+  - now includes a regression that proves the helper waits through an initial `null/null/null` record until profile metadata is actually populated
+
+New verification:
+- `node --test packages/app/scripts/_util.test.mjs`
+  - result:
+    - `5 pass`
+    - `0 fail`
+- `bun test packages/app/scripts/profile-sensitive-harnesses.test.mjs packages/app/scripts/qin-compare-harness.test.mjs`
+  - result:
+    - `4 pass`
+    - `0 fail`
+- `node --check packages/app/scripts/doc-agent-live-compare.mjs packages/app/scripts/qin-one-shot-compare.mjs`
+  - result:
+    - pass
+- `git diff --check -- packages/app/scripts/_util.mjs packages/app/scripts/_util.test.mjs packages/app/scripts/doc-agent-live-compare.mjs packages/app/scripts/qin-one-shot-compare.mjs packages/app/scripts/profile-sensitive-harnesses.test.mjs`
+  - result:
+    - pass
+
+Live finding 2:
+- the OpenWork service itself was not down during this window
+- one aborted turn created the impression that the service had dropped, but direct checks proved:
+  - backend healthy
+  - web healthy
+  - orchestrator/server/router processes still present
+- the unstable layer was the local tunnel / transport path, not the pod service
+
+Current blocker after this round:
+- the formal A/B still has not completed because the transport path for the large formal benchmark document remains unstable
+- the next practical step is still operational:
+  - keep the compare harness fixes
+  - use the healthier transport path available at the moment
+  - complete at least one formal hosted `common-work` vs `document-writer` run and then score the outputs

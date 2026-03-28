@@ -19,6 +19,7 @@ test("doc-agent live compare creates both lanes with explicit hosted runtime pro
   expect(script).toContain('preferredAgentLock: "document-writer"');
   expect(script).toContain("fetchHostedSessionRecord");
   expect(script).toContain("workspacePath");
+  expect(script).toContain("const requireStrictProfile = enableDocumentState || preferredView === \"document-writer\"");
 });
 
 test("doc-subagent simulate does not create writer sessions through client.session.create", () => {
@@ -42,6 +43,7 @@ test("qin compare scripts pin hosted sessions to the intended runtime profiles",
   expect(oneShot).toContain('preferredView: "document-writer"');
   expect(oneShot).toContain('preferredAgent: "document-writer"');
   expect(oneShot).toContain("workspacePath");
+  expect(oneShot).toContain("const requireStrictProfile = enableDocumentState || preferredView === \"document-writer\"");
   expect(writerOnly).toContain('preferredView: "document-writer"');
   expect(writerOnly).toContain('preferredAgentLock: "document-writer"');
   expect(writerOnly).toContain("workspacePath: auth.workspace.path");

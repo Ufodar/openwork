@@ -111,6 +111,9 @@ test("fetchHostedSessionRecord scopes the session list to the workspace path so 
       token: "secret-token",
       sessionId: "ses_common",
       workspacePath: "/root/.openwork/user-workspaces/user-1",
+      preferredView: "document-agent",
+      preferredAgent: "common-work",
+      preferredAgentLock: "common-work",
       timeoutMs: 50,
       pollMs: 1,
     });
@@ -120,6 +123,57 @@ test("fetchHostedSessionRecord scopes the session list to the workspace path so 
       seenUrls[0],
       "http://127.0.0.1:8789/w/ws_1/opencode/session?directory=%2Froot%2F.openwork%2Fuser-workspaces%2Fuser-1",
     );
+    assert.equal(record?.openworkPreferredView, "document-agent");
+    assert.equal(record?.openworkPreferredAgent, "common-work");
+    assert.equal(record?.openworkPreferredAgentLock, "common-work");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("fetchHostedSessionRecord keeps polling until profile metadata matches the requested runtime hints", async () => {
+  const originalFetch = globalThis.fetch;
+  let callCount = 0;
+  globalThis.fetch = async () => {
+    callCount += 1;
+    const payload = callCount === 1
+      ? [
+          {
+            id: "ses_common",
+            openworkPreferredView: null,
+            openworkPreferredAgent: null,
+            openworkPreferredAgentLock: null,
+          },
+        ]
+      : [
+          {
+            id: "ses_common",
+            openworkPreferredView: "document-agent",
+            openworkPreferredAgent: "common-work",
+            openworkPreferredAgentLock: "common-work",
+          },
+        ];
+    return new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+
+  try {
+    const record = await fetchHostedSessionRecord({
+      baseUrl: "http://127.0.0.1:8789",
+      workspaceId: "ws_1",
+      token: "secret-token",
+      sessionId: "ses_common",
+      workspacePath: "/root/.openwork/user-workspaces/user-1",
+      preferredView: "document-agent",
+      preferredAgent: "common-work",
+      preferredAgentLock: "common-work",
+      timeoutMs: 50,
+      pollMs: 1,
+    });
+
+    assert.equal(callCount, 2);
     assert.equal(record?.openworkPreferredView, "document-agent");
     assert.equal(record?.openworkPreferredAgent, "common-work");
     assert.equal(record?.openworkPreferredAgentLock, "common-work");

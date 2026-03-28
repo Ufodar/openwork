@@ -494,6 +494,9 @@ async function runScenario({ baseUrl, token, workspaceId, client, scenario }) {
     workspaceId,
     sessionId: session.id,
     workspacePath: workspace.path,
+    preferredView: "document-writer",
+    preferredAgent: "document-writer",
+    preferredAgentLock: "document-writer",
   });
   assert.equal(sessionProfile?.openworkPreferredView, "document-writer");
   assert.equal(sessionProfile?.openworkPreferredAgent, "document-writer");

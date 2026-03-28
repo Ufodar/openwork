@@ -293,6 +293,7 @@ async function runVariant({
   workspacePath,
   workspaceId,
 }) {
+  const requireStrictProfile = enableDocumentState || preferredView === "document-writer";
   const created = await createHostedOpenworkSession({
     baseUrl: OPENWORK_BASE,
     token,
@@ -310,7 +311,22 @@ async function runVariant({
     workspaceId,
     sessionId,
     workspacePath,
+    preferredView: requireStrictProfile ? preferredView : undefined,
+    preferredAgent: requireStrictProfile ? preferredAgent : undefined,
+    preferredAgentLock: requireStrictProfile ? preferredAgentLock : undefined,
   });
+  if (
+    requireStrictProfile &&
+    (
+      sessionProfile?.openworkPreferredView !== preferredView ||
+      sessionProfile?.openworkPreferredAgent !== preferredAgent ||
+      sessionProfile?.openworkPreferredAgentLock !== preferredAgentLock
+    )
+  ) {
+    throw new Error(
+      `profile mismatch view=${sessionProfile?.openworkPreferredView} agent=${sessionProfile?.openworkPreferredAgent} lock=${sessionProfile?.openworkPreferredAgentLock}`,
+    );
+  }
   const uploaded = [];
   // Hosted runtimes need a short window to finish carrier/workspace setup
   // before large multipart uploads start, otherwise upload probes can stall

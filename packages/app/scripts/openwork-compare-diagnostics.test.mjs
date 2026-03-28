@@ -78,6 +78,18 @@ describe("summarizeConversationDiagnostics", () => {
     expect(summary.issueCounts["direct-office-read"]).toBe(1);
     expect(summary.issueCounts["access-denied"]).toBe(2);
   });
+
+  test("tracks when the session has entered the deliverable-writing phase", () => {
+    const summary = summarizeConversationDiagnostics([
+      toolPart("bash", { command: "mkdir -p outputs" }),
+      toolPart("write", { filePath: "/workspace/documents/sessions/rt_1/outputs/final.md" }),
+      toolPart("bash", { command: "python3 .opencode/references/check_document_delivery.py --target outputs --target reports" }),
+    ], {
+      workspaceDir: "/workspace/documents/sessions/rt_1",
+    });
+
+    expect(summary.deliverableTouchCount).toBe(3);
+  });
 });
 
 describe("buildCompactToolTrace", () => {
@@ -133,6 +145,7 @@ describe("shouldStopDiagnosticCapture", () => {
     const decision = shouldStopDiagnosticCapture({
       totalToolCalls: 9,
       leadingDiscoveryBurst: 1,
+      deliverableTouchCount: 0,
       issueCounts: {},
     }, {
       maxToolCalls: 8,
@@ -148,6 +161,7 @@ describe("shouldStopDiagnosticCapture", () => {
     const decision = shouldStopDiagnosticCapture({
       totalToolCalls: 4,
       leadingDiscoveryBurst: 2,
+      deliverableTouchCount: 0,
       issueCounts: {
         "external-path-touch": 1,
       },
@@ -165,6 +179,7 @@ describe("shouldStopDiagnosticCapture", () => {
     const decision = shouldStopDiagnosticCapture({
       totalToolCalls: 5,
       leadingDiscoveryBurst: 5,
+      deliverableTouchCount: 0,
       issueCounts: {
         "broad-discovery": 3,
       },
@@ -176,5 +191,21 @@ describe("shouldStopDiagnosticCapture", () => {
 
     expect(decision.stop).toBe(true);
     expect(decision.reason).toBe("discovery-drift");
+  });
+
+  test("does not stop on max tool calls after deliverable generation has started", () => {
+    const decision = shouldStopDiagnosticCapture({
+      totalToolCalls: 26,
+      leadingDiscoveryBurst: 0,
+      deliverableTouchCount: 2,
+      issueCounts: {},
+    }, {
+      maxToolCalls: 24,
+      minToolCallsBeforeIssueStop: 4,
+      maxLeadingDiscoveryBurst: 5,
+    });
+
+    expect(decision.stop).toBe(false);
+    expect(decision.reason).toBeNull();
   });
 });

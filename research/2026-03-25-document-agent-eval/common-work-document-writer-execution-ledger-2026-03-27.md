@@ -242,6 +242,212 @@ Reason:
   - raw local reruns
   - historical artifact inspection
 
+### 2026-03-28: fresh Qin pod rerun after commit `39aeaf38` passed the new delivery gate end-to-end
+
+Deployment:
+- local commit:
+  - `39aeaf38` (`Add deterministic document delivery gate`)
+- pushed to:
+  - `origin/dev`
+  - `gitee/dev`
+- pod:
+  - `git pull --ff-only`
+  - `bash scripts/recover-pod-runtime.sh --force`
+- post-restart health:
+  - `http://192.168.5.10:32765/openwork/health -> ok`
+
+Rerun:
+- `OPENWORK_COMPARE_SCENARIO=qin OPENWORK_COMPARE_MODE=diagnostic QIN_ABC_LANES=pod OPENWORK_COMPARE_DIAGNOSTIC_TIMEOUT_MS=300000 OPENWORK_COMPARE_DIAGNOSTIC_MAX_TOOL_CALLS=24 node tmp/qin-abc-minimax.mjs`
+- session:
+  - `ses_2cdf0743dffeNB7QlH44DkR2Lt`
+
+Result:
+- generated deliverables:
+  - `outputs/融合算力平台项目申报技术材料.docx`
+  - `outputs/融合算力平台项目申报技术材料.md`
+- `deliveryGateOk = true`
+- `deliveryQualityGate.report.issueCount = 0`
+
+Most important behavior change:
+- the tool trace now shows a real repair loop instead of a fake “I checked” close-out:
+  - generated Markdown + `.docx`
+  - ran `python3 .opencode/references/check_document_delivery.py --target outputs --target reports`
+  - edited the Markdown multiple times
+  - regenerated the `.docx`
+  - reran the same delivery gate
+  - only then closed the task
+
+Residual observations:
+- this rerun still had one low-severity habit that is worth tracking later:
+  - a late `glob outputs/*`
+- it no longer matters for baseline correctness because:
+  - `broadDiscoveryCount = 0`
+  - `externalPathTouchCount = 0`
+  - `systemTempTouchCount = 0`
+  - `directOfficeReadCount = 0`
+  - final delivery gate passed
+- upload time is still long on this pod scenario:
+  - `uploadElapsedMs = 438521`
+  - that is a performance concern, not a document-correctness blocker
+
+Decision:
+- treat the deterministic gate as effective on hosted Qin
+- keep Stage 2 open until the same harness confirms whether raw local OpenCode now still beats, ties, or loses on final deliverable quality under the same gate
+
+### 2026-03-28: matching Qin raw rerun failed the same delivery gate, so hosted `common-work` is now stronger than raw on this benchmark
+
+Rerun:
+- `OPENWORK_COMPARE_SCENARIO=qin OPENWORK_COMPARE_MODE=diagnostic QIN_ABC_LANES=raw OPENWORK_COMPARE_DIAGNOSTIC_TIMEOUT_MS=300000 OPENWORK_COMPARE_DIAGNOSTIC_MAX_TOOL_CALLS=24 node tmp/qin-abc-minimax.mjs`
+- session:
+  - `ses_2cde4d279ffentciKfO5aM06wp`
+
+Raw result:
+- `deliveryGateOk = false`
+- generated output:
+  - `.tmp/system/算力网络平台项目申报技术材料.docx`
+- no stable `outputs/**` deliverable was produced
+- the compare harness therefore had no valid stable target to scan and reported:
+  - `No delivery-gate targets provided.`
+
+Important raw weaknesses in the same run:
+- still started with:
+  - `glob **/*.docx`
+- still called:
+  - `webfetch`
+  - `skill`
+- still wrote the final Word artifact into:
+  - `.tmp/system/...`
+- still did not run any equivalent deterministic delivery-quality repair loop
+- still produced malformed `export` JSON and forced fallback analysis from `run-jsonl`
+
+Direct comparison on the Qin benchmark now looks like this:
+- hosted `common-work`:
+  - stable outputs in `outputs/**`
+  - deterministic delivery gate passed
+  - explicit repair loop observed in the tool trace
+- raw local OpenCode:
+  - final artifact stranded in `.tmp/system/**`
+  - deterministic delivery gate failed / could not validate a stable deliverable
+  - more irrelevant routing (`glob`, `webfetch`, `skill`)
+
+Decision:
+- count the Qin benchmark as a clear Stage 2 win for hosted `common-work`
+- do not stop Stage 2 yet, because the long formal benchmark from `/Users/storm/Pictures/开发参考文件/标书agent开发相关文件/` is still pending
+
+### 2026-03-28: the first `ly` long-form pod diagnostic was a harness false stop, not a hosted product regression
+
+Scenario:
+- first pod-only long-form run:
+  - `OPENWORK_COMPARE_SCENARIO=ly OPENWORK_COMPARE_MODE=diagnostic QIN_ABC_LANES=pod OPENWORK_COMPARE_DIAGNOSTIC_TIMEOUT_MS=300000 OPENWORK_COMPARE_DIAGNOSTIC_MAX_TOOL_CALLS=24 node tmp/qin-abc-minimax.mjs`
+- source set:
+  - `备-环投数科临沂项目第一包v20250507v1.0(1)(1).docx`
+  - `临沂招标文件正文.pdf`
+  - `环投数科临沂项目第一包v20250508终版文件.docx`
+
+What happened:
+- the hosted route stayed clean on the dimensions the user cares about:
+  - `broadDiscoveryCount = 0`
+  - `systemTempTouchCount = 0`
+  - `externalPathTouchCount = 0`
+  - `directOfficeReadCount = 0`
+- but the diagnostic harness aborted at:
+  - `reason = max-tool-calls`
+- the recorded `write` error was:
+  - `Tool execution aborted`
+- the trace showed the session had already finished the expensive extraction/read phase and was only just entering first-draft creation
+
+Root cause:
+- this was not OpenCode / OpenWork imposing a 24-tool product limit
+- it was the A/B harness's diagnostic-only early-stop setting
+- on a large formal benchmark, `24` tool calls was too low and cut the run before delivery
+
+What was changed locally:
+- `packages/app/scripts/openwork-compare-diagnostics.mjs`
+  - diagnostic early-stop now refuses to stop on pure `max-tool-calls` once the session has already touched `outputs/**` or `reports/**`
+- `packages/app/scripts/openwork-compare-diagnostics.test.mjs`
+  - added coverage proving deliverable-phase activity suppresses the false stop
+- `tmp/qin-abc-minimax.mjs`
+  - raised the default diagnostic `maxToolCalls` fallback from `8` to `240`
+  - user explicitly called out that long-form diagnostics should be `200+`, so the harness default was aligned to that expectation
+
+Verification:
+- `bun test packages/app/scripts/openwork-compare-diagnostics.test.mjs`
+- `node --check tmp/qin-abc-minimax.mjs`
+- `git diff --check -- packages/app/scripts/openwork-compare-diagnostics.mjs packages/app/scripts/openwork-compare-diagnostics.test.mjs tmp/qin-abc-minimax.mjs`
+
+Decision:
+- do not treat the first failed `ly` pod-only run as evidence against hosted `common-work`
+- treat it as a Stage 2 benchmarking-tool bug and keep product conclusions tied only to the corrected reruns
+
+Reason:
+- the hosted route was still respecting workspace boundaries and document-first extraction rules
+- the session was interrupted by the benchmark harness itself, so changing product prompts or runtime behavior based on that run would have been a category error
+
+### 2026-03-28: corrected `ly` reruns show both lanes can now pass the delivery gate, but hosted `common-work` is still cleaner and more prompt-faithful
+
+Hosted rerun:
+- widened diagnostic pod run:
+  - `OPENWORK_COMPARE_SCENARIO=ly OPENWORK_COMPARE_MODE=diagnostic QIN_ABC_LANES=pod OPENWORK_COMPARE_DIAGNOSTIC_TIMEOUT_MS=420000 OPENWORK_COMPARE_DIAGNOSTIC_MAX_TOOL_CALLS=40 node tmp/qin-abc-minimax.mjs`
+- result:
+  - generated:
+    - `outputs/天河产业园融合算力系统技术方案.md`
+    - `outputs/天河产业园融合算力系统技术方案.docx`
+  - `deliveryGateOk = true`
+  - `issueCount = 0`
+  - `toolIssues = {}`
+  - route quality:
+    - `broadDiscoveryCount = 0`
+    - `systemTempTouchCount = 0`
+    - `externalPathTouchCount = 0`
+    - `directOfficeReadCount = 0`
+
+Matching raw rerun:
+- local raw run:
+  - `OPENWORK_COMPARE_SCENARIO=ly OPENWORK_COMPARE_MODE=diagnostic QIN_ABC_LANES=raw OPENWORK_COMPARE_DIAGNOSTIC_TIMEOUT_MS=420000 OPENWORK_COMPARE_DIAGNOSTIC_MAX_TOOL_CALLS=40 node tmp/qin-abc-minimax.mjs`
+- result:
+  - generated:
+    - `outputs/天河产业园融合算力系统技术方案.md`
+    - `outputs/天河产业园融合算力系统技术方案.docx`
+  - `deliveryGateOk = true`
+  - but still showed route waste:
+    - leading `glob "**/*"`
+    - one wrong `read` against a non-existent extracted file
+    - malformed `export` JSON again, forcing `run-jsonl` fallback analysis
+
+Cross-check:
+- combined deterministic scan over both output directories:
+  - `python3 .opencode/references/check_document_delivery.py --target tmp/compare-agents/ly-raw-vs-pod-minimax/raw-opencode-workspace/outputs --target tmp/compare-agents/ly-raw-vs-pod-minimax/downloads/pod/outputs`
+- result:
+  - all four deliverables scanned clean
+
+Output-quality comparison at this checkpoint:
+- pod Markdown is materially fuller:
+  - about `8269` chars
+  - `66` headings
+- raw Markdown is shorter and flatter:
+  - about `5300` chars
+  - `22` headings
+- raw output also carried prompt-faithfulness drift that the hosted result avoided:
+  - explicit procurement budget / price-like material:
+    - `5782.65万元`
+  - more bidder- and招标流程-oriented商务条款 noise
+- hosted output better respected the request to stay on a formal technical-solution surface and remove pricing-style residue
+
+Residual hosted nit:
+- hosted output still used an ASCII box-drawing architecture block
+- this is a readability polish issue, not a baseline delivery blocker
+
+Decision:
+- count `ly` as a hosted route-quality win and a hosted prompt-faithfulness win
+- do not yet declare Stage 2 fully complete from `ly` alone, because raw also now passes the hard delivery gate on this scenario
+
+Reason:
+- the corrected `ly` evidence says hosted `common-work` is cleaner and usually better aligned with the requested document shape
+- but Stage 2's exit criterion is stronger than “cleaner route”; it asks for final deliverables that are at least as strong as raw across the chosen benchmark set
+- the current state is:
+  - Qin: hosted clearly stronger
+  - `ly`: hosted cleaner and arguably stronger, but the quality gap is not yet definitive enough to close the entire stage without one more judgment pass
+
 ### Task 3: isolate `document-writer` from `common-work`
 
 Status:

@@ -58,7 +58,7 @@ const TIMEOUTS = {
 };
 
 const DIAGNOSTIC_LIMITS = {
-  maxToolCalls: readPositiveIntEnv("OPENWORK_COMPARE_DIAGNOSTIC_MAX_TOOL_CALLS", 8),
+  maxToolCalls: readPositiveIntEnv("OPENWORK_COMPARE_DIAGNOSTIC_MAX_TOOL_CALLS", 240),
   minToolCallsBeforeIssueStop: readPositiveIntEnv("OPENWORK_COMPARE_DIAGNOSTIC_MIN_TOOL_CALLS", 4),
   maxLeadingDiscoveryBurst: readPositiveIntEnv("OPENWORK_COMPARE_DIAGNOSTIC_MAX_DISCOVERY_BURST", 5),
 };
@@ -86,6 +86,18 @@ const SCENARIOS = {
     ],
     prompt:
       "请结合当前三份参考文档，输出一份中文点对点解决方案，优先落成可交付的 Markdown 或 Word 文档。正文至少完整覆盖：需求拆解、点对点对应方案、证据与约束、待确认问题。内容要面向正式方案交付，不要写成头脑风暴记录，也不要只列提纲。",
+  },
+  ly: {
+    id: "ly-raw-vs-pod-minimax",
+    title: "临沂正式材料-Raw-vs-Pod-MiniMax",
+    promptFile: "ly-user-prompt.txt",
+    docs: [
+      "/Users/storm/Pictures/开发参考文件/标书agent开发相关文件/备-环投数科临沂项目第一包v20250507v1.0(1)(1).docx",
+      "/Users/storm/Pictures/开发参考文件/标书agent开发相关文件/智能员工资料/ly项目伙伴/临沂招标文件正文.pdf",
+      "/Users/storm/Pictures/开发参考文件/标书agent开发相关文件/智能员工资料/ly项目伙伴/伙伴资料文档/环投数科临沂项目第一包v20250508终版文件.docx",
+    ],
+    prompt:
+      "请基于当前三份正式材料，输出一份可交付的中文技术方案，优先同时产出 Markdown 源稿和 Word 文档。正文至少完整覆盖：项目理解、点对点解决路径、证据来源与假设、风险与待确认事项。保留正式投标/方案口径，但删去供应商专属身份信息、报价信息和明显仅适用于原投标人的承诺；所有关键判断必须锚定到当前材料，不要先泛化搜索再写。",
   },
 };
 const SCENARIO_KEY = String(process.env.OPENWORK_COMPARE_SCENARIO ?? "qin").trim().toLowerCase();

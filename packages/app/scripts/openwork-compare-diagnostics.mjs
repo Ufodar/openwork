@@ -16,6 +16,8 @@ const COMMAND_SYSTEM_TEMP_RE = /(^|[\s"'=`])(?:\/private\/tmp\/|\/tmp\/)[^\s"'`;
 const FETCH_FAILED_RE = /fetch failed/i;
 const ACCESS_DENIED_RE = /access denied|prevents you from using this specific tool call/i;
 const MCP_ERROR_RE = /mcp error/i;
+const DELIVERABLE_PATH_RE = /(^|\/)(outputs|reports)(\/|$)/i;
+const DELIVERABLE_TEXT_RE = /(^|[\s"'=`])(?:\.\/)?(?:outputs|reports)(?:\/|\b)/i;
 
 function readStateInput(part) {
   if (part?.state?.input && typeof part.state.input === "object") return part.state.input;
@@ -144,6 +146,19 @@ function increment(map, key, amount = 1) {
   map[key] = (map[key] ?? 0) + amount;
 }
 
+function touchesDeliverable(part) {
+  const paths = getPathCandidates(part);
+  const pattern = getPattern(part);
+  const command = getCommand(part);
+  const url = getUrl(part);
+
+  if (paths.some((path) => DELIVERABLE_PATH_RE.test(path))) return true;
+  if (pattern && DELIVERABLE_TEXT_RE.test(pattern)) return true;
+  if (command && DELIVERABLE_TEXT_RE.test(command)) return true;
+  if (url && DELIVERABLE_TEXT_RE.test(url)) return true;
+  return false;
+}
+
 export function buildCompactToolTrace(parts, options = {}) {
   const toolParts = Array.isArray(parts) ? parts.filter((part) => part?.type === "tool") : [];
   const maxEntries = Number.isFinite(options.maxEntries) ? Number(options.maxEntries) : toolParts.length;
@@ -179,6 +194,7 @@ export function summarizeConversationDiagnostics(parts, options = {}) {
   let systemTempTouchCount = 0;
   let externalPathTouchCount = 0;
   let directOfficeReadCount = 0;
+  let deliverableTouchCount = 0;
   const failureKeys = new Map();
 
   for (const [index, part] of toolParts.entries()) {
@@ -193,6 +209,9 @@ export function summarizeConversationDiagnostics(parts, options = {}) {
     }
     if (!firstMeaningfulTool && isDiscoveryTool(part)) {
       leadingDiscoveryBurst += 1;
+    }
+    if (touchesDeliverable(part)) {
+      deliverableTouchCount += 1;
     }
 
     for (const code of codes) {
@@ -233,6 +252,7 @@ export function summarizeConversationDiagnostics(parts, options = {}) {
     systemTempTouchCount,
     externalPathTouchCount,
     directOfficeReadCount,
+    deliverableTouchCount,
     repeatedFailureCount,
     issueCounts,
     issues,
@@ -248,7 +268,7 @@ export function shouldStopDiagnosticCapture(summary, options = {}) {
     ? Number(options.maxLeadingDiscoveryBurst)
     : 5;
 
-  if ((summary?.totalToolCalls ?? 0) >= maxToolCalls) {
+  if ((summary?.totalToolCalls ?? 0) >= maxToolCalls && (summary?.deliverableTouchCount ?? 0) === 0) {
     return { stop: true, reason: "max-tool-calls" };
   }
 

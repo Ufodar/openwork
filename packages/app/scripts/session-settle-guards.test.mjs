@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 
 import {
   detectStalledPendingTools,
+  shouldTreatFingerprintChangeAsProgress,
   summarizePendingToolStates,
 } from "./session-settle-guards.mjs";
 
@@ -129,4 +130,42 @@ test("detectStalledPendingTools stays quiet when no pending tools exist", () => 
       stalledPendingToolTimeoutMs: 120_000,
     }),
   ).toBeNull();
+});
+
+test("shouldTreatFingerprintChangeAsProgress ignores malformed-pending-only assistant messages", () => {
+  const messages = [{
+    role: "assistant",
+    parts: [
+      {
+        type: "tool",
+        tool: "write",
+        state: {
+          status: "pending",
+          input: {},
+          raw: "",
+        },
+      },
+    ],
+  }];
+
+  expect(shouldTreatFingerprintChangeAsProgress(messages)).toBe(false);
+});
+
+test("shouldTreatFingerprintChangeAsProgress still counts well-formed tool activity as progress", () => {
+  const messages = [{
+    role: "assistant",
+    parts: [
+      {
+        type: "tool",
+        tool: "bash",
+        state: {
+          status: "running",
+          input: { command: "echo ok", description: "demo" },
+          raw: "",
+        },
+      },
+    ],
+  }];
+
+  expect(shouldTreatFingerprintChangeAsProgress(messages)).toBe(true);
 });

@@ -2716,3 +2716,85 @@ Decision:
 Reason:
 - this saves time immediately
 - it also makes the next A/B evidence more trustworthy, because a hung lane will now fail with the real reason instead of being misread as “still running”
+
+### 2026-03-28: formal `wjw` debugging split a real `common-work` regression from a misleading SSH/VPN interruption, and the fast-fail harness now aborts the bad loop quickly
+
+What first looked like a service outage:
+- while a pod-local `formal-wjw-multi-doc` compare was being driven through SSH, the control connection dropped during a VPN interruption
+- this made it look like the benchmark itself had simply hung forever
+- direct HTTP checks later confirmed:
+  - `http://192.168.5.10:32765/openwork/health -> ok`
+- direct session inspection also proved the earlier `common-work` session:
+  - `ses_2cb8f56ccffe7vOrH2PVj3OUG0`
+  had actually progressed much further than the dead SSH terminal suggested
+
+What the local HTTP rerun proved:
+- rerunning the same formal benchmark locally against the pod API removed SSH/VPN from the loop
+- on the new `common-work` lane:
+  - `ses_2cb875b23ffeYzElPy9os9YAPb`
+  the session first behaved normally:
+  - document extraction through `bash`
+  - targeted `read`
+  - successful `edit`
+  - successful `write`
+- but after `.worktree` state update attempts started failing, the lane degraded into malformed empty tool calls again:
+  - empty `write`
+  - empty `edit`
+  - empty `bash`
+  - all with:
+    - `status = pending`
+    - `state.input = {}`
+    - `state.raw = ""`
+
+More precise root-cause shape now observed:
+- the formal `wjw` failure is not a general pod outage
+- it is not the older writer-profile metadata bug either
+- it is a `common-work` long-form regression in the state-writing phase:
+  - a normal `.worktree` update attempt errors
+  - the agent partially repairs with `read` / `edit`
+  - then later falls into a malformed pending-tool loop instead of recovering cleanly
+
+Additional harness hardening added after this evidence:
+- `packages/app/scripts/session-settle-guards.mjs`
+  - added `shouldTreatFingerprintChangeAsProgress(messages)`
+- `packages/app/scripts/session-settle-guards.test.mjs`
+  - added regression coverage proving malformed-pending-only assistant messages do **not** refresh the progress timer
+- `packages/app/scripts/doc-agent-live-compare.mjs`
+  - now refreshes `lastProgressAt` only on meaningful progress, not on blank malformed pending shells
+- `packages/app/scripts/doc-subagent-simulate.mjs`
+  - same change
+
+Verification:
+- `bun test packages/app/scripts/session-settle-guards.test.mjs`
+  - `6 pass`
+  - `0 fail`
+- `node --check packages/app/scripts/doc-agent-live-compare.mjs packages/app/scripts/doc-subagent-simulate.mjs packages/app/scripts/session-settle-guards.mjs`
+  - pass
+- `git diff --check -- packages/app/scripts/session-settle-guards.mjs packages/app/scripts/session-settle-guards.test.mjs packages/app/scripts/doc-agent-live-compare.mjs packages/app/scripts/doc-subagent-simulate.mjs`
+  - clean
+
+Real proof that the new guard works:
+- local->pod rerun:
+  - `OPENWORK_BASE=http://192.168.5.10:32765/openwork OPENWORK_FORMAL_BENCHMARK_SOURCE_ROOT='/Users/storm/Pictures/开发参考文件/标书agent开发相关文件' OPENWORK_COMPARE_OUTPUT='tmp/compare-agents/formal-wjw-local-http-guard.json' node packages/app/scripts/doc-agent-live-compare.mjs formal-wjw-multi-doc`
+- lane:
+  - `ses_2cb81100fffeCanTuOwI6LbpQe`
+- result:
+  - compare terminated early with a structured failure instead of hanging:
+    - `malformed-pending-tool`
+    - tool sample:
+      - `bash`
+      - `status = pending`
+      - `inputKeys = []`
+      - `raw = ""`
+- local artifact written:
+  - `tmp/compare-agents/formal-wjw-local-http-guard.json`
+
+Decision:
+- treat the harness fast-fail as validated
+- stop running formal compares through long-lived SSH shells when direct pod HTTP is available
+- keep the product blocker focused on the real issue:
+  - `common-work` can still collapse into malformed empty pending tool calls during formal `wjw` state-writing work
+
+Reason:
+- this cleanly separates transport noise from product behavior
+- it also turns a multi-minute ambiguous wait into a fast, structured benchmark failure that other tools or agents can pick up immediately

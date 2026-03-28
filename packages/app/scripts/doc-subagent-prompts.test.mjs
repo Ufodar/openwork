@@ -437,6 +437,7 @@ test("common-work adds a concrete final sweep for suspicious internal paths and 
   const prompt = await readFile(resolve(root, ".opencode/agent/common-work.md"), "utf8");
 
   expect(prompt).toContain("完成前做一次显式扫描");
+  expect(prompt).toContain("python3 .opencode/references/check_document_delivery.py");
   expect(prompt).toContain("`example.com`");
   expect(prompt).toContain("`@example.com`");
   expect(prompt).toContain("`<ACCESS_TOKEN>`");
@@ -451,6 +452,7 @@ test("common-work adds a concrete final sweep for suspicious internal paths and 
   expect(prompt).toContain("`documents/sessions/`");
   expect(prompt).toContain("`.tmp/system`");
   expect(prompt).toContain("如果命中这些高风险残留");
+  expect(prompt).toContain("不要把最终扫描指向整个 `.`");
 });
 
 test("common-work forbids placeholder credentials in final API examples", async () => {
@@ -461,10 +463,10 @@ test("common-work forbids placeholder credentials in final API examples", async 
   expect(prompt).toContain("`Authorization: Bearer access_token`");
   expect(prompt).toContain("不要写 `YourSecurePassword123!`");
   expect(prompt).toContain("不要为了凑齐登录示例");
-  expect(prompt).toContain("`grep -RniE`");
-  expect(prompt).toContain("`example\\\\.com|@example\\\\.com|<access_token>|<ACCESS_TOKEN>|YourSecurePassword123!`");
+  expect(prompt).toContain("`python3 .opencode/references/check_document_delivery.py`");
+  expect(prompt).toContain("退出码为 `0`");
   expect(prompt).toContain("`ls`、`glob outputs/*`、只看文件存在");
-  expect(prompt).toContain("并重新运行同一条扫描直到无命中为止");
+  expect(prompt).toContain("并重新运行同一条扫描直到退出码为 `0`");
 });
 
 test("common-work keeps helper generator scripts out of user-visible deliverable paths", async () => {

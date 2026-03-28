@@ -180,10 +180,12 @@ Decisions:
 - keep Task 2 open
 - do not yet declare `common-work` stronger than local raw OpenCode on final deliverable quality
 - stop relying only on tail-end prompt rules for quality gates
+- move from a noisy `grep ... .` style reminder to a deterministic delivery gate script that scans only explicit deliverable targets
 
 Reason:
 - the model repeatedly ignored long tail-end cleanup instructions
 - moving the most important rules to the earliest runtime guidance is a better bet than continuing to add weaker wording near the bottom of a long prompt
+- the earlier `grep -RniE ... outputs reports .` route was also flawed on its own merits because scanning `.` pulls in runtime `.opencode/**` policy files that intentionally contain `example.com`, `@example.com`, and token placeholders as examples, which creates false positives and weakens the signal
 
 Current local pending work for Task 2:
 - one uncommitted bridge-only hardening is now present locally:
@@ -193,6 +195,52 @@ Current local pending work for Task 2:
   - no `/tmp` reopenable outputs
   - mandatory final `grep` sweep before delivery
 - this has not yet been committed or redeployed at the time of this checkpoint
+
+### 2026-03-28: deterministic delivery gate added for Stage 2 and wired into the Qin A/B harness
+
+New findings:
+- the newly added `python3 .opencode/references/check_document_delivery.py` immediately reproduced the known Qin residue on historical pod outputs:
+  - `tmp/compare-agents/qin-abc-minimax/downloads/pod/outputs/融合算力调度平台技术方案.docx`
+  - hits:
+    - `https://kubernetes.example.com:6443`
+- scanning the broader historical pod download corpus also caught the larger family of surviving residue:
+  - `http://<API_HOST>/...`
+  - `https://<API_HOST>/...`
+  - `Bearer <ACCESS_TOKEN>`
+  - `ops-team@example.com`
+  - `https://example.com/webhook/...`
+- a real implementation bug was found and fixed in the first version of the gate:
+  - it incorrectly ignored valid files when an ancestor absolute path happened to contain a `tmp/` segment
+  - this mattered because the compare corpus lives under `tmp/compare-agents/...`
+
+What was changed:
+- added runtime-shippable deterministic delivery gate:
+  - `.opencode/references/check_document_delivery.py`
+- changed `document-mode-bridge.js` to instruct sessions to run:
+  - `python3 .opencode/references/check_document_delivery.py --target outputs --target reports`
+  - plus the exact final file path when the stable deliverable lives elsewhere
+- changed `common-work.md` final verification rules to:
+  - treat the script exit code as the real delivery-quality result
+  - explicitly forbid pointing the sweep at the whole `.` tree
+- wired the Qin compare harness to record `deliveryQualityGate` results for:
+  - raw outputs
+  - hosted/local downloaded documents
+
+Tests run for this change:
+- `bun test "$PWD/.opencode/plugins/document-mode-bridge.test.mjs"`
+- `bun test packages/app/scripts/check-document-delivery.test.mjs packages/app/scripts/qin-compare-harness.test.mjs`
+- `bun test packages/app/scripts/doc-subagent-prompts.test.mjs`
+- `git diff --check -- .opencode/references/check_document_delivery.py .opencode/plugins/document-mode-bridge.js .opencode/plugins/document-mode-bridge.test.mjs .opencode/agent/common-work.md packages/app/scripts/check-document-delivery.test.mjs packages/app/scripts/doc-subagent-prompts.test.mjs packages/app/scripts/qin-compare-harness.test.mjs tmp/qin-abc-minimax.mjs`
+
+Decision:
+- keep this as the new Stage 2 quality baseline before the next pod rerun
+
+Reason:
+- this is a stronger and lower-noise gate than the old prompt-only `grep ... .` route
+- it creates the same machine-readable quality verdict for:
+  - live hosted reruns
+  - raw local reruns
+  - historical artifact inspection
 
 ### Task 3: isolate `document-writer` from `common-work`
 

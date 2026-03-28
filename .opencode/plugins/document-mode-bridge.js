@@ -139,7 +139,8 @@ ${candidateLine ? `\n${candidateLine}` : ""}
 Non-negotiable hosted document guardrails:
 - Never call \`read\` on original \`.docx\`, \`.xlsx\`, \`.pptx\`, or other binary Office files; extract into workspace-local text first, then read the extracted artifact.
 - Never write reopenable document temp outputs to \`/tmp\` or \`/private/tmp\`; keep them under \`<WORKSPACE>/.tmp/system\` or another workspace-local directory from the first command.
-- Before delivery, run a real text sweep such as \`grep -RniE 'example\\.com|@example\\.com|<access_token>|<ACCESS_TOKEN>|YourSecurePassword123!' outputs reports .\`; if anything hits, rewrite and regenerate until the scan is clean. \`ls\` or \`glob\` is not a substitute.
+- Before delivery, run \`python3 .opencode/references/check_document_delivery.py --target outputs --target reports\` plus the exact final file path if it lives elsewhere; if the script reports hits, rewrite and regenerate until it passes cleanly.
+- Never point the final delivery sweep at the whole \`.\` tree; runtime \`.opencode/**\` policy files intentionally contain strings like \`example.com\` and will create noisy false positives. \`ls\` or \`glob\` is not a substitute.
 
 Document-native operating rules:
 - Read real files early. Do not stay in planning-only mode for long.

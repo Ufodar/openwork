@@ -96,6 +96,7 @@ const SUMMARY_PATH = join(OUTPUT_ROOT, "summary.json");
 const RAW_WORKSPACE = join(OUTPUT_ROOT, "raw-opencode-workspace");
 const LOCAL_WORKSPACE = join(OUTPUT_ROOT, "local-openwork-workspace");
 const LOCAL_DATA_DIR = join(OUTPUT_ROOT, "local-openwork-data");
+const DELIVERY_GATE_SCRIPT = join(ROOT, ".opencode", "references", "check_document_delivery.py");
 
 function parseModel(value) {
   const slash = value.indexOf("/");
@@ -625,6 +626,48 @@ async function fileExists(path) {
   }
 }
 
+async function runDeliveryQualityGate(targets, { cwd }) {
+  const normalizedTargets = [...new Set((targets || []).filter(Boolean))];
+  if (!normalizedTargets.length) {
+    return {
+      ok: false,
+      exitCode: null,
+      error: { message: "No delivery-gate targets provided." },
+    };
+  }
+
+  const args = [DELIVERY_GATE_SCRIPT];
+  for (const target of normalizedTargets) {
+    args.push("--target", target);
+  }
+
+  const result = await runChildWithTimeout("python3", args, {
+    cwd,
+    env: process.env,
+    timeoutMs: 60_000,
+  });
+
+  try {
+    return {
+      ok: result.code === 0,
+      exitCode: result.code,
+      signal: result.signal,
+      report: result.stdout.trim() ? JSON.parse(result.stdout) : null,
+      stdoutPreview: result.stdout.slice(0, 4000),
+      stderrPreview: result.stderr.slice(0, 4000),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      exitCode: result.code,
+      signal: result.signal,
+      parseError: formatError(error),
+      stdoutPreview: result.stdout.slice(0, 4000),
+      stderrPreview: result.stderr.slice(0, 4000),
+    };
+  }
+}
+
 async function prepareAgentWorkspace(dir, { copyScenarioDocs }) {
   await ensureCleanDir(dir);
   await symlink(join(ROOT, ".opencode"), join(dir, ".opencode"), "dir");
@@ -821,6 +864,10 @@ async function runRawLane() {
 
   const files = await listFilesRecursive(RAW_WORKSPACE);
   const generatedOutputs = classifyWorkspaceOutputs(files);
+  const rawDeliverableTargets = generatedOutputs
+    .filter((item) => !item.startsWith(".tmp/") && !item.startsWith("tmp/"))
+    .filter((item) => /\.(?:docx|md|txt|json|yaml|yml|csv|tsv|xml|html?)$/i.test(item));
+  const deliveryQualityGate = await runDeliveryQualityGate(rawDeliverableTargets, { cwd: RAW_WORKSPACE });
   const result = {
     lane: "raw",
     title,
@@ -848,6 +895,7 @@ async function runRawLane() {
     stderrPreview: runResult.stderr.slice(0, 8000),
     workspaceFiles: files,
     generatedOutputs,
+    deliveryQualityGate,
     ...(exportObj
       ? analyzeExport(exportObj, { workspaceDir: RAW_WORKSPACE })
       : analyzeRunJsonLines(runResult.stdout, { workspaceDir: RAW_WORKSPACE })),
@@ -859,6 +907,7 @@ async function runRawLane() {
     returncode: result.returncode,
     signal: result.signal,
     generatedOutputs: result.generatedOutputs.length,
+    deliveryGateOk: result.deliveryQualityGate?.ok ?? false,
   });
   return result;
 }
@@ -945,6 +994,11 @@ async function runOpenWorkCommonWorkLane({
     }
   }
 
+  const deliveryQualityGate = await runDeliveryQualityGate(
+    downloaded.filter((item) => !item.error).map((item) => item.path),
+    { cwd: ROOT },
+  );
+
   return {
     lane,
     model: MODEL_REF,
@@ -971,6 +1025,7 @@ async function runOpenWorkCommonWorkLane({
     finalDocuments: docs.items || [],
     generatedDocuments,
     downloadedDocuments: downloaded,
+    deliveryQualityGate,
     health: await client.global.health(),
   };
 }
@@ -1063,6 +1118,7 @@ async function runLocalLane() {
       lane: "local",
       sessionId: result.sessionId,
       generatedDocuments: result.generatedDocuments.length,
+      deliveryGateOk: result.deliveryQualityGate?.ok ?? false,
     });
     return result;
   } finally {
@@ -1094,6 +1150,7 @@ async function runPodLane() {
     lane: "pod",
     sessionId: result.sessionId,
     generatedDocuments: result.generatedDocuments.length,
+    deliveryGateOk: result.deliveryQualityGate?.ok ?? false,
   });
   return result;
 }

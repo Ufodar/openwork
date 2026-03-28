@@ -14,4 +14,6 @@ test("qin compare harness creates hosted common-work sessions with explicit runt
   expect(script).toContain("preferredView: \"document-agent\"");
   expect(script).toContain("preferredAgent: \"common-work\"");
   expect(script).toContain("preferredAgentLock: \"common-work\"");
+  expect(script).toContain("check_document_delivery.py");
+  expect(script).toContain("deliveryQualityGate");
 });

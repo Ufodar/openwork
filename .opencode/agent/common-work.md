@@ -224,7 +224,9 @@ find . -maxdepth 3 -type f \( -iname '*.docx' -o -iname '*.doc' -o -iname '*.pdf
   - 版式是否明显偏离来源模板
 - `ls`、`glob outputs/*`、只看文件存在，或只看最终总结里的路径，不算 final verification；必须做真实文本回读或显式文本扫描。
 - 完成前做一次显式扫描，检查最终交付物和准备发给用户的总结里是否残留高风险字符串，例如 `example.com`、`@example.com`、`<ACCESS_TOKEN>`、`<access_token>`、`Bearer <ACCESS_TOKEN>`、`Bearer <access_token>`、`YourSecurePassword123!`、`https://example.com/webhooks/`、`https://<`、`http://<`、`<API_HOST>`、`<APP_HOST>`、`/root/.openwork`、`documents/sessions/`、`.tmp/system`；如果命中这些高风险残留，就先改写为稳定相对路径、相对 API 路径、统一的 hostless 占位变量或显式占位字段，再交付。
-- 如果最终交付物里包含 API 示例、JSON、Webhook 配置或鉴权字段，收尾时至少跑一次显式文本扫描；优先使用 `grep -RniE` 这类可复现命令，例如 `grep -RniE 'example\\.com|@example\\.com|<access_token>|<ACCESS_TOKEN>|YourSecurePassword123!' outputs reports .`；常用扫描模式至少覆盖 `example\\.com|@example\\.com|<access_token>|<ACCESS_TOKEN>|YourSecurePassword123!`；命中后必须回到稳定源稿或最终正文改写，再重新生成 `.docx` / `.pdf` 等交付件，并重新运行同一条扫描直到无命中为止。
+- 如果最终交付物里包含 API 示例、JSON、Webhook 配置、鉴权字段或其他容易残留伪值的结构，收尾时至少跑一次确定性的交付扫描：优先执行 `python3 .opencode/references/check_document_delivery.py --target outputs --target reports`，如果最终交付件不在这两个目录里，再额外追加那个精确稳定路径。
+- 不要把最终扫描指向整个 `.`；runtime `.opencode/**` 里的规则文本本来就包含 `example.com`、`@example.com`、`<ACCESS_TOKEN>` 这类示例，扫整个树会把规则文档自身算成命中，制造噪音和误判。
+- `python3 .opencode/references/check_document_delivery.py` 的退出码才算最终交付扫描的结果：命中后必须回到稳定源稿或最终正文改写，再重新生成 `.docx` / `.pdf` 等交付件，并重新运行同一条扫描直到退出码为 `0`。
 - 同时检查 workspace 根目录、`outputs/` 和其他稳定交付路径里是否残留 `generate-docx.js`、`*.py`、`*.ts`、`*.js` 这类仅用于生成文档的 helper 文件；如果有，就先移回 `.tmp/` 或 `reports/`，不要让它们进入最终交付清单。
 - 对多系统 proposal-style 文档，完成前还必须额外检查：
   - 标题是否仍保持语义化，而不是出现双层编号或手打编号伪装结构

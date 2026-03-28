@@ -6,7 +6,8 @@ test("document mode bridge forbids external-directory detours for document-heavy
   const file = readFileSync(join(import.meta.dir, "document-mode-bridge.js"), "utf8");
 
   expect(file).toContain("Non-negotiable hosted document guardrails");
-  expect(file).toContain("Before delivery, run a real text sweep such as");
+  expect(file).toContain("python3 .opencode/references/check_document_delivery.py");
+  expect(file).toContain("Never point the final delivery sweep at the whole \\`.\\` tree");
   expect(file).toContain("\\`ls\\` or \\`glob\\` is not a substitute");
   expect(file).toContain("Do not use \\`external_directory\\`");
   expect(file).toContain("create \\`<WORKSPACE>/.tmp/system\\`");

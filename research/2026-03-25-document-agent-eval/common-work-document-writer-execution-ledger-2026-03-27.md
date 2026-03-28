@@ -2564,3 +2564,85 @@ Interpretation:
   - copy the smaller formal `wjw` benchmark files onto the pod
   - run `doc-agent-live-compare.mjs formal-wjw-multi-doc` directly against `http://127.0.0.1:8789`
   - score `common-work` vs `document-writer` without the unstable local tunnel upload path
+
+### 2026-03-28: formal WJW pod-local compare isolated a hosted writer session-list bug, and the first local fix is now ready
+
+What the pod-local compare proved:
+- the formal benchmark no longer depends on the flaky local tunnel upload path
+- on pod-local sources, `common-work` completed the `formal-wjw-multi-doc` lane and produced:
+  - `outputs/formal-wjw-synthesis.md`
+- the `document-writer` lane failed earlier, at strict profile verification during session creation follow-up:
+  - session id:
+    - `ses_2cbaf8fa0ffec5P3tMcL8h4i9g`
+  - compare error:
+    - `Timed out waiting for hosted session record ... last record view=null agent=null lock=null`
+
+Root cause investigation result:
+- this was not a writer runtime provisioning failure
+- direct pod inspection of:
+  - `/root/.openwork/openwork-server/session-workspaces/user-c503a0f6-a558-41f4-8ba4-899eb1ed6923.json`
+  showed that the writer session store entry already contained:
+  - `preferredView = document-writer`
+  - `preferredAgent = document-writer`
+  - `preferredAgentLock = document-writer`
+- the runtime directory also already contained the expected writer-only support surface:
+  - `.opencode/openwork-runtime-profile.json`
+  - `.opencode/runtime-support/document-state/*`
+  - `.opencode/skills = [doc-coauthoring, doc-normalize, docx, pdf, pptx, xlsx]`
+- however, that same stored session entry had no `opencodeRuntime` field
+- in `listWorkspaceSessions(...)`, that meant the session was treated as part of the shared-list path instead of the isolated-runtime path
+- the shared-list path only decorated `openworkPreferred*` from recovered history records, not from the stored session-workspace entry itself
+- because runtime directories are named by `runtimeId` rather than `sessionId`, and this runtime had no `.opencode/openwork.json` session map, recovered history could not reattach the writer preferences to `ses_2cbaf8fa0ffec5P3tMcL8h4i9g`
+- final effect:
+  - runtime was correct
+  - session list metadata was wrong
+  - strict writer-profile harness correctly refused to proceed
+
+Local fix prepared:
+- `packages/server/src/server.ts`
+  - shared-list session decoration now prefers:
+    - `runtimeWorkspace.preferredView`
+    - `runtimeWorkspace.preferredAgent`
+    - `runtimeWorkspace.preferredAgentLock`
+  - then falls back to:
+    - runtime profile file
+    - recovered history
+- `packages/server/src/server.proxy-session-list.test.ts`
+  - added a regression that specifically covers:
+    - shared-runtime session-workspace entry with writer preferences but no `opencodeRuntime`
+    - expected listed result:
+      - `openworkPreferredView = document-writer`
+      - `openworkPreferredAgent = document-writer`
+      - `openworkPreferredAgentLock = document-writer`
+
+Verification:
+- red/green sequence completed:
+  - new test first failed with:
+    - `Expected: "document-writer"`
+    - `Received: null`
+- after the fix:
+  - `bun test packages/server/src/server.proxy-session-list.test.ts`
+    - `7 pass`
+    - `0 fail`
+  - `bun test packages/server/src/server.proxy-session-create.test.ts`
+    - `5 pass`
+    - `0 fail`
+
+Decision:
+- treat this as the active Stage 4 blocker
+- do not weaken the writer harness by relaxing strict profile checks
+- instead, fix the hosted session-list metadata path so the writer lane only proceeds when the listed session really exposes the intended profile
+
+Reason:
+- `document-writer` is genuinely profile-sensitive:
+  - view contract matters
+  - runtime-support matters
+  - skill surface matters
+- a null-profile listed session is acceptable for current `common-work` A/B in some hosted paths, but it is not acceptable for the writer benchmark lane
+
+Immediate next step:
+- commit this shared-list metadata fix
+- push to GitHub and Gitee
+- pull and restart/recover on pod
+- rerun the same pod-local `formal-wjw-multi-doc` compare
+- then record whether `document-writer` can finally complete against the same formal corpus

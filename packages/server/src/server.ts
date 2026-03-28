@@ -907,6 +907,10 @@ async function listWorkspaceSessions(input: {
 
         const runtimeWorkspace = runtimeEntries.get(parsed.id);
         const runtimeDir = runtimeWorkspace?.runtimeDir?.trim() || join(input.workspace.path, "documents", "sessions", parsed.id);
+        const runtimeProfilePreferences =
+          runtimeWorkspace?.preferredView || runtimeWorkspace?.preferredAgent || runtimeWorkspace?.preferredAgentLock
+            ? null
+            : await readRuntimeProfilePreferences(runtimeDir);
         const directory: string | null = parsed.directory?.trim() || runtimeDir;
         if (!sessionDirectoryBelongsToWorkspace(input.workspace.path, directory)) {
           return null;
@@ -915,9 +919,21 @@ async function listWorkspaceSessions(input: {
         return {
           ...parsed,
           directory,
-          openworkPreferredView: recoveredById.get(parsed.id)?.openworkPreferredView ?? null,
-          openworkPreferredAgent: recoveredById.get(parsed.id)?.openworkPreferredAgent ?? null,
-          openworkPreferredAgentLock: recoveredById.get(parsed.id)?.openworkPreferredAgentLock ?? null,
+          openworkPreferredView:
+            runtimeWorkspace?.preferredView ??
+            runtimeProfilePreferences?.openworkPreferredView ??
+            recoveredById.get(parsed.id)?.openworkPreferredView ??
+            null,
+          openworkPreferredAgent:
+            runtimeWorkspace?.preferredAgent ??
+            runtimeProfilePreferences?.openworkPreferredAgent ??
+            recoveredById.get(parsed.id)?.openworkPreferredAgent ??
+            null,
+          openworkPreferredAgentLock:
+            runtimeWorkspace?.preferredAgentLock ??
+            runtimeProfilePreferences?.openworkPreferredAgentLock ??
+            recoveredById.get(parsed.id)?.openworkPreferredAgentLock ??
+            null,
           ownerKey: owner.ownerKey,
         } satisfies WorkspaceListedSession;
       }),

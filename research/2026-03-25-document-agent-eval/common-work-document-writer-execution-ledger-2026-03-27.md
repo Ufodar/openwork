@@ -2798,3 +2798,56 @@ Decision:
 Reason:
 - this cleanly separates transport noise from product behavior
 - it also turns a multi-minute ambiguous wait into a fast, structured benchmark failure that other tools or agents can pick up immediately
+
+### 2026-03-28: formal `wjw` root cause narrowed to `common-work` overwriting preexisting `.worktree` state files with `write`
+
+What the error payload showed:
+- direct inspection of the failed formal `wjw` session:
+  - `ses_2cb81100fffeCanTuOwI6LbpQe`
+  surfaced the first real product-level errors, not just the later malformed pending shells
+- the failing tool calls were normal-looking `write` attempts against already existing state files:
+  - `.worktree/index.json`
+  - `.worktree/sources/manifest.json`
+- the tool layer rejected them with an explicit contract error:
+  - `You must read file ... before overwriting it. Use the Read tool first`
+
+Interpretation:
+- the formal `wjw` regression is not caused by missing permissions or broken file paths
+- it is also not caused by the files being unwritable in principle
+- the actual mistake is route selection:
+  - `common-work` tries to use `write` as an overwrite shortcut for preseeded `.worktree` state
+  - the runtime contract requires `read` before overwrite and strongly prefers `edit` for existing state files
+  - after that first avoidable error, the agent sometimes partially repairs and then collapses into malformed pending tools
+
+Local product hardening added:
+- `common-work.md`
+  - now explicitly says that if `.worktree/index.json`, `.worktree/sources/manifest.json`, `.worktree/facts.json`, `.worktree/coverage.json`, or other existing state files are already present:
+    - do not use `write` to overwrite them
+    - `read` the current file first
+    - then use `edit`
+    - only use `write` when the file does not exist yet
+  - also adds a reroute rule:
+    - if `write` fails because the file must be read first, do not retry blank `write`; immediately switch to `read` + `edit`
+- `document-mode-bridge.js`
+  - now repeats the same rule inside the document-session runtime bridge so the guardrail is visible before long document work starts
+
+Local regression coverage added:
+- `packages/app/scripts/doc-subagent-prompts.test.mjs`
+  - added a prompt regression for the new `read` -> `edit` state-file rule
+- `.opencode/plugins/document-mode-bridge.test.mjs`
+  - added a bridge regression for the same hosted guardrail
+
+Verification:
+- `bun test packages/app/scripts/doc-subagent-prompts.test.mjs --filter "reads existing state files before overwriting them"`
+  - pass
+- `bun test "$PWD/.opencode/plugins/document-mode-bridge.test.mjs"`
+  - pass
+
+Decision:
+- treat this as the first concrete product-side fix for the formal `wjw` `common-work` failure
+- keep the fast-fail harness in place, but do not stop at harness-only mitigation
+- next deployment should test whether this prompt/bridge change is enough to stop the `.worktree` overwrite error on fresh pod sessions
+
+Reason:
+- this is the earliest confirmed product-level mistake in the failing lane
+- it is a narrow, low-risk rule change that directly matches the tool error message instead of guessing at broader architectural causes

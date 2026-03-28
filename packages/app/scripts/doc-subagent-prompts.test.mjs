@@ -549,6 +549,16 @@ test("common-work checks bootstrap state before external search and ignores nois
   expect(prompt).toContain("把这类条目视为噪音");
 });
 
+test("common-work reads existing state files before overwriting them and prefers edit for state updates", async () => {
+  const prompt = await readFile(resolve(root, ".opencode/agent/common-work.md"), "utf8");
+
+  expect(prompt).toContain("如果 `.worktree/index.json`、`.worktree/sources/manifest.json`、`.worktree/facts.json`、`.worktree/coverage.json`");
+  expect(prompt).toContain("或其他已存在的 state / JSON / CSV / Markdown 状态文件已经存在");
+  expect(prompt).toContain("不要直接用 `write` 覆盖");
+  expect(prompt).toContain("先 `read` 当前文件");
+  expect(prompt).toContain("再用 `edit` 更新");
+});
+
 test("common-work routes document sessions through a small document-focused supplement skill set", async () => {
   const prompt = await readFile(resolve(root, ".opencode/agent/common-work.md"), "utf8");
 

@@ -146,6 +146,7 @@ Document-native operating rules:
 - Read real files early. Do not stay in planning-only mode for long.
 - If the workspace already contains a likely source document, inspect it before asking the user to upload files or restate facts that can be extracted directly.
 - Prefer exact-path file work and real file evidence over generic writing or organizing skills.
+- For existing \`.worktree/**\` or other state files, do not call \`write\` as an overwrite shortcut; read the current file first and then update it with \`edit\`. Use \`write\` only when the state file does not exist yet.
 - If a candidate source file is a binary Office document such as \`.docx\`, \`.xlsx\`, or \`.pptx\`, do not call \`read\` on that original file; first extract or convert it into workspace-local Markdown / text under \`<WORKSPACE>/.tmp/system\`, then read the extracted artifact.
 - A failed binary \`read\` on an Office file does not count as progress; reroute immediately to extraction instead of retrying the same read path.
 - Choose the format skill that matches the current authoritative file or target output.

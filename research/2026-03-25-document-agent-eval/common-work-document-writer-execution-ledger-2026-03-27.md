@@ -2266,3 +2266,68 @@ The remaining work on this stage is operational:
 - run at least one hosted formal `common-work` vs `document-writer` benchmark using the new profile-sensitive session creation path
 
 That hosted benchmark run is the next decision gate for determining whether `document-writer` is now materially stronger than `common-work` on the new formal corpus.
+
+### 2026-03-28: live validation exposed a harness bug and a restart-path false negative
+
+What happened:
+- Stage 4 code was committed as `ea1e1642` and pushed to both GitHub and Gitee
+- pod `git pull --ff-only` fast-forwarded cleanly to `ea1e1642`
+- local verification stayed green after commit
+
+Live issue 1:
+- `scripts/restart-pod.sh` failed the `OpenWork health check` twice even though the newly built binaries were not broken
+- direct foreground launch of:
+  - `packages/orchestrator/dist/bin/openwork serve ...`
+  showed:
+  - `opencode` healthy
+  - `opencode-router` healthy
+  - `openwork-server` healthy on `127.0.0.1:8789`
+- a manual detached launch of the same orchestrator command also succeeded and served `/health`
+
+Interpretation:
+- this Stage 4 change set did not break the OpenWork runtime itself
+- the current failure is in the pod restart path, not in the newly changed writer/common-work logic
+- the restart script still has a deployment-path false negative that can tear down an otherwise healthy launch
+
+Live issue 2:
+- the new profile-sensitive harnesses initially failed with:
+  - `profile mismatch view=undefined agent=undefined lock=undefined`
+- root cause investigation showed the helper was calling:
+  - `GET /w/<workspaceId>/opencode/session`
+  without:
+  - `?directory=<workspace.path>`
+- without the scoped `directory` query, the server does not route through the `listWorkspaceSessions(...)` branch that decorates isolated sessions with:
+  - `openworkPreferredView`
+  - `openworkPreferredAgent`
+  - `openworkPreferredAgentLock`
+
+Decision:
+- treat the first implementation of `fetchHostedSessionRecord(...)` as incomplete
+- fix the helper so profile-sensitive harnesses fetch the scoped session list for the workspace root
+
+Implementation follow-up:
+- `packages/app/scripts/_util.mjs`
+  - `fetchHostedSessionRecord(...)` now accepts `workspacePath`
+  - GET session list requests now append `directory=<workspacePath>`
+- updated profile-sensitive harnesses to pass the workspace path when verifying the created session profile:
+  - `packages/app/scripts/doc-agent-live-compare.mjs`
+  - `packages/app/scripts/doc-subagent-simulate.mjs`
+  - `packages/app/scripts/qin-one-shot-compare.mjs`
+  - `packages/app/scripts/run-qin-doc-writer.mjs`
+  - `packages/app/scripts/qin-common-work-debug.mjs`
+- added stronger local verification:
+  - `_util.test.mjs` now asserts the scoped session-list URL includes `directory=<workspacePath>`
+  - `profile-sensitive-harnesses.test.mjs` now asserts the harnesses pass `workspacePath`
+
+Fresh local verification after the live bugfix:
+- `node --test packages/app/scripts/_util.test.mjs`
+- `bun test packages/app/scripts/profile-sensitive-harnesses.test.mjs packages/app/scripts/qin-compare-harness.test.mjs`
+- `git diff --check -- packages/app/scripts/_util.mjs packages/app/scripts/_util.test.mjs packages/app/scripts/doc-agent-live-compare.mjs packages/app/scripts/doc-subagent-simulate.mjs packages/app/scripts/profile-sensitive-harnesses.test.mjs packages/app/scripts/qin-common-work-debug.mjs packages/app/scripts/qin-one-shot-compare.mjs packages/app/scripts/run-qin-doc-writer.mjs`
+
+Current live status:
+- pod backend was restored manually and is healthy on `127.0.0.1:8789`
+- public web was also restored manually
+- the formal A/B run has not completed yet because the first live attempt surfaced the harness fetch bug above
+- next step remains:
+  - finish the corrected live formal benchmark run
+  - then record `common-work` vs `document-writer` evidence on the new formal corpus

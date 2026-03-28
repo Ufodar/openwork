@@ -290,6 +290,7 @@ async function runVariant({
   preferredAgentLock,
   client,
   token,
+  workspacePath,
   workspaceId,
 }) {
   const created = await createHostedOpenworkSession({
@@ -308,6 +309,7 @@ async function runVariant({
     token,
     workspaceId,
     sessionId,
+    workspacePath,
   });
   const uploaded = [];
   // Hosted runtimes need a short window to finish carrier/workspace setup
@@ -372,6 +374,7 @@ async function main() {
   const auth = await login();
   const token = auth.token;
   const workspaceId = auth.workspace.id;
+  const workspacePath = auth.workspace.path;
   const client = createHostedOpenworkClient({ baseUrl: OPENWORK_BASE, workspaceId, token });
 
   const common = await runVariant({
@@ -383,6 +386,7 @@ async function main() {
     preferredAgentLock: "common-work",
     client,
     token,
+    workspacePath,
     workspaceId,
   });
   const orchestrated = await runVariant({
@@ -394,6 +398,7 @@ async function main() {
     preferredAgentLock: "document-writer",
     client,
     token,
+    workspacePath,
     workspaceId,
   });
 

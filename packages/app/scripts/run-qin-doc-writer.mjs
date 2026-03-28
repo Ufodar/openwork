@@ -311,6 +311,7 @@ async function main() {
     token,
     workspaceId,
     sessionId,
+    workspacePath: auth.workspace.path,
   });
   console.error(`[qin-doc-writer] session=${sessionId}`);
   console.error(`[qin-doc-writer] profile=${JSON.stringify(sessionProfile)}`);

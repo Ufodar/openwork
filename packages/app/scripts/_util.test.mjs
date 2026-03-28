@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   buildHostedOpenworkClientOptions,
   buildHostedSessionCreateBody,
+  fetchHostedSessionRecord,
   findHostedSessionRecord,
 } from "./_util.mjs";
 
@@ -80,4 +81,49 @@ test("findHostedSessionRecord returns the exact listed session and keeps profile
     openworkPreferredAgent: "document-writer",
     openworkPreferredAgentLock: "document-writer",
   });
+});
+
+test("fetchHostedSessionRecord scopes the session list to the workspace path so runtime profile metadata is decorated", async () => {
+  const originalFetch = globalThis.fetch;
+  const seenUrls = [];
+  globalThis.fetch = async (input) => {
+    seenUrls.push(String(input));
+    return new Response(
+      JSON.stringify([
+        {
+          id: "ses_common",
+          openworkPreferredView: "document-agent",
+          openworkPreferredAgent: "common-work",
+          openworkPreferredAgentLock: "common-work",
+        },
+      ]),
+      {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      },
+    );
+  };
+
+  try {
+    const record = await fetchHostedSessionRecord({
+      baseUrl: "http://127.0.0.1:8789",
+      workspaceId: "ws_1",
+      token: "secret-token",
+      sessionId: "ses_common",
+      workspacePath: "/root/.openwork/user-workspaces/user-1",
+      timeoutMs: 50,
+      pollMs: 1,
+    });
+
+    assert.equal(seenUrls.length, 1);
+    assert.equal(
+      seenUrls[0],
+      "http://127.0.0.1:8789/w/ws_1/opencode/session?directory=%2Froot%2F.openwork%2Fuser-workspaces%2Fuser-1",
+    );
+    assert.equal(record?.openworkPreferredView, "document-agent");
+    assert.equal(record?.openworkPreferredAgent, "common-work");
+    assert.equal(record?.openworkPreferredAgentLock, "common-work");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

@@ -248,6 +248,7 @@ async function main() {
     token,
     workspaceId,
     sessionId,
+    workspacePath: auth.workspace.path,
   });
   console.log("[session]", sessionId);
   console.log("[session-profile]", JSON.stringify(sessionProfile));

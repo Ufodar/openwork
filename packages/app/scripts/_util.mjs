@@ -65,8 +65,15 @@ export function buildHostedSessionCreateBody({
   return body;
 }
 
-function buildHostedOpenworkSessionUrl({ baseUrl, workspaceId }) {
-  return `${baseUrl.replace(/\/+$/, "")}/w/${encodeURIComponent(workspaceId)}/opencode/session`;
+function buildHostedOpenworkSessionUrl({ baseUrl, workspaceId, directory }) {
+  const url = new URL(
+    `${baseUrl.replace(/\/+$/, "")}/w/${encodeURIComponent(workspaceId)}/opencode/session`,
+  );
+  const normalizedDirectory = normalizeOptionalString(directory);
+  if (normalizedDirectory) {
+    url.searchParams.set("directory", normalizedDirectory);
+  }
+  return url.toString();
 }
 
 async function requestHostedOpenworkJson({
@@ -75,12 +82,13 @@ async function requestHostedOpenworkJson({
   token,
   method = "GET",
   body,
+  directory,
 }) {
   const headers = new Headers();
   if (token) headers.set("Authorization", `Bearer ${token}`);
   if (body !== undefined) headers.set("Content-Type", "application/json");
 
-  const response = await fetch(buildHostedOpenworkSessionUrl({ baseUrl, workspaceId }), {
+  const response = await fetch(buildHostedOpenworkSessionUrl({ baseUrl, workspaceId, directory }), {
     method,
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -131,6 +139,7 @@ export async function fetchHostedSessionRecord({
   workspaceId,
   token,
   sessionId,
+  workspacePath,
   timeoutMs = 15_000,
   pollMs = 500,
 }) {
@@ -143,6 +152,7 @@ export async function fetchHostedSessionRecord({
       workspaceId,
       token,
       method: "GET",
+      directory: workspacePath,
     });
     lastPayload = payload;
     const record = findHostedSessionRecord(payload, sessionId);

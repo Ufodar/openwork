@@ -456,6 +456,7 @@ async function runVariant({
   preferredAgentLock,
   client,
   token,
+  workspacePath,
   workspaceId,
 }) {
   let sessionId = null;
@@ -478,6 +479,7 @@ async function runVariant({
       token,
       workspaceId,
       sessionId,
+      workspacePath,
     });
     if (
       sessionProfile?.openworkPreferredView !== preferredView ||
@@ -670,6 +672,7 @@ async function main() {
   }
   const token = auth.token;
   const workspaceId = auth.workspace.id;
+  const workspacePath = auth.workspace.path;
   const client = createHostedOpenworkClient({ baseUrl: OPENWORK_BASE, workspaceId, token });
   try {
     result.common = await runVariant({
@@ -682,6 +685,7 @@ async function main() {
       preferredAgentLock: "common-work",
       client,
       token,
+      workspacePath,
       workspaceId,
     });
     result.orchestrated = await runVariant({
@@ -694,6 +698,7 @@ async function main() {
       preferredAgentLock: "document-writer",
       client,
       token,
+      workspacePath,
       workspaceId,
     });
   } catch (error) {

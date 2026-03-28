@@ -2331,3 +2331,87 @@ Current live status:
 - next step remains:
   - finish the corrected live formal benchmark run
   - then record `common-work` vs `document-writer` evidence on the new formal corpus
+
+### 2026-03-28: local Stage 4 generalization continued while pod sync was blocked
+
+New live facts:
+- local workspace is cleanly based on:
+  - `53af1a4f`
+- pod health is green, but the deployed repo is still on:
+  - `ea1e1642`
+- the next sync attempt was blocked by network instability:
+  - one `git pull --ff-only origin dev` on pod hung without output
+  - a later direct SSH probe to the pod timed out during banner exchange
+- because of that, the formal hosted A/B could not responsibly continue yet; the pod is healthy, but still missing the scoped-session-profile fix from `53af1a4f`
+
+Decision:
+- do not fake progress by running a formal benchmark against stale pod code
+- keep moving Stage 4 forward locally while the pod network path is unstable
+- record each local finding immediately so another tool or session can resume without rediscovery
+
+What was found in the current local audit:
+- the prompt layer was already less Qin-specific than earlier passes, but one important production path still had sample-shaped defaults:
+  - `.opencode/runtime-support/document-state/plan_doc_state.py`
+- specifically, the generic `方案/solution` branch still emitted:
+  - point-to-point flavored section titles
+  - sample-shaped evidence topics such as:
+    - `ai-nodes`
+    - `hpc`
+    - `xinchuang-cloud`
+    - `fp16-capability`
+    - `fp64-capability`
+- this is not acceptable for a general `document-writer` because it means a neutral solution task can still inherit domain bias from older benchmark material
+
+What was changed locally:
+- `.opencode/runtime-support/document-state/plan_doc_state.py`
+  - added explicit heading-contract extraction for prompts that say things like:
+    - `Markdown 标题：项目理解、结构重组方案、关键技术与实现路径、风险与待确认事项`
+  - when such a heading contract exists, planner now emits those exact section titles instead of falling back to generic placeholders
+  - rewrote the generic `方案/solution` branch to use domain-neutral section titles:
+    - `项目理解`
+    - `需求拆解`
+    - `解决路径` or `点对点解决路径` only when the goal explicitly says `点对点`
+    - `证据与约束`
+    - `风险与待确认事项` or `待确认事项` only when the goal explicitly says `点对点`
+  - replaced sample-shaped evidence-topic defaults with generic technical/support/risk topic groups
+- `.opencode/agent/document-writer.md`
+  - removed the top-level `bid-writing` wording from the main-controller identity
+  - kept the controller general to long-running formal and multi-document workflow tasks
+  - split durable state surfaces from optional task-specific requirement surfaces so `.bid/**` and `requirements.csv` no longer read like universal defaults
+  - generalized one stale `proposal-style plan` routing rule to `structured formal-document plan`
+- `packages/app/scripts/doc-agent-live-compare.mjs`
+  - changed the default live-compare scenario from legacy `wjw` to:
+    - `formal-single-long-tech-rewrite`
+  - changed the default output path from the WJW-specific filename to:
+    - `tmp/compare-agents/document-live-compare.json`
+
+New local regression coverage:
+- `packages/app/scripts/plan-doc-state-script.test.mjs`
+  - added a test that proves explicit benchmark heading contracts are preserved into `solution-plan.json` / `coverage.json`
+  - added a test that proves generic solution routes stay domain-neutral and no longer rely on sample-shaped default section titles
+- `packages/app/scripts/doc-subagent-prompts.test.mjs`
+  - added assertions that the entry prompt no longer frames the main controller as `bid-writing`
+  - added assertions that optional requirement surfaces stay optional
+  - updated schema-guard assertions to match the new `structured formal-document plan` wording
+
+Local verification run after these edits:
+- `bun test packages/app/scripts/plan-doc-state-script.test.mjs packages/app/scripts/doc-subagent-prompts.test.mjs`
+  - result:
+    - `45 pass`
+    - `0 fail`
+- `python3 -m py_compile .opencode/runtime-support/document-state/plan_doc_state.py`
+  - result:
+    - pass
+- `node --check packages/app/scripts/doc-agent-live-compare.mjs`
+  - result:
+    - pass
+- `git diff --check -- .opencode/runtime-support/document-state/plan_doc_state.py .opencode/agent/document-writer.md packages/app/scripts/doc-agent-live-compare.mjs packages/app/scripts/doc-subagent-prompts.test.mjs packages/app/scripts/plan-doc-state-script.test.mjs`
+  - result:
+    - pass
+
+Current status after this local pass:
+- Stage 4 generalization is still moving in the right direction
+- the remaining blocker is operational, not conceptual:
+  - restore stable pod SSH/git reachability
+  - sync the latest local commit set onto pod
+  - run the formal hosted `common-work` vs `document-writer` benchmark on the updated build

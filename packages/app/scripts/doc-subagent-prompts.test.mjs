@@ -20,6 +20,8 @@ test("document-writer agent entrypoint uses orchestrator-style delegation rules"
   const agentPrompt = await readFile(resolve(root, ".opencode/agent/document-writer.md"), "utf8");
 
   expect(agentPrompt).toContain("Your job is to keep the control loop coherent");
+  expect(agentPrompt).toContain("formal document and multi-document workflow tasks");
+  expect(agentPrompt).not.toContain("bid-writing and formal document work");
   expect(agentPrompt).toContain("call `doc-intake`");
   expect(agentPrompt).toContain("do not call non-`doc-*` agents");
   expect(agentPrompt).toContain("do not edit source documents or the target deliverable yourself");
@@ -43,6 +45,7 @@ test("document-writer agent entrypoint uses orchestrator-style delegation rules"
   expect(agentPrompt).toContain("keep that requirement alive in planner, writer, and verifier tasks");
   expect(agentPrompt).toContain("do not rename them to placeholders like `系统一/系统二/系统三`");
   expect(agentPrompt).toContain("must stay under `reports/doc-writer/**` or `reports/docx-draft/**`");
+  expect(agentPrompt).toContain("optional task-specific requirement surfaces when they exist: `.bid/**`, `requirements.csv`");
   expect(agentPrompt).toContain("do not drop the external-support requirement from verifier");
   expect(agentPrompt).toContain("do not ask `doc-merger` to create `.worktree/merge/gap-analysis.json`");
   expect(agentPrompt).toContain("do not bypass the missing phase");
@@ -136,7 +139,7 @@ test("planner and document-writer prompts preserve the machine-readable plan sch
   expect(plannerPrompt).toContain("do not replace the script-emitted section schema");
   expect(plannerPrompt).toContain("custom `system/modules/key_facts` shape");
   expect(plannerPrompt).toContain("preserve `id`, `title`, `required_subsections`, `required_evidence`, and `source_context_refs`");
-  expect(entryPrompt).toContain("If a proposal-style plan is missing section titles");
+  expect(entryPrompt).toContain("If a structured formal-document plan is missing section titles");
   expect(entryPrompt).toContain("do not send that malformed plan straight to `doc-writer`");
 });
 

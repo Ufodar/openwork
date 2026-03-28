@@ -20,6 +20,31 @@ SYSTEM_SUBSECTIONS = [
     "API调用示例",
 ]
 
+GENERIC_TECHNICAL_TOPICS = [
+    "resource-aggregation",
+    "scheduling",
+    "security-monitoring",
+    "api-interoperability",
+    "identifier-system",
+    "general",
+]
+
+GENERIC_SUPPORT_TOPICS = [
+    "timeline",
+    "warranty",
+    "commercial-baseline",
+    "general",
+]
+
+GENERIC_RISK_TOPICS = [
+    "general",
+    "timeline",
+    "warranty",
+    "commercial-baseline",
+    "payment",
+    "bid-security",
+]
+
 REFERENCE_SECTION_KEYWORDS = {
     "参考与依据",
     "联网补充依据",
@@ -104,6 +129,27 @@ def extract_explicit_system_titles(goal: str) -> list[str]:
     return dedupe_preserve_order(filtered)
 
 
+def extract_explicit_heading_titles(goal: str) -> list[str]:
+    text = goal or ""
+    patterns = [
+        r"Markdown\s*标题[:：]\s*([^\n]+)",
+        r"标题[:：]\s*([^\n]+)",
+    ]
+    for pattern in patterns:
+        for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+            raw = match.group(1).strip()
+            candidate = re.split(r"[。\n]", raw, maxsplit=1)[0]
+            headings = dedupe_preserve_order(
+                [
+                    part.strip(" `\"'“”‘’")
+                    for part in re.split(r"[，,、；;]", candidate)
+                ]
+            )
+            if len(headings) >= 2:
+                return headings
+    return []
+
+
 def has_named_system_contract(goal: str) -> bool:
     return len(extract_explicit_system_titles(goal)) >= 2
 
@@ -111,6 +157,50 @@ def has_named_system_contract(goal: str) -> bool:
 def should_add_reference_section(goal: str) -> bool:
     lowered = normalize_text(goal)
     return any(keyword.lower() in lowered for keyword in REFERENCE_SECTION_KEYWORDS)
+
+
+def infer_generic_heading_topics(title: str) -> list[str]:
+    lowered = normalize_text(title)
+    if any(keyword in lowered for keyword in ["风险", "待确认", "问题", "缺口", "约束"]):
+        return GENERIC_RISK_TOPICS
+    if any(keyword in lowered for keyword in ["证据", "依据", "参考", "来源"]):
+        return dedupe_preserve_order([*GENERIC_TECHNICAL_TOPICS, *GENERIC_SUPPORT_TOPICS])
+    if any(keyword in lowered for keyword in ["路径", "方案", "设计", "实施", "架构", "重组", "协同", "对应"]):
+        return GENERIC_TECHNICAL_TOPICS
+    if any(keyword in lowered for keyword in ["理解", "目标", "背景", "概述", "需求"]):
+        return dedupe_preserve_order([*GENERIC_SUPPORT_TOPICS, *GENERIC_TECHNICAL_TOPICS])
+    return GENERIC_TECHNICAL_TOPICS
+
+
+def build_explicit_heading_sections(goal: str) -> list[dict]:
+    sections = []
+    for title in extract_explicit_heading_titles(goal):
+        lowered = normalize_text(title)
+        if any(keyword in lowered for keyword in ["风险", "待确认", "问题", "缺口"]):
+            purpose = f"围绕 `{title}` 明确当前草稿中的风险、待确认事项与后续动作。"
+            acceptance = f"保留 `{title}` 这个精确标题，并明确列出剩余风险、待确认点与下一步动作。"
+        elif any(keyword in lowered for keyword in ["证据", "依据", "参考", "来源"]):
+            purpose = f"围绕 `{title}` 说明正文使用的证据来源、约束边界与外部补充。"
+            acceptance = f"保留 `{title}` 这个精确标题，并明确区分上传文档证据、外部补充与仍待核实内容。"
+        elif any(keyword in lowered for keyword in ["路径", "方案", "设计", "实施", "架构", "重组"]):
+            purpose = f"围绕 `{title}` 说明结构重组、实现路径或实施方案。"
+            acceptance = f"保留 `{title}` 这个精确标题，并给出可执行的结构化方案而不是泛化表述。"
+        elif any(keyword in lowered for keyword in ["理解", "目标", "背景", "概述", "需求"]):
+            purpose = f"围绕 `{title}` 说明项目背景、目标、需求或重构范围。"
+            acceptance = f"保留 `{title}` 这个精确标题，并用证据支撑关键判断。"
+        else:
+            purpose = f"围绕 `{title}` 组织正文的该部分内容。"
+            acceptance = f"保留 `{title}` 这个精确标题，并确保该部分内容可直接用于最终交付物。"
+        sections.append(
+            {
+                "id": title,
+                "title": title,
+                "purpose": purpose,
+                "acceptance": acceptance,
+                "evidence_topics": infer_generic_heading_topics(title),
+            }
+        )
+    return sections
 
 
 def infer_system_section_topics(title: str) -> list[str]:
@@ -153,6 +243,9 @@ def build_named_system_sections(goal: str) -> list[dict]:
 
 
 def build_sections(goal: str, manifest: dict, canonical_facts: list[dict]):
+    if len(extract_explicit_heading_titles(goal)) >= 2:
+        return build_explicit_heading_sections(goal)
+
     if has_named_system_contract(goal):
         return build_named_system_sections(goal)
 
@@ -161,38 +254,38 @@ def build_sections(goal: str, manifest: dict, canonical_facts: list[dict]):
         return [
             {
                 "id": "project-understanding",
-                "title": "项目理解与目标",
+                "title": "项目理解",
                 "purpose": "Summarize the project scope, stakeholder objective, and success target from the merged fact surface.",
                 "acceptance": "Explains the project background, target outcome, and the solution framing in Chinese.",
-                "evidence_topics": ["commercial-baseline", "timeline", "general"],
+                "evidence_topics": dedupe_preserve_order([*GENERIC_SUPPORT_TOPICS, *GENERIC_TECHNICAL_TOPICS]),
             },
             {
                 "id": "requirement-mapping",
-                "title": "需求拆解与点对点对应",
-                "purpose": "Map the core tender requirements or user asks to the proposed response line-by-line.",
-                "acceptance": "Explicitly links requirement points to corresponding response actions or capabilities.",
-                "evidence_topics": ["ai-nodes", "hpc", "xinchuang-cloud", "fp16-capability", "fp64-capability"],
+                "title": "需求拆解",
+                "purpose": "Map the core requirements or user asks to the proposed response structure.",
+                "acceptance": "Explains the main requirement groups and how the response will address them.",
+                "evidence_topics": dedupe_preserve_order([*GENERIC_TECHNICAL_TOPICS, *GENERIC_SUPPORT_TOPICS]),
             },
             {
                 "id": "solution-route",
-                "title": "解决路径与实施方案",
+                "title": "点对点解决路径" if "点对点" in goal else "解决路径",
                 "purpose": "Describe the practical implementation route, delivery path, and collaboration model.",
                 "acceptance": "Contains concrete execution steps rather than generic sales language.",
-                "evidence_topics": ["timeline", "hpc", "ai-nodes", "xinchuang-cloud"],
+                "evidence_topics": GENERIC_TECHNICAL_TOPICS,
             },
             {
-                "id": "evidence-assumptions",
-                "title": "证据来源与关键假设",
-                "purpose": "Show which facts are supported by source artifacts and which assumptions remain provisional.",
-                "acceptance": "Includes explicit evidence references and labels assumptions conservatively.",
-                "evidence_topics": ["general", "commercial-baseline", "payment"],
+                "id": "evidence-constraints",
+                "title": "证据与约束",
+                "purpose": "Show which claims are supported by source artifacts and which constraints or assumptions still matter.",
+                "acceptance": "Includes explicit evidence references and labels constraints or assumptions conservatively.",
+                "evidence_topics": dedupe_preserve_order([*GENERIC_TECHNICAL_TOPICS, *GENERIC_SUPPORT_TOPICS]),
             },
             {
                 "id": "risk-open-questions",
-                "title": "风险与待确认事项",
+                "title": "待确认事项" if "点对点" in goal else "风险与待确认事项",
                 "purpose": "Expose unresolved conflicts, deviations, and missing details that still affect confidence.",
                 "acceptance": "Calls out unresolved issues and the next confirmation action for each.",
-                "evidence_topics": ["cooling-method", "rack-power", "fp64-capability"],
+                "evidence_topics": GENERIC_RISK_TOPICS,
             },
         ]
     return [
@@ -241,8 +334,8 @@ def build_goal_profile(goal: str, manifest: dict, canonical_facts: list[dict]) -
             "resource-aggregation", "scheduling", "security-monitoring", "api-interoperability", "identifier-system",
         })
     elif "点对点" in goal or "solution" in lowered or "方案" in goal:
-        keywords.update({"需求", "方案", "实施", "技术", "项目", "系统"})
-        preferred_topics.update({"general", "commercial-baseline", "timeline"})
+        keywords.update({"需求", "方案", "实施", "技术", "项目", "系统", "接口", "架构", "风险", "约束"})
+        preferred_topics.update([*GENERIC_TECHNICAL_TOPICS, *GENERIC_SUPPORT_TOPICS])
     else:
         keywords.update({"项目", "技术", "系统", "平台"})
         preferred_topics.update({"general"})

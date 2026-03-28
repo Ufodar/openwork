@@ -241,3 +241,142 @@ test("plan_doc_state.py preserves generic fallback sections for generic goals", 
     await rm(workspace, { recursive: true, force: true });
   }
 });
+
+test("plan_doc_state.py preserves explicit heading contracts from formal benchmark prompts", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "doc-plan-explicit-headings-"));
+
+  try {
+    await mkdir(join(workspace, ".worktree", "sources"), { recursive: true });
+    await mkdir(join(workspace, ".worktree", "merge"), { recursive: true });
+
+    await writeFile(join(workspace, ".worktree", "index.json"), JSON.stringify({ summary: "formal rewrite" }, null, 2), "utf8");
+    await writeFile(
+      join(workspace, ".worktree", "sources", "manifest.json"),
+      JSON.stringify({
+        goal: "Compile uploaded source documents into structured state",
+        sources: [{ title: "正式技术文档" }],
+      }, null, 2),
+      "utf8",
+    );
+    await writeFile(
+      join(workspace, ".worktree", "facts.json"),
+      JSON.stringify({
+        canonical_facts: [
+          { topic: "general", statement: "原始文档结构存在重复章节和营销化表述。", sources: [{ title: "正式技术文档" }] },
+          { topic: "api-interoperability", statement: "文档包含接口接入与数据交换相关内容。", sources: [{ title: "正式技术文档" }] },
+          { topic: "security-monitoring", statement: "文档提到风险控制、审计与监测机制。", sources: [{ title: "正式技术文档" }] },
+        ],
+        gaps: ["部分技术论证仍需补强。"],
+      }, null, 2),
+      "utf8",
+    );
+    await writeFile(join(workspace, ".worktree", "merge", "conflicts.json"), JSON.stringify({ conflicts: [], open_questions: [] }, null, 2), "utf8");
+
+    const proc = Bun.spawn([
+      "python3",
+      scriptPath,
+      "--workspace", workspace,
+      "--goal",
+      "继续推进，把一份重构后的中文 Markdown 稿件写到 outputs/formal-single-long-rewrite.md。正文至少必须包含以下四个 Markdown 标题：项目理解、结构重组方案、关键技术与实现路径、风险与待确认事项。写完后自检，确保这些标题原样存在。",
+      "--target-doc", "outputs/formal-single-long-rewrite.md",
+    ], {
+      cwd: "/Users/storm/Documents/code/studyProject/opencode-docx/openwork",
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    const stderr = await new Response(proc.stderr).text();
+    const exitCode = await proc.exited;
+
+    expect(exitCode).toBe(0);
+    expect(stderr.trim()).toBe("");
+
+    const plan = JSON.parse(await readFile(join(workspace, ".worktree", "plan", "solution-plan.json"), "utf8"));
+    const coverage = JSON.parse(await readFile(join(workspace, ".worktree", "coverage.json"), "utf8"));
+
+    expect(plan.target_doc).toBe("outputs/formal-single-long-rewrite.md");
+    expect(plan.sections.map((item) => item.title)).toEqual([
+      "项目理解",
+      "结构重组方案",
+      "关键技术与实现路径",
+      "风险与待确认事项",
+    ]);
+    expect(coverage.targets.map((item) => item.title)).toEqual([
+      "项目理解",
+      "结构重组方案",
+      "关键技术与实现路径",
+      "风险与待确认事项",
+    ]);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("plan_doc_state.py keeps generic solution routes domain-neutral instead of sample-specific", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "doc-plan-generic-solution-"));
+
+  try {
+    await mkdir(join(workspace, ".worktree", "sources"), { recursive: true });
+    await mkdir(join(workspace, ".worktree", "merge"), { recursive: true });
+
+    await writeFile(join(workspace, ".worktree", "index.json"), JSON.stringify({ summary: "solution draft" }, null, 2), "utf8");
+    await writeFile(
+      join(workspace, ".worktree", "sources", "manifest.json"),
+      JSON.stringify({
+        goal: "Compile uploaded source documents into structured state",
+        sources: [{ title: "项目资料" }],
+      }, null, 2),
+      "utf8",
+    );
+    await writeFile(
+      join(workspace, ".worktree", "facts.json"),
+      JSON.stringify({
+        canonical_facts: [
+          { topic: "resource-aggregation", statement: "方案需要统一接入多类业务资源并形成标准化目录。", sources: [{ title: "项目资料" }] },
+          { topic: "api-interoperability", statement: "平台需要通过标准接口与外部系统交换数据。", sources: [{ title: "项目资料" }] },
+          { topic: "security-monitoring", statement: "方案要求保留审计、告警与权限控制机制。", sources: [{ title: "项目资料" }] },
+          { topic: "timeline", statement: "交付节奏需要分阶段推进并保留联调窗口。", sources: [{ title: "项目资料" }] },
+        ],
+        gaps: [],
+      }, null, 2),
+      "utf8",
+    );
+    await writeFile(join(workspace, ".worktree", "merge", "conflicts.json"), JSON.stringify({ conflicts: [], open_questions: [] }, null, 2), "utf8");
+
+    const proc = Bun.spawn([
+      "python3",
+      scriptPath,
+      "--workspace", workspace,
+      "--goal", "请基于当前资料整理一份解决方案，先给出项目理解、需求拆解、解决路径、证据与约束、风险与待确认事项。",
+      "--target-doc", "outputs/generic-solution.md",
+    ], {
+      cwd: "/Users/storm/Documents/code/studyProject/opencode-docx/openwork",
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    const stderr = await new Response(proc.stderr).text();
+    const exitCode = await proc.exited;
+
+    expect(exitCode).toBe(0);
+    expect(stderr.trim()).toBe("");
+
+    const plan = JSON.parse(await readFile(join(workspace, ".worktree", "plan", "solution-plan.json"), "utf8"));
+    expect(plan.sections.map((item) => item.title)).toEqual([
+      "项目理解",
+      "需求拆解",
+      "解决路径",
+      "证据与约束",
+      "风险与待确认事项",
+    ]);
+
+    const sectionEvidence = new Map(
+      plan.sections.map((item) => [item.title, (item.required_evidence || []).map((evidence) => evidence.statement)]),
+    );
+    expect(sectionEvidence.get("需求拆解")).toContain("方案需要统一接入多类业务资源并形成标准化目录。");
+    expect(sectionEvidence.get("解决路径")).toContain("平台需要通过标准接口与外部系统交换数据。");
+    expect(sectionEvidence.get("风险与待确认事项")).toContain("交付节奏需要分阶段推进并保留联调窗口。");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});

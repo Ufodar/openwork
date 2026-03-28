@@ -17,7 +17,7 @@ const PASSWORD = process.env.OPENWORK_PASSWORD ?? "1";
 const MODEL = parseModel(process.env.OPENWORK_COMPARE_MODEL ?? "my-company/Qwen3.5-397B-A17B");
 const OUTPUT_PATH = resolve(
   process.cwd(),
-  process.env.OPENWORK_COMPARE_OUTPUT ?? "../../tmp/compare-agents/wjw-live-compare.json",
+  process.env.OPENWORK_COMPARE_OUTPUT ?? "../../tmp/compare-agents/document-live-compare.json",
 );
 
 const legacyScenarios = {
@@ -643,7 +643,7 @@ async function runVariant({
 }
 
 async function main() {
-  const scenarioKey = process.argv[2] ?? "wjw";
+  const scenarioKey = process.argv[2] ?? "formal-single-long-tech-rewrite";
   const scenario = scenarios[scenarioKey];
   if (!scenario) {
     throw new Error(`Unknown scenario: ${scenarioKey}`);

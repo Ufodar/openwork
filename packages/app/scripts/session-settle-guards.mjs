@@ -28,6 +28,7 @@ export function summarizePendingToolStates(messages) {
         raw,
         inputKeys,
         malformed: !raw.trim() && inputKeys.length === 0,
+        delegated: String(part?.tool ?? "").toLowerCase() === "task",
       };
     });
 }
@@ -49,9 +50,15 @@ export function shouldTreatFingerprintChangeAsProgress(messages) {
     const status = typeof part?.state?.status === "string" ? part.state.status : "";
     if (status === "pending" || status === "running") {
       sawPendingTool = true;
+      const tool = String(part?.tool ?? "").toLowerCase();
       const raw = typeof part?.state?.raw === "string" ? part.state.raw : "";
       const input = part?.state?.input && typeof part.state.input === "object" ? part.state.input : {};
       if (raw.trim() || Object.keys(input).length > 0) {
+        sawNonMalformedPendingTool = true;
+      } else if (tool === "read") {
+        // OpenCode sometimes emits a short-lived placeholder `read` before
+        // attaching the concrete file path; count the new step as progress and
+        // let the malformed timeout catch it only if it actually persists.
         sawNonMalformedPendingTool = true;
       }
       continue;
@@ -84,10 +91,11 @@ export function detectStalledPendingTools({
     };
   }
 
-  if (elapsedSinceProgress >= stalledPendingToolTimeoutMs) {
+  const guardablePendingTools = pendingTools.filter((tool) => !tool.delegated);
+  if (guardablePendingTools.length && elapsedSinceProgress >= stalledPendingToolTimeoutMs) {
     return {
       kind: "stalled-pending-tool",
-      pendingTools,
+      pendingTools: guardablePendingTools,
     };
   }
 

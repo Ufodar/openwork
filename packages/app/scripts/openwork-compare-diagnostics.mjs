@@ -1,5 +1,7 @@
 import { isAbsolute, relative, resolve } from "node:path";
 
+import { summarizeArtifactFiles } from "./doc-subagent-simulate-lib.mjs";
+
 const DISCOVERY_TOOLS = new Set([
   "glob",
   "list",
@@ -18,6 +20,16 @@ const ACCESS_DENIED_RE = /access denied|prevents you from using this specific to
 const MCP_ERROR_RE = /mcp error/i;
 const DELIVERABLE_PATH_RE = /(^|\/)(outputs|reports)(\/|$)/i;
 const DELIVERABLE_TEXT_RE = /(^|[\s"'=`])(?:\.\/)?(?:outputs|reports)(?:\/|\b)/i;
+const ARTIFACT_PATH_RE = /(?:^|[\s"'=`])((?:\.\/)?(?:\.worktree|outputs|reports)\/[^\s"'`;|,)]+)/g;
+const BASH_OUTPUT_ARTIFACT_RE = /(?:--(?:[\w-]+out|output)\s+|(?:^|[\s;(])(?:tee|cat)\s+|>\s*)(['"`]?)(\.?\/?(?:\.worktree|outputs|reports)\/[^\s"'`;|,)]+)\1/g;
+const FILE_EXISTENCE_TOOLS = new Set([
+  "read",
+  "write",
+  "edit",
+  "filesystem_read_file",
+  "filesystem_write_file",
+  "filesystem_edit_file",
+]);
 
 function readStateInput(part) {
   if (part?.state?.input && typeof part.state.input === "object") return part.state.input;
@@ -77,6 +89,45 @@ function getPattern(part) {
 function getUrl(part) {
   const input = readStateInput(part);
   return normalizePath(input.url);
+}
+
+function normalizeArtifactPath(value, workspaceDir) {
+  let normalized = normalizePath(value);
+  if (!normalized) return "";
+  normalized = normalized.replace(/^[("'`]+/, "").replace(/[)"'`,.;:]+$/, "");
+  if (normalized.startsWith("./")) normalized = normalized.slice(2);
+
+  if (isAbsolute(normalized)) {
+    if (!workspaceDir || !pathWithinWorkspace(normalized, workspaceDir)) return "";
+    const rel = relative(resolve(workspaceDir), resolve(normalized));
+    normalized = normalizePath(rel);
+  }
+
+  if (normalized.startsWith("./")) normalized = normalized.slice(2);
+  if (!/^(?:\.worktree|outputs|reports)\//.test(normalized)) return "";
+  return normalized;
+}
+
+function extractArtifactPathsFromText(text, workspaceDir) {
+  const value = normalizePath(text);
+  if (!value) return [];
+  const matches = [];
+  for (const match of value.matchAll(ARTIFACT_PATH_RE)) {
+    const candidate = normalizeArtifactPath(match[1], workspaceDir);
+    if (candidate) matches.push(candidate);
+  }
+  return matches;
+}
+
+function extractArtifactEvidenceFromBashCommand(command, workspaceDir) {
+  const value = normalizePath(command);
+  if (!value) return [];
+  const matches = [];
+  for (const match of value.matchAll(BASH_OUTPUT_ARTIFACT_RE)) {
+    const candidate = normalizeArtifactPath(match[2], workspaceDir);
+    if (candidate) matches.push(candidate);
+  }
+  return matches;
 }
 
 function getErrorText(part) {
@@ -157,6 +208,37 @@ function touchesDeliverable(part) {
   if (command && DELIVERABLE_TEXT_RE.test(command)) return true;
   if (url && DELIVERABLE_TEXT_RE.test(url)) return true;
   return false;
+}
+
+export function summarizeTouchedArtifactFiles(parts, expectedOutput, options = {}) {
+  const toolParts = Array.isArray(parts) ? parts.filter((part) => part?.type === "tool") : [];
+  const files = new Set();
+  const workspaceDir = normalizePath(options.workspaceDir);
+
+  for (const part of toolParts) {
+    const tool = normalizePath(part?.tool).toLowerCase();
+
+    if (FILE_EXISTENCE_TOOLS.has(tool)) {
+      for (const candidate of getPathCandidates(part)) {
+        const normalized = normalizeArtifactPath(candidate, workspaceDir);
+        if (normalized) files.add(normalized);
+      }
+    }
+
+    if (tool === "bash") {
+      for (const candidate of extractArtifactEvidenceFromBashCommand(getCommand(part), workspaceDir)) {
+        files.add(candidate);
+      }
+    }
+
+    if (tool === "task" && normalizePath(part?.state?.status) === "completed") {
+      for (const candidate of extractArtifactPathsFromText(getOutputText(part), workspaceDir)) {
+        files.add(candidate);
+      }
+    }
+  }
+
+  return summarizeArtifactFiles([...files], expectedOutput);
 }
 
 export function buildCompactToolTrace(parts, options = {}) {

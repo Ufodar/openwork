@@ -3010,3 +3010,619 @@ Next step:
   - pull `7c91433e`
   - restart/recover the pod runtime
   - run the next hosted `common-work` vs `document-writer` formal benchmark on the updated build
+
+### 2026-03-28: the real pod SSH endpoint was corrected, full repo deployment finally succeeded, and a fresh writer runtime now reflects the generalized Stage 4 code
+
+What had been wrong:
+- the earlier operational assumption kept probing the pod as if SSH were available directly on:
+  - `192.168.5.10:22`
+- that was the wrong access path for this environment
+- the actual working pod SSH entry is:
+  - `ssh -p 31033 -i ~/biaoshu.key root@hcc-subcenter1.tianhe-tech.com`
+
+What this immediately unblocked:
+- direct pod shell access worked
+- repo head on pod was verified as stale:
+  - `0873a678`
+- pod repo was then successfully updated to:
+  - `477070aa`
+- `bash scripts/restart-pod.sh --force` completed successfully
+- post-restart health check stayed green:
+  - `GET http://192.168.5.10:32765/openwork/health -> ok`
+
+Second operational finding:
+- repo `pull + restart` alone still did not update the already-provisioned user workspace root
+- direct inspection of:
+  - `/root/.openwork/user-workspaces/c503a0f6-a558-41f4-8ba4-899eb1ed6923/.opencode/agent/document-writer.md`
+  initially still showed the old frontmatter:
+  - `description: 标书写作助手主代理...`
+- source inspection explains why:
+  - `provisionUserWorkspace(...)` calls `copyWorkspaceConfigTemplate(...)`
+  - that sync happens on the user-workspace provisioning/login path, not inside `restart-pod.sh`
+
+What actually completed the sync:
+- a fresh hosted login for:
+  - `fuda / 1`
+- after login, the same user workspace root now showed the updated files:
+  - `.opencode/agent/document-writer.md`
+    - `description: 正式文档工作流主代理...`
+  - `.opencode/runtime-support/document-state/plan_doc_state.py`
+    - includes the new generalized topics such as:
+      - `architecture-design`
+      - `compatibility-requirements`
+
+Fresh runtime validation:
+- created a new hosted session with:
+  - `openworkEnableDocState = true`
+  - `openworkPreferredView = document-writer`
+  - `openworkPreferredAgent = document-writer`
+  - `openworkPreferredAgentLock = document-writer`
+- resulting fresh runtime:
+  - `/root/.openwork/user-workspaces/c503a0f6-a558-41f4-8ba4-899eb1ed6923/documents/sessions/61508090123c48648f70d415abb5b764`
+- verified runtime profile:
+  - `id = document-writer`
+  - `skillAllowlist = [doc-coauthoring, doc-normalize, docx, pdf, pptx, xlsx]`
+  - `mcpAllowlist = [bocha-search, doc_state, openwork-knowledge]`
+- verified runtime support:
+  - runtime `plan_doc_state.py` contains:
+    - `architecture-design`
+    - `compatibility-requirements`
+
+Interpretation:
+- the primary deployment blocker was indeed the wrong SSH endpoint
+- once the correct SSH path was used, the Stage 4 generalized writer/runtime-support code could be pulled and the pod could be restarted normally
+- one extra sync step still matters operationally:
+  - for existing users, login is what refreshes the durable user workspace template layer
+- after that login-sync step, fresh `document-writer` hosted runtimes now demonstrably use the new Stage 4 generalized logic
+
+Next step:
+- continue hosted formal `common-work` vs `document-writer` validation on the now-correctly deployed pod
+
+### 2026-03-28: added a staged low-token hosted compare harness so runtime/profile drift can be diagnosed before spending full document-run tokens
+
+Why this batch was needed:
+- the original hosted compare flow only had one real operating mode:
+  - upload all docs
+  - run the full scenario prompt chain
+  - wait for settle using the same long timeout profile even when the goal was only to validate runtime/profile or intake bootstrap
+- that made the flow expensive and noisy:
+  - upload latency and early settle uncertainty could consume time before we even knew whether the correct runtime profile existed
+  - when something went wrong early, the harness gave too little structure for precise localization
+
+What was implemented:
+- introduced a new staged compare helper:
+  - `packages/app/scripts/document-workflow-compare-stages.mjs`
+- supported staged modes:
+  - `runtime`
+  - `intake`
+  - `plan`
+  - `full`
+- each stage now has an explicit contract:
+  - `runtime`
+    - create hosted sessions only
+    - verify profile wiring
+    - skip uploads and prompts
+  - `intake`
+    - upload docs
+    - run one narrow bootstrap prompt
+    - stop after `.worktree/index.json` and `.worktree/sources/manifest.json`
+    - explicitly forbid draft generation
+  - `plan`
+    - upload docs
+    - run one narrow planning prompt
+    - require `.worktree/facts.json`, `.worktree/merge/conflicts.json`, `.worktree/plan/solution-plan.json`, `.worktree/coverage.json`
+    - explicitly forbid draft generation
+  - `full`
+    - keep the original benchmark prompt chain
+
+Additional precision added to the harness:
+- `packages/app/scripts/openwork-compare-diagnostics.mjs`
+  - now exports `summarizeTouchedArtifactFiles(...)`
+  - this extracts artifact-path hints not only from direct file-tool inputs, but also from bash command strings such as:
+    - `--plan-out .worktree/plan/solution-plan.json`
+    - `--coverage-out .worktree/coverage.json`
+    - `--verify-out .worktree/verify/coverage.json`
+- `packages/app/scripts/doc-agent-live-compare.mjs`
+  - now accepts `OPENWORK_COMPARE_STAGE`
+  - runs the stage-selected prompt plan instead of always executing the full scenario
+  - records per-prompt:
+    - compact tool trace
+    - diagnostic summary
+    - touched artifact summary
+  - returns a `stageValidation` block per lane
+
+Important design decision:
+- low-cost stages now use shorter settle/no-progress windows than full runs
+- this was intentional because `runtime/intake/plan` are diagnostic gates, not end-to-end production runs
+- the goal is to fail early on:
+  - wrong runtime profile
+  - no intake bootstrap
+  - no planning artifacts
+  - obvious stage overshoot
+- instead of waiting on the full-run timeout profile
+
+Local verification completed:
+- new tests:
+  - `packages/app/scripts/document-workflow-compare-stages.test.mjs`
+- updated tests:
+  - `packages/app/scripts/openwork-compare-diagnostics.test.mjs`
+  - `packages/app/scripts/profile-sensitive-harnesses.test.mjs`
+- commands run successfully:
+  - `bun test packages/app/scripts/document-workflow-compare-stages.test.mjs packages/app/scripts/openwork-compare-diagnostics.test.mjs packages/app/scripts/profile-sensitive-harnesses.test.mjs`
+  - `node --check packages/app/scripts/doc-agent-live-compare.mjs`
+  - `git diff --check`
+
+Hosted validation already completed for the new harness:
+- ran:
+  - `OPENWORK_COMPARE_STAGE=runtime node packages/app/scripts/doc-agent-live-compare.mjs formal-single-long-tech-rewrite`
+- result:
+  - both lanes created cleanly
+  - `common-work` lane profile was:
+    - `openworkPreferredView = document-agent`
+    - `openworkPreferredAgent = common-work`
+    - `openworkPreferredAgentLock = common-work`
+  - `document-writer` lane profile was:
+    - `openworkPreferredView = document-writer`
+    - `openworkPreferredAgent = document-writer`
+    - `openworkPreferredAgentLock = document-writer`
+  - both lanes returned `stageValidation.ok = true`
+- output file:
+  - `tmp/compare-agents/runtime-stage-formal-single-long-tech-rewrite.json`
+
+Current hosted status at the time of this note:
+- the new `runtime` stage is proven working end-to-end against the hosted pod
+- the next step is `intake` on the same benchmark
+- one earlier `intake` process had been started under the old long-timeout behavior and was explicitly killed to avoid wasting more wait time
+- a fresh `intake` rerun under the new shorter stage policy is in progress / being observed separately
+
+Interpretation:
+- this batch does not yet prove `document-writer > common-work`
+- it does establish the missing evaluation infrastructure needed to make that claim efficiently
+- from here forward, hosted A/B can be run as:
+  - `runtime` gate
+  - `intake` gate
+  - `plan` gate
+  - only then `full`
+- that sharply reduces both token burn and ambiguity when a lane fails early
+
+### 2026-03-28: root-cause follow-up showed the next hosted bottleneck is upload transport, not agent drift, and the staged harness was refined again
+
+Root-cause investigation:
+- SDK source inspection confirms:
+  - `@opencode-ai/sdk` `promptAsync()` is defined as:
+    - `Create and send a new message to a session, start if needed and return immediately`
+- proxy/server inspection confirms:
+  - OpenWork treats `POST /session/{id}/prompt_async` as a session-starting run
+  - session activity is expected to be observed via runtime-scoped event streams
+  - the proxy request itself is not intended to be the long blocking point
+
+What the new evidence showed:
+- after adding incremental snapshot writes to `doc-agent-live-compare.mjs`, a hosted `intake` run no longer looked like an opaque hang
+- the partial result showed:
+  - session creation had already succeeded
+  - the run was still in:
+    - `progress.step = uploading-document`
+  - no prompt had started yet
+- hosted `GET /documents?session=<id>` still returned an empty list at that time
+- the benchmark source file size explains why this stage is qualitatively different from agent reasoning:
+  - `备-天河产业园一期融合算力系统建设项目CPU、GPU节点及云计算服务器采购投标文件电子版-技术部分-烽火.docx`
+  - size:
+    - `103815047` bytes
+
+Interpretation:
+- the current wait was not evidence of:
+  - planner drift
+  - writer drift
+  - prompt-settle failure
+- it was evidence that:
+  - transport/upload cost for large formal benchmark documents needs to be treated as its own measurable stage
+
+Refinement made in response:
+- `document-workflow-compare-stages.mjs`
+  - added a new explicit `upload` stage
+- staged sequence is now:
+  - `runtime`
+  - `upload`
+  - `intake`
+  - `plan`
+  - `full`
+- `upload` is intentionally transport-only:
+  - create hosted session
+  - upload benchmark documents
+  - verify the uploaded documents appear in the session
+  - do not start agent work yet
+
+Additional harness improvements:
+- `doc-agent-live-compare.mjs`
+  - now writes partial JSON snapshots at:
+    - auth complete
+    - session created
+    - per-file upload start
+    - documents uploaded
+    - each completed prompt
+    - final completion / failure
+  - progress now includes:
+    - `step`
+    - `promptIndex`
+    - `currentFile`
+- practical effect:
+  - even if a hosted run is interrupted, another tool/session can inspect the current output JSON and immediately know whether the bottleneck is:
+    - runtime profile
+    - upload transport
+    - intake
+    - planning
+    - later drafting/verification
+
+Local verification after the refinement:
+- `bun test packages/app/scripts/document-workflow-compare-stages.test.mjs packages/app/scripts/openwork-compare-diagnostics.test.mjs packages/app/scripts/profile-sensitive-harnesses.test.mjs`
+  - `24 pass / 0 fail`
+- `node --check packages/app/scripts/doc-agent-live-compare.mjs`
+  - pass
+- `git diff --check`
+  - clean
+
+Operational outcome:
+- the evaluation stack is now much better aligned with the real hosted runtime model:
+  - transport cost is separated from reasoning cost
+  - partial evidence is persisted continuously
+  - long formal document benchmarks are no longer treated as if their first blocking point must be an agent problem
+
+### 2026-03-28: formal benchmark sizing and staged hosted reruns confirmed that `upload` is a first-class gate, and surfaced one more harness bug
+
+Benchmark file-size check:
+- `formal-single-long-tech-rewrite`
+  - `备-天河产业园一期融合算力系统建设项目CPU、GPU节点及云计算服务器采购投标文件电子版-技术部分-烽火.docx`
+  - `103815047` bytes
+- `formal-wjw-multi-doc`
+  - main招标文件: `1028496` bytes
+  - point-to-point应答: `15986` bytes
+  - 参数表: `11547` bytes
+- `formal-ly-plan-first`
+  - source doc 1: `51510558` bytes
+  - PDF: `1662995` bytes
+  - source doc 2: `51768846` bytes
+
+Interpretation:
+- the formal benchmark set is structurally mixed:
+  - `WJW` is lightweight enough that upload is cheap
+  - `single-long` and `LY` both contain 50MB-100MB class Office documents
+- therefore:
+  - `runtime -> upload -> intake -> plan -> full`
+  is not just a nice optimization
+  - it is necessary to keep transport latency from contaminating agent-quality judgments
+
+Hosted rerun results on the refined harness:
+
+1. `formal-single-long-tech-rewrite`, stage=`intake`
+- partial snapshots now immediately show where the run is stalled
+- observed state:
+  - session creation succeeds
+  - progress moves to:
+    - `uploading-document`
+  - session `/documents` list remains empty during that window
+- conclusion:
+  - this lane is still dominated by 100MB-class document upload
+  - no evidence yet that the bottleneck is planner/writer behavior
+
+2. `formal-wjw-multi-doc`, stage=`upload`
+- both lanes completed cleanly
+- `common-work` lane:
+  - upload elapsed: `9252 ms`
+  - `stageValidation.ok = true`
+- `document-writer` lane:
+  - upload elapsed: `12145 ms`
+  - `stageValidation.ok = true`
+- conclusion:
+  - when document size is modest, both hosted runtime profiles pass the transport gate normally
+
+3. `formal-wjw-multi-doc`, stage=`intake`
+- service-side inspection of `common-work` session messages proved:
+  - uploaded documents were present
+  - `.worktree/index.json` and `.worktree/sources/manifest.json` existed
+  - the lane followed the expected state-first path
+  - assistant receipt recommended the next phase as `doc-reader`
+- service-side inspection of `document-writer` session messages proved:
+  - it also completed intake bootstrap
+  - but one harness bug was exposed:
+    - diagnostics had not been normalizing absolute state-file reads because `sessionProfile.directory` was missing from the `workspaceDir` fallback chain
+
+Fix applied immediately:
+- `doc-agent-live-compare.mjs`
+  - diagnostics workspace resolution now includes:
+    - `sessionProfile.directory`
+- this ensures:
+  - absolute reads of `.worktree/index.json`
+  - absolute reads of `.worktree/sources/manifest.json`
+  are recognized as in-workspace artifact touches instead of being dropped
+
+Resulting state:
+- the staged hosted harness is now materially more trustworthy
+- the next meaningful hosted comparison should continue from:
+  - `formal-wjw-multi-doc`
+  - then `plan`
+  - then `full`
+- for `single-long` and `LY`, upload remains a transport gate that must be treated explicitly before any agent-quality conclusion is made
+
+### 2026-03-29: hosted blocker narrowed from service availability to harness semantics, then fixed
+
+Observed service failure:
+- `/openwork/health` returned:
+  - `502 Bad Gateway`
+  - `Proxy error: connect ECONNREFUSED 127.0.0.1:8789`
+- direct pod inspection showed the working repo was:
+  - `/root/ai_staff/openwork`
+- plain `restart-pod.sh --reuse-build` was not the reliable recovery path for this state
+
+Recovery action:
+- running:
+  - `bash scripts/recover-pod-runtime.sh`
+  from `/root/ai_staff/openwork`
+  restored the full hosted chain
+- post-recovery health checks confirmed:
+  - OpenCode healthy
+  - router healthy
+  - OpenWork server healthy
+  - `/openwork/health` back to `200`
+
+Follow-up verification:
+- minimal hosted session creation probes succeeded for both runtime profiles:
+  - `common-work`
+  - `document-writer`
+- conclusion:
+  - the earlier `POST /opencode/session 500` was not a stable structural failure
+  - once the pod runtime was recovered, base hosted session creation resumed normally
+
+New harness-level finding from `formal-wjw-multi-doc`, stage=`plan`:
+- after the service recovered, the staged compare rerun still failed
+- the failure was no longer transport or session creation
+- it failed at compare-settle time with:
+  - `stalled-pending-tool`
+  - pending tool:
+    - `task`
+    - `status=running`
+    - `subagent_type=doc-intake`
+- direct session inspection showed:
+  - parent `common-work` session had already progressed through:
+    - state reads
+    - bash-based intake preparation
+  - the final visible parent step was a delegated `task` call to `doc-intake`
+- interpretation:
+  - this was not an agent stall in the product
+  - it was a bad assumption in the compare harness
+  - the harness was treating delegated subagent execution (`task`) as if it were the same class of suspicious pending tool as malformed `write/edit/bash`
+
+Theory correction:
+- in this agentic architecture, `task` is not a normal leaf tool
+- it is a delegation boundary:
+  - parent agent waits
+  - child agent performs the long-running work
+  - lack of new parent messages during that interval is not enough evidence to classify the run as stalled
+- therefore:
+  - `task: running` should be governed by the overall session timeout
+  - not by the short generic `stalled-pending-tool` guard
+
+Fix applied:
+- `packages/app/scripts/session-settle-guards.mjs`
+  - pending tool summaries now mark delegated tools via:
+    - `delegated: tool === "task"`
+  - generic stalled-pending detection now excludes delegated task tools
+  - malformed-pending detection remains intact for genuinely broken tool states
+- `packages/app/scripts/session-settle-guards.test.mjs`
+  - added regression:
+    - delegated `task` tools must not trigger generic stalled-pending failure
+
+Local verification:
+- `bun test packages/app/scripts/session-settle-guards.test.mjs packages/app/scripts/openwork-compare-diagnostics.test.mjs packages/app/scripts/document-workflow-compare-runtime.test.mjs packages/app/scripts/document-workflow-compare-stages.test.mjs packages/app/scripts/profile-sensitive-harnesses.test.mjs`
+- `node --check packages/app/scripts/doc-agent-live-compare.mjs`
+- `git diff --check`
+- all green
+
+Current state after the fix:
+- the hosted `formal-wjw-multi-doc`, stage=`plan` rerun is back in progress
+- progress snapshot confirms:
+  - upload completed
+  - parent lane moved to `prompt-submitted`
+  - the earlier false-positive fast-fail path has been removed
+- next acceptance checkpoint:
+  - let `common-work` pass the `doc-intake` delegation boundary cleanly
+  - then compare whether `document-writer` still shows broader discovery or other route inefficiencies at the same stage
+
+Follow-up from the same rerun:
+- `common-work` did pass the `doc-intake` delegation boundary
+- direct session inspection showed:
+  - compiled per-source files were created
+  - `.worktree/index.json` moved to `phase = extraction_complete`
+  - `.worktree/facts.json` and `.worktree/merge/conflicts.json` were created
+  - parent then delegated into `doc-planner`
+- however the harness still fast-failed once more on:
+  - `malformed-pending-tool`
+  - tool:
+    - `read`
+    - `status=pending`
+    - empty raw
+    - empty input
+
+Root-cause refinement:
+- this second failure was also a harness semantic bug, not product proof of failure
+- service-side message inspection showed a real progress sequence:
+  - completed `task(doc-intake)`
+  - completed `read(index.json)`
+  - completed `read(manifest.json)`
+  - completed `read(compiled source jsons)`
+  - completed `task(doc-merger)`
+  - completed `read(facts.json/conflicts.json)`
+  - then started `task(doc-planner)`
+- therefore the empty `read` pending state was a short-lived transition artifact in the tool-stream lifecycle, not an actual dead-end
+
+Second guard fix:
+- `packages/app/scripts/session-settle-guards.mjs`
+  - `shouldTreatFingerprintChangeAsProgress(...)` now treats a newly appeared placeholder `read` as progress
+  - rationale:
+    - OpenCode can emit a provisional pending `read` before attaching the concrete file path
+    - that transition should get one grace window
+    - if the placeholder `read` truly persists unchanged, the malformed timeout still catches it later
+- preserved behavior:
+  - malformed empty `bash/write/edit` style turns still do **not** count as progress
+
+Regression coverage added:
+- `packages/app/scripts/session-settle-guards.test.mjs`
+  - malformed pending `write` still does **not** count as progress
+  - placeholder pending `read` **does** count as progress
+  - delegated `task` still does not trigger generic stalled-pending failure
+
+Re-verified locally after the second guard fix:
+- `bun test packages/app/scripts/session-settle-guards.test.mjs packages/app/scripts/openwork-compare-diagnostics.test.mjs packages/app/scripts/document-workflow-compare-runtime.test.mjs packages/app/scripts/document-workflow-compare-stages.test.mjs packages/app/scripts/profile-sensitive-harnesses.test.mjs`
+- `node --check packages/app/scripts/doc-agent-live-compare.mjs`
+- `git diff --check`
+- all green
+
+Practical conclusion:
+- the staged hosted compare harness now models the agentic control flow much more faithfully:
+  - delegation (`task`) is treated as a legitimate long-running boundary
+  - placeholder `read` transitions are not mistaken for total failure
+  - obviously malformed empty `bash/write/edit` style pending turns are still caught quickly
+
+### 2026-03-29: strong `plan` contract plus lane-isolated execution finally produced a decisive hosted comparison
+
+Problem found in the previous `plan` prompt:
+- both lanes could satisfy the old wording by doing “inspection + suggestion”
+- that made the stage too soft:
+  - it did not force actual creation of
+    - `.worktree/facts.json`
+    - `.worktree/merge/conflicts.json`
+    - `.worktree/plan/solution-plan.json`
+    - `.worktree/coverage.json`
+
+Prompt contract fix:
+- `packages/app/scripts/document-workflow-compare-stages.mjs`
+  - `intake` and `plan` prompts now explicitly say:
+    - this is not a consultation task
+    - execute now
+    - do not ask whether to continue
+    - only stop after the required artifacts actually exist
+- `packages/app/scripts/document-workflow-compare-stages.test.mjs`
+  - updated to lock those new hard requirements
+
+Compare harness execution fix:
+- `packages/app/scripts/doc-agent-live-compare.mjs`
+  - one lane failing no longer aborts the whole compare immediately
+  - the harness now:
+    - records the failed lane
+    - keeps running the other lane
+    - persists both sides into the same result snapshot
+
+Hosted result: `formal-wjw-multi-doc`, stage=`plan`, strong contract
+
+1. `common-work`
+- once the prompt was strong enough to force real execution, `common-work` stopped behaving like a pure advisor and began mutating state
+- service-side evidence showed:
+  - it extracted source text into `.tmp/system/*`
+  - it updated `.worktree/index.json`
+  - it updated `.worktree/sources/manifest.json`
+  - it created at least part of `.worktree/sources/*.json`
+- however the lane then fell back into the same class of malformed pending tool issue seen earlier:
+  - first empty `write`
+  - later empty `bash`
+- a direct 30s follow-up poll on the affected session still showed:
+  - assistant step open
+  - tool=`write`
+  - `status=pending`
+  - empty raw
+  - empty input
+- interpretation:
+  - under a real execute-now planning contract, `common-work` is still not stable enough as the long-task baseline for this WJW scenario
+  - this is no longer a harness false positive
+  - it is a genuine hosted route failure mode
+
+2. `document-writer`
+- with the same strong contract, `document-writer` completed the planning gate
+- hosted compare trace recorded:
+  - `doc-reader` x3 completed
+  - `doc-merger` completed
+  - `doc-planner` completed
+- pod-side filesystem verification of the writer session runtime showed all expected planning artifacts existed:
+  - `.worktree/index.json`
+  - `.worktree/sources/manifest.json`
+  - `.worktree/sources/doc-1c0bb7c98883.json`
+  - `.worktree/sources/doc-1c2b1f07e995.json`
+  - `.worktree/sources/doc-9-29-1.json`
+  - `.worktree/facts.json`
+  - `.worktree/merge/conflicts.json`
+  - `.worktree/plan/solution-plan.json`
+  - `.worktree/coverage.json`
+- the writer lane assistant receipt explicitly reported:
+  - planning gate complete
+  - blockers: none
+
+One more harness bug exposed by that success:
+- the saved compare JSON still marked writer `stageValidation.ok = false`
+- reason:
+  - `summarizeTouchedArtifactFiles(...)` only recognized file tools and bash output targets
+  - it did **not** yet recognize artifacts named inside completed `task` receipts
+- this made a truly successful `document-writer` run look like a validation failure
+
+Fix applied immediately:
+- `packages/app/scripts/openwork-compare-diagnostics.mjs`
+  - completed `task` outputs are now scanned for `.worktree/**`, `outputs/**`, `reports/**` artifact paths
+- `packages/app/scripts/openwork-compare-diagnostics.test.mjs`
+  - added regression coverage for completed task receipts containing:
+    - `.worktree/facts.json`
+    - `.worktree/merge/conflicts.json`
+    - `.worktree/plan/solution-plan.json`
+    - `.worktree/coverage.json`
+
+Interpretation after all fixes:
+- for the WJW formal multi-doc planning benchmark:
+  - `document-writer` is already materially stronger than `common-work`
+- the reason is not style or verbosity
+- the reason is control-flow quality:
+  - `document-writer` successfully uses delegated subagents to finish the state graph
+  - `common-work` still collapses into malformed leaf-tool states when the contract demands actual long-form execution
+
+Current next step:
+- rerun the same hosted `plan` stage once more with the new task-receipt artifact extraction enabled
+- expected outcome:
+  - `common-work` still fails or remains unstable
+  - `document-writer` should now be automatically validated as `stageValidation.ok = true` without manual pod-side correction
+
+### 2026-03-29: follow-up rerun after task-receipt extraction landed was polluted by transient hosted instability
+
+Attempted confirmation rerun:
+- same benchmark:
+  - `formal-wjw-multi-doc`
+  - `stage=plan`
+- goal:
+  - let the now-fixed artifact summarizer auto-recognize writer success in the saved JSON
+
+What actually happened:
+- the rerun did **not** produce a cleaner signal
+- instead it was hit by infrastructure/runtime instability on both lanes:
+
+1. `common-work`
+- failed very early on:
+  - `session.messages.poll timed out after 15000ms`
+- this is different from the prior clean failure mode (`malformed pending write/bash`)
+- interpretation:
+  - the lane was polluted by message-poll/service instability before it could provide a useful fresh comparison sample
+
+2. `document-writer`
+- this rerun did not become a clean validation sample either
+- it failed at hosted session creation with:
+  - `Proxy error: socket hang up`
+- interpretation:
+  - this was a transport/server-side failure before the writer workflow itself could be exercised
+
+Decision:
+- do **not** use this rerun as the primary product-quality signal
+- keep the earlier clean hosted comparison as the authoritative comparison for the WJW planning benchmark:
+  - `common-work` failed under the strong planning contract due malformed pending tool behavior
+  - `document-writer` completed the planning gate and produced all expected planning artifacts
+
+Operational conclusion:
+- at this point there are two distinct classes of evidence:
+  - product/control-flow evidence
+    - strong and useful
+    - favors `document-writer`
+  - transient hosted transport/runtime instability
+    - noisy
+    - must be filtered out instead of over-interpreted as agent regression

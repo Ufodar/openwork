@@ -1,5 +1,5 @@
-import { writeFile } from "node:fs/promises";
-import { basename, resolve } from "node:path";
+import { mkdir, writeFile } from "node:fs/promises";
+import { basename, dirname } from "node:path";
 import { performance } from "node:perf_hooks";
 
 import {
@@ -10,7 +10,21 @@ import {
 } from "./_util.mjs";
 
 import { joinVisibleAssistantText } from "./_assistant-text.mjs";
+import {
+  buildDocumentWorkflowCompareStagePlan,
+  normalizeDocumentWorkflowCompareStage,
+  validateDocumentWorkflowCompareStageResult,
+} from "./document-workflow-compare-stages.mjs";
+import {
+  resolveDocumentWorkflowCompareOutputPath,
+  withAsyncTimeout,
+} from "./document-workflow-compare-runtime.mjs";
 import { FORMAL_DOCUMENT_BENCHMARKS_BY_ID } from "./document-workflow-benchmarks.mjs";
+import {
+  buildCompactToolTrace,
+  summarizeConversationDiagnostics,
+  summarizeTouchedArtifactFiles,
+} from "./openwork-compare-diagnostics.mjs";
 import {
   detectStalledPendingTools,
   shouldTreatFingerprintChangeAsProgress,
@@ -20,9 +34,20 @@ const OPENWORK_BASE = process.env.OPENWORK_BASE ?? "http://192.168.5.10:32765/op
 const USERNAME = process.env.OPENWORK_USERNAME ?? "fuda";
 const PASSWORD = process.env.OPENWORK_PASSWORD ?? "1";
 const MODEL = parseModel(process.env.OPENWORK_COMPARE_MODEL ?? "my-company/Qwen3.5-397B-A17B");
-const OUTPUT_PATH = resolve(
-  process.cwd(),
-  process.env.OPENWORK_COMPARE_OUTPUT ?? "../../tmp/compare-agents/document-live-compare.json",
+const COMPARE_STAGE = normalizeDocumentWorkflowCompareStage(
+  process.env.OPENWORK_COMPARE_STAGE ?? "full",
+);
+const OUTPUT_PATH = resolveDocumentWorkflowCompareOutputPath({
+  cwd: process.cwd(),
+  outputOverride: process.env.OPENWORK_COMPARE_OUTPUT,
+});
+const PROMPT_REQUEST_TIMEOUT_MS = Number.parseInt(
+  process.env.OPENWORK_COMPARE_PROMPT_REQUEST_TIMEOUT_MS ?? "30000",
+  10,
+);
+const MESSAGE_POLL_TIMEOUT_MS = Number.parseInt(
+  process.env.OPENWORK_COMPARE_MESSAGE_POLL_TIMEOUT_MS ?? "15000",
+  10,
 );
 
 const legacyScenarios = {
@@ -249,6 +274,11 @@ function serializeError(error) {
   };
 }
 
+async function persistResultSnapshot(payload) {
+  await mkdir(dirname(OUTPUT_PATH), { recursive: true });
+  await writeFile(OUTPUT_PATH, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+}
+
 async function requestJson(url, token, init = {}, context = {}) {
   const method = typeof init.method === "string" ? init.method : "GET";
   const headers = new Headers(init.headers || {});
@@ -323,6 +353,7 @@ async function waitForSessionSettled(
     noProgressTimeoutMs = 180_000,
     label,
     useWorkspaceEventStream = false,
+    onPromptSubmitted = null,
   } = {},
 ) {
   const observedEvents = new Set();
@@ -379,7 +410,14 @@ async function waitForSessionSettled(
 
   try {
     try {
-      await runPrompt();
+      await withAsyncTimeout(
+        () => runPrompt(),
+        PROMPT_REQUEST_TIMEOUT_MS,
+        `${label ?? "session"}.promptAsync`,
+      );
+      if (typeof onPromptSubmitted === "function") {
+        await onPromptSubmitted();
+      }
     } catch (cause) {
       throw buildStepError({
         label: label ?? "session",
@@ -398,7 +436,11 @@ async function waitForSessionSettled(
 
       let messages;
       try {
-        messages = await client.session.messages({ sessionID: sessionId, limit: 400 });
+        messages = await withAsyncTimeout(
+          () => client.session.messages({ sessionID: sessionId, limit: 400 }),
+          MESSAGE_POLL_TIMEOUT_MS,
+          `${label ?? "session"}.session.messages.poll`,
+        );
       } catch (cause) {
         throw buildStepError({
           label: label ?? "session",
@@ -446,6 +488,7 @@ async function waitForSessionSettled(
 
 async function runVariant({
   scenario,
+  stagePlan,
   label,
   agent,
   enableDocumentState,
@@ -456,11 +499,35 @@ async function runVariant({
   token,
   workspacePath,
   workspaceId,
+  onProgress,
 }) {
   let sessionId = null;
   let created;
   let sessionProfile = null;
   const requireStrictProfile = enableDocumentState || preferredView === "document-writer";
+  const variantResult = {
+    label,
+    agent,
+    stage: stagePlan.id,
+    enableDocumentState,
+    sessionId: null,
+    sessionProfile: null,
+    uploaded: [],
+    uploadElapsedMs: 0,
+    finalDocuments: [],
+    promptRuns: [],
+    stageValidation: null,
+    progress: {
+      step: "initializing",
+      promptIndex: null,
+      currentFile: null,
+    },
+  };
+  const reportProgress = async () => {
+    if (typeof onProgress === "function") {
+      await onProgress(variantResult);
+    }
+  };
   try {
     created = await createHostedOpenworkSession({
       baseUrl: OPENWORK_BASE,
@@ -510,40 +577,77 @@ async function runVariant({
       cause,
     });
   }
+  variantResult.sessionId = sessionId;
+  variantResult.sessionProfile = sessionProfile;
+  variantResult.progress = {
+    step: "session-created",
+    promptIndex: null,
+    currentFile: null,
+  };
+  await reportProgress();
   const uploaded = [];
   const uploadStarted = Date.now();
-  for (const docPath of scenario.docs) {
-    const name = basename(docPath);
-    try {
-      uploaded.push(
-        await uploadHostedDocument({
-          baseUrl: OPENWORK_BASE,
-          token,
-          workspaceId,
+  if (stagePlan.uploadDocs) {
+    for (const docPath of scenario.docs) {
+      const name = basename(docPath);
+      variantResult.progress = {
+        step: "uploading-document",
+        promptIndex: null,
+        currentFile: name,
+      };
+      await reportProgress();
+      try {
+        uploaded.push(
+          await uploadHostedDocument({
+            baseUrl: OPENWORK_BASE,
+            token,
+            workspaceId,
+            sessionId,
+            localPath: docPath,
+            attempts: Number.parseInt(process.env.OPENWORK_UPLOAD_ATTEMPTS ?? "4", 10),
+            retryDelayMs: Number.parseInt(process.env.OPENWORK_UPLOAD_RETRY_DELAY_MS ?? "1500", 10),
+          }),
+        );
+      } catch (cause) {
+        throw buildStepError({
+          label,
+          step: "uploadDocument",
           sessionId,
-          localPath: docPath,
-          attempts: Number.parseInt(process.env.OPENWORK_UPLOAD_ATTEMPTS ?? "4", 10),
-          retryDelayMs: Number.parseInt(process.env.OPENWORK_UPLOAD_RETRY_DELAY_MS ?? "1500", 10),
-        }),
-      );
-    } catch (cause) {
-      throw buildStepError({
-        label,
-        step: "uploadDocument",
-        sessionId,
-        details: { file: name },
-        cause,
-      });
+          details: { file: name },
+          cause,
+        });
+      }
     }
   }
   const uploadElapsedMs = Date.now() - uploadStarted;
+  variantResult.uploaded = uploaded;
+  variantResult.uploadElapsedMs = uploadElapsedMs;
+  variantResult.progress = {
+    step: stagePlan.uploadDocs ? "documents-uploaded" : "ready",
+    promptIndex: null,
+    currentFile: null,
+  };
+  await reportProgress();
 
   let seenMessageCount = 0;
   const promptRuns = [];
+  const diagnosticsWorkspaceDir =
+    sessionProfile?.runtimePath ??
+    sessionProfile?.runtimeDir ??
+    sessionProfile?.sessionPath ??
+    sessionProfile?.directory ??
+    sessionProfile?.path ??
+    null;
 
-  for (const promptText of scenario.prompts) {
+  for (const [promptIndex, promptText] of stagePlan.prompts.entries()) {
     const startedAt = Date.now();
     let settle;
+    variantResult.progress = {
+      step: "prompt-submitting",
+      promptIndex,
+      currentFile: null,
+    };
+    await reportProgress();
     try {
       settle = await waitForSessionSettled(
         client,
@@ -555,7 +659,18 @@ async function runVariant({
             model: MODEL,
             parts: [{ type: "text", text: promptText }],
           }),
-        { label },
+        {
+          label,
+          ...(stagePlan.settleOptions ?? {}),
+          onPromptSubmitted: async () => {
+            variantResult.progress = {
+              step: "prompt-submitted",
+              promptIndex,
+              currentFile: null,
+            };
+            await reportProgress();
+          },
+        },
       );
     } catch (cause) {
       if (cause instanceof Error && typeof cause.step === "string") throw cause;
@@ -582,8 +697,21 @@ async function runVariant({
     }
     const freshMessages = messages.slice(seenMessageCount);
     seenMessageCount = messages.length;
+    const freshToolParts = extractToolParts(freshMessages);
     const toolCounts = countTools(freshMessages);
     const taskCalls = extractTaskCalls(freshMessages);
+    const toolTrace = buildCompactToolTrace(freshToolParts, {
+      workspaceDir: diagnosticsWorkspaceDir,
+      maxEntries: Number.parseInt(process.env.OPENWORK_COMPARE_TRACE_MAX_ENTRIES ?? "32", 10),
+    });
+    const diagnostics = summarizeConversationDiagnostics(freshToolParts, {
+      workspaceDir: diagnosticsWorkspaceDir,
+    });
+    const artifactTouches = summarizeTouchedArtifactFiles(
+      freshToolParts,
+      scenario.expectedOutput,
+      { workspaceDir: diagnosticsWorkspaceDir },
+    );
     let docs;
     try {
       docs = await listDocuments({ token, workspaceId, sessionId });
@@ -624,12 +752,22 @@ async function runVariant({
       eventTypes: settle.events,
       toolCounts,
       taskCalls,
+      toolTrace,
+      diagnostics,
+      artifactTouches,
       assistantText: extractText(freshMessages) || extractText(messages),
       documentCount: Array.isArray(docs.items) ? docs.items.length : 0,
       hasExpectedOutput,
       outputHeadings,
       outputPreview: outputText.slice(0, 1_200),
     });
+    variantResult.promptRuns = promptRuns;
+    variantResult.progress = {
+      step: "prompt-completed",
+      promptIndex,
+      currentFile: null,
+    };
+    await reportProgress();
   }
 
   let finalDocuments;
@@ -644,17 +782,23 @@ async function runVariant({
     });
   }
 
-  return {
-    label,
-    agent,
-    enableDocumentState,
-    sessionId,
-    sessionProfile,
-    uploaded,
-    uploadElapsedMs,
-    finalDocuments: finalDocuments.items || [],
+  const stageValidation = validateDocumentWorkflowCompareStageResult({
+    stagePlan,
+    expectedOutput: scenario.expectedOutput,
+    expectedDocumentCount: Array.isArray(scenario.docs) ? scenario.docs.length : 0,
     promptRuns,
+    finalDocuments: finalDocuments.items || [],
+  });
+  variantResult.finalDocuments = finalDocuments.items || [];
+  variantResult.stageValidation = stageValidation;
+  variantResult.progress = {
+    step: "completed",
+    promptIndex: stagePlan.prompts.length ? stagePlan.prompts.length - 1 : null,
+    currentFile: null,
   };
+  await reportProgress();
+
+  return variantResult;
 }
 
 async function main() {
@@ -667,8 +811,13 @@ async function main() {
   const result = {
     generatedAt: new Date().toISOString(),
     model: MODEL,
+    stage: COMPARE_STAGE,
     scenario,
   };
+  const stagePlan = buildDocumentWorkflowCompareStagePlan({
+    scenario,
+    stage: COMPARE_STAGE,
+  });
 
   let auth;
   try {
@@ -688,10 +837,29 @@ async function main() {
   const token = auth.token;
   const workspaceId = auth.workspace.id;
   const workspacePath = auth.workspace.path;
+  result.auth = {
+    workspaceId,
+    workspacePath,
+  };
+  await persistResultSnapshot(result);
   const client = createHostedOpenworkClient({ baseUrl: OPENWORK_BASE, workspaceId, token });
-  try {
-    result.common = await runVariant({
+  const laneErrors = {};
+
+  async function runLane(key, laneParams) {
+    try {
+      result[key] = await runVariant(laneParams);
+    } catch (error) {
+      laneErrors[key] = serializeError(error);
+      await persistResultSnapshot({
+        ...result,
+        laneErrors,
+      });
+    }
+  }
+
+  await runLane("common", {
       scenario,
+      stagePlan,
       label: "cmp-common-work",
       agent: "common-work",
       enableDocumentState: false,
@@ -702,9 +870,14 @@ async function main() {
       token,
       workspacePath,
       workspaceId,
+      onProgress: async (variant) => {
+        result.common = variant;
+        await persistResultSnapshot(result);
+      },
     });
-    result.orchestrated = await runVariant({
+  await runLane("orchestrated", {
       scenario,
+      stagePlan,
       label: "cmp-document-writer",
       agent: "document-writer",
       enableDocumentState: true,
@@ -715,12 +888,25 @@ async function main() {
       token,
       workspacePath,
       workspaceId,
+      onProgress: async (variant) => {
+        result.orchestrated = variant;
+        await persistResultSnapshot(result);
+      },
     });
-  } catch (error) {
+
+  if (Object.keys(laneErrors).length > 0) {
+    result.laneErrors = laneErrors;
+    const error = buildStepError({
+      label: "main",
+      step: "laneCompare",
+      details: { failedLanes: Object.keys(laneErrors).join(",") },
+      cause: new Error("One or more compare lanes failed"),
+    });
     error.partialResult = result;
     throw error;
   }
-  await writeFile(OUTPUT_PATH, `${JSON.stringify(result, null, 2)}\n`, "utf8");
+
+  await persistResultSnapshot(result);
   console.log(JSON.stringify(result, null, 2));
 }
 
@@ -730,7 +916,7 @@ main().catch(async (error) => {
     error: serializeError(error),
     partialResult: error?.partialResult ?? null,
   };
-  await writeFile(OUTPUT_PATH, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  await persistResultSnapshot(payload);
   console.error(JSON.stringify(payload, null, 2));
   process.exitCode = 1;
 });

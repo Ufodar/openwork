@@ -20,6 +20,10 @@ test("doc-agent live compare creates both lanes with explicit hosted runtime pro
   expect(script).toContain("fetchHostedSessionRecord");
   expect(script).toContain("workspacePath");
   expect(script).toContain("const requireStrictProfile = enableDocumentState || preferredView === \"document-writer\"");
+  expect(script).toContain("OPENWORK_COMPARE_STAGE");
+  expect(script).toContain("buildDocumentWorkflowCompareStagePlan");
+  expect(script).toContain("summarizeTouchedArtifactFiles");
+  expect(script).toContain("sessionProfile?.directory");
 });
 
 test("doc-subagent simulate does not create writer sessions through client.session.create", () => {

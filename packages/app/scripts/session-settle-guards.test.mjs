@@ -28,6 +28,7 @@ test("summarizePendingToolStates captures pending tool shape", () => {
       raw: "{\"filePath\":\"outputs/demo.md\"}",
       inputKeys: ["filePath"],
       malformed: false,
+      delegated: false,
     },
   ]);
 });
@@ -64,6 +65,7 @@ test("detectStalledPendingTools flags malformed pending tools on the short timeo
         raw: "",
         inputKeys: [],
         malformed: true,
+        delegated: false,
       },
     ],
   });
@@ -101,9 +103,40 @@ test("detectStalledPendingTools flags generic stalled pending tools on the long 
         raw: "{\"filePath\":\"outputs/demo.md\"}",
         inputKeys: ["filePath"],
         malformed: false,
+        delegated: false,
       },
     ],
   });
+});
+
+test("detectStalledPendingTools does not fast-fail delegated task tools", () => {
+  const messages = [{
+    parts: [
+      {
+        type: "tool",
+        tool: "task",
+        state: {
+          status: "running",
+          input: {
+            description: "Compile source documents into state",
+            prompt: "subagent prompt",
+            subagent_type: "doc-intake",
+          },
+          raw: "",
+        },
+      },
+    ],
+  }];
+
+  expect(
+    detectStalledPendingTools({
+      messages,
+      lastProgressAt: 0,
+      now: 300_000,
+      malformedPendingToolTimeoutMs: 30_000,
+      stalledPendingToolTimeoutMs: 120_000,
+    }),
+  ).toBeNull();
 });
 
 test("detectStalledPendingTools stays quiet when no pending tools exist", () => {
@@ -149,6 +182,25 @@ test("shouldTreatFingerprintChangeAsProgress ignores malformed-pending-only assi
   }];
 
   expect(shouldTreatFingerprintChangeAsProgress(messages)).toBe(false);
+});
+
+test("shouldTreatFingerprintChangeAsProgress treats placeholder reads as progress", () => {
+  const messages = [{
+    role: "assistant",
+    parts: [
+      {
+        type: "tool",
+        tool: "read",
+        state: {
+          status: "pending",
+          input: {},
+          raw: "",
+        },
+      },
+    ],
+  }];
+
+  expect(shouldTreatFingerprintChangeAsProgress(messages)).toBe(true);
 });
 
 test("shouldTreatFingerprintChangeAsProgress still counts well-formed tool activity as progress", () => {

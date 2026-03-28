@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import {
   buildCompactToolTrace,
+  summarizeTouchedArtifactFiles,
   shouldStopDiagnosticCapture,
   summarizeConversationDiagnostics,
 } from "./openwork-compare-diagnostics.mjs";
@@ -137,6 +138,76 @@ describe("buildCompactToolTrace", () => {
         command: "pandoc input.docx -o /tmp/out.txt",
       },
     ]);
+  });
+});
+
+describe("summarizeTouchedArtifactFiles", () => {
+  test("extracts stage artifact paths from both file tools and bash commands", () => {
+    const summary = summarizeTouchedArtifactFiles([
+      toolPart("write", { filePath: "/workspace/documents/sessions/rt_1/.worktree/index.json" }),
+      toolPart("read", { filePath: "/workspace/documents/sessions/rt_1/outputs/final.md" }),
+      toolPart("bash", {
+        command:
+          "python3 ./.opencode/runtime-support/document-state/plan_doc_state.py --workspace . --plan-out .worktree/plan/solution-plan.json --coverage-out .worktree/coverage.json",
+      }),
+      toolPart("bash", {
+        command:
+          "python3 ./.opencode/runtime-support/document-state/verify_doc_state.py --workspace . --target outputs/final.md --verify-out .worktree/verify/coverage.json",
+      }),
+    ], "outputs/final.md", {
+      workspaceDir: "/workspace/documents/sessions/rt_1",
+    });
+
+    expect(summary.hasIndex).toBe(true);
+    expect(summary.hasPlan).toBe(true);
+    expect(summary.hasCoverage).toBe(true);
+    expect(summary.hasVerifyCoverage).toBe(true);
+    expect(summary.hasExpectedOutput).toBe(true);
+  });
+
+  test("extracts stage artifact paths from completed task receipts", () => {
+    const summary = summarizeTouchedArtifactFiles([
+      {
+        type: "tool",
+        tool: "task",
+        state: {
+          status: "completed",
+          output: [
+            "task_id: ses_demo",
+            "",
+            "<task_result>",
+            "Created:",
+            "- .worktree/facts.json",
+            "- .worktree/merge/conflicts.json",
+            "- .worktree/plan/solution-plan.json",
+            "- .worktree/coverage.json",
+            "</task_result>",
+          ].join("\n"),
+        },
+      },
+    ], "outputs/final.md", {
+      workspaceDir: "/workspace/documents/sessions/rt_1",
+    });
+
+    expect(summary.hasFacts).toBe(true);
+    expect(summary.hasConflicts).toBe(true);
+    expect(summary.hasPlan).toBe(true);
+    expect(summary.hasCoverage).toBe(true);
+  });
+
+  test("does not treat glob or ls probes as proof that missing artifacts exist", () => {
+    const summary = summarizeTouchedArtifactFiles([
+      toolPart("glob", { pattern: ".worktree/facts.json" }),
+      toolPart("glob", { pattern: ".worktree/plan/solution-plan.json" }),
+      toolPart("bash", { command: "ls -la .worktree/coverage.json .worktree/merge/conflicts.json 2>&1" }),
+    ], "outputs/final.md", {
+      workspaceDir: "/workspace/documents/sessions/rt_1",
+    });
+
+    expect(summary.hasFacts).toBe(false);
+    expect(summary.hasPlan).toBe(false);
+    expect(summary.hasCoverage).toBe(false);
+    expect(summary.hasConflicts).toBe(false);
   });
 });
 

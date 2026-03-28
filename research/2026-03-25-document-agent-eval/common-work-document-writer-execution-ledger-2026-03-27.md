@@ -542,6 +542,29 @@ Why this is the chosen Stage 3 entry move:
   - current `document-writer` prompt behavior
 - it directly prevents the most likely future leak once Stage 4 starts adding writer-only workflow helpers
 
+Verification and deployment:
+- local verification:
+  - `bun test packages/server/src/session-workspaces.test.ts`
+  - `bun test packages/server/src/server.proxy-session-create.test.ts`
+  - `git diff --check -- packages/server/src/session-workspaces.ts packages/server/src/session-workspaces.test.ts`
+- committed locally as:
+  - `a07c149a` (`Isolate runtime plugins by session profile`)
+- pushed to:
+  - `origin/dev`
+  - `gitee/dev`
+- pod deploy path:
+  - `git pull --ff-only`
+  - `bash scripts/restart-pod.sh --force`
+- deployed pod verification:
+  - `HEAD = a07c149a817f4e3f8903f1c2c71cd942895cfa39`
+  - `http://127.0.0.1:8789/health -> ok`
+  - `http://127.0.0.1:32765/openwork/health -> ok`
+  - pod-side test rerun:
+    - `bun test packages/server/src/session-workspaces.test.ts --filter "mirrors generic plugins to every runtime but keeps profile-specific plugins isolated"`
+    - result:
+      - `11 pass`
+      - `0 fail`
+
 Decision:
 - keep Task 3 focused on shared-path isolation only
 - do not start Stage 4 prompt/generalization work until this runtime-level guardrail is merged, deployed, and verified

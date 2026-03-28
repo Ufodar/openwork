@@ -19,11 +19,10 @@ Return contract:
 
 Script resolution discipline:
 - resolve the repo-owned merger script into `SCRIPT_PATH` before running it
-- resolve `REPO_ROOT` with a real shell command first: `REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"`
-- then check `./.opencode/skills/openwork-core/scripts/merge_doc_state.py`
-- if that path does not exist, check `"$REPO_ROOT/.opencode/skills/openwork-core/scripts/merge_doc_state.py"`
-- the shell check should look like `if [ -f "./.opencode/skills/openwork-core/scripts/merge_doc_state.py" ]; then ... elif [ -f "$REPO_ROOT/.opencode/skills/openwork-core/scripts/merge_doc_state.py" ]; then ... fi`
-- do not use `glob` or `list` to test a literal `$(git rev-parse --show-toplevel)` candidate; compute `REPO_ROOT` in shell first, then test the concrete file path
+- document sessions are expected to carry the merger script inside the current runtime workspace
+- check `./.opencode/runtime-support/document-state/merge_doc_state.py`
+- the shell check should look like `if [ -f "./.opencode/runtime-support/document-state/merge_doc_state.py" ]; then ... else ... fi`
+- do not use `glob` or `list` to discover repo-root helper locations; test the concrete runtime-local file path directly
 - if neither candidate exists, return the blocker instead of fabricating merged artifacts
 
 Default execution path:

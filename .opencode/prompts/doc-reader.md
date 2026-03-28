@@ -46,12 +46,11 @@ Reading discipline:
 
 Script resolution discipline:
 - resolve the actual extractor path before running it
-- resolve `REPO_ROOT` with a real shell command first: `REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"`
-- then check `./.opencode/skills/openwork-core/scripts/extract_doc_state.py` inside the current workspace
-- if that path does not exist, check `"$REPO_ROOT/.opencode/skills/openwork-core/scripts/extract_doc_state.py"`
-- the shell check should look like `if [ -f "./.opencode/skills/openwork-core/scripts/extract_doc_state.py" ]; then ... elif [ -f "$REPO_ROOT/.opencode/skills/openwork-core/scripts/extract_doc_state.py" ]; then ... fi`
+- document sessions are expected to carry the extractor inside the current runtime workspace
+- check `./.opencode/runtime-support/document-state/extract_doc_state.py` directly
+- the shell check should look like `if [ -f "./.opencode/runtime-support/document-state/extract_doc_state.py" ]; then ... else ... fi`
 - keep the resolved path in `SCRIPT_PATH`
-- do not use `glob` or `list` to test a literal `$(git rev-parse --show-toplevel)` candidate; compute `REPO_ROOT` in shell first, then test the concrete file path
+- do not use `glob` or `list` to discover repo-root helper locations; test the concrete runtime-local file path directly
 - if neither candidate exists, return the blocker; do not pretend the extractor ran and do not switch to a handwritten compilation path
 
 Default execution path:

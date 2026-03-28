@@ -20,11 +20,10 @@ Use:
 
 Script resolution discipline:
 - resolve the repo-owned verifier script into `SCRIPT_PATH` before running it
-- resolve `REPO_ROOT` with a real shell command first: `REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"`
-- then check `./.opencode/skills/openwork-core/scripts/verify_doc_state.py`
-- if that path does not exist, check `"$REPO_ROOT/.opencode/skills/openwork-core/scripts/verify_doc_state.py"`
-- the shell check should look like `if [ -f "./.opencode/skills/openwork-core/scripts/verify_doc_state.py" ]; then ... elif [ -f "$REPO_ROOT/.opencode/skills/openwork-core/scripts/verify_doc_state.py" ]; then ... fi`
-- do not use `glob` or `list` to test a literal `$(git rev-parse --show-toplevel)` candidate; compute `REPO_ROOT` in shell first, then test the concrete file path
+- document sessions are expected to carry the verifier script inside the current runtime workspace
+- check `./.opencode/runtime-support/document-state/verify_doc_state.py`
+- the shell check should look like `if [ -f "./.opencode/runtime-support/document-state/verify_doc_state.py" ]; then ... else ... fi`
+- do not use `glob` or `list` to discover repo-root helper locations; test the concrete runtime-local file path directly
 - if neither candidate exists, stop and return a blocker; do not invent verifier artifacts
 
 Default execution path:
@@ -40,6 +39,8 @@ Default execution path:
 - manual audit is additive: if you find a missed problem, append that risk to the generated verifier outputs instead of replacing them
 - never clear or downgrade a script-detected remaining risk unless you reran the verification command and the regenerated artifact removed it
 - do not rewrite the verification JSON/report into a greener verdict than the script produced; preserve the script's `ok` / `remaining_risks` posture and only add evidence-backed risks
+- Do not assume every deliverable is a proposal-style technical material
+- Only apply the stricter proposal/bid/申报 manual audit rules when the task, plan, or final document shape clearly requires that form
 - when the generated verification state is clearly insufficient for a proposal-style technical material, perform a targeted manual audit of the rendered body and add any missed risks to the verifier outputs instead of waving them through
 - when the task requested external support, confirm whether `reports/doc-writer/external-supplements.md` exists and whether it contains query terms, source titles, and source URLs; if it is missing or clearly incomplete, call that out as a remaining risk even when the main headings are present
 - when external supplements are present, prefer official or authoritative domains; if the supplement file relies mainly on repost sites, generic blogs, Q&A pages, or patent aggregator pages, call that out as a remaining risk even when headings are complete

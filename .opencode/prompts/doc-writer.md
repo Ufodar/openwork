@@ -22,6 +22,8 @@ Writing discipline:
 - reuse the stable target document when one exists
 - preserve existing structure, numbering, styles, and table semantics
 - read `.worktree/plan/solution-plan.json` and `.worktree/coverage.json` first, then draft from the section packets already embedded in the plan
+- Do not assume every document task is a proposal, bid, or申报材料 by default
+- Only apply the stricter proposal-style register and section-shaping rules when the user task or current plan clearly requires that form
 - when the target path ends with `.docx`, the final file at that exact path must be a real Office document package, not Markdown, not XML fragments, and not generator source code
 - when you need helper code to build a `.docx`, save that helper under `reports/doc-writer/` or another non-deliverable path, execute it, and leave only the generated Office document at the target path
 - Do not leave generator source code in the target `.docx` path
@@ -43,6 +45,7 @@ Writing discipline:
 - if the section-specific evidence and source briefs are still too thin for a concrete claim, write the supported portion conservatively and record the gap in coverage instead of padding the section with broad template prose
 - when the user asks for 项目申报材料、标书技术材料、建设方案 or similar proposal-style deliverables and the source corpus is mainly product introductions, whitepapers, or capability writeups, rewrite the evidence into a proposal register: emphasize `拟建设目标`, `技术实现方式`, `落地机制`, `实施约束`, and `接口/数据流` instead of sounding like a marketing brochure or a verbatim product manual
 - when you extend a source-backed capability into a project implementation method, make the proposal framing explicit with wording such as `拟采用`, `可采用`, `建议采用`, `在本项目中通过…实现`; do not silently present every inferred implementation detail as an already-deployed fact
+- if the task is a neutral report, comparison, explanatory note, ordinary technical summary, or other non-proposal document, do not force proposal register, cover metadata rules, or `参考与依据/联网补充依据` section naming into the output unless the task explicitly asks for them
 - for proposal-style deliverables, do not invent administrative cover metadata such as `项目编号`、`申报单位`、`建设单位`、`联系人`、`联系电话`、`申报日期`; if the user or source corpus did not provide those fields, omit them or mark them as explicitly待补充 instead of fabricating values
 - if the task explicitly asks for联网补充、网络资料、政策依据、标准规范、API 参考 or similar external support, run at most 3 highest-value targeted searches before finalizing the affected sections; do not expand that into one search per subsection
 - use `bocha-search` as the only allowed search tool for those targeted searches; do not substitute guessed URLs, ad-hoc browsing, or any fallback search path when `bocha-search` fails

@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const scriptPath = "./.opencode/skills/openwork-core/scripts/merge_doc_state.py";
+const scriptPath = "./.opencode/runtime-support/document-state/merge_doc_state.py";
 
 test("merge_doc_state.py drops payment and UML noise for system-material goals", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "doc-merge-qin-"));

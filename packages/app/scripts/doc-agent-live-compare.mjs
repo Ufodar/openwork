@@ -644,7 +644,7 @@ async function main() {
     });
     result.orchestrated = await runVariant({
       scenario,
-      label: "cmp-doc-orchestrator",
+      label: "cmp-document-writer",
       agent: "document-writer",
       enableDocumentState: true,
       client,

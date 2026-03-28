@@ -62,35 +62,14 @@ def infer_goal(goal: str, manifest: dict, canonical_facts: list[dict]) -> str:
     explicit = (goal or "").strip()
     if explicit and not is_generic_goal(explicit):
         return explicit
-
-    titles = joined_source_titles(manifest)
-    fact_text = " ".join(
-        str(item.get("statement") or "")
-        for item in canonical_facts[:24]
-        if isinstance(item, dict)
-    )
-    context = f"{titles} {fact_text}"
-    if "算力" in context and ("监控" in context or "运维" in context or "调度" in context):
-        return "撰写三大系统技术材料文档"
     return explicit or "Prepare a structured document response from the merged fact surface"
 
 
-def is_system_material_goal(goal: str, manifest: dict, canonical_facts: list[dict]) -> bool:
+def is_explicit_three_system_goal(goal: str) -> bool:
     lowered = normalize_text(goal)
-    if any(keyword in lowered for keyword in ["项目申报", "技术材料", "api 调用示例", "三大系统"]):
-        return True
     if all(name in goal for name in ["算力资源汇聚系统", "算力选择与调度系统", "算力运行安全监测系统"]):
         return True
-    titles = joined_source_titles(manifest)
-    if "算力" in titles and ("监控" in titles or "运维" in titles):
-        topics = {
-            str(item.get("topic") or "")
-            for item in canonical_facts
-            if isinstance(item, dict)
-        }
-        if topics & {"resource-aggregation", "scheduling", "security-monitoring", "api-interoperability"}:
-            return True
-    return False
+    return "三大系统" in lowered and "技术材料" in lowered
 
 
 def build_system_material_sections():
@@ -130,7 +109,7 @@ def build_system_material_sections():
 
 
 def build_sections(goal: str, manifest: dict, canonical_facts: list[dict]):
-    if is_system_material_goal(goal, manifest, canonical_facts):
+    if is_explicit_three_system_goal(goal):
         return build_system_material_sections()
 
     lowered = goal.lower()
@@ -208,7 +187,7 @@ def build_goal_profile(goal: str, manifest: dict, canonical_facts: list[dict]) -
         "@startuml", "@enduml", "participant",
     }
 
-    if is_system_material_goal(goal, manifest, canonical_facts):
+    if is_explicit_three_system_goal(goal):
         keywords.update({
             "算力", "资源", "纳管", "k8s", "虚拟机", "裸金属", "gpu", "标签", "调度", "时延", "带宽",
             "丢包", "路径", "算网", "监控", "告警", "审计", "安全", "等保", "api", "rest", "grpc",

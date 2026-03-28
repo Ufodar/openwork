@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const scriptPath = "./.opencode/skills/openwork-core/scripts/init_doc_state.py";
+const scriptPath = "./.opencode/runtime-support/document-state/init_doc_state.py";
 
 test("init_doc_state.py bootstraps a document workspace from uploaded source files", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "doc-init-state-"));

@@ -89,6 +89,7 @@ const RUNTIME_MIRRORED_OPENCODE_DIRS = [
   "plugins",
   "prompts",
   "references",
+  "runtime-support",
   "skills",
 ] as const;
 const DOCUMENT_SESSION_SKILL_ALLOWLIST = [
@@ -99,7 +100,7 @@ const DOCUMENT_SESSION_SKILL_ALLOWLIST = [
   "pptx",
   "xlsx",
 ] as const;
-const DOCUMENT_WRITER_SESSION_SKILL_ALLOWLIST = [...DOCUMENT_SESSION_SKILL_ALLOWLIST, "openwork-core"] as const;
+const DOCUMENT_WRITER_SESSION_SKILL_ALLOWLIST = [...DOCUMENT_SESSION_SKILL_ALLOWLIST] as const;
 const DOCUMENT_SESSION_MCP_ALLOWLIST = [
   "bocha-search",
   "doc_state",
@@ -369,6 +370,9 @@ async function mirrorWorkspaceOpencodeSupportFiles(
       for (const entry of allowedPluginEntries) {
         await cp(join(sourceDir, entry), join(targetDir, entry), { recursive: true, force: true });
       }
+      continue;
+    }
+    if (relativeDir === "runtime-support" && runtimeProfile.id !== "document-writer") {
       continue;
     }
     await cp(sourceDir, targetDir, { recursive: true, force: true });

@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const scriptPath = "./.opencode/skills/openwork-core/scripts/plan_doc_state.py";
+const scriptPath = "./.opencode/runtime-support/document-state/plan_doc_state.py";
 
 test("plan_doc_state.py generates system-material sections and filters noisy evidence for proposal-style goals", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "doc-plan-qin-"));
@@ -192,13 +192,22 @@ test("plan_doc_state.py preserves generic fallback sections for generic goals", 
     await writeFile(join(workspace, ".worktree", "index.json"), JSON.stringify({ summary: "simple summary" }, null, 2), "utf8");
     await writeFile(
       join(workspace, ".worktree", "sources", "manifest.json"),
-      JSON.stringify({ goal: "Compile uploaded source documents into structured state", sources: [{ title: "普通项目说明" }] }, null, 2),
+      JSON.stringify({
+        goal: "Compile uploaded source documents into structured state",
+        sources: [
+          { title: "融合算力云平台白皮书" },
+          { title: "天河监控运维一体化平台软件介绍v0.3" },
+        ],
+      }, null, 2),
       "utf8",
     );
     await writeFile(
       join(workspace, ".worktree", "facts.json"),
       JSON.stringify({
-        canonical_facts: [{ topic: "general", statement: "这是一个普通项目说明。", sources: [{ title: "普通项目说明" }] }],
+        canonical_facts: [
+          { topic: "resource-aggregation", statement: "平台支持算力资源统一纳管。", sources: [{ title: "融合算力云平台白皮书" }] },
+          { topic: "security-monitoring", statement: "平台支持统一监控与告警。", sources: [{ title: "天河监控运维一体化平台软件介绍v0.3" }] },
+        ],
         gaps: [],
       }, null, 2),
       "utf8",

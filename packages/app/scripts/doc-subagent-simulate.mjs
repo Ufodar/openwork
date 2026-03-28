@@ -498,7 +498,7 @@ async function runScenario({ baseUrl, token, workspaceId, client, scenario }) {
       () =>
         client.session.promptAsync({
           sessionID: session.id,
-          agent: "doc-orchestrator",
+          agent: "document-writer",
           model: modelRef,
           parts: [{ type: "text", text: promptText }],
         }),

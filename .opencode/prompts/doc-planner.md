@@ -19,17 +19,17 @@ Return contract:
 
 Script resolution discipline:
 - resolve the repo-owned planner script into `SCRIPT_PATH` before running it
-- resolve `REPO_ROOT` with a real shell command first: `REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"`
-- then check `./.opencode/skills/openwork-core/scripts/plan_doc_state.py`
-- if that path does not exist, check `"$REPO_ROOT/.opencode/skills/openwork-core/scripts/plan_doc_state.py"`
-- the shell check should look like `if [ -f "./.opencode/skills/openwork-core/scripts/plan_doc_state.py" ]; then ... elif [ -f "$REPO_ROOT/.opencode/skills/openwork-core/scripts/plan_doc_state.py" ]; then ... fi`
-- do not use `glob` or `list` to test a literal `$(git rev-parse --show-toplevel)` candidate; compute `REPO_ROOT` in shell first, then test the concrete file path
+- document sessions are expected to carry the planner script inside the current runtime workspace
+- check `./.opencode/runtime-support/document-state/plan_doc_state.py`
+- the shell check should look like `if [ -f "./.opencode/runtime-support/document-state/plan_doc_state.py" ]; then ... else ... fi`
+- do not use `glob` or `list` to discover repo-root helper locations; test the concrete runtime-local file path directly
 - if neither candidate exists, return the blocker instead of inventing planner outputs
 
 Default execution path:
 - first resolve `SCRIPT_PATH`, then run `python3 "$SCRIPT_PATH" --workspace . --plan-out .worktree/plan/solution-plan.json --coverage-out .worktree/coverage.json`
 - if the task explicitly provides a user objective or target document, pass them through with `--goal` and `--target-doc`
 - if the user named systems, exact output headings, mandatory subsections, or a specific proposal deliverable, treat those strings as a hard contract and pass them through explicitly; do not accept a generic placeholder plan with sections like “执行摘要 / 主体内容 / 待确认事项”
+- do not infer a Qin-like multi-system proposal skeleton only from source titles or domain keywords; require the user goal or accepted task contract to make that structure explicit
 - only hand-edit the generated JSON when the script output is clearly insufficient for the writer
 - do not replace the script-emitted section schema with a custom `system/modules/key_facts` shape; if you enrich the plan, preserve `id`, `title`, `required_subsections`, `required_evidence`, and `source_context_refs` as the canonical control surface
 

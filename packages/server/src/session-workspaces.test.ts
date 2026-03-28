@@ -275,7 +275,7 @@ describe("provisionSessionWorkspace", () => {
     expect(parsed.mcp?.filesystem).toBeUndefined();
   });
 
-  test("keeps openwork-core for document-writer runtime sessions", async () => {
+  test("keeps runtime support helpers but not openwork-core skill for document-writer runtime sessions", async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), "openwork-session-workspace-doc-writer-"));
     const writerSkills = [
       "content-research-writer",
@@ -284,7 +284,6 @@ describe("provisionSessionWorkspace", () => {
       "docx",
       "image-enhancer",
       "internal-comms",
-      "openwork-core",
       "openwork-debug",
       "pdf",
       "pptx",
@@ -294,8 +293,12 @@ describe("provisionSessionWorkspace", () => {
       await mkdir(join(workspacePath, ".opencode", "skills", skill), { recursive: true });
       await writeFile(join(workspacePath, ".opencode", "skills", skill, "SKILL.md"), `# ${skill}\n`, "utf8");
     }
-    await mkdir(join(workspacePath, ".opencode", "skills", "openwork-core", "scripts"), { recursive: true });
-    await writeFile(join(workspacePath, ".opencode", "skills", "openwork-core", "scripts", "extract_doc_state.py"), "print('ok')\n", "utf8");
+    await mkdir(join(workspacePath, ".opencode", "runtime-support", "document-state"), { recursive: true });
+    await writeFile(
+      join(workspacePath, ".opencode", "runtime-support", "document-state", "extract_doc_state.py"),
+      "print('ok')\n",
+      "utf8",
+    );
 
     const runtime = await provisionSessionWorkspace(workspacePath, {
       preferredView: "document-writer",
@@ -310,7 +313,6 @@ describe("provisionSessionWorkspace", () => {
       "doc-coauthoring",
       "doc-normalize",
       "docx",
-      "openwork-core",
       "pdf",
       "pptx",
       "xlsx",
@@ -320,14 +322,14 @@ describe("provisionSessionWorkspace", () => {
       "doc-coauthoring",
       "doc-normalize",
       "docx",
-      "openwork-core",
       "pdf",
       "pptx",
       "xlsx",
     ]);
-    expect(await exists(join(runtime.runtimeDir, ".opencode", "skills", "openwork-core", "scripts", "extract_doc_state.py"))).toBe(
-      true,
-    );
+    expect(await exists(join(runtime.runtimeDir, ".opencode", "skills", "openwork-core", "SKILL.md"))).toBe(false);
+    expect(
+      await exists(join(runtime.runtimeDir, ".opencode", "runtime-support", "document-state", "extract_doc_state.py")),
+    ).toBe(true);
   });
 
   test("mirrors generic plugins to every runtime but keeps profile-specific plugins isolated", async () => {

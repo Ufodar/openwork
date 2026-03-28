@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const repoRoot = join(import.meta.dir, "..", "..", "..");
-const scriptPath = "./.opencode/skills/openwork-core/scripts/verify_doc_state.py";
+const scriptPath = "./.opencode/runtime-support/document-state/verify_doc_state.py";
 
 test("verify_doc_state.py writes verifier state and a report for a drafted markdown deliverable", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "doc-verify-"));

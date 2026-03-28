@@ -4,13 +4,13 @@ import { resolve } from "node:path";
 
 const root = resolve(import.meta.dir, "..", "..", "..");
 
-test("doc-orchestrator reader tasks are anchored on the deterministic extractor command", async () => {
-  const prompt = await readFile(resolve(root, ".opencode/prompts/doc-orchestrator.md"), "utf8");
+test("document-writer entry prompt anchors reader tasks on the deterministic extractor command", async () => {
+  const prompt = await readFile(resolve(root, ".opencode/agent/document-writer.md"), "utf8");
 
   expect(prompt).toContain("extract_doc_state.py");
   expect(prompt).toContain("verify_doc_state.py");
-  expect(prompt).toContain("git rev-parse --show-toplevel");
   expect(prompt).toContain("SCRIPT_PATH");
+  expect(prompt).toContain("./.opencode/runtime-support/document-state/<script-name>");
   expect(prompt).toContain("--doc-id");
   expect(prompt).toContain("--output");
   expect(prompt).toContain("Do not ask `doc-reader` to use the `docx` or `pdf` skills");
@@ -45,12 +45,14 @@ test("document-writer agent entrypoint uses orchestrator-style delegation rules"
   expect(agentPrompt).toContain("must stay under `reports/doc-writer/**` or `reports/docx-draft/**`");
   expect(agentPrompt).toContain("do not drop the external-support requirement from verifier");
   expect(agentPrompt).toContain("do not ask `doc-merger` to create `.worktree/merge/gap-analysis.json`");
+  expect(agentPrompt).toContain("do not bypass the missing phase");
+  expect(agentPrompt).toContain("if a subagent returns partial work, continue from the artifact it produced or relaunch that same subagent");
 });
 
 test("writer and verifier prompts treat user-specified section titles as exact headings", async () => {
   const writerPrompt = await readFile(resolve(root, ".opencode/prompts/doc-writer.md"), "utf8");
   const verifierPrompt = await readFile(resolve(root, ".opencode/prompts/doc-verifier.md"), "utf8");
-  const orchestratorPrompt = await readFile(resolve(root, ".opencode/prompts/doc-orchestrator.md"), "utf8");
+  const entryPrompt = await readFile(resolve(root, ".opencode/agent/document-writer.md"), "utf8");
 
   expect(writerPrompt).toContain("literal heading contract");
   expect(writerPrompt).toContain("do not invent helper scripts");
@@ -58,13 +60,13 @@ test("writer and verifier prompts treat user-specified section titles as exact h
   expect(verifierPrompt).toContain("exact heading contract");
   expect(verifierPrompt).toContain("execute that verification command directly");
   expect(verifierPrompt).toContain("do not fake verifier outputs");
-  expect(orchestratorPrompt).toContain("literal output headings");
-  expect(orchestratorPrompt).toContain("do not tell `doc-writer` to \"follow the plan titles\"");
-  expect(orchestratorPrompt).toContain("do not invent helper scripts for coverage refresh");
-  expect(orchestratorPrompt).toContain("split that into two subagent calls");
-  expect(orchestratorPrompt).toContain("If `doc-verifier` reports missing sections");
-  expect(orchestratorPrompt).toContain("title mismatch is a failure");
-  expect(orchestratorPrompt).toContain("do not call non-`doc-*` agents");
+  expect(entryPrompt).toContain("literal output headings");
+  expect(entryPrompt).toContain("do not tell `doc-writer` to \"follow the plan titles\"");
+  expect(entryPrompt).toContain("do not invent helper scripts for coverage refresh");
+  expect(entryPrompt).toContain("split that into two subagent calls");
+  expect(entryPrompt).toContain("If `doc-verifier` reports missing sections");
+  expect(entryPrompt).toContain("title mismatch is a failure");
+  expect(entryPrompt).toContain("do not call non-`doc-*` agents");
   expect(writerPrompt).toContain("do not pad proposal-style technical materials with unrelated commercial");
   expect(writerPrompt).toContain("do not satisfy that requirement by leaving only a TODO-style");
   expect(writerPrompt).toContain("real Office document");
@@ -81,8 +83,7 @@ test("doc-reader does not allow docx/pdf skills for standard source compilation"
   expect(skillPermission.docx).not.toBe("allow");
   expect(skillPermission.pdf).not.toBe("allow");
   expect(prompt).toContain("resolve the actual extractor path");
-  expect(prompt).toContain("git rev-parse --show-toplevel");
-  expect(prompt).toContain("REPO_ROOT");
+  expect(prompt).toContain("./.opencode/runtime-support/document-state/extract_doc_state.py");
   expect(prompt).toContain("do not use `glob`");
   expect(prompt).toContain("return the blocker");
 });
@@ -128,16 +129,13 @@ test("doc-planner can reread absolute runtime state paths when refining generate
   }
 });
 
-test("planner and orchestrator prompts preserve the machine-readable plan schema", async () => {
+test("planner and document-writer prompts preserve the machine-readable plan schema", async () => {
   const plannerPrompt = await readFile(resolve(root, ".opencode/prompts/doc-planner.md"), "utf8");
-  const orchestratorPrompt = await readFile(resolve(root, ".opencode/prompts/doc-orchestrator.md"), "utf8");
   const entryPrompt = await readFile(resolve(root, ".opencode/agent/document-writer.md"), "utf8");
 
   expect(plannerPrompt).toContain("do not replace the script-emitted section schema");
   expect(plannerPrompt).toContain("custom `system/modules/key_facts` shape");
   expect(plannerPrompt).toContain("preserve `id`, `title`, `required_subsections`, `required_evidence`, and `source_context_refs`");
-  expect(orchestratorPrompt).toContain("If a proposal-style plan is missing section titles");
-  expect(orchestratorPrompt).toContain("treat the plan as invalid or stale and rerun `doc-planner`");
   expect(entryPrompt).toContain("If a proposal-style plan is missing section titles");
   expect(entryPrompt).toContain("do not send that malformed plan straight to `doc-writer`");
 });
@@ -179,12 +177,11 @@ test("doc-writer preserves the official bocha search capability for external sup
   expect(entryPrompt).toContain("do not close the loop on a partial verifier result");
 });
 
-test("repo helper prompts require shell-resolved REPO_ROOT instead of literal glob candidates", async () => {
+test("repo helper prompts require runtime-local script resolution instead of repo-root fallback", async () => {
   const readerPrompt = await readFile(resolve(root, ".opencode/prompts/doc-reader.md"), "utf8");
   const mergerPrompt = await readFile(resolve(root, ".opencode/prompts/doc-merger.md"), "utf8");
   const plannerPrompt = await readFile(resolve(root, ".opencode/prompts/doc-planner.md"), "utf8");
   const verifierPrompt = await readFile(resolve(root, ".opencode/prompts/doc-verifier.md"), "utf8");
-  const orchestratorPrompt = await readFile(resolve(root, ".opencode/prompts/doc-orchestrator.md"), "utf8");
   const entryPrompt = await readFile(resolve(root, ".opencode/agent/document-writer.md"), "utf8");
 
   for (const prompt of [
@@ -192,11 +189,11 @@ test("repo helper prompts require shell-resolved REPO_ROOT instead of literal gl
     mergerPrompt,
     plannerPrompt,
     verifierPrompt,
-    orchestratorPrompt,
     entryPrompt,
   ]) {
-    expect(prompt).toContain('REPO_ROOT="$(git rev-parse --show-toplevel');
-    expect(prompt).toContain('if [ -f "$REPO_ROOT/.opencode/skills/openwork-core/scripts/');
+    expect(prompt).toContain('if [ -f "./.opencode/runtime-support/document-state/');
+    expect(prompt).not.toContain("git rev-parse --show-toplevel");
+    expect(prompt).not.toContain("REPO_ROOT");
     expect(prompt).toContain("do not use `glob`");
   }
 });
@@ -254,6 +251,19 @@ test("doc-writer keeps proposal-style deliverables readable and flags mirrored a
   expect(verifierPrompt).toContain("manual audit is additive");
   expect(verifierPrompt).toContain("never clear or downgrade a script-detected remaining risk");
   expect(verifierPrompt).toContain("do not rewrite the verification JSON/report into a greener verdict");
+});
+
+test("document-writer prompts treat proposal-style rules as conditional task-shaping, not the universal default", async () => {
+  const writerPrompt = await readFile(resolve(root, ".opencode/prompts/doc-writer.md"), "utf8");
+  const verifierPrompt = await readFile(resolve(root, ".opencode/prompts/doc-verifier.md"), "utf8");
+  const entryPrompt = await readFile(resolve(root, ".opencode/agent/document-writer.md"), "utf8");
+
+  expect(writerPrompt).toContain("Do not assume every document task is a proposal, bid, or申报材料 by default");
+  expect(writerPrompt).toContain("Only apply the stricter proposal-style register and section-shaping rules when the user task or current plan clearly requires that form");
+  expect(verifierPrompt).toContain("Do not assume every deliverable is a proposal-style technical material");
+  expect(entryPrompt).toContain("keep the loop aligned to that shape instead of forcing proposal/bid/申报 conventions into every subagent task");
+  expect(entryPrompt).toContain("do small supervisory reads of state files, verifier reports, or narrow deliverable excerpts when artifact existence, heading alignment, or phase health is unclear");
+  expect(entryPrompt).toContain("do not use `outputs/**` or the target deliverable as the default reading surface in the main session");
 });
 
 test("common-work keeps hosted document temp artifacts workspace-local and treats external temp paths as shell-only", async () => {
@@ -625,11 +635,11 @@ test("merger and planner filter out goal-irrelevant commercial or operations noi
 
 test("document-writer entry agent has orchestrator task and doc_state permissions", async () => {
   const agentPrompt = await readFile(resolve(root, ".opencode/agent/document-writer.md"), "utf8");
-  const orchestratorPrompt = await readFile(resolve(root, ".opencode/prompts/doc-orchestrator.md"), "utf8");
 
   for (const configName of ["opencode.json", "opencode.jsonc"]) {
     const config = JSON.parse(await readFile(resolve(root, configName), "utf8"));
     const writer = config.agent?.["document-writer"] ?? {};
+    const orchestrator = config.agent?.["doc-orchestrator"];
 
     expect(writer?.tools?.task).toBe(true);
     expect(writer?.tools?.["doc_state_*"]).toBe(true);
@@ -639,14 +649,13 @@ test("document-writer entry agent has orchestrator task and doc_state permission
     expect(writer?.permission?.bash).toBe("deny");
     expect(writer?.permission?.read?.[".worktree/index.json"]).toBe("allow");
     expect(writer?.permission?.glob?.["**/*.{docx,doc,pdf,md}"]).toBe("allow");
+    expect(orchestrator).toBeUndefined();
   }
 
   expect(agentPrompt).toContain("If `.worktree/index.json` or `.worktree/sources/manifest.json` is missing, call `doc-intake`");
   expect(agentPrompt).toContain("do a targeted existence check with `glob` or `list`");
   expect(agentPrompt).toContain("do not maintain a todo list in the main session");
   expect(agentPrompt).toContain("do not read or glob the raw workspace before `doc-intake` creates the initial state");
-  expect(orchestratorPrompt).toContain("first do a targeted existence check for `.worktree/index.json` and `.worktree/sources/manifest.json`");
-  expect(orchestratorPrompt).toContain("do not maintain a todo list in the main session");
 });
 
 test("doc-verifier can execute the verification script directly", async () => {

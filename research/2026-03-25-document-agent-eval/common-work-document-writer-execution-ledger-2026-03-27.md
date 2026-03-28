@@ -62,19 +62,21 @@ Exit criteria:
 ## Current Status
 
 Active stage:
-- Stage 3
+- Stage 4
 
 Stage transition note:
 - Stage 2 evidence remains recorded below and is strong enough for the current benchmark set
 - the user explicitly allowed entering Stage 3 early if the isolation change was low-risk
-- Stage 3 is therefore now active as a narrow shared-runtime audit, not as a broad `document-writer` prompt rewrite
+- Stage 3 was completed first as a narrow shared-runtime audit
+- the user then explicitly allowed entering Task 4 with a low-risk first pass and local review before any commit/push
 
 Stage 1 status:
 - completed on the current pod build after fresh live verification
 
 Immediate blocker:
 - no active Stage 1 blocker remains on the current pod build
-- Stage 3 now needs to finish the shared-path guardrails before any `document-writer` generalization starts
+- no Stage 3 blocker remains on the deployed build
+- the current blocker is only review/iteration risk inside Task 4 prompt generalization before anything is committed or deployed
 
 ## 2026-03-28 Status Checkpoint
 
@@ -515,7 +517,7 @@ Reason:
 ### Task 3: isolate `document-writer` from `common-work`
 
 Status:
-- in progress
+- completed and deployed
 
 What was found in the audit:
 - the highest-risk shared path is not the agent markdown files themselves
@@ -566,8 +568,8 @@ Verification and deployment:
       - `0 fail`
 
 Decision:
-- keep Task 3 focused on shared-path isolation only
-- do not start Stage 4 prompt/generalization work until this runtime-level guardrail is merged, deployed, and verified
+- Task 3 was intentionally kept focused on shared-path isolation only
+- only after this guardrail was merged, deployed, and pod-verified did work proceed to Stage 4
 
 Reason:
 - the user explicitly approved entering Task 3 if the risk stayed low
@@ -576,17 +578,15 @@ Reason:
 ### Task 4: generalize `document-writer`
 
 Status:
-- not started
+- in progress locally, not yet committed or deployed
 
 Decision:
-- do not begin removing Qin-specific heuristics or reshaping `document-writer` yet
+- start with a review-friendly first pass that removes obvious Qin-shaped defaults without widening scope into new workflow features
+- keep the first pass local until the user reviews the prompt boundary changes
 
 Reason:
-- user-mandated order requires:
-  - Task 1 baseline closed first
-  - then Task 2 A/B proof
-  - then Task 3 shared-path audit
-  - only then Task 4 generalization
+- user-mandated order has now been satisfied through Task 3
+- the remaining risk is no longer runtime leakage into `common-work`; it is over-correcting the `document-writer` main-agent boundary or leaving Qin-only prompt assumptions in place
 
 ### Current checkpoint conclusion
 
@@ -596,18 +596,157 @@ Reason:
   - route-level parity is already strong on WJW and often strong on Qin
   - final-output quality is still the blocking gap
 - Task 3:
-  - not started
+  - completed, deployed, and pod-verified
 - Task 4:
-  - not started
+  - first-pass local cleanup is underway and awaiting review before commit/push
 
 Primary open problem right now:
-- `common-work` still does not execute the final output sweep reliably enough, so fabricated hosts/emails/tokens can survive into generated `.docx` output even when the route itself is otherwise clean
+- `document-writer` still carries some Qin-shaped prompt framing and an over-tight main-agent boundary that risks making the orchestrator too passive
 
 Immediate next move after this checkpoint:
-- finish the uncommitted `document-mode-bridge.js` front-loaded guardrail block
-- redeploy it to pod
-- rerun Qin again
-- if fabricated placeholders still survive after that, stop treating this as a prompt-only problem and add a harder runtime-side quality gate
+- finish the local Stage 4 first pass
+- review the prompt boundary changes
+- only then decide whether to commit/push and start live writer-specific validation
+
+### 2026-03-28: Stage 4 first pass repositions `document-writer` as a supervisory orchestrator instead of a blind dispatcher
+
+Status:
+- local-only
+- not committed
+- not pushed
+- not deployed to pod
+
+What triggered this pass:
+- after the first Stage 4 cleanup, the user flagged two valid design concerns:
+  - the top-level “do not treat proposal/bid/申报 as the default” wording in `document-writer.md` felt too heavy and too early in the document
+  - making the main `document-writer` session purely orchestration-only, with no small supervisory reads at all, risked turning it into a blind dispatcher that could only trust subagent receipts
+
+What was changed locally:
+- `document-writer.md`
+  - removed the top-level `Core objective` bullets that framed proposal/bid/申报 style as the first thing to negate
+  - kept the more concrete mid-document rule:
+    - if the task is a neutral summary/report/comparison/etc, do not force proposal/bid/申报 conventions into every subagent task
+  - preserved and clarified the supervisory-read boundary:
+    - the main session may do small supervisory reads of state files, verifier reports, or narrow deliverable excerpts when artifact existence, heading alignment, or phase health is unclear
+- `packages/app/scripts/doc-subagent-prompts.test.mjs`
+  - updated expectations so the regression suite now locks the new design:
+    - style-shaping remains conditional and task-driven
+    - the main agent retains explicit supervisory-read permission
+    - the main controller no longer depends on the old top-level anti-default wording
+
+Verification:
+- `bun test packages/app/scripts/doc-subagent-prompts.test.mjs`
+  - `40 pass`
+  - `0 fail`
+- `git diff --check -- .opencode/agent/document-writer.md packages/app/scripts/doc-subagent-prompts.test.mjs`
+  - clean
+
+Decision:
+- keep this as a review checkpoint, not a deployment checkpoint
+- do not commit/push until the user reviews the new boundary wording
+
+Reason:
+- this change is architectural rather than bug-fix-only
+- the user explicitly asked to inspect the prompt changes before they are committed
+- the new boundary is a deliberate compromise:
+  - orchestrator-first
+  - not orchestrator-only
+  - no raw-corpus drafting in the main session
+  - but no blind trust in subagent receipts either
+
+### 2026-03-28: Stage 4 single-controller cleanup removes `doc-orchestrator` as an active main agent
+
+Status:
+- local-only
+- implemented
+- not committed
+- not pushed
+- not deployed to pod
+
+What was changed locally:
+- `opencode.json`
+  - removed the active `doc-orchestrator` agent registration
+  - kept `document-writer` as the only active main controller for the writer flow
+- `opencode.jsonc`
+  - removed the same active `doc-orchestrator` registration
+- `document-writer.md`
+  - removed the “Treat this agent as the live `doc-orchestrator` runtime” wording
+  - replaced it with a direct single-controller statement:
+    - `You are the only active main controller for this workflow`
+- `.opencode/prompts/doc-orchestrator.md`
+  - removed from the repo so it cannot drift as a second live controller prompt
+- `packages/app/scripts/doc-subagent-simulate.mjs`
+  - updated internal simulation runs to call `document-writer` directly
+- `packages/app/scripts/doc-agent-live-compare.mjs`
+  - renamed the writer lane label away from `cmp-doc-orchestrator`
+- `packages/app/scripts/doc-subagent-prompts.test.mjs`
+  - moved prior controller-level assertions onto `document-writer.md`
+  - added a config assertion that `config.agent?.["doc-orchestrator"]` is now absent
+- `docs/plans/2026-03-28-document-writer-single-controller-design.md`
+  - added a short design note explaining why the repo is collapsing to one active writer controller
+
+Verification:
+- `bun test packages/app/scripts/doc-subagent-prompts.test.mjs packages/app/scripts/plan-doc-state-script.test.mjs`
+  - `42 pass`
+  - `0 fail`
+- `node --check packages/app/scripts/doc-subagent-simulate.mjs`
+- `node --check packages/app/scripts/doc-agent-live-compare.mjs`
+- `git diff --check -- opencode.json opencode.jsonc .opencode/agent/document-writer.md packages/app/scripts/doc-subagent-prompts.test.mjs packages/app/scripts/doc-subagent-simulate.mjs packages/app/scripts/doc-agent-live-compare.mjs docs/plans/2026-03-28-document-writer-single-controller-design.md`
+  - clean
+
+Decision:
+- keep the writer architecture on a single active controller
+- do not restore `doc-orchestrator` as a separately registered main agent unless there is a concrete runtime composition mechanism that justifies it
+
+Reason:
+- OpenCode is not auto-composing `document-writer.md` and `doc-orchestrator.md`
+- keeping both as active primaries creates policy drift, duplicated tests, and a real risk that `document-writer` becomes weaker than `common-work`
+- the intended architecture is now simpler and matches the original goal better:
+  - one main controller
+  - many narrow `doc-*` subagents
+  - skills and MCP as capability layers, not as architecture glue
+
+### 2026-03-28: runtime-local helper resolution replaced repo-root fallback across the writer flow
+
+Status:
+- local-only
+- implemented
+- verified
+- not committed
+- not pushed
+
+What changed locally:
+- removed `git rev-parse --show-toplevel` / `REPO_ROOT` fallback from:
+  - `document-writer.md`
+  - `doc-reader.md`
+  - `doc-merger.md`
+  - `doc-planner.md`
+  - `doc-verifier.md`
+- all writer-flow prompts now assume the session runtime already mirrors:
+  - `./.opencode/skills/openwork-core/scripts/<script-name>`
+- if that runtime-local script path is missing, the subagent must return a blocker instead of trying to climb back to a repo root
+
+Why this changed:
+- in the hosted product model, uploaded documents live inside an isolated session runtime rather than a developer repo working tree
+- although the runtime currently gets a `.git` boundary marker, that does not make repo-root fallback the right contract for document sessions
+- keeping the fallback encouraged a more repo-centric mental model than the actual hosted document model
+
+Verification:
+- `bun test packages/app/scripts/doc-subagent-prompts.test.mjs packages/app/scripts/plan-doc-state-script.test.mjs`
+  - `42 pass`
+  - `0 fail`
+- `git diff --check -- .opencode/agent/document-writer.md .opencode/prompts/doc-reader.md .opencode/prompts/doc-merger.md .opencode/prompts/doc-planner.md .opencode/prompts/doc-verifier.md packages/app/scripts/doc-subagent-prompts.test.mjs`
+  - clean
+
+Decision:
+- keep writer-flow helper resolution runtime-local by default
+- do not reintroduce repo-root helper fallback unless the hosted document architecture changes materially
+
+Reason:
+- the cleaner contract is:
+  - session runtime is self-contained
+  - runtime-local helper path is authoritative
+  - missing helper path is a blocker, not a reason to escape to a repo root
 
 ## Latest Findings
 
@@ -1981,15 +2120,16 @@ Interpretation:
 
 ## Next Actions
 
-1. Finish Stage 3 deployment for the new plugin-isolation guardrail:
-   - commit
-   - push to `origin` and `gitee`
+1. Get user review on the Stage 4 first-pass prompt boundary changes:
+   - `document-writer.md`
+   - the updated prompt regression expectations
+2. If approved, commit and push the Stage 4 single-controller cleanup:
+   - `origin/dev`
+   - `gitee/dev`
    - pod `git pull --ff-only`
-   - restart/recover and verify the deployed server still provisions healthy runtimes
-2. Add one live/shared-path verification after deploy:
-   - confirm generic plugins still exist in both runtime profiles
-   - confirm a prefixed writer-only plugin would not leak into `common-work`
-3. Only after Stage 3 is live-green, start Stage 4 planning:
-   - inventory `document-writer` subagent prompts and scripts
-   - strip Qin-only heuristics
-   - keep all writer-only workflow upgrades isolated from `common-work`
+   - restart/recover if runtime prompt surfaces need a live revalidation
+3. After the first-pass cleanup is merged, continue inventorying:
+   - `document-writer` subagent prompts
+   - `document-writer` helper scripts
+   - remaining Qin-only heuristics
+4. Keep checking that any writer-only workflow enhancement still stays isolated from `common-work`

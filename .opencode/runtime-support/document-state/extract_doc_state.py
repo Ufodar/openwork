@@ -412,7 +412,7 @@ def main() -> int:
         "gaps": build_gaps(blocks, sections),
         "open_questions": build_open_questions(blocks, sections),
         "meta": {
-            "extractor": "openwork-core/extract_doc_state.py",
+            "extractor": "runtime-support/document-state/extract_doc_state.py",
             "blockCount": len(blocks),
             "sectionBriefCount": len(section_briefs),
         },

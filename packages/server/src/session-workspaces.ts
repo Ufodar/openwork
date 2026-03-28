@@ -1,6 +1,6 @@
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { homedir } from "node:os";
-import { cp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { cp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 
 import { readJsoncFile, writeJsoncFile } from "./jsonc.js";
 import { opencodeConfigPath } from "./workspace-files.js";
@@ -361,8 +361,28 @@ async function mirrorWorkspaceOpencodeSupportFiles(
       }
       continue;
     }
+    if (relativeDir === "plugins") {
+      const pluginEntries = await readdir(sourceDir);
+      const allowedPluginEntries = pluginEntries.filter((entry) => pluginEntryAllowedInRuntime(entry, runtimeProfile));
+      if (!allowedPluginEntries.length) continue;
+      await ensureDir(targetDir);
+      for (const entry of allowedPluginEntries) {
+        await cp(join(sourceDir, entry), join(targetDir, entry), { recursive: true, force: true });
+      }
+      continue;
+    }
     await cp(sourceDir, targetDir, { recursive: true, force: true });
   }
+}
+
+function pluginEntryAllowedInRuntime(entryName: string, runtimeProfile: RuntimeSessionProfile): boolean {
+  const normalizedEntryName = entryName.trim().toLowerCase();
+  if (!normalizedEntryName) return false;
+  if (normalizedEntryName.startsWith("document-writer-")) return runtimeProfile.id === "document-writer";
+  if (normalizedEntryName.startsWith("common-work-") || normalizedEntryName.startsWith("document-agent-")) {
+    return runtimeProfile.id !== "document-writer";
+  }
+  return true;
 }
 
 function normalizeInstructionEntries(value: unknown): string[] {

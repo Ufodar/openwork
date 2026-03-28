@@ -330,6 +330,42 @@ describe("provisionSessionWorkspace", () => {
     );
   });
 
+  test("mirrors generic plugins to every runtime but keeps profile-specific plugins isolated", async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), "openwork-session-workspace-plugin-isolation-"));
+    const pluginNames = [
+      "document-mode-bridge.js",
+      "document-writer-guard.js",
+      "common-work-guard.js",
+    ] as const;
+    for (const pluginName of pluginNames) {
+      await mkdir(join(workspacePath, ".opencode", "plugins"), { recursive: true });
+      await writeFile(join(workspacePath, ".opencode", "plugins", pluginName), `// ${pluginName}\n`, "utf8");
+    }
+
+    const commonRuntime = await provisionSessionWorkspace(workspacePath, {
+      preferredView: "document-agent",
+      preferredAgent: "common-work",
+      preferredAgentLock: "common-work",
+    });
+    const writerRuntime = await provisionSessionWorkspace(workspacePath, {
+      preferredView: "document-writer",
+      preferredAgent: "document-writer",
+      preferredAgentLock: "document-writer",
+    });
+
+    const commonPlugins = (await readdir(join(commonRuntime.runtimeDir, ".opencode", "plugins"))).sort();
+    const writerPlugins = (await readdir(join(writerRuntime.runtimeDir, ".opencode", "plugins"))).sort();
+
+    expect(commonPlugins).toEqual([
+      "common-work-guard.js",
+      "document-mode-bridge.js",
+    ]);
+    expect(writerPlugins).toEqual([
+      "document-mode-bridge.js",
+      "document-writer-guard.js",
+    ]);
+  });
+
   test("writes a runtime knowledge carrier config by preserving parent config and adding the MCP", async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), "openwork-session-workspace-overlay-"));
     const runtime = await provisionSessionWorkspace(workspacePath);

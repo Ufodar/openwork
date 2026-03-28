@@ -62,14 +62,19 @@ Exit criteria:
 ## Current Status
 
 Active stage:
-- Stage 2
+- Stage 3
+
+Stage transition note:
+- Stage 2 evidence remains recorded below and is strong enough for the current benchmark set
+- the user explicitly allowed entering Stage 3 early if the isolation change was low-risk
+- Stage 3 is therefore now active as a narrow shared-runtime audit, not as a broad `document-writer` prompt rewrite
 
 Stage 1 status:
 - completed on the current pod build after fresh live verification
 
 Immediate blocker:
 - no active Stage 1 blocker remains on the current pod build
-- Stage 2 now needs to prove `common-work` is actually stronger than local raw OpenCode, not just free of the hosted regressions
+- Stage 3 now needs to finish the shared-path guardrails before any `document-writer` generalization starts
 
 ## 2026-03-28 Status Checkpoint
 
@@ -510,13 +515,40 @@ Reason:
 ### Task 3: isolate `document-writer` from `common-work`
 
 Status:
-- not started by design
+- in progress
+
+What was found in the audit:
+- the highest-risk shared path is not the agent markdown files themselves
+- it is runtime provisioning inside:
+  - `packages/server/src/session-workspaces.ts`
+- current hosted runtime provisioning already prunes session-local `.opencode/skills` by profile, but still mirrored `.opencode/plugins` wholesale into every runtime
+- that means any future `document-writer`-specific auto-loaded plugin would silently land inside `common-work` runtimes too
+
+What was changed:
+- added profile-aware plugin mirroring in:
+  - `packages/server/src/session-workspaces.ts`
+- added a red/green regression proving the intended boundary in:
+  - `packages/server/src/session-workspaces.test.ts`
+- current rule:
+  - generic plugins still mirror to every runtime
+  - `document-writer-*` plugins only mirror to `document-writer` runtimes
+  - `common-work-*` and `document-agent-*` plugins do not mirror into `document-writer` runtimes
+
+Why this is the chosen Stage 3 entry move:
+- it is a runtime-level isolation barrier with very low blast radius
+- it does not change:
+  - existing `common-work` prompt behavior
+  - session view routing
+  - current `document-writer` prompt behavior
+- it directly prevents the most likely future leak once Stage 4 starts adding writer-only workflow helpers
 
 Decision:
-- keep Task 3 blocked until Task 2 proves that `common-work` is stronger than local raw OpenCode on final-result quality, not just on route cleanliness
+- keep Task 3 focused on shared-path isolation only
+- do not start Stage 4 prompt/generalization work until this runtime-level guardrail is merged, deployed, and verified
 
 Reason:
-- starting the shared-path audit too early risks mixing `document-writer`-specific decisions into a still-moving `common-work` baseline
+- the user explicitly approved entering Task 3 if the risk stayed low
+- plugin mirroring is the cleanest low-risk boundary to lock before any writer-specific enhancements exist
 
 ### Task 4: generalize `document-writer`
 
@@ -1910,6 +1942,7 @@ Interpretation:
 - `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/.opencode/agent/common-work.md`
 - `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/.opencode/plugins/document-mode-bridge.js`
 - `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/.opencode/plugins/document-mode-bridge.test.mjs`
+- `/Users/storm/Documents/code/studyProject/opencode-docx/openwork/research/2026-03-25-document-agent-eval/common-work-document-writer-execution-ledger-2026-03-27.md`
 
 ## Current Working Rules
 
@@ -1925,16 +1958,15 @@ Interpretation:
 
 ## Next Actions
 
-1. Move Stage 2 on to the formal long-document benchmark set under `/Users/storm/Pictures/开发参考文件/标书agent开发相关文件/`, now that the main hosted baseline issues are live-green on WJW and Qin.
-2. Focus Stage 2 on:
-   - early search churn after local document grounding
-   - repeated failure patterns
-   - final-result quality and completion quality
-   - whether hosted `common-work` stays stronger than local raw OpenCode on much larger formal bid/technical files, not just the medium-size WJW / Qin scenarios
-3. For Stage 2 long-document work, use the formal benchmark docs under:
-   - `/Users/storm/Pictures/开发参考文件/标书agent开发相关文件/`
-4. Keep the hosted baseline checks in the loop while doing Stage 2:
-   - runtime `.opencode/skills` remains physically pruned
-   - runtime MCP surface stays trimmed
-   - history re-entry remains correct
-5. Do not begin Stage 3 / `document-writer` work until `common-work` is demonstrably at least as strong as local raw OpenCode on the chosen document benchmarks.
+1. Finish Stage 3 deployment for the new plugin-isolation guardrail:
+   - commit
+   - push to `origin` and `gitee`
+   - pod `git pull --ff-only`
+   - restart/recover and verify the deployed server still provisions healthy runtimes
+2. Add one live/shared-path verification after deploy:
+   - confirm generic plugins still exist in both runtime profiles
+   - confirm a prefixed writer-only plugin would not leak into `common-work`
+3. Only after Stage 3 is live-green, start Stage 4 planning:
+   - inventory `document-writer` subagent prompts and scripts
+   - strip Qin-only heuristics
+   - keep all writer-only workflow upgrades isolated from `common-work`

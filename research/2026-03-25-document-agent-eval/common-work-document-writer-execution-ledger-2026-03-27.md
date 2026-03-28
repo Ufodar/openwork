@@ -2981,3 +2981,32 @@ Interpretation:
 - the next decision point is operational:
   - either commit/push this local pass and validate on pod
   - or do one more local audit if another sample-shaped default is still visible in writer/runtime-support
+
+### 2026-03-28: the next `document-writer` generalization pass is committed and pushed, but pod repo deployment is still blocked by SSH
+
+What was completed:
+- committed local Stage 4 generalization work as:
+  - `7c91433e` (`Generalize document-writer runtime support`)
+- pushed successfully to:
+  - `origin/dev`
+  - `gitee/dev`
+
+Current operational blocker:
+- pod repo deployment is still not available over SSH:
+  - `ssh -o BatchMode=yes -o ConnectTimeout=8 root@192.168.5.10 ...`
+  - result:
+    - `Connection closed by 192.168.5.10 port 22`
+
+Interpretation:
+- the current blocker is not local code quality:
+  - local tests are green
+  - remotes are updated
+- the blocker is specifically the pod repo deployment path for non-Markdown assets such as:
+  - `.opencode/runtime-support/document-state/*.py`
+- unlike prompt-only Markdown fixes, this batch cannot be fully hotpatched through the hosted workspace Markdown API
+
+Next step:
+- once pod SSH or another repo-sync path is restored:
+  - pull `7c91433e`
+  - restart/recover the pod runtime
+  - run the next hosted `common-work` vs `document-writer` formal benchmark on the updated build

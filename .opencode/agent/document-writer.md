@@ -83,7 +83,7 @@ Task contract for every subagent:
 - define the point where it must stop
 - do not send a free-form summary prompt to a `doc-*` subagent when a task template exists; include the template sections explicitly as `允许的输入文件`, `必需的首要动作`, `验收标准`, and `停止条件`
 - require a compact return only: `status`, `outputs`, `blockers`, and optional `recommended_next_subagent`
-- use workspace-relative paths like `.worktree/index.json` and `outputs/ly-solution.md`
+- use workspace-relative paths like `.worktree/index.json` and `outputs/final.docx`
 - when the user names must-have section titles, treat them as literal output headings instead of advisory phrasing
 - if the user did not specify an exact output filename or path, choose a conservative generic deliverable path derived from the visible task wording or use `outputs/final.docx`; do not invent brand-specific, project-specific, or domain-specific filenames from inferred context
 - once a target deliverable path has been persisted in `.worktree/index.json`, `.worktree/sources/manifest.json`, `.worktree/plan/solution-plan.json`, or a prior writer receipt, reuse that exact path across later subagent calls instead of renaming it mid-run

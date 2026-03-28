@@ -5,8 +5,8 @@ import { join } from "node:path";
 
 const scriptPath = "./.opencode/runtime-support/document-state/merge_doc_state.py";
 
-test("merge_doc_state.py drops payment and UML noise for system-material goals", async () => {
-  const workspace = await mkdtemp(join(tmpdir(), "doc-merge-qin-"));
+test("merge_doc_state.py drops payment and UML noise for explicit multi-system solution goals", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "doc-merge-multi-system-"));
 
   try {
     await mkdir(join(workspace, ".worktree", "sources"), { recursive: true });
@@ -14,15 +14,15 @@ test("merge_doc_state.py drops payment and UML noise for system-material goals",
     await writeFile(
       join(workspace, ".worktree", "index.json"),
       JSON.stringify({
-        summary: "请基于两篇资料撰写项目申报技术材料。",
+        summary: "请基于两篇资料撰写多系统建设方案。",
       }, null, 2),
       "utf8",
     );
     await writeFile(
       join(workspace, ".worktree", "sources", "manifest.json"),
       JSON.stringify({
-        goal: "请你结合参考两篇文档以及查找网络中的一些资料，帮我写一份项目申报所需要的技术材料，围绕算力资源汇聚系统、算力选择与调度系统、算力运行安全监测系统三部分展开，并给出 API 调用示例。",
-        target_doc: "outputs/项目申报技术材料.docx",
+        goal: "请基于当前资料形成建设方案，围绕统一资源接入系统、智能调度协同系统、运行监测与审计系统展开，并给出 API 调用示例。",
+        target_doc: "outputs/多系统建设方案.docx",
         sources: [
           { docId: "src-001", title: "融合算力云平台白皮书", role: "产品白皮书", relativePath: "融合算力云平台白皮书.docx" },
           { docId: "src-002", title: "天河监控运维一体化平台软件介绍v0.3", role: "产品介绍", relativePath: "天河监控运维一体化平台软件介绍v0.3.docx" },
@@ -130,8 +130,8 @@ test("merge_doc_state.py drops payment and UML noise for system-material goals",
       scriptPath,
       "--workspace", workspace,
       "--goal",
-      "请你结合参考两篇文档以及查找网络中的一些资料，帮我写一份项目申报所需要的技术材料，围绕算力资源汇聚系统、算力选择与调度系统、算力运行安全监测系统三部分展开，并给出 API 调用示例。",
-      "--target-doc", "outputs/项目申报技术材料.docx",
+      "请基于当前资料形成建设方案，围绕统一资源接入系统、智能调度协同系统、运行监测与审计系统展开，并给出 API 调用示例。",
+      "--target-doc", "outputs/多系统建设方案.docx",
     ], {
       cwd: "/Users/storm/Documents/code/studyProject/opencode-docx/openwork",
       stdout: "pipe",

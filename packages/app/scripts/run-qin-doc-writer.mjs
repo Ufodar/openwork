@@ -3,7 +3,11 @@ import { basename, dirname, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
 
-import { createHostedOpenworkClient } from "./_util.mjs";
+import {
+  createHostedOpenworkClient,
+  createHostedOpenworkSession,
+  fetchHostedSessionRecord,
+} from "./_util.mjs";
 
 import { joinVisibleAssistantText } from "./_assistant-text.mjs";
 
@@ -158,16 +162,6 @@ async function login() {
   });
 }
 
-async function createSession({ token, workspaceId, title }) {
-  return requestJson(`${OPENWORK_BASE}/w/${encodeURIComponent(workspaceId)}/opencode/session`, token, {
-    method: "POST",
-    body: JSON.stringify({
-      title,
-      openworkEnableDocState: true,
-    }),
-  });
-}
-
 async function uploadDocument({ token, workspaceId, sessionId, localPath }) {
   const form = new FormData();
   form.append("file", Bun.file(localPath));
@@ -301,9 +295,25 @@ async function main() {
   const workspaceId = auth.workspace.id;
   const client = createHostedOpenworkClient({ baseUrl: OPENWORK_BASE, workspaceId, token });
 
-  const created = await createSession({ token, workspaceId, title: `qin-doc-writer-fresh-${Date.now()}` });
+  const created = await createHostedOpenworkSession({
+    baseUrl: OPENWORK_BASE,
+    token,
+    workspaceId,
+    title: `qin-doc-writer-fresh-${Date.now()}`,
+    enableDocumentState: true,
+    preferredView: "document-writer",
+    preferredAgent: "document-writer",
+    preferredAgentLock: "document-writer",
+  });
   const sessionId = created.id;
+  const sessionProfile = await fetchHostedSessionRecord({
+    baseUrl: OPENWORK_BASE,
+    token,
+    workspaceId,
+    sessionId,
+  });
   console.error(`[qin-doc-writer] session=${sessionId}`);
+  console.error(`[qin-doc-writer] profile=${JSON.stringify(sessionProfile)}`);
 
   const uploaded = [];
   for (const path of DOCS) {
@@ -374,6 +384,7 @@ async function main() {
   const payload = {
     generatedAt: new Date().toISOString(),
     sessionId,
+    sessionProfile,
     uploaded,
     promptRuns,
     finalDocs: finalDocs.items || [],

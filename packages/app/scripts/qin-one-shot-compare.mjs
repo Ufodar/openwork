@@ -3,7 +3,11 @@ import { basename, resolve } from "node:path";
 import { dirname } from "node:path";
 import { performance } from "node:perf_hooks";
 
-import { createHostedOpenworkClient } from "./_util.mjs";
+import {
+  createHostedOpenworkClient,
+  createHostedOpenworkSession,
+  fetchHostedSessionRecord,
+} from "./_util.mjs";
 
 import { joinVisibleAssistantText } from "./_assistant-text.mjs";
 
@@ -159,16 +163,6 @@ async function login() {
   });
 }
 
-async function createSession({ token, workspaceId, title, enableDocumentState }) {
-  return requestJson(`${OPENWORK_BASE}/w/${encodeURIComponent(workspaceId)}/opencode/session`, token, {
-    method: "POST",
-    body: JSON.stringify({
-      title,
-      openworkEnableDocState: enableDocumentState ? true : undefined,
-    }),
-  });
-}
-
 async function uploadDocument({ token, workspaceId, sessionId, localPath }) {
   const payload = await readFile(localPath);
   const form = new FormData();
@@ -287,14 +281,34 @@ function classifyGeneratedDocuments(items, uploadedNames) {
   return (items || []).filter((item) => !uploaded.has(item.name));
 }
 
-async function runVariant({ label, agent, enableDocumentState, client, token, workspaceId }) {
-  const created = await createSession({
+async function runVariant({
+  label,
+  agent,
+  enableDocumentState,
+  preferredView,
+  preferredAgent,
+  preferredAgentLock,
+  client,
+  token,
+  workspaceId,
+}) {
+  const created = await createHostedOpenworkSession({
+    baseUrl: OPENWORK_BASE,
     token,
     workspaceId,
     title: `${label}-${Date.now()}`,
     enableDocumentState,
+    preferredView,
+    preferredAgent,
+    preferredAgentLock,
   });
   const sessionId = created.id;
+  const sessionProfile = await fetchHostedSessionRecord({
+    baseUrl: OPENWORK_BASE,
+    token,
+    workspaceId,
+    sessionId,
+  });
   const uploaded = [];
   // Hosted runtimes need a short window to finish carrier/workspace setup
   // before large multipart uploads start, otherwise upload probes can stall
@@ -339,6 +353,7 @@ async function runVariant({ label, agent, enableDocumentState, client, token, wo
     agent,
     enableDocumentState,
     sessionId,
+    sessionProfile,
     uploaded,
     uploadElapsedMs,
     elapsedMs,
@@ -363,6 +378,9 @@ async function main() {
     label: "qin-common-work",
     agent: "common-work",
     enableDocumentState: false,
+    preferredView: "document-agent",
+    preferredAgent: "common-work",
+    preferredAgentLock: "common-work",
     client,
     token,
     workspaceId,
@@ -371,6 +389,9 @@ async function main() {
     label: "qin-document-writer",
     agent: "document-writer",
     enableDocumentState: true,
+    preferredView: "document-writer",
+    preferredAgent: "document-writer",
+    preferredAgentLock: "document-writer",
     client,
     token,
     workspaceId,

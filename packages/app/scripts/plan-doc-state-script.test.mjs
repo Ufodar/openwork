@@ -5,8 +5,8 @@ import { join } from "node:path";
 
 const scriptPath = "./.opencode/runtime-support/document-state/plan_doc_state.py";
 
-test("plan_doc_state.py generates system-material sections and filters noisy evidence for proposal-style goals", async () => {
-  const workspace = await mkdtemp(join(tmpdir(), "doc-plan-qin-"));
+test("plan_doc_state.py preserves explicit multi-system section names for non-sample proposal goals", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "doc-plan-multi-system-"));
 
   try {
     await mkdir(join(workspace, ".worktree", "sources"), { recursive: true });
@@ -116,8 +116,8 @@ test("plan_doc_state.py generates system-material sections and filters noisy evi
       scriptPath,
       "--workspace", workspace,
       "--goal",
-      "请你结合参考两篇文档以及查找网络中的一些资料，帮我写一份项目申报所需要的技术材料，围绕算力资源汇聚系统、算力选择与调度系统、算力运行安全监测系统三部分展开，并给出 API 调用示例。",
-      "--target-doc", "outputs/qin-technical-material.md",
+      "请基于当前资料起草一份建设方案，围绕统一资源接入系统、智能调度协同系统、运行监测与审计系统三部分展开，并给出 API 调用示例，同时补一节参考与依据。",
+      "--target-doc", "outputs/multi-system-solution.md",
     ], {
       cwd: "/Users/storm/Documents/code/studyProject/opencode-docx/openwork",
       stdout: "pipe",
@@ -133,18 +133,18 @@ test("plan_doc_state.py generates system-material sections and filters noisy evi
     const plan = JSON.parse(await readFile(join(workspace, ".worktree", "plan", "solution-plan.json"), "utf8"));
     const coverage = JSON.parse(await readFile(join(workspace, ".worktree", "coverage.json"), "utf8"));
 
-    expect(plan.goal).toContain("技术材料");
-    expect(plan.target_doc).toBe("outputs/qin-technical-material.md");
+    expect(plan.goal).toContain("建设方案");
+    expect(plan.target_doc).toBe("outputs/multi-system-solution.md");
     expect(plan.sections.map((item) => item.title)).toEqual([
-      "算力资源汇聚系统",
-      "算力选择与调度系统",
-      "算力运行安全监测系统",
+      "统一资源接入系统",
+      "智能调度协同系统",
+      "运行监测与审计系统",
       "参考与依据",
     ]);
     expect(coverage.targets.map((item) => item.title)).toEqual([
-      "算力资源汇聚系统",
-      "算力选择与调度系统",
-      "算力运行安全监测系统",
+      "统一资源接入系统",
+      "智能调度协同系统",
+      "运行监测与审计系统",
       "参考与依据",
     ]);
     expect(coverage.targets[0].required_subsections).toEqual([

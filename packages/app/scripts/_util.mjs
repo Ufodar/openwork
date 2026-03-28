@@ -6,6 +6,12 @@ import { realpathSync, statSync } from "node:fs";
 
 import { createOpencodeClient } from "@opencode-ai/sdk/v2/client";
 
+function normalizeOptionalString(value) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed || null;
+}
+
 export function makeClient({ baseUrl, directory }) {
   return createOpencodeClient({
     baseUrl,
@@ -26,6 +32,127 @@ export function buildHostedOpenworkClientOptions({ baseUrl, workspaceId, token }
 
 export function createHostedOpenworkClient(input) {
   return createOpencodeClient(buildHostedOpenworkClientOptions(input));
+}
+
+export function buildHostedSessionCreateBody({
+  title,
+  enableDocumentState = false,
+  preferredView,
+  preferredAgent,
+  preferredAgentLock,
+}) {
+  const body = { title };
+
+  if (enableDocumentState) {
+    body.openworkEnableDocState = true;
+  }
+
+  const normalizedPreferredView = normalizeOptionalString(preferredView);
+  if (normalizedPreferredView) {
+    body.openworkPreferredView = normalizedPreferredView;
+  }
+
+  const normalizedPreferredAgent = normalizeOptionalString(preferredAgent);
+  if (normalizedPreferredAgent) {
+    body.openworkPreferredAgent = normalizedPreferredAgent;
+  }
+
+  const normalizedPreferredAgentLock = normalizeOptionalString(preferredAgentLock);
+  if (normalizedPreferredAgentLock) {
+    body.openworkPreferredAgentLock = normalizedPreferredAgentLock;
+  }
+
+  return body;
+}
+
+function buildHostedOpenworkSessionUrl({ baseUrl, workspaceId }) {
+  return `${baseUrl.replace(/\/+$/, "")}/w/${encodeURIComponent(workspaceId)}/opencode/session`;
+}
+
+async function requestHostedOpenworkJson({
+  baseUrl,
+  workspaceId,
+  token,
+  method = "GET",
+  body,
+}) {
+  const headers = new Headers();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  if (body !== undefined) headers.set("Content-Type", "application/json");
+
+  const response = await fetch(buildHostedOpenworkSessionUrl({ baseUrl, workspaceId }), {
+    method,
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(text || `HTTP ${response.status}`);
+  }
+  return text ? JSON.parse(text) : null;
+}
+
+export async function createHostedOpenworkSession({
+  baseUrl,
+  workspaceId,
+  token,
+  title,
+  enableDocumentState = false,
+  preferredView,
+  preferredAgent,
+  preferredAgentLock,
+}) {
+  return requestHostedOpenworkJson({
+    baseUrl,
+    workspaceId,
+    token,
+    method: "POST",
+    body: buildHostedSessionCreateBody({
+      title,
+      enableDocumentState,
+      preferredView,
+      preferredAgent,
+      preferredAgentLock,
+    }),
+  });
+}
+
+export function findHostedSessionRecord(payload, sessionId) {
+  const items = Array.isArray(payload?.items)
+    ? payload.items
+    : Array.isArray(payload)
+      ? payload
+      : [];
+  return items.find((item) => item?.id === sessionId) ?? null;
+}
+
+export async function fetchHostedSessionRecord({
+  baseUrl,
+  workspaceId,
+  token,
+  sessionId,
+  timeoutMs = 15_000,
+  pollMs = 500,
+}) {
+  const startedAt = Date.now();
+  let lastPayload = null;
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const payload = await requestHostedOpenworkJson({
+      baseUrl,
+      workspaceId,
+      token,
+      method: "GET",
+    });
+    lastPayload = payload;
+    const record = findHostedSessionRecord(payload, sessionId);
+    if (record) return record;
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, pollMs));
+  }
+
+  throw new Error(
+    `Timed out waiting for hosted session record ${sessionId}; last payload keys=${Object.keys(lastPayload ?? {}).join(",")}`,
+  );
 }
 
 export async function findFreePort() {

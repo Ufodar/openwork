@@ -2,9 +2,14 @@ import { readFile, writeFile } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 
-import { createHostedOpenworkClient } from "./_util.mjs";
+import {
+  createHostedOpenworkClient,
+  createHostedOpenworkSession,
+  fetchHostedSessionRecord,
+} from "./_util.mjs";
 
 import { joinVisibleAssistantText } from "./_assistant-text.mjs";
+import { FORMAL_DOCUMENT_BENCHMARKS_BY_ID } from "./document-workflow-benchmarks.mjs";
 
 const OPENWORK_BASE = process.env.OPENWORK_BASE ?? "http://192.168.5.10:32765/openwork";
 const USERNAME = process.env.OPENWORK_USERNAME ?? "fuda";
@@ -15,7 +20,7 @@ const OUTPUT_PATH = resolve(
   process.env.OPENWORK_COMPARE_OUTPUT ?? "../../tmp/compare-agents/wjw-live-compare.json",
 );
 
-const scenarios = {
+const legacyScenarios = {
   qin: {
     id: "qin-live-compare",
     title: "秦老师申报材料-live",
@@ -57,6 +62,11 @@ const scenarios = {
       "继续推进，把完整的中文 Markdown 方案写到 outputs/ly-solution.md。正文至少必须包含以下四个 Markdown 标题：项目理解、点对点解决路径、证据来源与假设、风险与待确认事项。写完后自检，确保这些标题原样存在。",
     ],
   },
+};
+
+const scenarios = {
+  ...legacyScenarios,
+  ...FORMAL_DOCUMENT_BENCHMARKS_BY_ID,
 };
 
 function parseModel(value) {
@@ -279,16 +289,6 @@ async function login() {
   });
 }
 
-async function createSession({ token, workspaceId, title, enableDocumentState }) {
-  return requestJson(`${OPENWORK_BASE}/w/${encodeURIComponent(workspaceId)}/opencode/session`, token, {
-    method: "POST",
-    body: JSON.stringify({
-      title,
-      openworkEnableDocState: enableDocumentState ? true : undefined,
-    }),
-  });
-}
-
 async function uploadDocument({ token, workspaceId, sessionId, localPath }) {
   const payload = await readFile(localPath);
   const form = new FormData();
@@ -446,22 +446,60 @@ async function waitForSessionSettled(
   }
 }
 
-async function runVariant({ scenario, label, agent, enableDocumentState, client, token, workspaceId }) {
+async function runVariant({
+  scenario,
+  label,
+  agent,
+  enableDocumentState,
+  preferredView,
+  preferredAgent,
+  preferredAgentLock,
+  client,
+  token,
+  workspaceId,
+}) {
   let sessionId = null;
   let created;
+  let sessionProfile = null;
   try {
-    created = await createSession({
+    created = await createHostedOpenworkSession({
+      baseUrl: OPENWORK_BASE,
       token,
       workspaceId,
       title: `${label}-${Date.now()}`,
       enableDocumentState,
+      preferredView,
+      preferredAgent,
+      preferredAgentLock,
     });
     sessionId = created.id;
+    sessionProfile = await fetchHostedSessionRecord({
+      baseUrl: OPENWORK_BASE,
+      token,
+      workspaceId,
+      sessionId,
+    });
+    if (
+      sessionProfile?.openworkPreferredView !== preferredView ||
+      sessionProfile?.openworkPreferredAgent !== preferredAgent ||
+      sessionProfile?.openworkPreferredAgentLock !== preferredAgentLock
+    ) {
+      throw new Error(
+        `profile mismatch view=${sessionProfile?.openworkPreferredView} agent=${sessionProfile?.openworkPreferredAgent} lock=${sessionProfile?.openworkPreferredAgentLock}`,
+      );
+    }
   } catch (cause) {
     throw buildStepError({
       label,
       step: "createSession",
-      details: { agent, enableDocumentState, workspaceId },
+      details: {
+        agent,
+        enableDocumentState,
+        workspaceId,
+        preferredView,
+        preferredAgent,
+        preferredAgentLock,
+      },
       cause,
     });
   }
@@ -594,6 +632,7 @@ async function runVariant({ scenario, label, agent, enableDocumentState, client,
     agent,
     enableDocumentState,
     sessionId,
+    sessionProfile,
     uploaded,
     uploadElapsedMs,
     finalDocuments: finalDocuments.items || [],
@@ -638,6 +677,9 @@ async function main() {
       label: "cmp-common-work",
       agent: "common-work",
       enableDocumentState: false,
+      preferredView: "document-agent",
+      preferredAgent: "common-work",
+      preferredAgentLock: "common-work",
       client,
       token,
       workspaceId,
@@ -647,6 +689,9 @@ async function main() {
       label: "cmp-document-writer",
       agent: "document-writer",
       enableDocumentState: true,
+      preferredView: "document-writer",
+      preferredAgent: "document-writer",
+      preferredAgentLock: "document-writer",
       client,
       token,
       workspaceId,

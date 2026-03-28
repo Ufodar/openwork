@@ -2133,3 +2133,136 @@ Interpretation:
    - `document-writer` helper scripts
    - remaining Qin-only heuristics
 4. Keep checking that any writer-only workflow enhancement still stays isolated from `common-work`
+
+## Current Status (Updated 2026-03-28)
+
+- Task 1: complete
+- Task 2: complete enough to proceed; hosted `common-work` has a stable parity baseline and is no longer the main blocker
+- Task 3: complete; runtime plugin isolation for `document-writer` vs `common-work` is already in place
+- Task 4: in progress; this stage is now focused on:
+  - making `document-writer` profile-sensitive harnesses create the right hosted runtime every time
+  - removing Qin-specific planning and writing shortcuts from the writer workflow
+  - building a new formal benchmark set that is not anchored on the Qin sample
+
+### 2026-03-28: Stage 4 harnesses now create real hosted writer/common-work runtimes instead of relying on the SDK helper
+
+Problem:
+- several local and hosted `document-writer` probes were still creating sessions through `client.session.create()`
+- that helper only forwarded the typed session payload and silently dropped:
+  - `openworkPreferredView`
+  - `openworkPreferredAgent`
+  - `openworkPreferredAgentLock`
+- this created a false-positive validation path where a script looked like it was testing `document-writer`, but the runtime that actually got created was the default one
+
+Decision:
+- treat any profile-sensitive harness as invalid unless it uses the raw hosted `POST /w/<workspaceId>/opencode/session` route
+- keep `client.session.create()` only for generic sessions where runtime profile does not matter
+
+Implementation:
+- added shared helper functions to `packages/app/scripts/_util.mjs`:
+  - `buildHostedSessionCreateBody(...)`
+  - `createHostedOpenworkSession(...)`
+  - `findHostedSessionRecord(...)`
+  - `fetchHostedSessionRecord(...)`
+- updated the following harnesses to use explicit hosted profile hints plus post-create runtime verification:
+  - `packages/app/scripts/doc-agent-live-compare.mjs`
+  - `packages/app/scripts/doc-subagent-simulate.mjs`
+  - `packages/app/scripts/qin-one-shot-compare.mjs`
+  - `packages/app/scripts/run-qin-doc-writer.mjs`
+  - `packages/app/scripts/qin-common-work-debug.mjs`
+- added dedicated regression coverage:
+  - `packages/app/scripts/_util.test.mjs`
+  - `packages/app/scripts/profile-sensitive-harnesses.test.mjs`
+
+Reason:
+- without this change, later A/B conclusions about `document-writer` vs `common-work` could not be trusted
+- the testing surface had to be fixed before more prompt work or benchmark work could be considered meaningful
+
+### 2026-03-28: document-writer planning logic was generalized away from Qin-specific named systems
+
+Problem:
+- earlier iterations had overfit to the Qin sample and encoded an implicit three-system proposal path in the writer planning layer
+- this made the workflow look stronger on the Qin corpus while risking degraded behavior on unrelated long-form technical documents
+
+Decision:
+- keep the useful workflow behavior, but only trigger named multi-system planning when the user goal explicitly names multiple systems
+- stop inferring a Qin-style skeleton from topic hints alone
+
+Implementation:
+- generalized runtime-support planning helpers:
+  - `packages/app/scripts/plan-doc-state-script.test.mjs`
+  - `packages/app/scripts/merge-doc-state-script.test.mjs`
+  - `.opencode/runtime-support/document-state/plan_doc_state.py`
+  - `.opencode/runtime-support/document-state/merge_doc_state.py`
+- tightened prompt wording to remove Qin-shaped defaults:
+  - `.opencode/prompts/doc-planner.md`
+  - `.opencode/agent/document-writer.md`
+  - `.opencode/prompts/doc-writer.md`
+  - `packages/app/scripts/doc-subagent-prompts.test.mjs`
+
+New behavior:
+- if the task explicitly names multiple systems, preserve those named systems
+- if the task does not explicitly ask for that structure, do not synthesize a named multi-system proposal skeleton
+- writer examples now use generic outputs and generic section labels rather than Qin-only naming
+
+Reason:
+- the product goal for `document-writer` is a reusable long-document workflow controller, not a Qin-sample optimizer
+
+### 2026-03-28: a new formal benchmark set was added from a non-Qin document corpus
+
+Decision:
+- stop treating the Qin sample as the only serious benchmark surface
+- add a reusable benchmark catalog built from the formal document corpus under:
+  - `/Users/storm/Pictures/开发参考文件/标书agent开发相关文件`
+
+Implementation:
+- added `packages/app/scripts/document-workflow-benchmarks.mjs`
+- added `packages/app/scripts/document-workflow-benchmarks.test.mjs`
+- benchmark categories now include:
+  - `single-long-rewrite`
+  - `multi-doc-synthesis`
+  - `plan-first-redraft`
+
+Current benchmark entries:
+- `formal-single-long-tech-rewrite`
+- `formal-wjw-multi-doc`
+- `formal-ly-plan-first`
+
+Scoring axes are fixed across all formal benchmarks:
+- `tool-path-stability`
+- `error-free-routing`
+- `state-first-execution`
+- `deliverable-quality`
+
+Reason:
+- the Stage 4 goal is to prove `document-writer` is a general workflow upgrade over `common-work`
+- that proof needs a repeatable benchmark set that is not dominated by one previously optimized sample
+
+### 2026-03-28: Local verification evidence
+
+Fresh local verification completed successfully:
+- `node --test packages/app/scripts/_util.test.mjs`
+- `bun test packages/app/scripts/profile-sensitive-harnesses.test.mjs`
+- `bun test packages/app/scripts/document-workflow-benchmarks.test.mjs`
+- `bun test packages/app/scripts/plan-doc-state-script.test.mjs`
+- `bun test packages/app/scripts/merge-doc-state-script.test.mjs`
+- `bun test packages/app/scripts/doc-subagent-prompts.test.mjs --test-name-pattern "sample-specific labels|conditional task-shaping"`
+- `bun test packages/app/scripts/profile-sensitive-harnesses.test.mjs packages/app/scripts/document-workflow-benchmarks.test.mjs packages/app/scripts/plan-doc-state-script.test.mjs packages/app/scripts/merge-doc-state-script.test.mjs packages/app/scripts/doc-subagent-prompts.test.mjs packages/app/scripts/qin-compare-harness.test.mjs`
+- `python3 -m py_compile .opencode/runtime-support/document-state/plan_doc_state.py .opencode/runtime-support/document-state/merge_doc_state.py`
+- `git diff --check -- ...`
+
+Observed result:
+- `49 pass`
+- `0 fail`
+
+### 2026-03-28: Current blocker and next step
+
+There is no new product blocker in local code at this point.
+
+The remaining work on this stage is operational:
+- commit the current Stage 4 changes
+- push to GitHub and Gitee
+- pull on pod and force a rebuild/restart if needed
+- run at least one hosted formal `common-work` vs `document-writer` benchmark using the new profile-sensitive session creation path
+
+That hosted benchmark run is the next decision gate for determining whether `document-writer` is now materially stronger than `common-work` on the new formal corpus.

@@ -32,7 +32,7 @@ Writing discipline:
 - for long prose-heavy technical materials, prefer a Markdown staging draft plus `pandoc <draft>.md -o <target>.docx` over hand-writing a giant JS `docx-js` generator; only fall back to custom generator code when the layout truly requires it
 - if the task names required section titles, those titles are a literal heading contract; use the exact strings as Markdown headings instead of paraphrasing, merging, or silently substituting plan titles
 - for Markdown-to-`.docx` proposal deliverables, keep headings semantic and unprefixed: do not manually type chapter/section numbering markers such as `第一章`, `1.1`, `1.1.1`, or `一、` into heading text when the heading hierarchy already carries structure
-- before the final render, strip any leading chapter/section numbering markers from heading text in the Markdown staging draft; for example, rewrite `# 一、算力资源汇聚系统` to `# 算力资源汇聚系统` and `## 1.1 功能定位` to `## 功能定位`
+- before the final render, strip any leading chapter/section numbering markers from heading text in the Markdown staging draft; for example, rewrite `# 一、资源接入系统` to `# 资源接入系统` and `## 1.1 功能定位` to `## 功能定位`
 - if visible numbering is required, let the renderer, template, or real list/heading semantics provide it; do not stack manual numbering text on top of structural headings
 - when an existing draft uses different headings from the task contract, rename or split the affected sections so the required headings appear explicitly in the deliverable
 - draft from the plan and merged facts first

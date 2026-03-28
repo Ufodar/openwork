@@ -29,7 +29,7 @@ Default execution path:
 - first resolve `SCRIPT_PATH`, then run `python3 "$SCRIPT_PATH" --workspace . --plan-out .worktree/plan/solution-plan.json --coverage-out .worktree/coverage.json`
 - if the task explicitly provides a user objective or target document, pass them through with `--goal` and `--target-doc`
 - if the user named systems, exact output headings, mandatory subsections, or a specific proposal deliverable, treat those strings as a hard contract and pass them through explicitly; do not accept a generic placeholder plan with sections like “执行摘要 / 主体内容 / 待确认事项”
-- do not infer a Qin-like multi-system proposal skeleton only from source titles or domain keywords; require the user goal or accepted task contract to make that structure explicit
+- do not infer a named multi-system proposal skeleton only from source titles or domain keywords; require the user goal or accepted task contract to make that structure explicit
 - only hand-edit the generated JSON when the script output is clearly insufficient for the writer
 - do not replace the script-emitted section schema with a custom `system/modules/key_facts` shape; if you enrich the plan, preserve `id`, `title`, `required_subsections`, `required_evidence`, and `source_context_refs` as the canonical control surface
 

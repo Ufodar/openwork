@@ -4,7 +4,12 @@ import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promi
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { createHostedOpenworkClient, makeClient } from "./_util.mjs";
+import {
+  createHostedOpenworkClient,
+  createHostedOpenworkSession,
+  fetchHostedSessionRecord,
+  makeClient,
+} from "./_util.mjs";
 
 import {
   extractMarkdownHeadings,
@@ -473,7 +478,25 @@ async function readExpectedOutput(runtimeDir, expectedOutput) {
 }
 
 async function runScenario({ baseUrl, token, workspaceId, client, scenario }) {
-  const session = await client.session.create({ title: scenario.title });
+  const session = await createHostedOpenworkSession({
+    baseUrl,
+    token,
+    workspaceId,
+    title: scenario.title,
+    enableDocumentState: true,
+    preferredView: "document-writer",
+    preferredAgent: "document-writer",
+    preferredAgentLock: "document-writer",
+  });
+  const sessionProfile = await fetchHostedSessionRecord({
+    baseUrl,
+    token,
+    workspaceId,
+    sessionId: session.id,
+  });
+  assert.equal(sessionProfile?.openworkPreferredView, "document-writer");
+  assert.equal(sessionProfile?.openworkPreferredAgent, "document-writer");
+  assert.equal(sessionProfile?.openworkPreferredAgentLock, "document-writer");
   const uploaded = [];
   for (const docPath of scenario.docs) {
     const name = await uploadDocument({
@@ -533,6 +556,7 @@ async function runScenario({ baseUrl, token, workspaceId, client, scenario }) {
     scenarioId: scenario.id,
     title: scenario.title,
     sessionId: session.id,
+    sessionProfile,
     expectedOutput: scenario.expectedOutput,
     uploaded,
     runtimeDir: relative(root, runtimeDir),

@@ -266,6 +266,16 @@ test("document-writer prompts treat proposal-style rules as conditional task-sha
   expect(entryPrompt).toContain("do not use `outputs/**` or the target deliverable as the default reading surface in the main session");
 });
 
+test("document-writer prompt examples stay generic and planner wording avoids sample-specific labels", async () => {
+  const plannerPrompt = await readFile(resolve(root, ".opencode/prompts/doc-planner.md"), "utf8");
+  const entryPrompt = await readFile(resolve(root, ".opencode/agent/document-writer.md"), "utf8");
+
+  expect(plannerPrompt).not.toContain("Qin-like");
+  expect(plannerPrompt).toContain("named multi-system proposal skeleton");
+  expect(entryPrompt).not.toContain("outputs/ly-solution.md");
+  expect(entryPrompt).toContain("outputs/final.docx");
+});
+
 test("common-work keeps hosted document temp artifacts workspace-local and treats external temp paths as shell-only", async () => {
   const prompt = await readFile(resolve(root, ".opencode/agent/common-work.md"), "utf8");
 

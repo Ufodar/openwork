@@ -20,6 +20,18 @@ SYSTEM_SUBSECTIONS = [
     "API调用示例",
 ]
 
+REFERENCE_SECTION_KEYWORDS = {
+    "参考与依据",
+    "联网补充依据",
+    "参考资料",
+    "依据",
+    "参考",
+    "联网",
+    "政策",
+    "标准",
+    "规范",
+}
+
 
 def load_json(path: Path, default):
     try:
@@ -65,52 +77,84 @@ def infer_goal(goal: str, manifest: dict, canonical_facts: list[dict]) -> str:
     return explicit or "Prepare a structured document response from the merged fact surface"
 
 
-def is_explicit_three_system_goal(goal: str) -> bool:
+def dedupe_preserve_order(values: list[str]) -> list[str]:
+    seen = set()
+    result: list[str] = []
+    for value in values:
+        cleaned = str(value or "").strip()
+        if not cleaned:
+            continue
+        lowered = normalize_text(cleaned)
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        result.append(cleaned)
+    return result
+
+
+def extract_explicit_system_titles(goal: str) -> list[str]:
+    candidates = re.findall(r"[\u4e00-\u9fffA-Za-z0-9（）()·\-/]{2,40}?系统", goal or "")
+    filtered = []
+    for candidate in candidates:
+        cleaned = candidate.strip(" ，,；;：:。")
+        cleaned = re.sub(r"^(围绕|聚焦|针对|面向|关于|以)\s*", "", cleaned)
+        if cleaned in {"系统", "本系统", "该系统", "目标系统", "业务系统"}:
+            continue
+        filtered.append(cleaned)
+    return dedupe_preserve_order(filtered)
+
+
+def has_named_system_contract(goal: str) -> bool:
+    return len(extract_explicit_system_titles(goal)) >= 2
+
+
+def should_add_reference_section(goal: str) -> bool:
     lowered = normalize_text(goal)
-    if all(name in goal for name in ["算力资源汇聚系统", "算力选择与调度系统", "算力运行安全监测系统"]):
-        return True
-    return "三大系统" in lowered and "技术材料" in lowered
+    return any(keyword.lower() in lowered for keyword in REFERENCE_SECTION_KEYWORDS)
 
 
-def build_system_material_sections():
-    return [
-        {
-            "id": "算力资源汇聚系统",
-            "title": "算力资源汇聚系统",
-            "purpose": "说明跨中心算力纳管、异构资源池化与统一标签体系的实现方式。",
-            "acceptance": "覆盖功能定位、资源接入、资源抽象、统一标签、互联互通与 API 调用示例。",
-            "required_subsections": SYSTEM_SUBSECTIONS,
-            "evidence_topics": ["resource-aggregation", "api-interoperability", "identifier-system"],
-        },
-        {
-            "id": "算力选择与调度系统",
-            "title": "算力选择与调度系统",
-            "purpose": "说明多维指标驱动的任务-资源-路径联合调度策略。",
-            "acceptance": "覆盖功能定位、网络感知、算力建模、调度算法、互联互通与 API 调用示例。",
-            "required_subsections": SYSTEM_SUBSECTIONS,
-            "evidence_topics": ["scheduling", "api-interoperability", "identifier-system"],
-        },
-        {
-            "id": "算力运行安全监测系统",
-            "title": "算力运行安全监测系统",
-            "purpose": "说明监控、告警、审计、身份认证与安全合规的实现方式。",
-            "acceptance": "覆盖功能定位、安全监控架构、运行风险闭环、互联互通与 API 调用示例。",
-            "required_subsections": SYSTEM_SUBSECTIONS,
-            "evidence_topics": ["security-monitoring", "api-interoperability", "identifier-system"],
-        },
-        {
-            "id": "参考与依据",
-            "title": "参考与依据",
-            "purpose": "说明源文档、联网补充依据与行业通用假设边界。",
-            "acceptance": "明确区分来源于上传文档的事实和联网补充的行业通用信息。",
-            "evidence_topics": ["general"],
-        },
-    ]
+def infer_system_section_topics(title: str) -> list[str]:
+    lowered = normalize_text(title)
+    if any(keyword in lowered for keyword in ["调度", "协同", "选路", "路径", "推荐"]):
+        primary = "scheduling"
+    elif any(keyword in lowered for keyword in ["监测", "监控", "安全", "审计", "告警", "风控"]):
+        primary = "security-monitoring"
+    else:
+        primary = "resource-aggregation"
+    return dedupe_preserve_order([primary, "api-interoperability", "identifier-system"])
+
+
+def build_named_system_sections(goal: str) -> list[dict]:
+    sections = []
+    for title in extract_explicit_system_titles(goal):
+        sections.append(
+            {
+                "id": title,
+                "title": title,
+                "purpose": f"围绕 `{title}` 说明功能定位、技术架构、技术路线、互联互通机制、标识系统构建与 API 调用示例。",
+                "acceptance": f"保留 `{title}` 这个精确标题，并覆盖功能定位、技术架构、技术路线、互联互通机制、标识系统构建与 API 调用示例。",
+                "required_subsections": SYSTEM_SUBSECTIONS,
+                "evidence_topics": infer_system_section_topics(title),
+            }
+        )
+
+    if should_add_reference_section(goal):
+        sections.append(
+            {
+                "id": "参考与依据",
+                "title": "参考与依据",
+                "purpose": "说明源文档、联网补充依据与行业通用假设边界。",
+                "acceptance": "明确区分来源于上传文档的事实和联网补充的行业通用信息。",
+                "evidence_topics": ["general"],
+            }
+        )
+
+    return sections
 
 
 def build_sections(goal: str, manifest: dict, canonical_facts: list[dict]):
-    if is_explicit_three_system_goal(goal):
-        return build_system_material_sections()
+    if has_named_system_contract(goal):
+        return build_named_system_sections(goal)
 
     lowered = goal.lower()
     if "点对点" in goal or "solution" in lowered or "方案" in goal:
@@ -187,7 +231,7 @@ def build_goal_profile(goal: str, manifest: dict, canonical_facts: list[dict]) -
         "@startuml", "@enduml", "participant",
     }
 
-    if is_explicit_three_system_goal(goal):
+    if has_named_system_contract(goal):
         keywords.update({
             "算力", "资源", "纳管", "k8s", "虚拟机", "裸金属", "gpu", "标签", "调度", "时延", "带宽",
             "丢包", "路径", "算网", "监控", "告警", "审计", "安全", "等保", "api", "rest", "grpc",

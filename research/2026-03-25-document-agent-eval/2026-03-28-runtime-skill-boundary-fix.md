@@ -108,11 +108,51 @@ Key assertions now covered by tests:
 - prompt contracts reference runtime-local support paths
 - helper script tests execute against the new runtime-support location
 
+### Pod deployment validation
+
+After pushing commit `ab33f873` to GitHub and Gitee, pod verification uncovered one deployment-specific trap:
+
+- `scripts/recover-pod-runtime.sh` reused existing build outputs, so the first pod rollout still ran the old compiled server binary.
+- A subsequent full restart also initially inherited `OPENWORK_REUSE_BUILD=1` from pod env and failed health checks while still reusing stale outputs.
+- Running `OPENWORK_REUSE_BUILD=0 bash scripts/restart-pod.sh --force` via the pod SSH entrypoint forced a fresh frontend + backend rebuild and restored healthy service.
+
+Fresh pod health after the forced rebuild:
+
+- `http://127.0.0.1:8789/health -> {"ok":true,...}`
+- `http://192.168.5.10:32765/openwork/health -> {"ok":true,...}`
+
+### Hosted runtime verification result
+
+The final production check must create the session through the raw OpenWork `POST /session` endpoint, not through the SDK helper that only forwards the typed `title` payload.
+
+This matters because a probe that used `client.session.create({... openworkPreferredView ...})` silently created a default runtime session with:
+
+- `preferredView = null`
+- `preferredAgent = null`
+- `preferredAgentLock = null`
+
+That probe was invalid for verifying the `document-writer` profile.
+
+Using a raw `POST /w/<workspaceId>/opencode/session` body with:
+
+- `openworkPreferredView = document-writer`
+- `openworkPreferredAgent = document-writer`
+- `openworkPreferredAgentLock = document-writer`
+
+produced a fresh hosted runtime whose stored session mapping and runtime files showed:
+
+- `preferredView = "document-writer"`
+- `preferredAgent = "document-writer"`
+- `preferredAgentLock = "document-writer"`
+- `skillAllowlist = [doc-coauthoring, doc-normalize, docx, pdf, pptx, xlsx]`
+- `.opencode/runtime-support/document-state/*.py` present
+- `.opencode/skills/openwork-core/SKILL.md` absent
+
 ## Product Conclusion
 
 For hosted production sessions, `openwork-core` should no longer be treated as part of the user runtime skill surface.
 
-After deployment, the expected production result for a fresh `document-writer` session is:
+After deployment, the verified production result for a fresh `document-writer` session is:
 
 - runtime support helpers present under `.opencode/runtime-support/document-state/`
 - document-focused user skills present under `.opencode/skills/`

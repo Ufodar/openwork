@@ -9,11 +9,10 @@ from pathlib import Path
 
 SYSTEM_MATERIAL_HINTS = {
     "项目申报",
+    "申报材料",
     "技术材料",
+    "建设方案",
     "三大系统",
-    "算力资源汇聚系统",
-    "算力选择与调度系统",
-    "算力运行安全监测系统",
     "api调用示例",
     "api 调用示例",
 }
@@ -102,9 +101,26 @@ def dedupe_strings(values):
     return result
 
 
+def extract_explicit_system_titles(goal: str) -> list[str]:
+    candidates = re.findall(r"[\u4e00-\u9fffA-Za-z0-9（）()·\-/]{2,40}?系统", goal or "")
+    titles = []
+    seen = set()
+    for candidate in candidates:
+        cleaned = candidate.strip(" ，,；;：:。")
+        cleaned = re.sub(r"^(围绕|聚焦|针对|面向|关于|以)\s*", "", cleaned)
+        if cleaned in {"系统", "本系统", "该系统", "业务系统", "目标系统"}:
+            continue
+        lowered = normalize_text(cleaned)
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        titles.append(cleaned)
+    return titles
+
+
 def is_system_material_goal(goal: str) -> bool:
     lowered = normalize_text(goal)
-    return any(keyword in lowered for keyword in SYSTEM_MATERIAL_HINTS)
+    return any(keyword in lowered for keyword in SYSTEM_MATERIAL_HINTS) or len(extract_explicit_system_titles(goal)) >= 2
 
 
 def build_goal_profile(goal: str):

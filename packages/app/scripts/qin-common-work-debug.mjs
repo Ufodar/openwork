@@ -2,7 +2,11 @@ import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
 import { performance } from "node:perf_hooks";
 
-import { createHostedOpenworkClient } from "./_util.mjs";
+import {
+  createHostedOpenworkClient,
+  createHostedOpenworkSession,
+  fetchHostedSessionRecord,
+} from "./_util.mjs";
 
 const OPENWORK_BASE = process.env.OPENWORK_BASE ?? "http://192.168.5.10:32765/openwork";
 const USERNAME = process.env.OPENWORK_USERNAME ?? "fuda";
@@ -108,13 +112,6 @@ async function login() {
   return requestJson(`${OPENWORK_BASE}/auth/login`, null, {
     method: "POST",
     body: JSON.stringify({ username: USERNAME, password: PASSWORD }),
-  });
-}
-
-async function createSession({ token, workspaceId, title }) {
-  return requestJson(`${OPENWORK_BASE}/w/${encodeURIComponent(workspaceId)}/opencode/session`, token, {
-    method: "POST",
-    body: JSON.stringify({ title }),
   });
 }
 
@@ -236,13 +233,24 @@ async function main() {
   const workspaceId = auth.workspace.id;
   const client = createHostedOpenworkClient({ baseUrl: OPENWORK_BASE, workspaceId, token });
 
-  const created = await createSession({
+  const created = await createHostedOpenworkSession({
+    baseUrl: OPENWORK_BASE,
     token,
     workspaceId,
     title: `qin-common-work-debug-${Date.now()}`,
+    preferredView: "document-agent",
+    preferredAgent: "common-work",
+    preferredAgentLock: "common-work",
   });
   const sessionId = created.id;
+  const sessionProfile = await fetchHostedSessionRecord({
+    baseUrl: OPENWORK_BASE,
+    token,
+    workspaceId,
+    sessionId,
+  });
   console.log("[session]", sessionId);
+  console.log("[session-profile]", JSON.stringify(sessionProfile));
   await sleep(8_000);
   for (const docPath of SCENARIO.docs) {
     console.log("[upload-start]", basename(docPath));

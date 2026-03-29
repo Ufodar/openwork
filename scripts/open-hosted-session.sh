@@ -42,7 +42,11 @@ command -v jq >/dev/null 2>&1 || die "jq command not found in PATH"
 
 RUNTIME_DIR=""
 while IFS= read -r mapping_file; do
-  candidate="$(jq -r --arg sid "$SESSION_ID" '.[$sid].runtimeDir // empty' "$mapping_file" 2>/dev/null || true)"
+  candidate="$(
+    jq -r --arg sid "$SESSION_ID" '
+      .workspaces[$sid].runtimeDir // .[$sid].runtimeDir // empty
+    ' "$mapping_file" 2>/dev/null || true
+  )"
   if [[ -n "$candidate" ]]; then
     RUNTIME_DIR="$candidate"
     break

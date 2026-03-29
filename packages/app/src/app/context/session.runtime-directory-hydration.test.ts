@@ -216,4 +216,211 @@ describe("createSessionStore runtime directory hydration", () => {
       "session.todo:ses_1",
     ]);
   });
+
+  test("hydrates the selected session when the cached directory is only the workspace root", async () => {
+    const callOrder: string[] = [];
+
+    const runtimeDirectory = "/root/.openwork/user-workspaces/user-1/documents/sessions/runtime-1";
+    const workspaceRoot = "/root/.openwork/user-workspaces/user-1";
+
+    const store = createRoot((dispose) => {
+      disposeCurrent = dispose;
+      const [selectedSessionId, setSelectedSessionId] = createSignal<string | null>(null);
+      const [sessionModelState, setSessionModelState] = createSignal<SessionModelState>({
+        overrides: {},
+        resolved: {},
+      });
+
+      const client = {
+        event: {
+          subscribe: async (_input?: { directory?: string }, options?: { signal?: AbortSignal }) => ({
+            stream: (async function* () {
+              await new Promise<void>((resolve) => {
+                options?.signal?.addEventListener("abort", () => resolve(), { once: true });
+              });
+            })(),
+          }),
+        },
+        global: {
+          health: async () => {
+            callOrder.push("global.health");
+            return { data: { healthy: true } };
+          },
+        },
+        session: {
+          get: async ({ sessionID }: { sessionID: string }) => {
+            callOrder.push(`session.get:${sessionID}`);
+            return {
+              data: {
+                id: sessionID,
+                title: "Runtime session",
+                slug: null,
+                directory: runtimeDirectory,
+                time: { created: 1, updated: 2 },
+              },
+            };
+          },
+          messages: async ({ sessionID }: { sessionID: string }) => {
+            callOrder.push(`session.messages:${sessionID}`);
+            return { data: [] };
+          },
+          todo: async ({ sessionID }: { sessionID: string }) => {
+            callOrder.push(`session.todo:${sessionID}`);
+            return { data: [] };
+          },
+        },
+        permission: {
+          list: async () => ({ data: [] }),
+        },
+        question: {
+          list: async () => ({ data: [] }),
+        },
+      } as any;
+
+      const store = createSessionStore({
+        client: () => client,
+        activeWorkspaceRoot: () => workspaceRoot,
+        selectedSessionId,
+        setSelectedSessionId,
+        sessionModelState,
+        setSessionModelState: (updater) => {
+          const next = updater(sessionModelState());
+          setSessionModelState(next);
+          return next;
+        },
+        lastUserModelFromMessages: () => null,
+        developerMode: () => false,
+        setError: () => undefined,
+        setSseConnected: () => undefined,
+      });
+
+      store.setSessions([
+        {
+          id: "ses_1",
+          title: "Runtime session",
+          slug: null,
+          directory: workspaceRoot,
+          time: { created: 1, updated: 1 },
+        } as any,
+      ]);
+
+      return store;
+    });
+
+    await wait();
+    await store.selectSession("ses_1");
+    await wait();
+
+    expect(callOrder).toEqual([
+      "global.health",
+      "session.get:ses_1",
+      "session.messages:ses_1",
+      "session.todo:ses_1",
+    ]);
+    expect(store.sessions().find((session) => session.id === "ses_1")?.directory).toBe(runtimeDirectory);
+  });
+
+  test("hydrates the selected session when the cached directory is only the sessions root", async () => {
+    const callOrder: string[] = [];
+
+    const runtimeDirectory = "/root/.openwork/user-workspaces/user-1/documents/sessions/runtime-1";
+    const workspaceRoot = "/root/.openwork/user-workspaces/user-1";
+    const sessionsRoot = "/root/.openwork/user-workspaces/user-1/documents/sessions";
+
+    const store = createRoot((dispose) => {
+      disposeCurrent = dispose;
+      const [selectedSessionId, setSelectedSessionId] = createSignal<string | null>(null);
+      const [sessionModelState, setSessionModelState] = createSignal<SessionModelState>({
+        overrides: {},
+        resolved: {},
+      });
+
+      const client = {
+        event: {
+          subscribe: async (_input?: { directory?: string }, options?: { signal?: AbortSignal }) => ({
+            stream: (async function* () {
+              await new Promise<void>((resolve) => {
+                options?.signal?.addEventListener("abort", () => resolve(), { once: true });
+              });
+            })(),
+          }),
+        },
+        global: {
+          health: async () => {
+            callOrder.push("global.health");
+            return { data: { healthy: true } };
+          },
+        },
+        session: {
+          get: async ({ sessionID }: { sessionID: string }) => {
+            callOrder.push(`session.get:${sessionID}`);
+            return {
+              data: {
+                id: sessionID,
+                title: "Runtime session",
+                slug: null,
+                directory: runtimeDirectory,
+                time: { created: 1, updated: 2 },
+              },
+            };
+          },
+          messages: async ({ sessionID }: { sessionID: string }) => {
+            callOrder.push(`session.messages:${sessionID}`);
+            return { data: [] };
+          },
+          todo: async ({ sessionID }: { sessionID: string }) => {
+            callOrder.push(`session.todo:${sessionID}`);
+            return { data: [] };
+          },
+        },
+        permission: {
+          list: async () => ({ data: [] }),
+        },
+        question: {
+          list: async () => ({ data: [] }),
+        },
+      } as any;
+
+      const store = createSessionStore({
+        client: () => client,
+        activeWorkspaceRoot: () => workspaceRoot,
+        selectedSessionId,
+        setSelectedSessionId,
+        sessionModelState,
+        setSessionModelState: (updater) => {
+          const next = updater(sessionModelState());
+          setSessionModelState(next);
+          return next;
+        },
+        lastUserModelFromMessages: () => null,
+        developerMode: () => false,
+        setError: () => undefined,
+        setSseConnected: () => undefined,
+      });
+
+      store.setSessions([
+        {
+          id: "ses_1",
+          title: "Runtime session",
+          slug: null,
+          directory: sessionsRoot,
+          time: { created: 1, updated: 1 },
+        } as any,
+      ]);
+
+      return store;
+    });
+
+    await wait();
+    await store.selectSession("ses_1");
+    await wait();
+
+    expect(callOrder).toEqual([
+      "global.health",
+      "session.get:ses_1",
+      "session.messages:ses_1",
+      "session.todo:ses_1",
+    ]);
+    expect(store.sessions().find((session) => session.id === "ses_1")?.directory).toBe(runtimeDirectory);
+  });
 });

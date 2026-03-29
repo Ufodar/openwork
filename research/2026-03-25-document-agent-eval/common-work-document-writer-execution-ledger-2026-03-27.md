@@ -3626,3 +3626,128 @@ Operational conclusion:
   - transient hosted transport/runtime instability
     - noisy
     - must be filtered out instead of over-interpreted as agent regression
+
+### 2026-03-29: pod frontend stayed up while OpenWork backend on 8789 was down
+
+Symptom reported from the browser:
+- dashboard loaded at:
+  - `http://192.168.5.10:32765/dashboard/agents`
+- but DevTools showed repeated `502` for:
+  - `/openwork/opencode/global/health`
+- response body:
+  - `Proxy error: connect ECONNREFUSED 127.0.0.1:8789`
+
+Evidence gathered before any restart:
+- direct probes confirmed the failure was real:
+  - `curl http://192.168.5.10:32765/openwork/health`
+  - `curl http://192.168.5.10:32765/openwork/opencode/global/health`
+  - both returned:
+    - `502 Bad Gateway`
+    - `ECONNREFUSED 127.0.0.1:8789`
+- pod process list showed:
+  - public web server still listening on:
+    - `5173`
+    - `32765`
+  - but no live `openwork-server` / orchestrator process bound to:
+    - `8789`
+- `manual-web-32765.log` and `manual-web-5173.log` showed both web servers were still proxying `/openwork -> http://127.0.0.1:8789`
+- `manual-orchestrator.log` was not from a brand-new restart; it was the last successful backend run from `2026-03-28 17:44`
+
+Root-cause interpretation:
+- this was **not** a frontend-only rendering/auth issue
+- the actual failure mode was:
+  - static web servers stayed alive
+  - OpenWork backend/orchestrator was gone
+  - so the browser could still load the app shell while every `/openwork/*` API call failed at the reverse-proxy boundary
+- the last preserved orchestrator log shows the prior backend death sequence clearly:
+  - `[opencode] ERROR Process exited`
+  - `[openwork-orchestrator] Shutting down`
+  - `/opencode/global/health` changed from `200` to `503`
+- so the proximate backend death reason was:
+  - the orchestrator terminated after its managed global `opencode` child exited
+
+Important caution:
+- this investigation established **why the browser showed 502 now**
+- it did **not** yet produce the deeper root cause for why that older global `opencode` child originally exited
+- that deeper cause still needs a separate follow-up if recurrence becomes frequent
+
+Recovery action taken:
+- ran a controlled fast recovery on the pod:
+  - `bash scripts/recover-pod-runtime.sh --force`
+- the recovery script:
+  - stopped stale web servers
+  - stopped stale orchestrator-managed `opencode serve` sidecars
+  - reused existing build outputs
+  - relaunched:
+    - prod web on `5173`
+    - public web on `32765`
+    - orchestrator
+    - `openwork-server` on `8789`
+
+Post-recovery verification:
+- `curl http://192.168.5.10:32765/openwork/health`
+  - returned `200`
+  - body contained:
+    - `"ok": true`
+- `curl http://192.168.5.10:32765/openwork/opencode/global/health`
+  - no longer returned `ECONNREFUSED`
+  - now returned `401 Unauthorized`
+  - interpretation:
+    - proxy path and backend are alive again
+    - the request simply lacked the required bearer token
+- pod process list after recovery showed all expected services back:
+  - compiled orchestrator
+  - `openwork-server --port 8789`
+  - global `opencode serve`
+  - public and internal web servers
+
+Decision:
+- treat this incident primarily as:
+  - `frontend shell alive + backend dead + no external supervisor restart`
+- do not misclassify it as a pure UI state bug
+- future hardening, if needed, should focus on:
+  - backend liveness supervision
+  - better surfaced "frontend alive / backend dead" operator signals
+
+## 2026-03-29 03:18 - Chat page needed refresh to show new messages
+
+Observed symptom:
+- after sending a prompt in the browser chat UI, the new conversation content did not render live
+- refreshing the browser caused the missing messages to appear immediately
+
+Root-cause chain confirmed in code:
+- pod was still running commit `477070aa`, not the unreleased local fix set
+- hosted session list aggregation in `packages/server/src/server.ts` still allowed a shared-list `directory` value to win over the mapped `runtimeDir`
+- frontend session hydration in `packages/app/src/app/context/session.ts` still skipped `session.get()` whenever the cached directory string was merely non-empty
+- the remaining edge case was broader than just `workspaceRoot`
+  - `.../documents/sessions` was also being treated as if it were already a real session runtime directory
+- that caused the UI to keep subscribing SSE to a non-runtime directory, so new message events were missed until a manual refresh reloaded `session.messages`
+
+Changes made locally:
+- `packages/server/src/server.ts`
+  - prefer mapped `runtimeDir` over stale shared-list `directory` values when listing sessions
+- `packages/server/src/server.proxy-session-list.test.ts`
+  - added coverage for the shared-list workspace-root directory case
+- `packages/app/src/app/context/session.ts`
+  - force `session.get()` hydration whenever the cached directory is missing or not a true runtime directory
+- `packages/app/src/app/utils/index.ts`
+  - tightened `isSessionRuntimeDirectory(...)`
+  - `.../documents/sessions/<runtime>` counts as runtime
+  - bare `.../documents/sessions` no longer counts as runtime
+- `packages/app/src/app/context/session.runtime-directory-hydration.test.ts`
+  - added coverage for both:
+    - cached directory = workspace root
+    - cached directory = sessions root
+
+Verification:
+- wrote the new `sessions root` hydration test first and confirmed it failed before the helper change
+- after the helper change, the following passed:
+  - `bun test packages/app/src/app/context/session.runtime-directory-hydration.test.ts`
+  - `bun test packages/server/src/server.proxy-session-list.test.ts`
+  - `bun test packages/app/src/app/lib/session-event-directories.test.ts`
+  - `git diff --check -- packages/server/src/server.ts packages/server/src/server.proxy-session-list.test.ts packages/app/src/app/context/session.ts packages/app/src/app/context/session.runtime-directory-hydration.test.ts packages/app/src/app/utils/index.ts`
+
+Operational finding:
+- `curl http://192.168.5.10:32765/openwork/health` showed the pod service was healthy
+- SSH inspection confirmed the pod repo head was still `477070aa`
+- therefore the browser symptom on pod was expected until this fix set is committed, pushed, and deployed

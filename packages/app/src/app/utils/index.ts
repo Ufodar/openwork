@@ -247,6 +247,14 @@ export function sessionBelongsToWorkspace(workspaceRoot?: string | null, session
   return directory === sessionsRoot || directory.startsWith(`${sessionsRoot}/`);
 }
 
+export function isSessionRuntimeDirectory(workspaceRoot?: string | null, sessionDirectory?: string | null) {
+  const root = normalizeDirectoryPath(workspaceRoot);
+  const directory = normalizeDirectoryPath(sessionDirectory);
+  if (!root || !directory) return false;
+  const sessionsRoot = normalizeDirectoryPath(`${root}/documents/sessions`);
+  return directory.startsWith(`${sessionsRoot}/`);
+}
+
 export function normalizeEvent(raw: unknown): OpencodeEvent | null {
   if (!raw || typeof raw !== "object") {
     return null;

@@ -19,6 +19,7 @@ import type {
 import {
   addOpencodeCacheHint,
   getEventSubscriptionDirectories,
+  isSessionRuntimeDirectory,
   modelFromUserMessage,
   normalizeDirectoryPath,
   normalizeEvent,
@@ -623,6 +624,10 @@ export function createSessionStore(options: {
 
       const currentSession = store.sessions.find((session) => session.id === sessionID) ?? null;
       const currentDirectory = normalizeDirectoryPath(currentSession?.directory ?? "");
+      const currentDirectoryIsRuntime = isSessionRuntimeDirectory(
+        options.activeWorkspaceRoot(),
+        currentDirectory,
+      );
 
       mark("checking health");
       try {
@@ -638,7 +643,7 @@ export function createSessionStore(options: {
       }
       if (abortIfStale("selection changed after health")) return;
 
-      if (!currentDirectory) {
+      if (!currentDirectory || !currentDirectoryIsRuntime) {
         mark("calling session.get");
         try {
           const info = unwrap(await c.session.get(
@@ -647,6 +652,7 @@ export function createSessionStore(options: {
           ));
           mark("session.get done", {
             directory: normalizeDirectoryPath(info?.directory ?? ""),
+            reason: !currentDirectory ? "missing-directory" : "non-runtime-directory",
           });
           if (abortIfStale("selection changed before session applied")) return;
           setStore("sessions", (current) => upsertSession(current, info));

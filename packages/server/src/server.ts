@@ -906,12 +906,13 @@ async function listWorkspaceSessions(input: {
         if (!owner) return null;
 
         const runtimeWorkspace = runtimeEntries.get(parsed.id);
-        const runtimeDir = runtimeWorkspace?.runtimeDir?.trim() || join(input.workspace.path, "documents", "sessions", parsed.id);
+        const mappedRuntimeDir = runtimeWorkspace?.runtimeDir?.trim() || "";
+        const runtimeDir = mappedRuntimeDir || join(input.workspace.path, "documents", "sessions", parsed.id);
         const runtimeProfilePreferences =
           runtimeWorkspace?.preferredView || runtimeWorkspace?.preferredAgent || runtimeWorkspace?.preferredAgentLock
             ? null
             : await readRuntimeProfilePreferences(runtimeDir);
-        const directory: string | null = parsed.directory?.trim() || runtimeDir;
+        const directory: string | null = mappedRuntimeDir || parsed.directory?.trim() || runtimeDir;
         if (!sessionDirectoryBelongsToWorkspace(input.workspace.path, directory)) {
           return null;
         }
@@ -967,7 +968,8 @@ async function listWorkspaceSessions(input: {
           .map((value) => parseListedSession(value))
           .find((value) => value?.id === sessionId) ?? null;
         if (parsed) {
-          const directory = parsed.directory?.trim() || runtimeEntry.runtimeDir;
+          const mappedRuntimeDir = runtimeEntry.runtimeDir.trim();
+          const directory = mappedRuntimeDir || parsed.directory?.trim() || runtimeEntry.runtimeDir;
           if (sessionDirectoryBelongsToWorkspace(input.workspace.path, directory)) {
             merged.set(sessionId, {
               ...parsed,

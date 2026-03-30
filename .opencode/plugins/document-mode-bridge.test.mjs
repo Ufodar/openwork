@@ -13,6 +13,9 @@ test("document mode bridge forbids external-directory detours for document-heavy
   expect(file).toContain("create \\`<WORKSPACE>/.tmp/system\\`");
   expect(file).toContain("Do not \"probe\" \\`/tmp/*\\`");
   expect(file).toContain("parent directories, sibling session folders, or repo-root files");
+  expect(file).toContain("If machine-named source files such as \\`src-001.docx\\` are present");
+  expect(file).toContain("\\`.worktree/text/*.txt\\`");
+  expect(file).toContain("read those bootstrap text files before you extract the original binary again");
   expect(file).toContain("do not call \\`read\\` on that original file");
   expect(file).toContain("A failed binary \\`read\\` on an Office file does not count as progress");
   expect(file).toContain("For existing \\`.worktree/**\\` or other state files, do not call \\`write\\` as an overwrite shortcut");

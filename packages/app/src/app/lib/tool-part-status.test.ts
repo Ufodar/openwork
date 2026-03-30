@@ -51,14 +51,14 @@ describe("tool part display status", () => {
       resolveToolPartDisplayStatus(part, {
         sessionStatus: "idle",
         messageInfo: message,
-        now: 40_000,
+        now: 320_000,
       }),
     ).toBe("stale");
     expect(
       isToolPartActive(part, {
         sessionStatus: "idle",
         messageInfo: message,
-        now: 40_000,
+        now: 320_000,
       }),
     ).toBe(false);
   });
@@ -73,14 +73,36 @@ describe("tool part display status", () => {
       resolveToolPartDisplayStatus(part, {
         sessionStatus: "running",
         messageInfo: message,
-        now: 40_000,
+        now: 320_000,
       }),
     ).toBe("pending");
     expect(
       isToolPartActive(part, {
         sessionStatus: "running",
         messageInfo: message,
-        now: 40_000,
+        now: 320_000,
+      }),
+    ).toBe(true);
+  });
+
+  test("keeps an empty pending tool active before the five minute stale threshold", () => {
+    const message = createAssistantMessage({
+      time: { created: 10_000 },
+    });
+    const part = createToolPart("pending", { input: {} });
+
+    expect(
+      resolveToolPartDisplayStatus(part, {
+        sessionStatus: "running",
+        messageInfo: message,
+        now: 299_000,
+      }),
+    ).toBe("pending");
+    expect(
+      isToolPartActive(part, {
+        sessionStatus: "running",
+        messageInfo: message,
+        now: 299_000,
       }),
     ).toBe(true);
   });

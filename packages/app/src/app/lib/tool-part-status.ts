@@ -11,7 +11,7 @@ type ResolveToolPartDisplayStatusOptions = {
   staleAfterMs?: number;
 };
 
-const DEFAULT_STALE_AFTER_MS = 15_000;
+const DEFAULT_STALE_AFTER_MS = 300_000;
 
 const normalizeStatus = (value: unknown): ToolPartDisplayStatus => {
   const text = typeof value === "string" ? value.trim().toLowerCase() : "";

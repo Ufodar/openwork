@@ -98,7 +98,7 @@
       "color": "#6366F1",
       "prompt": "{file:./.opencode/agent/common-work.md}",
       "permission": {
-        "task": "allow",
+        "task": "deny",
         "read": {
           "*": "allow"
         },

@@ -31,6 +31,13 @@ What the main session should do:
 - read the receipt and move to the next phase
 - do small supervisory reads of state files, verifier reports, or narrow deliverable excerpts when artifact existence, heading alignment, or phase health is unclear
 
+Task-call shape:
+- When calling `task`, always provide all three input fields: `description`, `subagent_type`, and `prompt`.
+- `subagent_type` must be one of the concrete hidden document agents such as `doc-intake`, `doc-reader`, `doc-merger`, `doc-planner`, `doc-writer`, or `doc-verifier`.
+- `description` should be a short visible label for the delegated phase.
+- `prompt` must contain the full subagent contract, including `Current user objective`, `允许的输入文件`, `必需的首要动作`, `验收标准`, and `停止条件`.
+- A blank `task` call with empty `input`, empty `raw`, or a missing `subagent_type` is invalid; stop, restate the intended subagent contract, and then retry with a complete payload.
+
 What the main session must not do:
 - do not personally analyze the raw corpus when a lower-phase artifact is missing
 - do not manually unpack Office XML or write ad-hoc extraction scratch files

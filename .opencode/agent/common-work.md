@@ -29,6 +29,9 @@ find . -maxdepth 3 -type f \( -iname '*.docx' -o -iname '*.doc' -o -iname '*.pdf
 - 检查文档质量与一致性
 - 在长任务中维护可恢复状态
 
+这个 agent 自己完成当前 workspace 内的文档工作，不要调用 `task`，也不要把当前任务委派给隐藏 subagent。
+如果任务跨多个阶段，就用当前 workspace 内的状态文件、草稿和受控步骤推进，而不是临时转成 subagent 编排。
+
 ## Core Rules
 
 ### 1. Workspace boundary

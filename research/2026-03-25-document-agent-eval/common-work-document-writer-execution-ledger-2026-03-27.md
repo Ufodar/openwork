@@ -3751,3 +3751,97 @@ Operational finding:
 - `curl http://192.168.5.10:32765/openwork/health` showed the pod service was healthy
 - SSH inspection confirmed the pod repo head was still `477070aa`
 - therefore the browser symptom on pod was expected until this fix set is committed, pushed, and deployed
+
+## 2026-03-30 05:05 - Qin sample rerun after stable source renaming: live UI fixed, malformed tool calls remain
+
+Scenario:
+- fresh hosted rerun with the Qin sample folder:
+  - `天河监控运维一体化平台软件介绍v0.3.docx`
+  - `融合算力云平台白皮书.docx`
+- user prompt:
+  - long proposal-style request for three systems, architecture/route/interoperability/identifier system/API examples, plus web supplements
+
+What improved:
+- uploaded source files were renamed to stable machine names:
+  - `src-001.docx`
+  - `src-002.docx`
+- browser-side live rendering was no longer the blocker:
+  - fresh `document-agent` sessions showed the user message and tool timeline immediately
+- the old filename hallucination path no longer appeared:
+  - the agent no longer drifted between variants like `... v0.3.docx` vs `...v0.3.docx`
+
+Fresh hosted evidence:
+- `common-work` fresh session:
+  - `ses_2c2e6c192ffeDS1YBYzxsCIkzp`
+- earlier fresh `common-work` rerun before the latest patch:
+  - `ses_2c2f1c643ffeMH72e8YFGV6SlU`
+- fresh `document-writer` rerun before the latest patch:
+  - `ses_2c2eecccfffeynjMms0GPiwREj`
+
+Observed failures after the filename fix:
+- `common-work`
+  - now frequently stalls much earlier with a malformed empty `task` call
+  - latest assistant message for `ses_2c2e6c192ffeDS1YBYzxsCIkzp`:
+    - `tool = task`
+    - `state.status = pending`
+    - `state.input = {}`
+    - `state.raw = ""`
+- `document-writer`
+  - still reaches a malformed empty `task` pending in hosted Qwen runs
+  - separate earlier writer runs also showed that the primary agent could drift into a denied `bash` attempt before the empty `task`
+- earlier `doc-reader` child sessions in the same family could also end with malformed empty `write` pending
+
+Root-cause interpretation after comparing prompt/contracts vs. runtime behavior:
+- the malformed tool state is no longer primarily a filename/path issue
+- there are now two distinct contract problems:
+  1. `common-work` does not need subagent delegation, but its agent config still allowed `task`
+     - the prompt never told it to delegate
+     - Qwen could opportunistically choose `task` anyway and emit an empty payload
+  2. `document-writer` does require `task`, but its entry prompt did not explicitly state the exact `task` payload shape
+     - working historical traces from local `MiniMax-2.5` runs show successful `task` inputs with:
+       - `description`
+       - `subagent_type`
+       - `prompt`
+     - the current hosted Qwen path appears to know it should delegate, but can still emit a blank task shell when that schema is underspecified
+
+Minimal repo fix prepared:
+- `common-work`
+  - deny `task` in `opencode.json` / `opencode.jsonc`
+  - add prompt guidance that `common-work` must finish the document work itself and not delegate hidden subagents
+- `document-writer`
+  - add an explicit task-call contract to `.opencode/agent/document-writer.md`
+  - require all three task input fields:
+    - `description`
+    - `subagent_type`
+    - `prompt`
+  - mark blank task calls (`input = {}`, `raw = ""`, missing `subagent_type`) as invalid
+
+Tests added first:
+- extended `packages/app/scripts/doc-subagent-prompts.test.mjs`
+  - `common-work` should now have `permission.task = deny`
+  - `document-writer` prompt must contain the explicit task-call contract text
+- confirmed the test failed before the config/prompt change
+- then updated:
+  - `.opencode/agent/common-work.md`
+  - `.opencode/agent/document-writer.md`
+  - `opencode.json`
+  - `opencode.jsonc`
+- re-ran:
+  - `bun test packages/app/scripts/doc-subagent-prompts.test.mjs`
+  - result: pass
+
+Deployment note:
+- local commit for the earlier `doc-reader` extractor-only fix existed as:
+  - `8dee5bd5`
+- initial push state:
+  - `origin/dev` eventually succeeded
+  - `gitee/dev` was intermittently blocked by connection reset from the local machine
+- before repo sync completed, the same `doc-reader` patch had already been reconciled into the pod repo as an emergency patch and the pod had been restarted
+- after that, the Qin rerun showed the upstream failure had moved from malformed empty `write` inside `doc-reader` to malformed empty `task` higher in the control loop
+
+Decision:
+- treat the empty-task issue as the next primary blocker for hosted Qin-style long tasks
+- keep the fix narrow:
+  - remove unnecessary `task` latitude from `common-work`
+  - make `document-writer`'s task schema explicit for Qwen
+- do not touch the session isolation / runtime support / skill boundary architecture while addressing this

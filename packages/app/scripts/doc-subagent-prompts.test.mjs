@@ -409,7 +409,7 @@ test("common-work is registered as a real primary agent instead of only existing
     expect(config.permission).toBe("allow");
     expect(commonWork?.mode).toBe("primary");
     expect(commonWork?.prompt).toBe("{file:./.opencode/agent/common-work.md}");
-    expect(commonWork?.permission?.task).toBe("allow");
+    expect(commonWork?.permission?.task).toBe("deny");
     expect(commonWork?.permission?.bash).toBe("allow");
     expect(commonWork?.permission?.read?.["*"]).toBe("allow");
     expect(commonWork?.permission?.write?.["*"]).toBe("allow");
@@ -687,6 +687,9 @@ test("document-writer entry agent has orchestrator task and doc_state permission
   expect(agentPrompt).toContain("do a targeted existence check with `glob` or `list`");
   expect(agentPrompt).toContain("do not maintain a todo list in the main session");
   expect(agentPrompt).toContain("do not read or glob the raw workspace before `doc-intake` creates the initial state");
+  expect(agentPrompt).toContain("When calling `task`, always provide all three input fields: `description`, `subagent_type`, and `prompt`.");
+  expect(agentPrompt).toContain("A blank `task` call with empty `input`, empty `raw`, or a missing `subagent_type` is invalid");
+  expect(agentPrompt).toContain("Task-call shape");
 });
 
 test("doc-verifier can execute the verification script directly", async () => {

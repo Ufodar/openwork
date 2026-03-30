@@ -5,7 +5,7 @@ import * as utils from "../src/app/utils/index.ts";
 describe("resolveSupportedModel", () => {
   const fallback = {
     providerID: "my-company",
-    modelID: "Qwen3.5-397B-A17B",
+    modelID: "MiniMax-2.5",
   };
 
   const providers = [
@@ -16,6 +16,7 @@ describe("resolveSupportedModel", () => {
       models: {
         "Qwen3.5-397B-A17B": { id: "Qwen3.5-397B-A17B", name: "Qwen3.5-397B-A17B" },
         "MiniMax-2.5": { id: "MiniMax-2.5", name: "MiniMax-2.5" },
+        "GLM-5": { id: "GLM-5", name: "GLM-5" },
       },
     },
   ];
@@ -30,17 +31,17 @@ describe("resolveSupportedModel", () => {
     expect(resolved).toEqual(fallback);
   });
 
-  test("falls back retired GLM sessions to the supported default model", () => {
+  test("keeps GLM sessions unchanged because GLM is supported again", () => {
     const resolved = utils.resolveSupportedModel(
       { providerID: "my-company", modelID: "GLM-5" },
       providers,
       fallback,
     );
 
-    expect(resolved).toEqual(fallback);
+    expect(resolved).toEqual({ providerID: "my-company", modelID: "GLM-5" });
   });
 
-  test("keeps Qwen sessions unchanged because Qwen is the supported default", () => {
+  test("keeps Qwen sessions unchanged even though MiniMax is the supported default", () => {
     const resolved = utils.resolveSupportedModel(
       { providerID: "my-company", modelID: "Qwen3.5-397B-A17B" },
       providers,

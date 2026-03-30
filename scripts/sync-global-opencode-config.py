@@ -8,6 +8,13 @@ from pathlib import Path
 SUPPORTED_MODELS = {
     "Qwen3.5-397B-A17B": {
         "name": "Qwen3.5-397B-A17B",
+        "limit": {
+            "context": 256000,
+            "output": 32000,
+        },
+        "options": {
+            "systemMessageMode": "system",
+        },
         "capabilities": {
             "input": {"text": True, "image": True, "audio": True, "video": True, "pdf": True},
             "output": {"text": True, "image": True, "audio": False, "video": False, "pdf": False},
@@ -18,6 +25,23 @@ SUPPORTED_MODELS = {
     },
     "MiniMax-2.5": {
         "name": "MiniMax-2.5",
+        "limit": {
+            "context": 256000,
+            "output": 32000,
+        },
+        "capabilities": {
+            "input": {"text": True},
+            "output": {"text": True},
+            "attachment": False,
+            "toolcall": True,
+        },
+    },
+    "GLM-5": {
+        "name": "GLM-5",
+        "limit": {
+            "context": 256000,
+            "output": 32000,
+        },
         "capabilities": {
             "input": {"text": True},
             "output": {"text": True},
@@ -27,7 +51,7 @@ SUPPORTED_MODELS = {
     },
 }
 
-DEFAULT_MODEL_ID = "Qwen3.5-397B-A17B"
+DEFAULT_MODEL_ID = "MiniMax-2.5"
 
 
 def resolve_default_base_url() -> str:

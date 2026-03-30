@@ -30,7 +30,6 @@ export function modelEquals(a: ModelRef, b: ModelRef) {
 
 const RETIRED_MODEL_REFS = new Set([
   "my-company/Kimi-K2.5",
-  "my-company/GLM-5",
 ]);
 
 export function isRetiredModel(model: ModelRef) {

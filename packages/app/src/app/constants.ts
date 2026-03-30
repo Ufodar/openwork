@@ -9,7 +9,7 @@ export const HIDE_TITLEBAR_PREF_KEY = "openwork.hideTitlebar";
 
 export const DEFAULT_MODEL: ModelRef = {
   providerID: "my-company",
-  modelID: "Qwen3.5-397B-A17B",
+  modelID: "MiniMax-2.5",
 };
 
 export const SUGGESTED_PLUGINS: SuggestedPlugin[] = [

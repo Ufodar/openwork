@@ -29,21 +29,20 @@ test("recover-pod-runtime help documents no-build recovery intent", () => {
   assert.match(result.stdout, /OPENWORK_SERVER_HEALTH_TIMEOUT_SECONDS=60/);
 });
 
-test("pod restart and recovery scripts default managed OpenCode source to downloaded", () => {
+test("pod restart and recovery scripts default managed OpenCode source to external when a healthy opencode binary is available", () => {
   const restartScript = readFileSync(new URL("./restart-pod.sh", import.meta.url), "utf8");
   const recoverScript = readFileSync(new URL("./recover-pod-runtime.sh", import.meta.url), "utf8");
   const startScript = readFileSync(new URL("./start-pod.sh", import.meta.url), "utf8");
-  const externalFallbackRegex = new RegExp(
+  const externalFromPathRegex = new RegExp(
     String.raw`elif \[ -n "\$\{OPENWORK_OPENCODE_BIN:-\}" \] \|\| command -v opencode >/dev/null 2>&1; then\s+requested="external"`,
   );
-  const explicitBinRegex = new RegExp(String.raw`elif \[ -n "\$\{OPENWORK_OPENCODE_BIN:-\}" \]; then\s+requested="external"`);
-  const downloadedDefaultRegex = new RegExp(String.raw`else\s+requested="downloaded"`);
+  const externalDefaultRegex = new RegExp(String.raw`OPENWORK_POD_OPENCODE_SOURCE="\$\{OPENWORK_POD_OPENCODE_SOURCE:-external\}"`);
+  const downloadedFallbackRegex = new RegExp(String.raw`else\s+requested="downloaded"`);
 
-  assert.match(startScript, /OPENWORK_POD_OPENCODE_SOURCE="\$\{OPENWORK_POD_OPENCODE_SOURCE:-downloaded\}"/);
-  assert.match(recoverScript, /OPENWORK_POD_OPENCODE_SOURCE="\$\{OPENWORK_POD_OPENCODE_SOURCE:-downloaded\}"/);
-  assert.doesNotMatch(restartScript, externalFallbackRegex);
-  assert.match(restartScript, explicitBinRegex);
-  assert.match(restartScript, downloadedDefaultRegex);
+  assert.match(startScript, externalDefaultRegex);
+  assert.match(recoverScript, externalDefaultRegex);
+  assert.match(restartScript, externalFromPathRegex);
+  assert.match(restartScript, downloadedFallbackRegex);
 });
 
 test("restart-pod launches long-lived services under detached sessions with stable log files", () => {

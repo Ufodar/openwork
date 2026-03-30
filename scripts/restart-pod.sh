@@ -24,8 +24,8 @@ export PATH="$HOME/.bun/bin:$HOME/.opencode/bin:$HOME/.local/bin:$PATH"
 export OPENWORK_SESSION_RUNTIME_MODE="${OPENWORK_SESSION_RUNTIME_MODE:-process}"
 export OPENWORK_MAX_ACTIVE_SESSION_RUNTIMES="${OPENWORK_MAX_ACTIVE_SESSION_RUNTIMES:-30}"
 export OPENWORK_SESSION_RUNTIME_IDLE_TTL_MS="${OPENWORK_SESSION_RUNTIME_IDLE_TTL_MS:-28800000}"
-# Keep hosted pod restarts on the last verified-good downloaded OpenCode
-# sidecar unless the operator explicitly overrides OPENCODE_VERSION.
+# Keep the downloaded OpenCode sidecar available as a fallback, but prefer a
+# healthy external opencode binary already installed on the pod.
 export OPENCODE_VERSION="${OPENCODE_VERSION:-1.3.2}"
 
 is_truthy() {
@@ -814,7 +814,7 @@ resolve_managed_opencode_source() {
         requested="$OPENWORK_POD_OPENCODE_SOURCE"
     elif [ -n "${OPENWORK_OPENCODE_SOURCE:-}" ]; then
         requested="$OPENWORK_OPENCODE_SOURCE"
-    elif [ -n "${OPENWORK_OPENCODE_BIN:-}" ]; then
+    elif [ -n "${OPENWORK_OPENCODE_BIN:-}" ] || command -v opencode >/dev/null 2>&1; then
         requested="external"
     else
         requested="downloaded"

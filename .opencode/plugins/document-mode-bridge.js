@@ -126,76 +126,25 @@ function classifyWorkspace(rootDir) {
   };
 }
 
-function buildSystemBridge(mode) {
-  const candidates = mode.officeFiles.length ? mode.officeFiles : mode.textFiles;
-  const candidateLine = candidates.length
-    ? `Detected document candidates in workspace (use exact names if you open them): ${candidates.join(", ")}`
-    : "";
-
+function buildSystemBridge() {
   return `<DOCUMENT_MODE_BRIDGE>
-Document mode is active for this workspace because the sampled files look document-heavy (office=${mode.officeCount}, text=${mode.textDocCount}, code=${mode.codeCount}).
-${candidateLine ? `\n${candidateLine}` : ""}
-
-Non-negotiable hosted document guardrails:
 - Never call \`read\` on original \`.docx\`, \`.xlsx\`, \`.pptx\`, or other binary Office files; extract into workspace-local text first, then read the extracted artifact.
-- Never write reopenable document temp outputs to \`/tmp\` or \`/private/tmp\`; keep them under \`<WORKSPACE>/.tmp/system\` or another workspace-local directory from the first command.
-- Before delivery, run \`python3 .opencode/references/check_document_delivery.py --target outputs --target reports\` plus the exact final file path if it lives elsewhere; if the script reports hits, rewrite and regenerate until it passes cleanly.
-- Never point the final delivery sweep at the whole \`.\` tree; runtime \`.opencode/**\` policy files intentionally contain strings like \`example.com\` and will create noisy false positives. \`ls\` or \`glob\` is not a substitute.
-
-Document-native operating rules:
-- Read real files early. Do not stay in planning-only mode for long.
-- If the workspace already contains a likely source document, inspect it before asking the user to upload files or restate facts that can be extracted directly.
-- Prefer exact-path file work and real file evidence over generic writing or organizing skills.
-- If machine-named source files such as \`src-001.docx\` are present, first check for bootstrap state and ready text refs such as \`.worktree/index.json\`, \`.worktree/sources/manifest.json\`, and \`.worktree/text/*.txt\`; if those text refs already exist, read those bootstrap text files before you extract the original binary again.
-- For existing \`.worktree/**\` or other state files, do not call \`write\` as an overwrite shortcut; read the current file first and then update it with \`edit\`. Use \`write\` only when the state file does not exist yet.
-- If a candidate source file is a binary Office document such as \`.docx\`, \`.xlsx\`, or \`.pptx\`, do not call \`read\` on that original file; first extract or convert it into workspace-local Markdown / text under \`<WORKSPACE>/.tmp/system\`, then read the extracted artifact.
-- A failed binary \`read\` on an Office file does not count as progress; reroute immediately to extraction instead of retrying the same read path.
-- Choose the format skill that matches the current authoritative file or target output.
-- Do not call the skill tool merely to "activate" docx, pdf, xlsx, or pptx for ordinary document reads, extraction, conversion, or verification; those document capabilities are already installed in this runtime.
-- Do not use \`external_directory\` or workspace-external absolute paths for normal document discovery, reads, or writes.
-- Before the first extraction or conversion shell command, create \`<WORKSPACE>/.tmp/system\` (or another workspace-local temp directory) and write outputs there directly.
-- Do not "probe" \`/tmp/*\` or \`/private/tmp/*\` first and then recover after a permission error; rewrite the command before execution so reopenable outputs stay inside the workspace.
-- Do not probe parent directories, sibling session folders, or repo-root files when the needed document is not already inside the current workspace; treat that as missing input instead.
-- In normal document sessions, do not use the glob tool once exact candidate paths are known; prefer filtered \`find\` / \`ls\` and then reuse exact workspace-relative paths.
-- In normal hosted document sessions, do not use the grep tool; once you have workspace-local extracted text or Markdown, use \`bash grep -n\`, \`sed -n\`, or targeted \`read\` instead.
-- If you use the skill tool, pass an exact installed skill name for a genuinely different workflow such as doc-coauthoring or doc-normalize.
-- Never call the skill tool with a generic label like "document expert", "writing expert", or an empty name.
-- If the task spans formats, handle one sub-step at a time and switch formats by stage.
-- Identify the authoritative source hierarchy before drafting.
-- Keep one stable target document instead of creating many drifting variants.
-- Persist reusable state in workspace files instead of relying on short-term chat memory.
-
-Whole-document quality rules:
-- For Word documents, you must use real Word heading semantics for headings instead of manual numeric prefixes such as \`1.\`, \`1.1\`, or \`一、\`.
-- For Word documents, you must use real numbering or bullet structure for lists instead of manually typed prefixes.
-- When the target document already has styles, numbering, paragraph spacing, or table rules, reuse that structure instead of inventing a new format.
-- If a block's role is ambiguous, inherit the nearest equivalent heading, list, or body style instead of improvising a visual clone.
-- Before major edits to a long document, reread the title, outline, adjacent sections, and current conclusions.
-- Local edits must preserve global logic, terminology, numbering, cross-references, and section dependencies.
-- Before claiming a whole document is done, reread the whole document or a faithful extracted representation.
-- Use /doc-normalize for full-document normalization instead of hiding that work inside ordinary drafting or revision turns.
-
-Process routing:
-- Use writing-plans only for clearly multi-round, multi-file, or multi-output tasks.
-- Use systematic-debugging only after repeated failure, environment mismatch, or conflicting results.
-- Use verification-before-completion only before claiming completion, verification, or delivery.
-- Do not auto-route to generic brainstorming or generic writing skills unless the user explicitly asks for that kind of help after real-file review.
+- Keep reopenable temp artifacts under \`<WORKSPACE>/.tmp/system\`, and keep persisted state plus final deliverables inside \`<WORKSPACE>\`; do not treat workspace-external paths or \`external_directory\` as the normal document I/O path.
+- If bootstrap state or text refs such as \`.worktree/index.json\`, \`.worktree/sources/manifest.json\`, or \`.worktree/text/*.txt\` already exist, read them before extracting the original binary again.
+- Before delivery, run \`python3 .opencode/references/check_document_delivery.py --target outputs --target reports\` plus the exact final file path if it lives elsewhere, and do not point the sweep at the whole \`.\` tree.
 </DOCUMENT_MODE_BRIDGE>`;
 }
 
-function buildCompactionBridge(mode) {
+function buildCompactionBridge() {
   return `## Document Session Continuation Contract
-This workspace currently looks document-heavy (office=${mode.officeCount}, text=${mode.textDocCount}, code=${mode.codeCount}).
-
 When summarizing for continuation, preserve if present:
 - the authoritative source files and the stable target document
-- the current stage: intake, authority resolution, extraction, revision, coherence check, or delivery
-- canonical filenames and workspace-relative paths
-- state files already written, such as requirements.csv, .worktree/index.json, .worktree/conventions.md, .worktree/sources/*.json, .worktree/facts.json, .worktree/merge/conflicts.json, .worktree/plan/solution-plan.json, .worktree/coverage.json, and reports/*
-- the current outline, section dependencies, terminology commitments, and unresolved cross-section issues
-- unresolved blockers, TBD facts, and the single best next action
+- the current stage
+- state files already written
+- unresolved blockers and open questions
+- the single best next action
 
-Do not collapse exact filenames, paths, document roles, or open coherence issues into vague summaries.`;
+Do not collapse exact filenames, target paths, or blockers into vague summaries.`;
 }
 
 function appendSystemPrompt(output, prompt) {
@@ -222,12 +171,12 @@ export const DocumentModeBridge = async ({ directory }) => {
     "experimental.chat.system.transform": async (_input, output) => {
       const mode = classify();
       if (!mode.documentLikely) return;
-      appendSystemPrompt(output, buildSystemBridge(mode));
+      appendSystemPrompt(output, buildSystemBridge());
     },
     "experimental.session.compacting": async (_input, output) => {
       const mode = classify();
       if (!mode.documentLikely) return;
-      (output.context ||= []).push(buildCompactionBridge(mode));
+      (output.context ||= []).push(buildCompactionBridge());
     },
   };
 };

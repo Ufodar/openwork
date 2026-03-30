@@ -99,7 +99,9 @@ describe("proxyOpencodeRequest session creation", () => {
     expect(parsed.instructions).toContain(".opencode/openwork-runtime.md");
     expect(parsed.instructions ?? []).not.toContain(".opencode/openwork-knowledge.md");
     expect(parsed.instructions ?? []).not.toContain(".opencode/doc-state.md");
+    expect(runtimeInstructionRaw).toContain("Minimal runtime contract:");
     expect(runtimeInstructionRaw).toContain("<WORKSPACE>/.tmp/system");
+    expect(runtimeInstructionRaw).toContain("external_directory");
     expect(parsed.mcp?.doc_state).toBeUndefined();
     expect(await exists(join(runtime?.runtimeDir ?? "", ".tmp", "system"))).toBe(true);
     await expect(readFile(join(runtime?.runtimeDir ?? "", ".opencode", "openwork-knowledge.md"), "utf8")).rejects.toThrow();
@@ -150,8 +152,9 @@ describe("proxyOpencodeRequest session creation", () => {
     expect(parsed.instructions).toContain(".opencode/openwork-runtime.md");
     expect(parsed.instructions).toContain(".opencode/doc-state.md");
     expect(parsed.instructions ?? []).not.toContain(".opencode/openwork-knowledge.md");
-    expect(runtimeInstructionRaw).toContain("workspace-local temp directory");
-    expect(docStateInstructionRaw).toContain("doc_state_state_get_brief");
+    expect(runtimeInstructionRaw).toContain("Minimal runtime contract:");
+    expect(docStateInstructionRaw).toContain("The `.worktree/**` files remain the source of truth");
+    expect(docStateInstructionRaw).not.toContain("doc_state_state_get_brief");
     await expect(readFile(join(runtime?.runtimeDir ?? "", ".opencode", "openwork-knowledge.md"), "utf8")).rejects.toThrow();
   });
 

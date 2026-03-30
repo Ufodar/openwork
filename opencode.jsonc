@@ -1,8 +1,5 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "instructions": [
-    ".opencode/references/doc-state-schema.md"
-  ],
   "permission": "allow",
   "agent": {
     "document-writer": {
@@ -98,7 +95,7 @@
       "color": "#6366F1",
       "prompt": "{file:./.opencode/agent/common-work.md}",
       "permission": {
-        "task": "deny",
+        "task": "allow",
         "read": {
           "*": "allow"
         },
@@ -280,8 +277,7 @@
           "**/.bid/**": "allow",
           "requirements.csv": "allow",
           "**/requirements.csv": "allow",
-          "reports/**": "allow"
-          ,
+          "reports/**": "allow",
           "**/reports/**": "allow"
         },
         "list": {
@@ -374,8 +370,7 @@
           "**/*.md": "allow",
           ".worktree/coverage.json": "allow",
           "**/.worktree/coverage.json": "allow",
-          "reports/doc-writer/**": "allow"
-          ,
+          "reports/doc-writer/**": "allow",
           "**/reports/doc-writer/**": "allow"
         },
         "edit": {
@@ -390,8 +385,7 @@
           "**/*.md": "allow",
           ".worktree/coverage.json": "allow",
           "**/.worktree/coverage.json": "allow",
-          "reports/doc-writer/**": "allow"
-          ,
+          "reports/doc-writer/**": "allow",
           "**/reports/doc-writer/**": "allow"
         },
         "bash": "allow",
@@ -451,16 +445,14 @@
           "*": "deny",
           ".worktree/verify/coverage.json": "allow",
           "**/.worktree/verify/coverage.json": "allow",
-          "reports/doc-verifier/**": "allow"
-          ,
+          "reports/doc-verifier/**": "allow",
           "**/reports/doc-verifier/**": "allow"
         },
         "edit": {
           "*": "deny",
           ".worktree/verify/coverage.json": "allow",
           "**/.worktree/verify/coverage.json": "allow",
-          "reports/doc-verifier/**": "allow"
-          ,
+          "reports/doc-verifier/**": "allow",
           "**/reports/doc-verifier/**": "allow"
         },
         "bash": "allow",

@@ -92,11 +92,11 @@ describe("provisionSessionWorkspace", () => {
     expect(await exists(join(result.runtimeDir, ".opencode", "skills", "docx", "SKILL.md"))).toBe(true);
     expect(runtimeConfig.model).toBe("test");
     expect(runtimeConfig.instructions).toContain(".opencode/openwork-runtime.md");
+    expect(runtimeInstructionRaw).toContain("Minimal runtime contract:");
     expect(runtimeInstructionRaw).toContain("<WORKSPACE>/.tmp/system");
-    expect(runtimeInstructionRaw).toContain("Before the first extraction or conversion shell command");
-    expect(runtimeInstructionRaw).toContain("Do not first try `/tmp/*.md`, `/tmp/*.txt`, `/tmp/*.xml`");
-    expect(runtimeInstructionRaw).toContain("copy or re-emit the needed artifact into `<WORKSPACE>/.tmp/system/`");
-    expect(runtimeInstructionRaw).toContain("Treat `/tmp/*` and `/private/tmp/*` as shell-only transient paths");
+    expect(runtimeInstructionRaw).toContain("Keep persisted state, user-visible deliverables");
+    expect(runtimeInstructionRaw).toContain("Treat system temp paths such as `/tmp/*` and `/private/tmp/*` as shell-local only");
+    expect(runtimeInstructionRaw).toContain("Do not rely on workspace-external absolute paths or `external_directory`");
   });
 
   test("prunes runtime skills and unrelated MCP entries for document-agent sessions", async () => {
@@ -423,9 +423,8 @@ describe("provisionSessionWorkspace", () => {
     expect(parsed.instructions).toContain(".opencode/openwork-knowledge.md");
     expect(instructionRaw).toContain("openwork_knowledge_search");
     expect(instructionRaw).toContain("Attached knowledge count: 0");
-    expect(instructionRaw).toContain("do not call `openwork_knowledge_search`");
-    expect(instructionRaw).toContain("Never use `memory_search_nodes` or `memory_read_graph`");
-    expect(instructionRaw).toContain("do not use `memory_search_nodes` or `memory_read_graph` as a substitute for knowledge retrieval");
+    expect(instructionRaw).toContain("If no knowledge bases are attached, or attached knowledge is insufficient");
+    expect(instructionRaw).toContain("Do not use `memory_search_nodes` or `memory_read_graph` as a substitute for attached knowledge retrieval");
     expect(instructionRaw).toContain("(none attached yet; do not substitute session memory for knowledge retrieval)");
   });
 
@@ -472,8 +471,9 @@ describe("provisionSessionWorkspace", () => {
     });
     expect(parsed.instructions).toContain(".opencode/openwork-runtime.md");
     expect(parsed.instructions).toContain(".opencode/doc-state.md");
-    expect(instructionRaw).toContain("doc_state_state_get_brief");
-    expect(instructionRaw).toContain("doc_state_state_get_facts");
+    expect(instructionRaw).toContain("The `.worktree/**` files remain the source of truth");
+    expect(instructionRaw).not.toContain("doc_state_state_get_brief");
+    expect(instructionRaw).not.toContain("doc_state_state_get_facts");
   });
 
   test("updates the runtime knowledge instructions with the current attached titles", async () => {
@@ -521,7 +521,7 @@ describe("provisionSessionWorkspace", () => {
     expect(parsed.mcp?.memory).toBeUndefined();
     expect(instructionRaw).toContain("商业资质库");
     expect(instructionRaw).toContain("Attached knowledge count: 1");
-    expect(instructionRaw).toContain("If attachments changed earlier in the conversation");
+    expect(instructionRaw).toContain("rerun knowledge search if the active attachments changed earlier in the conversation");
     expect(instructionRaw).toContain("knowledge_id=kb_alpha");
     expect(instructionRaw).toContain("owner=alice");
   });

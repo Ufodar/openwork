@@ -170,8 +170,6 @@
         "list": true,
         "glob": true,
         "bash": true,
-        "write": true,
-        "edit": true,
         "skill": true
       },
       "permission": {
@@ -181,14 +179,6 @@
         },
         "list": "allow",
         "glob": "allow",
-        "write": {
-          "*": "deny",
-          ".worktree/sources/*.json": "allow"
-        },
-        "edit": {
-          "*": "deny",
-          ".worktree/sources/*.json": "allow"
-        },
         "bash": "allow",
         "skill": {
           "*": "deny",

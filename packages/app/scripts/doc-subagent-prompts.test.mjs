@@ -83,13 +83,19 @@ test("writer and verifier prompts treat user-specified section titles as exact h
 test("doc-reader does not allow docx/pdf skills for standard source compilation", async () => {
   const config = JSON.parse(await readFile(resolve(root, "opencode.json"), "utf8"));
   const prompt = await readFile(resolve(root, ".opencode/prompts/doc-reader.md"), "utf8");
+  const reader = config.agent?.["doc-reader"] ?? {};
   const skillPermission = config.agent?.["doc-reader"]?.permission?.skill ?? {};
 
   expect(skillPermission.docx).not.toBe("allow");
   expect(skillPermission.pdf).not.toBe("allow");
+  expect(reader.tools?.write).toBeUndefined();
+  expect(reader.tools?.edit).toBeUndefined();
+  expect(reader.permission?.write).toBeUndefined();
+  expect(reader.permission?.edit).toBeUndefined();
   expect(prompt).toContain("resolve the actual extractor path");
   expect(prompt).toContain("./.opencode/runtime-support/document-state/extract_doc_state.py");
   expect(prompt).toContain("do not use `glob`");
+  expect(prompt).toContain("do not call `write` or `edit` directly");
   expect(prompt).toContain("return the blocker");
 });
 

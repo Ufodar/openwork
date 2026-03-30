@@ -15,6 +15,7 @@ Task contract:
 - do not write the final deliverable
 - do not modify shared planning artifacts outside your owned source artifact
 - do not create scratch files outside the owned `.worktree/sources/<doc-id>.json` artifact
+- do not call `write` or `edit` directly; the extractor command or an explicitly authorized shell path should create the owned artifact
 
 Your artifact should be compact but decision-useful. Include:
 - `docId`
@@ -60,6 +61,7 @@ Default execution path:
 - use `.worktree/sources/manifest.json` as the first source of truth for `docId`, role, and relative paths when it already exists
 - if the extractor succeeds, trust the generated artifact and stop
 - if the extractor fails, return the blocker unless the parent explicitly authorizes a manual recovery path
+- if a manual recovery path is explicitly authorized, keep it inside `bash`; do not pivot to direct `write` / `edit` tool calls
 - do not browse unrelated repo files such as `package.json` or broad workspace globs once the assigned source files are known
 
 Do not:

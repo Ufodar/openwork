@@ -172,6 +172,42 @@ kill_by_pattern() {
     kill_pids_gracefully "$reason" "${pids[@]}"
 }
 
+count_pattern_matches() {
+    local pattern="$1"
+    local count
+    count="$(pgrep -fc "$pattern" 2>/dev/null || true)"
+    if [ -z "$count" ]; then
+        count="0"
+    fi
+    printf '%s\n' "$count"
+}
+
+log_leak_counts() {
+    local stage="$1"
+    local opencode_serve_count="$2"
+    local opencode_tui_count="$3"
+    local bocha_uv_count="$4"
+    local bocha_python_count="$5"
+    echo "[restart-pod] Leak counts ${stage}: opencode serve=${opencode_serve_count} opencode -s=${opencode_tui_count} bocha uv=${bocha_uv_count} bocha python=${bocha_python_count}"
+}
+
+ensure_pattern_drained() {
+    local reason="$1"
+    local pattern="$2"
+    local remaining
+    remaining="$(count_pattern_matches "$pattern")"
+    if [ "$remaining" -eq 0 ]; then
+        return 0
+    fi
+
+    echo "[restart-pod] ${reason} still present after cleanup (${remaining}); retrying..."
+    kill_by_pattern "${reason} retry" "$pattern"
+    remaining="$(count_pattern_matches "$pattern")"
+    if [ "$remaining" -ne 0 ]; then
+        echo "[restart-pod] Warning: ${reason} still present after forced cleanup (${remaining})." >&2
+    fi
+}
+
 kill_by_port() {
     local port="$1"
     local pids=()
@@ -939,6 +975,20 @@ wait_for_runtime_drain
 RUNTIME_KILL_PHASE_STARTED="1"
 echo "[restart-pod] Killing old processes..."
 
+BOCHA_MCP_DIR_RESOLVED="${BOCHA_MCP_DIR:-$HOME/.config/openwork/bocha-search-mcp}"
+BOCHA_MCP_DIR_PATTERN="$(printf '%s' "$BOCHA_MCP_DIR_RESOLVED" | sed 's/[][(){}.^$+?*|\\/]/\\&/g')"
+BOCHA_UV_PATTERN="uv --directory ${BOCHA_MCP_DIR_PATTERN} run bocha-search-mcp"
+BOCHA_PYTHON_PATTERN="${BOCHA_MCP_DIR_PATTERN}/\\.venv/bin/python .*bocha-search-mcp"
+OPENCODE_SERVE_PATTERN="opencode serve --hostname"
+OPENCODE_TUI_PATTERN="opencode -s "
+
+log_leak_counts \
+    "before cleanup" \
+    "$(count_pattern_matches "$OPENCODE_SERVE_PATTERN")" \
+    "$(count_pattern_matches "$OPENCODE_TUI_PATTERN")" \
+    "$(count_pattern_matches "$BOCHA_UV_PATTERN")" \
+    "$(count_pattern_matches "$BOCHA_PYTHON_PATTERN")"
+
 # Kill known process signatures first (more reliable than port-only cleanup).
 kill_by_pattern "dev-headless-web wrapper" "bun scripts/dev-headless-web.ts"
 kill_by_pattern "openwork orchestrator for this workspace" "openwork-orchestrator.*start.*--workspace[ =]$PROJECT_DIR"
@@ -951,16 +1001,31 @@ kill_by_pattern "compiled opencode-router" "$PROJECT_DIR/packages/opencode-route
 kill_by_pattern "orchestrator opencode sidecar" "/openwork-orchestrator/sidecars/opencode/.*/opencode serve"
 # Failed recoveries can leave detached opencode serves behind. Clear them before
 # restarting so stale daemons do not pollute later health checks.
-kill_by_pattern "generic opencode serve" "opencode serve --hostname"
+kill_by_pattern "generic opencode serve" "$OPENCODE_SERVE_PATTERN"
+kill_by_pattern "interactive opencode tui" "$OPENCODE_TUI_PATTERN"
+kill_by_pattern "bocha-search-mcp uv launcher" "$BOCHA_UV_PATTERN"
+kill_by_pattern "bocha-search-mcp python worker" "$BOCHA_PYTHON_PATTERN"
 
 # Port-level fallback cleanup.
 for p in "$OPENWORK_PORT" "$PORT" "$OPENWORK_WEB_PORT" "$OPENWORK_PUBLIC_WEB_PORT" 8789 5173 32765; do
     kill_by_port "$p"
 done
 
+ensure_pattern_drained "generic opencode serve" "$OPENCODE_SERVE_PATTERN"
+ensure_pattern_drained "interactive opencode tui" "$OPENCODE_TUI_PATTERN"
+ensure_pattern_drained "bocha-search-mcp uv launcher" "$BOCHA_UV_PATTERN"
+ensure_pattern_drained "bocha-search-mcp python worker" "$BOCHA_PYTHON_PATTERN"
+
 for p in "$OPENWORK_PORT" "$PORT" "$OPENWORK_WEB_PORT" "$OPENWORK_PUBLIC_WEB_PORT" 8789 5173 32765; do
     ensure_port_free "$p"
 done
+
+log_leak_counts \
+    "after cleanup" \
+    "$(count_pattern_matches "$OPENCODE_SERVE_PATTERN")" \
+    "$(count_pattern_matches "$OPENCODE_TUI_PATTERN")" \
+    "$(count_pattern_matches "$BOCHA_UV_PATTERN")" \
+    "$(count_pattern_matches "$BOCHA_PYTHON_PATTERN")"
 
 sleep 1
 

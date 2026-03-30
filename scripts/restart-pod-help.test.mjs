@@ -73,3 +73,20 @@ test("restart-pod releases cleanup traps after health checks succeed", () => {
   assert.match(restartScript, /trap - EXIT INT TERM/);
   assert.match(restartScript, /WEB_PID=""\s+PUBLIC_WEB_PID=""\s+ORCHESTRATOR_PID=""\s+exit 0/s);
 });
+
+test("restart-pod cleans leaked bocha and interactive opencode processes and logs leak counts", () => {
+  const restartScript = readFileSync(new URL("./restart-pod.sh", import.meta.url), "utf8");
+
+  assert.match(restartScript, /kill_by_pattern "bocha-search-mcp uv launcher"/);
+  assert.match(restartScript, /BOCHA_UV_PATTERN="uv --directory \$\{BOCHA_MCP_DIR_PATTERN\} run bocha-search-mcp"/);
+  assert.match(restartScript, /kill_by_pattern "bocha-search-mcp python worker"/);
+  assert.match(restartScript, /BOCHA_PYTHON_PATTERN=".*bocha-search-mcp"/);
+  assert.match(restartScript, /OPENCODE_TUI_PATTERN="opencode -s "/);
+  assert.match(restartScript, /kill_by_pattern "interactive opencode tui" "\$OPENCODE_TUI_PATTERN"/);
+  assert.match(restartScript, /log_leak_counts\s+\\\s+"before cleanup"/s);
+  assert.match(restartScript, /log_leak_counts\s+\\\s+"after cleanup"/s);
+  assert.match(restartScript, /opencode serve=/);
+  assert.match(restartScript, /opencode -s=/);
+  assert.match(restartScript, /bocha uv=/);
+  assert.match(restartScript, /bocha python=/);
+});

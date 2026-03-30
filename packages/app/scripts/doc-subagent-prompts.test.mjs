@@ -369,6 +369,10 @@ test("common-work prefers search-backed authoritative sources over guessed aggre
   expect(prompt).toContain("只有在用户明确允许的情况下");
   expect(prompt).toContain("明确记录 blocker");
   expect(prompt).toContain("不要把低权威背景材料混成主依据");
+  expect(prompt).toContain("不要把搜索结果页的标题、摘要或 snippet 直接当成可引用依据");
+  expect(prompt).toContain("如果第一批搜索结果大多数是博客、专利解析站、聚合转载页");
+  expect(prompt).toContain("不要马上宣布“资料已经足够”");
+  expect(prompt).toContain("先改写成更窄的官方 / 标准 / 厂商一手资料查询");
   expect(prompt).toContain("不要静默切回“基于常识先写一版”");
   expect(prompt).toContain("如果本地源文档已经覆盖了当前写作阶段所需的大部分事实");
   expect(prompt).toContain("只有在你能明确说出“当前还缺哪一个事实/标准/API 细节”时");

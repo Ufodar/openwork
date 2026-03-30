@@ -77,8 +77,11 @@ find . -maxdepth 3 -type f \( -iname '*.docx' -o -iname '*.doc' -o -iname '*.pdf
 - `.xlsx/.xls/.csv/.tsv` → `xlsx`
 - `.pptx` → `pptx`
 
-这里的“使用对应格式能力”指按该格式的已安装工作方法处理，不等于每次都要先单独调用 `skill` 工具。
+这里的“使用对应格式能力”指按该格式的已安装工作方法处理，不等于每次都要先单独调用 `skill` 工具，也不保证当前 runtime 一定存在同名 tool。
+不要直接尝试调用名为 `docx`、`pdf`、`xlsx`、`pptx` 的 tool，除非当前可用工具列表里真的出现了该 tool；如果没有，就把这些名字理解成格式处理路线，改走当前 session 已暴露的 `bash` / `read` / `write` / `skill` 等真实工具。
 在 hosted 文档 session 里，不要为了“激活一下” `docx` / `pdf` / `xlsx` / `pptx` 而先调用 `skill`；普通读取、提取、转换、核查优先直接走精确路径、workspace 内中间产物以及现有 `bash` / `read` 路线。
+对 `.docx` 做只读提取时，如果 `pandoc` 可用，先直接使用 `mkdir -p <WORKSPACE>/.tmp/system && pandoc <input>.docx -t plain -o <WORKSPACE>/.tmp/system/<name>.txt` 或等价的 workspace 内提取命令；只有 `pandoc` 失败、提取内容明显缺失，或你确实需要额外表格/结构保真时，才再切到 `python-docx`、现有 helper 或其他后备路线。
+如果 `pandoc`、`python-docx` 或现有 helper 已经可用，不要先手写新的 `extract_docx.py`、`extract_pdf.py` 或其他临时提取脚本；优先使用现成工具，只有这些直接路线都不满足当前提取目标时才写最小 helper。
 
 一次只围绕当前阶段最关键的一个格式工作。跨格式任务按阶段切换，不要一上来加载一堆 skill。
 

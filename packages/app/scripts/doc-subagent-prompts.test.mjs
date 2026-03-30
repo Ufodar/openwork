@@ -315,6 +315,16 @@ test("common-work prefers markdown-plus-pandoc over giant js generators for long
   expect(prompt).toContain("不要直接拼接超长 JS 字符串");
 });
 
+test("common-work treats docx/pdf labels as routes instead of literal tool names and prefers direct extraction before custom scripts", async () => {
+  const prompt = await readFile(resolve(root, ".opencode/agent/common-work.md"), "utf8");
+
+  expect(prompt).toContain("不保证当前 runtime 一定存在同名 tool");
+  expect(prompt).toContain("不要直接尝试调用名为 `docx`、`pdf`、`xlsx`、`pptx` 的 tool");
+  expect(prompt).toContain("如果 `pandoc` 可用，先直接");
+  expect(prompt).toContain("pandoc <input>.docx -t plain -o <WORKSPACE>/.tmp/system/<name>.txt");
+  expect(prompt).toContain("不要先手写新的 `extract_docx.py`");
+});
+
 test("common-work defaults to shipping both markdown source and docx for formal prose deliverables when docx is acceptable", async () => {
   const prompt = await readFile(resolve(root, ".opencode/agent/common-work.md"), "utf8");
 

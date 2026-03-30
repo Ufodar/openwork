@@ -8,6 +8,7 @@ import type { SessionViewProps } from "./session";
 import OnlyOfficeEditor from "../components/onlyoffice-editor";
 import MessageList from "../components/session/message-list";
 import Composer from "../components/session/composer";
+import QuestionModal from "../components/question-modal";
 import SessionKnowledgeSurface from "../components/session/session-knowledge-surface";
 import ToolMonitorPanel from "../components/tool-monitor/tool-monitor-panel";
 import { shouldShowDocumentAgentChatLoading } from "../lib/document-agent-loading";
@@ -2654,6 +2655,18 @@ export default function DocumentAgentView(props: SessionViewProps) {
           onMouseUp={() => paneResizeCleanup?.()}
         />
       </Show>
+
+      <QuestionModal
+        open={Boolean(props.activeQuestion)}
+        questions={props.activeQuestion?.questions ?? []}
+        busy={props.questionReplyBusy}
+        onClose={() => { }}
+        onReply={(answers) => {
+          if (props.activeQuestion) {
+            props.respondQuestion(props.activeQuestion.id, answers);
+          }
+        }}
+      />
     </div>
   );
 }

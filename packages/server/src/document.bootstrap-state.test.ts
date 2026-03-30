@@ -175,9 +175,9 @@ test("records a workspace-local text extract for supported uploaded sources", as
         "-t",
         "plain",
         "-o",
-        join(runtimeDir, ".worktree", "sources", "text", "doc-src-001.txt"),
+        join(runtimeDir, ".worktree", "text", "src-001.txt"),
       ]);
-      writeFileSync(join(runtimeDir, ".worktree", "sources", "text", "doc-src-001.txt"), "extracted plain text\n", "utf8");
+      writeFileSync(join(runtimeDir, ".worktree", "text", "src-001.txt"), "extracted plain text\n", "utf8");
       return {
         status: 0,
         stdout: "",
@@ -190,10 +190,10 @@ test("records a workspace-local text extract for supported uploaded sources", as
   expect(manifest.sources).toHaveLength(1);
   expect(manifest.sources[0]).toMatchObject({
     relativePath: "src-001.docx",
-    textRelativePath: ".worktree/sources/text/doc-src-001.txt",
+    textRelativePath: ".worktree/text/src-001.txt",
     textStatus: "ready",
     textExtractor: "pandoc",
   });
-  expect(await readFile(join(runtimeDir, ".worktree", "sources", "text", "doc-src-001.txt"), "utf8")).toContain("extracted plain text");
+  expect(await readFile(join(runtimeDir, ".worktree", "text", "src-001.txt"), "utf8")).toContain("extracted plain text");
 });
 });

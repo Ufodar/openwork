@@ -407,8 +407,19 @@ function buildBootstrapProjectName(sources: Array<Record<string, any>>): string 
     return firstTitle || "document-workspace";
 }
 
-function buildBootstrapTextRelativePath(docId: string): string {
-    return `${BOOTSTRAP_STATE_DIR}/sources/text/${docId}.txt`;
+function sanitizeBootstrapTextStem(value: string): string {
+    return value
+        .trim()
+        .replace(/[^\p{L}\p{N}._-]+/gu, "-")
+        .replace(/-+/g, "-")
+        .replace(/^[-_.]+|[-_.]+$/g, "");
+}
+
+function buildBootstrapTextRelativePath(input: { relativePath: string; docId: string }): string {
+    const sourceStem = sanitizeBootstrapTextStem(basename(input.relativePath, extname(input.relativePath)));
+    const fallbackStem = sanitizeBootstrapTextStem(input.docId);
+    const stem = sourceStem || fallbackStem || "source";
+    return `${BOOTSTRAP_STATE_DIR}/text/${stem}.txt`;
 }
 
 function buildBootstrapTextExtractionPlan(input: {
@@ -422,7 +433,7 @@ function buildBootstrapTextExtractionPlan(input: {
     copySource: boolean;
 } | null {
     const extension = extname(input.relativePath).toLowerCase();
-    const textRelativePath = buildBootstrapTextRelativePath(input.docId);
+    const textRelativePath = buildBootstrapTextRelativePath(input);
     if (BOOTSTRAP_DIRECT_TEXT_EXTENSIONS.has(extension)) {
         return {
             textRelativePath,

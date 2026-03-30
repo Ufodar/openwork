@@ -3845,3 +3845,156 @@ Decision:
   - remove unnecessary `task` latitude from `common-work`
   - make `document-writer`'s task schema explicit for Qwen
 - do not touch the session isolation / runtime support / skill boundary architecture while addressing this
+
+## 2026-03-30 13:00+08:00 Qin sample rerun after hosted docx extraction routing clarification
+
+Goal:
+- verify the fresh-session browser regression is actually fixed on the live pod
+- rerun the Qin sample after narrowing `common-work`'s hosted `.docx` extraction contract
+- distinguish real long-task tool failures from transient streamed placeholder parts
+
+Prompt / deployment change under test:
+- local commit:
+  - `21c941b4` `Clarify hosted docx extraction routing`
+- repo change:
+  - `.opencode/agent/common-work.md`
+    - explicitly says `docx/pdf/xlsx/pptx` labels are format routes, not guaranteed literal tool names
+    - forbids directly calling a tool named `docx` unless the runtime actually exposes it
+    - says to prefer direct `pandoc` extraction into `<WORKSPACE>/.tmp/system/`
+    - says not to hand-write `extract_docx.py` / `extract_pdf.py` when `pandoc` / `python-docx` / existing helpers are already available
+- regression test first:
+  - extended `packages/app/scripts/doc-subagent-prompts.test.mjs`
+  - verified red before the prompt edit, then green after it
+- pod sync:
+  - repo on pod fast-forwarded to `21c941b4`
+  - no server rebuild needed because this round changed prompt/test only
+
+Fresh hosted evidence:
+- browser fresh `document-agent` session after the prompt change:
+  - `ses_2c2d2549bffeUEjrIpEeoaSv47`
+- comparison baseline session before this prompt change:
+  - `ses_2c2d96804ffe82NrNVK6bW4bMb`
+
+What was confirmed:
+- the original live-rendering regression is fixed in a fresh session:
+  - the first user message appears immediately without manual refresh
+  - the tool timeline and reasoning timeline also appear immediately
+- the earlier `Invalid Tool: docx` failure path is removed in the fresh rerun
+- the earlier `extract_docx.py` ad-hoc helper path is also removed in the fresh rerun
+
+Observed behavior before the new prompt clarification (`ses_2c2d96804ffe82NrNVK6bW4bMb`):
+- fresh Qin session showed immediate UI rendering, so browser hydration was no longer the blocker
+- `common-work` still made two real route mistakes:
+  1. two `invalid` tool calls because the model tried to call unavailable tool `docx`
+  2. after that it wrote `.tmp/system/extract_docx.py` and used the temp helper to extract `src-001.docx` / `src-002.docx`
+- some later `read` / `bash` parts showed up first as `pending` with empty input, but then resolved into concrete tool calls
+  - this means not every empty pending part is a terminal failure; some are just streamed placeholders
+
+Observed behavior after the new prompt clarification (`ses_2c2d2549bffeUEjrIpEeoaSv47`):
+- first steps:
+  - `bash: ls -la`
+  - `bash: mkdir -p .../.tmp/system`
+  - `read: .worktree/index.json`
+  - `read: .worktree/sources/manifest.json`
+- the bad `docx` invalid-tool calls no longer appeared
+- the old `extract_docx.py` helper write no longer appeared
+- however the model still did not fully obey the preferred extraction route:
+  - it later attempted an inline `python3 -c ...` extraction command for `src-001.docx`
+  - the command shown in the timeline started with `python3 -c " import zipfile ...`
+
+Interpretation:
+- the live browser/session issue is now a confirmed fix, not just a stale-tab artifact
+- the filename-stability fix and the prompt clarification together removed two concrete failure classes:
+  - filename hallucination
+  - invalid `docx` literal tool calls
+- but prompt-only control is still not enough to force the exact preferred extraction path
+- the remaining weakness is now narrower and more architectural:
+  - `common-work` still has too much freedom in how it converts source `.docx` files into readable text
+  - Qwen can still invent an alternate extraction command even when the prompt names a preferred route
+
+Current decision:
+- do not touch session isolation, skill pruning, or runtime boundary design for this
+- treat the next likely product-grade fix as deterministic source extraction, not more generic prompt prose
+- strongest next move would be to precompute or expose a single stable workspace-local text extraction surface for uploaded source documents so `common-work` reads that state instead of inventing per-run extraction methods
+
+## 2026-03-30 13:50+08:00 Qin sample rerun after deterministic bootstrap text-ref audit
+
+Goal:
+- rerun the Qin sample on a fresh hosted `document-agent` session after the browser live-rendering fix
+- verify whether the machine-filename + bootstrap-text-ref path actually removes per-run source extraction detours
+- identify the next remaining obvious blocker after the filename stabilization work
+
+Fresh hosted session under test:
+- `ses_2c2bcaa77ffe6KlF2OtEfG8pys`
+- runtime dir:
+  - `/root/.openwork/user-workspaces/c503a0f6-a558-41f4-8ba4-899eb1ed6923/documents/sessions/884f526d083a407088d85a67bda2b39f`
+
+What the rerun confirmed:
+- the browser/session rendering regression stayed fixed:
+  - the first user message appeared immediately in the chat panel
+  - the live timeline also appeared immediately without refresh
+- the machine filename stabilization stayed effective:
+  - uploaded sources were `src-001.docx` and `src-002.docx`
+  - the agent no longer hallucinated the old long Chinese filenames with stray spaces/punctuation
+
+Critical new finding:
+- the upload/bootstrap layer had already generated deterministic text refs successfully:
+  - `.worktree/sources/manifest.json` contained:
+    - `textRelativePath: ".worktree/sources/text/doc-src-001.txt"`
+    - `textRelativePath: ".worktree/sources/text/doc-src-002.txt"`
+    - `textStatus: "ready"`
+    - `textExtractor: "pandoc"`
+  - the actual files existed under:
+    - `.worktree/sources/text/doc-src-001.txt`
+    - `.worktree/sources/text/doc-src-002.txt`
+- despite that, `common-work` still chose this route:
+  - `mkdir -p .../.tmp/system`
+  - `pandoc src-001.docx -> .tmp/system/src-001.txt`
+  - `pandoc src-002.docx -> .tmp/system/src-002.txt`
+  - `read .tmp/system/src-001.txt`
+  - `read .tmp/system/src-002.txt`
+- therefore the remaining issue was not filename instability anymore
+- the real issue was discoverability:
+  - the precomputed text refs lived too deep under `.worktree/sources/text/**`
+  - the default `find . -maxdepth 3 ...` discovery pattern did not naturally surface them
+  - Qwen therefore kept inventing a new extraction path before it ever touched manifest/state
+
+Second finding from the same rerun:
+- external search authority is still too weak after the local-source stage
+- the first search batch still produced mostly low-authority results such as:
+  - CSDN blog pages
+  - 搜狐转载/门户页
+  - 网易订阅
+- the model did not first narrow toward official / vendor / standard sources before moving on
+
+Product-side fix prepared locally:
+- move bootstrap text refs from deep path:
+  - `.worktree/sources/text/<doc-id>.txt`
+- to a discovery-friendly path:
+  - `.worktree/text/<machine-source-stem>.txt`
+- example:
+  - `src-001.docx` -> `.worktree/text/src-001.txt`
+- this keeps the files inside hidden runtime state, but now they are visible to the default `find -maxdepth 3 ... '*.txt'` discovery pass
+- prompt alignment added in `.opencode/agent/common-work.md`:
+  - if discovery reveals `.worktree/text/*.txt`, treat them as bootstrap text refs and read them before touching binaries
+
+Tests added first:
+- extended `packages/server/src/document.bootstrap-state.test.ts`
+  - now expects bootstrap text extraction to land in `.worktree/text/src-001.txt`
+- extended `packages/app/scripts/doc-subagent-prompts.test.mjs`
+  - now expects `common-work` to explicitly recognize `.worktree/text/*.txt` as a preferred bootstrap text surface
+- verified red before the implementation
+- then updated:
+  - `packages/server/src/document.ts`
+  - `.opencode/agent/common-work.md`
+- re-ran:
+  - `bun test packages/server/src/document.bootstrap-state.test.ts packages/server/src/document.upload-route.test.ts packages/server/src/document.list.test.ts packages/app/scripts/doc-subagent-prompts.test.mjs`
+  - result: pass
+- rebuilt:
+  - `pnpm --filter openwork-server build:bin`
+
+Current decision:
+- keep the fix narrow and architectural:
+  - do not keep adding prose-only extraction reminders
+  - make the precomputed text surface easier for the agent to discover
+- after deployment, rerun the same Qin sample again before touching the search-authority policy further

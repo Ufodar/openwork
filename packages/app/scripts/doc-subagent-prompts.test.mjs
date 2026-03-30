@@ -570,6 +570,7 @@ test("common-work checks bootstrap state before external search and ignores nois
   expect(prompt).toContain("再决定要读哪些本地源文档");
   expect(prompt).toContain("不要在读状态面之前就转去联网搜索");
   expect(prompt).toContain("如果轻量发现已经暴露出 `.worktree/index.json`、`.worktree/sources/manifest.json`");
+  expect(prompt).toContain("`.worktree/text/*.txt`");
   expect(prompt).toContain("下一步优先 `read` 这些状态文件");
   expect(prompt).toContain("不要先去提取 `src-001.docx`、`src-002.pdf` 这类二进制源文档");
   expect(prompt).toContain("如果 bootstrap manifest / source inventory 里的大多数条目落在 `.openwork-runtime`、`.opencode`、`.tmp`");

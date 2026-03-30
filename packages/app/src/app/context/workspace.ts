@@ -125,7 +125,7 @@ export function createWorkspaceStore(options: {
   loadSessions: (scopeRoot?: string) => Promise<void>;
   refreshPendingPermissions: () => Promise<void>;
   selectedSessionId: () => string | null;
-  selectSession: (id: string) => Promise<void>;
+  selectSession: (id: string) => Promise<void | boolean>;
   setSelectedSessionId: (value: string | null) => void;
   setMessages: (value: any[]) => void;
   setTodos: (value: any[]) => void;

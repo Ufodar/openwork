@@ -6956,12 +6956,20 @@ export default function App() {
     const ensureRouteSessionHydrated = (sessionId: string) => {
       const key = `${workspaceStore.activeWorkspaceId()}::${sessionId}`;
       if (selectedSessionId() === sessionId && routeHydratedSessionKey === key) return;
-      routeHydratedSessionKey = key;
       setRouteSessionHydratingId(sessionId);
-      void selectSession(sessionId).finally(() => {
-        if (routeHydratedSessionKey !== key) return;
-        setRouteSessionHydratingId((current) => (current === sessionId ? null : current));
-      });
+      void selectSession(sessionId)
+        .then((hydrated) => {
+          if (!hydrated) return;
+          routeHydratedSessionKey = key;
+        })
+        .catch((error) => {
+          if (import.meta.env?.DEV) {
+            console.error("[route] session hydration failed", error);
+          }
+        })
+        .finally(() => {
+          setRouteSessionHydratingId((current) => (current === sessionId ? null : current));
+        });
     };
 
     if (path === "" || path === "/") {

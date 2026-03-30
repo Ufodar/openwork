@@ -165,7 +165,7 @@ export type SessionViewProps = {
   newTaskDisabled: boolean;
   workspaceSessionGroups: WorkspaceSessionGroup[];
   openRenameWorkspace: (workspaceId: string) => void;
-  selectSession: (sessionId: string) => Promise<void> | void;
+  selectSession: (sessionId: string) => Promise<void | boolean> | void;
   messages: MessageWithParts[];
   todos: TodoItem[];
   busyLabel: string | null;

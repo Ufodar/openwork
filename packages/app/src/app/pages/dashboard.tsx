@@ -246,7 +246,7 @@ export type DashboardViewProps = {
   reloadMcpEngine: () => void;
   createSessionAndOpen: (options?: CreateSessionOptions) => void;
   setPrompt: (value: string) => void;
-  selectSession: (sessionId: string) => Promise<void> | void;
+  selectSession: (sessionId: string) => Promise<void | boolean> | void;
   defaultModelLabel: string;
   defaultModelRef: string;
   openDefaultModelPicker: () => void;

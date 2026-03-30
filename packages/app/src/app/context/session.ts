@@ -28,6 +28,7 @@ import {
   safeStringify,
 } from "../utils";
 import { unwrap } from "../lib/opencode";
+import { isTransientRequestError } from "../lib/request-abort";
 import { finishPerf, perfNow, recordPerfLog } from "../lib/perf-log";
 
 export type SessionModelState = {
@@ -108,6 +109,38 @@ const upsertPartInfo = (list: Part[], next: Part) => {
 };
 
 const removePartInfo = (list: Part[], partID: string) => list.filter((part) => part.id !== partID);
+
+const SESSION_HYDRATION_RETRY_DELAYS_MS = [250, 500] as const;
+
+const getErrorText = (error: unknown) => {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  return safeStringify(error);
+};
+
+const isSessionHydrationRetryableError = (error: unknown) => {
+  if (isTransientRequestError(error)) return true;
+
+  const text = getErrorText(error).trim();
+  if (!text) return false;
+  const lowered = text.toLowerCase();
+
+  if (/\b(?:status|statuscode|code|http)\s*(?:=|:)?\s*(401|403|404|429|500|502|503|504)\b/i.test(text)) {
+    return true;
+  }
+  if (/\b(401|403|404|429|500|502|503|504)\b/.test(text)) {
+    return true;
+  }
+  if (
+    /(unauthorized|forbidden|not found|request timed out|timed out|rate limit|too many requests|service unavailable|bad gateway|gateway timeout|network error|fetch failed|socket hang up|connection refused|eai_again|econnreset|temporarily unavailable|temporary unavailable|server error)/i.test(
+      lowered,
+    )
+  ) {
+    return true;
+  }
+
+  return false;
+};
 
 export function createSessionStore(options: {
   client: () => Client | null;
@@ -470,7 +503,7 @@ export function createSessionStore(options: {
 
   let selectRunCounter = 0;
   let selectVersion = 0;
-  const selectInFlightBySession = new Map<string, Promise<void>>();
+  const selectInFlightBySession = new Map<string, Promise<boolean>>();
 
   const sessions = () => store.sessions;
   const sessionStatusById = () => store.sessionStatus;
@@ -586,7 +619,7 @@ export function createSessionStore(options: {
 
   async function selectSession(sessionID: string) {
     const c = options.client();
-    if (!c) return;
+    if (!c) return false;
 
     const perfEnabled = options.developerMode();
     options.setSelectedSessionId(sessionID);
@@ -622,6 +655,37 @@ export function createSessionStore(options: {
     const run = (async () => {
       mark("start");
 
+      const retryWithBackoff = async <T>(
+        label: string,
+        operation: () => Promise<T>,
+      ): Promise<{ ok: true; value: T } | { ok: false; error: unknown }> => {
+        let lastError: unknown = null;
+        for (let attempt = 1; attempt <= SESSION_HYDRATION_RETRY_DELAYS_MS.length + 1; attempt += 1) {
+          try {
+            return { ok: true, value: await operation() };
+          } catch (error) {
+            lastError = error;
+            const retryable = isSessionHydrationRetryableError(error);
+            mark(`${label} failed`, {
+              attempt,
+              retryable,
+              error: error instanceof Error ? error.message : safeStringify(error),
+            });
+            if (!retryable || attempt > SESSION_HYDRATION_RETRY_DELAYS_MS.length) {
+              break;
+            }
+            const delayMs =
+              SESSION_HYDRATION_RETRY_DELAYS_MS[attempt - 1] ??
+              SESSION_HYDRATION_RETRY_DELAYS_MS[SESSION_HYDRATION_RETRY_DELAYS_MS.length - 1];
+            mark(`${label} retrying`, { attempt, delayMs });
+            await new Promise<void>((resolve) => {
+              setTimeout(resolve, delayMs);
+            });
+          }
+        }
+        return { ok: false, error: lastError };
+      };
+
       const currentSession = store.sessions.find((session) => session.id === sessionID) ?? null;
       const currentDirectory = normalizeDirectoryPath(currentSession?.directory ?? "");
       const currentDirectoryIsRuntime = isSessionRuntimeDirectory(
@@ -641,41 +705,63 @@ export function createSessionStore(options: {
           error: error instanceof Error ? error.message : safeStringify(error),
         });
       }
-      if (abortIfStale("selection changed after health")) return;
+      if (abortIfStale("selection changed after health")) return false;
 
       if (!currentDirectory || !currentDirectoryIsRuntime) {
         mark("calling session.get");
-        try {
-          const info = unwrap(await c.session.get(
-            { sessionID },
-            { signal: AbortSignal.timeout(8_000) },
-          ));
+        const infoResult = await retryWithBackoff("session.get", async () =>
+          unwrap(
+            await c.session.get(
+              { sessionID },
+              { signal: AbortSignal.timeout(8_000) },
+            ),
+          ),
+        );
+        if (infoResult.ok) {
+          const info = infoResult.value;
           mark("session.get done", {
             directory: normalizeDirectoryPath(info?.directory ?? ""),
             reason: !currentDirectory ? "missing-directory" : "non-runtime-directory",
           });
-          if (abortIfStale("selection changed before session applied")) return;
+          if (abortIfStale("selection changed before session applied")) return false;
           setStore("sessions", (current) => upsertSession(current, info));
-        } catch (error) {
+        } else {
           mark("session.get failed/timeout", {
-            error: error instanceof Error ? error.message : safeStringify(error),
+            error:
+              infoResult.error instanceof Error
+                ? infoResult.error.message
+                : safeStringify(infoResult.error),
           });
-          if (abortIfStale("selection changed after session.get failure")) return;
+          if (abortIfStale("selection changed after session.get failure")) return false;
         }
       }
 
       mark("calling session.messages");
-      const msgs = unwrap(await c.session.messages(
-        { sessionID },
-        { signal: AbortSignal.timeout(12_000) },
-      ));
+      const msgsResult = await retryWithBackoff("session.messages", async () =>
+        unwrap(
+          await c.session.messages(
+            { sessionID },
+            { signal: AbortSignal.timeout(12_000) },
+          ),
+        ),
+      );
+      if (!msgsResult.ok) {
+        mark("session.messages failed/timeout", {
+          error:
+            msgsResult.error instanceof Error ? msgsResult.error.message : safeStringify(msgsResult.error),
+        });
+        if (abortIfStale("selection changed after session.messages failure")) return false;
+        addError(msgsResult.error, "Failed to load session messages");
+        return false;
+      }
+      const msgs = msgsResult.value;
       mark("session.messages done");
-      if (abortIfStale("selection changed before messages applied")) return;
+      if (abortIfStale("selection changed before messages applied")) return false;
       setMessagesForSession(sessionID, msgs);
 
       const model = options.lastUserModelFromMessages(msgs);
       if (model) {
-        if (abortIfStale("selection changed before model applied")) return;
+        if (abortIfStale("selection changed before model applied")) return false;
         options.setSessionModelState((current) => ({
           overrides: current.overrides,
           resolved: { ...current.resolved, [sessionID]: model },
@@ -707,13 +793,13 @@ export function createSessionStore(options: {
       ]);
 
       if (todoResult.status === "fulfilled") {
-        if (abortIfStale("selection changed before todos applied")) return;
+        if (abortIfStale("selection changed before todos applied")) return false;
         setStore("todos", sessionID, todoResult.value);
       } else {
         mark("session.todo failed/timeout", {
           error: todoResult.reason instanceof Error ? todoResult.reason.message : safeStringify(todoResult.reason),
         });
-        if (abortIfStale("selection changed before todo fallback")) return;
+        if (abortIfStale("selection changed before todo fallback")) return false;
         setStore("todos", sessionID, []);
       }
 
@@ -724,9 +810,9 @@ export function createSessionStore(options: {
               ? permissionResult.reason.message
               : safeStringify(permissionResult.reason),
         });
-        if (abortIfStale("selection changed after permission failure")) return;
+        if (abortIfStale("selection changed after permission failure")) return false;
       } else if (abortIfStale("selection changed before permissions applied")) {
-        return;
+        return false;
       }
 
       finishPerf(perfEnabled, "session.select", "complete", startedAt, {
@@ -735,11 +821,12 @@ export function createSessionStore(options: {
         messageCount: msgs.length,
         todoCount: (store.todos[sessionID] ?? []).length,
       });
+      return true;
     })();
 
     selectInFlightBySession.set(sessionID, run);
     try {
-      await run;
+      return await run;
     } finally {
       if (selectInFlightBySession.get(sessionID) === run) {
         selectInFlightBySession.delete(sessionID);

@@ -1503,6 +1503,25 @@ export async function proxyOpencodeRequest(input: {
           }
         }
       }
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const nextPayload = { ...(parsed as Record<string, unknown>) };
+        const runtimeDir = (
+          provisionedRuntimeEntry?.runtimeDir ??
+          provisionedRuntime?.runtimeDir ??
+          ""
+        ).trim();
+        if (runtimeDir) {
+          nextPayload.directory = runtimeDir;
+        }
+        if (sessionProvisioningHints) {
+          nextPayload.openworkPreferredView = sessionProvisioningHints.preferredView;
+          nextPayload.openworkPreferredAgent = sessionProvisioningHints.preferredAgent;
+          nextPayload.openworkPreferredAgentLock = sessionProvisioningHints.preferredAgentLock;
+        }
+        const nextHeaders = new Headers(response.headers);
+        nextHeaders.set("Content-Type", "application/json");
+        return new Response(JSON.stringify(nextPayload), { status: response.status, headers: nextHeaders });
+      }
       return new Response(raw, { status: response.status, headers: response.headers });
     }
 

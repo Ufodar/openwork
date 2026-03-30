@@ -212,6 +212,54 @@ describe("proxyOpencodeRequest session creation", () => {
     expect(await exists(join(runtime?.runtimeDir ?? "", ".opencode", "skills", "openwork-debug", "SKILL.md"))).toBe(false);
   });
 
+  test("rewrites the created session payload to the provisioned runtime directory and profile hints", async () => {
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({
+        id: "ses_created_runtime",
+        title: "Created Runtime Session",
+        directory: workspace.path,
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })) as unknown as typeof fetch;
+
+    const sessionOwnership = new SessionOwnershipService();
+    const sessionWorkspaces = new SessionWorkspaceService();
+    const runtimeKnowledgeTokens = new RuntimeKnowledgeTokenService();
+    const runtimeDocumentStateTokens = new RuntimeDocumentStateTokenService();
+
+    const response = await proxyOpencodeRequest({
+      request: new Request("http://openwork.local/w/ws_1/opencode/session", {
+        method: "POST",
+        body: JSON.stringify({
+          title: "Created Runtime Session",
+          openworkPreferredView: "document-agent",
+          openworkPreferredAgent: "common-work",
+          openworkPreferredAgentLock: "common-work",
+        }),
+      }),
+      url: new URL("http://openwork.local/w/ws_1/opencode/session"),
+      workspace,
+      proxyPath: "/session",
+      actor: { type: "remote", scope: "collaborator", tokenHash: "owner-alice" },
+      sessionOwnership,
+      sessionWorkspaces,
+      runtimeKnowledgeTokens,
+      runtimeDocumentStateTokens,
+      openworkBaseUrl: "http://127.0.0.1:8789",
+    });
+
+    expect(response.status).toBe(200);
+
+    const runtime = await sessionWorkspaces.getWorkspace(workspace.id, "ses_created_runtime");
+    const payload = await response.json() as Record<string, unknown>;
+
+    expect(payload.directory).toBe(runtime?.runtimeDir);
+    expect(payload.openworkPreferredView).toBe("document-agent");
+    expect(payload.openworkPreferredAgent).toBe("common-work");
+    expect(payload.openworkPreferredAgentLock).toBe("common-work");
+  });
+
   test("reduces common-work document sessions to the document runtime skill and MCP surface", async () => {
     globalThis.fetch = (async () =>
       new Response(JSON.stringify({ id: "ses_document_surface", title: "Document Surface Session" }), {

@@ -1306,6 +1306,28 @@ export async function proxyOpencodeRequest(input: {
       ? await input.sessionRuntimeService.resolveSessionWorkspace(workspace, workspaceId, pathSessionId, runtimeWorkspace)
       : workspaceWithDirectory(workspace, runtimeWorkspace.runtimeDir);
   }
+  if (workspace && workspaceId && !pathSessionId && requestDirectory) {
+    const runtimeEntries = await input.sessionWorkspaces.listWorkspaces(workspaceId);
+    const matchedEntry = Object.entries(runtimeEntries).find(([, entry]) => {
+      const runtimeDir = entry.runtimeDir?.trim() ?? "";
+      return runtimeDir && resolve(runtimeDir) === resolve(requestDirectory);
+    });
+    if (matchedEntry) {
+      const [matchedSessionId, matchedRuntime] = matchedEntry;
+      if (!isOwnerScope) {
+        if (!requesterKey) {
+          throw new ApiError(403, "forbidden", "Missing requester identity");
+        }
+        const knownOwner = await input.sessionOwnership.getOwner(workspaceId, matchedSessionId);
+        if (!knownOwner || knownOwner !== requesterKey) {
+          throw new ApiError(404, "session_not_found", "Session not found");
+        }
+      }
+      targetWorkspace = matchedRuntime.opencodeRuntime && input.sessionRuntimeService
+        ? await input.sessionRuntimeService.resolveSessionWorkspace(workspace, workspaceId, matchedSessionId, matchedRuntime)
+        : workspaceWithDirectory(workspace, matchedRuntime.runtimeDir);
+    }
+  }
   if (workspace && workspaceId && requesterKey && method === "POST" && normalizedProxyPath === "/session") {
     const rawBody = await input.request.text();
     let payload: Record<string, unknown> = {};

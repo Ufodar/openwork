@@ -653,6 +653,11 @@ const STORAGE_URL_OVERRIDE = "openwork.server.urlOverride";
 const STORAGE_PORT_OVERRIDE = "openwork.server.port";
 const STORAGE_TOKEN = "openwork.server.token";
 
+function isLoopbackHostname(hostname: string): boolean {
+  const normalized = hostname.trim().toLowerCase();
+  return normalized === "localhost" || normalized === "127.0.0.1" || normalized === "::1" || normalized === "[::1]";
+}
+
 export function normalizeOpenworkServerUrl(input: string) {
   const trimmed = input.trim();
   if (!trimmed) return null;
@@ -662,6 +667,29 @@ export function normalizeOpenworkServerUrl(input: string) {
   }
   const withProtocol = /^https?:\/\//.test(trimmed) ? trimmed : `http://${trimmed}`;
   return withProtocol.replace(/\/+$/, "");
+}
+
+export function resolveBrowserOpenworkEnvUrl(input: {
+  envUrl?: string | null;
+  locationOrigin?: string | null;
+  dev: boolean;
+  tauri: boolean;
+}) {
+  const envUrl = normalizeOpenworkServerUrl(input.envUrl ?? "");
+  if (!envUrl) return null;
+  if (input.tauri || !input.dev) return envUrl;
+
+  const origin = normalizeOpenworkServerUrl(input.locationOrigin ?? "");
+  if (!origin) return envUrl;
+
+  try {
+    const parsed = new URL(envUrl);
+    if (!isLoopbackHostname(parsed.hostname)) return envUrl;
+  } catch {
+    return envUrl;
+  }
+
+  return `${origin}/openwork`;
 }
 
 export function parseOpenworkWorkspaceIdFromUrl(input: string) {
@@ -867,14 +895,20 @@ export function hydrateOpenworkServerSettingsFromEnv() {
     let changed = false;
 
     const currentUrlNormalized = normalizeOpenworkServerUrl(current.urlOverride ?? "") ?? "";
-    const envUrlNormalized = normalizeOpenworkServerUrl(envUrl) ?? "";
     const isDevMode = Boolean(import.meta.env?.DEV);
     const canHydrateEnvToken = isTauriRuntime();
+    const resolvedEnvUrl = resolveBrowserOpenworkEnvUrl({
+      envUrl,
+      locationOrigin: window.location.origin,
+      dev: isDevMode,
+      tauri: canHydrateEnvToken,
+    }) ?? "";
+    const envUrlNormalized = normalizeOpenworkServerUrl(resolvedEnvUrl) ?? "";
 
     // In web dev mode (e.g. pod + vite), always trust env URL so stale browser
     // localStorage cannot keep the app pointed at an old worker endpoint.
     if (envUrl && (isDevMode || currentUrlNormalized !== envUrlNormalized)) {
-      next.urlOverride = normalizeOpenworkServerUrl(envUrl) ?? undefined;
+      next.urlOverride = envUrlNormalized || undefined;
       changed = true;
     }
 

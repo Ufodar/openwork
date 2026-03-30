@@ -1,4 +1,8 @@
-import type { OpenworkServerSettings } from "./openwork-server";
+import {
+  normalizeOpenworkServerUrl,
+  resolveBrowserOpenworkEnvUrl,
+  type OpenworkServerSettings,
+} from "./openwork-server";
 import { SESSION_MODEL_PREF_KEY } from "../constants";
 
 export const OPENWORK_WEB_AUTH_USER_KEY = "openwork.web.auth.user";
@@ -40,6 +44,29 @@ export function clearOpenworkWebSession(current: OpenworkServerSettings): Openwo
   const next: OpenworkServerSettings = { ...current };
   delete next.token;
   return next;
+}
+
+export function resolveWebAuthBaseUrl(input: {
+  configuredBaseUrl?: string | null;
+  envBaseUrl?: string | null;
+  locationOrigin?: string | null;
+  dev: boolean;
+}): string | null {
+  const configured = normalizeOpenworkServerUrl(input.configuredBaseUrl ?? "");
+  if (configured) return configured;
+
+  const envBaseUrl = resolveBrowserOpenworkEnvUrl({
+    envUrl: input.envBaseUrl ?? "",
+    locationOrigin: input.locationOrigin ?? "",
+    dev: input.dev,
+    tauri: false,
+  });
+  if (envBaseUrl) return envBaseUrl;
+
+  const origin = normalizeOpenworkServerUrl(input.locationOrigin ?? "");
+  if (!origin) return null;
+
+  return input.dev ? `${origin}/openwork` : origin;
 }
 
 export function clearWebLogoutStorage(storage?: RemovableStorage | null): void {

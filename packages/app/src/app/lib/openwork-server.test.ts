@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
-import { createOpenworkServerClient, OpenworkServerError } from "./openwork-server";
+import {
+  createOpenworkServerClient,
+  OpenworkServerError,
+  resolveBrowserOpenworkEnvUrl,
+} from "./openwork-server";
 
 const originalFetch = globalThis.fetch;
 
@@ -49,5 +53,29 @@ describe("openwork server client", () => {
       code: "request_failed",
       message: "Backend overloaded",
     });
+  });
+});
+
+describe("resolveBrowserOpenworkEnvUrl", () => {
+  test("rewrites loopback env URLs to the same-origin /openwork proxy in web dev", () => {
+    expect(
+      resolveBrowserOpenworkEnvUrl({
+        envUrl: "http://localhost:8787",
+        locationOrigin: "http://192.168.5.10:32765",
+        dev: true,
+        tauri: false,
+      }),
+    ).toBe("http://192.168.5.10:32765/openwork");
+  });
+
+  test("keeps the env URL outside web dev mode", () => {
+    expect(
+      resolveBrowserOpenworkEnvUrl({
+        envUrl: "http://localhost:8787",
+        locationOrigin: "http://192.168.5.10:32765",
+        dev: false,
+        tauri: false,
+      }),
+    ).toBe("http://localhost:8787");
   });
 });

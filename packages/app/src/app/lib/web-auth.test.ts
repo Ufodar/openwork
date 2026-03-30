@@ -5,6 +5,7 @@ import {
   clearWebLogoutStorage,
   OPENWORK_SESSION_PREFS_LOCAL_STORAGE_KEY,
   OPENWORK_WEB_AUTH_USER_KEY,
+  resolveWebAuthBaseUrl,
   SESSION_BY_WORKSPACE_KEY,
 } from "./web-auth";
 import { SESSION_MODEL_PREF_KEY } from "../constants";
@@ -58,5 +59,51 @@ describe("clearWebLogoutStorage", () => {
     expect(store.has(OPENWORK_SESSION_PREFS_LOCAL_STORAGE_KEY)).toBe(false);
     expect(store.has(`${SESSION_MODEL_PREF_KEY}.ws_marken`)).toBe(false);
     expect(store.get("openwork.themePref")).toBe("light");
+  });
+});
+
+describe("resolveWebAuthBaseUrl", () => {
+  test("prefers the configured OpenWork server URL when available", () => {
+    expect(
+      resolveWebAuthBaseUrl({
+        configuredBaseUrl: "http://192.168.5.10:32765/openwork",
+        envBaseUrl: "/openwork",
+        locationOrigin: "http://192.168.5.10:32765",
+        dev: true,
+      }),
+    ).toBe("http://192.168.5.10:32765/openwork");
+  });
+
+  test("uses the same-origin /openwork proxy in web dev when no server URL is configured", () => {
+    expect(
+      resolveWebAuthBaseUrl({
+        configuredBaseUrl: "",
+        envBaseUrl: "",
+        locationOrigin: "http://192.168.5.10:32765",
+        dev: true,
+      }),
+    ).toBe("http://192.168.5.10:32765/openwork");
+  });
+
+  test("ignores loopback env URLs when the page is opened from another machine in web dev", () => {
+    expect(
+      resolveWebAuthBaseUrl({
+        configuredBaseUrl: "",
+        envBaseUrl: "http://localhost:8787",
+        locationOrigin: "http://192.168.5.10:32765",
+        dev: true,
+      }),
+    ).toBe("http://192.168.5.10:32765/openwork");
+  });
+
+  test("falls back to the page origin in production web mode", () => {
+    expect(
+      resolveWebAuthBaseUrl({
+        configuredBaseUrl: "",
+        envBaseUrl: "",
+        locationOrigin: "http://192.168.5.10:32765",
+        dev: false,
+      }),
+    ).toBe("http://192.168.5.10:32765");
   });
 });

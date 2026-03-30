@@ -73,6 +73,7 @@ import {
   clearWebLogoutStorage,
   OPENWORK_SESSION_PREFS_LOCAL_STORAGE_KEY,
   readWebAuthUser,
+  resolveWebAuthBaseUrl,
   SESSION_BY_WORKSPACE_KEY,
   writeWebAuthUser,
 } from "./lib/web-auth";
@@ -4020,10 +4021,12 @@ export default function App() {
       throw new Error("Username and password are required.");
     }
 
-    const baseFromSettings = normalizeOpenworkServerUrl(openworkServerBaseUrl().trim()) ?? "";
-    const baseFromWindow =
-      typeof window !== "undefined" ? normalizeOpenworkServerUrl(window.location.origin) ?? "" : "";
-    const baseUrl = baseFromSettings || baseFromWindow;
+    const baseUrl = resolveWebAuthBaseUrl({
+      configuredBaseUrl: openworkServerBaseUrl().trim(),
+      envBaseUrl: typeof import.meta.env?.VITE_OPENWORK_URL === "string" ? import.meta.env.VITE_OPENWORK_URL : "",
+      locationOrigin: typeof window !== "undefined" ? window.location.origin : "",
+      dev: Boolean(import.meta.env?.DEV),
+    }) ?? "";
     if (!baseUrl) {
       throw new Error("OpenWork server URL is not configured.");
     }

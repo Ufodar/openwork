@@ -3,6 +3,7 @@ import { GlobalSDKProvider } from "./context/global-sdk";
 import { GlobalSyncProvider } from "./context/global-sync";
 import { LocalProvider } from "./context/local";
 import { ServerProvider } from "./context/server";
+import { resolveBrowserOpenworkEnvUrl } from "./lib/openwork-server";
 import { isTauriRuntime } from "./utils";
 
 export default function AppEntry() {
@@ -17,7 +18,13 @@ export default function AppEntry() {
         ? import.meta.env.VITE_OPENWORK_URL.trim()
         : "";
     if (openworkUrl) {
-      return `${openworkUrl.replace(/\/+$/, "")}/opencode`;
+      const resolvedOpenworkUrl = resolveBrowserOpenworkEnvUrl({
+        envUrl: openworkUrl,
+        locationOrigin: typeof window !== "undefined" ? window.location.origin : "",
+        dev: Boolean(import.meta.env?.DEV),
+        tauri: false,
+      }) ?? openworkUrl.replace(/\/+$/, "");
+      return `${resolvedOpenworkUrl.replace(/\/+$/, "")}/opencode`;
     }
 
     // When the UI is served by the OpenWork server (Docker "remote" mode),

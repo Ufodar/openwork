@@ -354,34 +354,15 @@ test("common-work prefers search-backed authoritative sources over guessed aggre
   const prompt = await readFile(resolve(root, ".opencode/agent/common-work.md"), "utf8");
 
   expect(prompt).toContain("优先使用可用的搜索工具");
-  expect(prompt).toContain("不要把某个具体 MCP 写死成唯一合法入口");
   expect(prompt).toContain("官方文档");
-  expect(prompt).toContain("不要先凭记忆猜测资讯站 URL");
-  expect(prompt).toContain("不要把“模拟搜索结果”");
-  expect(prompt).toContain("不要因为搜索工具报错");
+  expect(prompt).toContain("先明确当前缺的是哪一个事实、标准或 API 细节");
   expect(prompt).toContain("`webfetch` 只用于读取已经由搜索工具、其他工具结果或用户明确给出的具体 URL");
-  expect(prompt).toContain("不要拿无关主页抓取");
-  expect(prompt).toContain("不要为了“试试能不能抓到点资料”而访问与当前文档主题无关的消费网站");
-  expect(prompt).toContain("像 `https://www.jd.com/` 这种与任务无关的主页探测");
-  expect(prompt).toContain("如果手上还没有一个由搜索结果、来源文档或用户明确给出的具体候选 URL，就不要调用 `webfetch`");
-  expect(prompt).toContain("先明确报告阻塞和缺失");
-  expect(prompt).toContain("不要自动降级使用二级来源");
-  expect(prompt).toContain("只有在用户明确允许的情况下");
+  expect(prompt).toContain("搜索结果只负责发现候选来源");
   expect(prompt).toContain("明确记录 blocker");
   expect(prompt).toContain("不要把低权威背景材料混成主依据");
-  expect(prompt).toContain("不要把搜索结果页的标题、摘要或 snippet 直接当成可引用依据");
-  expect(prompt).toContain("如果第一批搜索结果大多数是博客、专利解析站、聚合转载页");
-  expect(prompt).toContain("不要马上宣布“资料已经足够”");
-  expect(prompt).toContain("先改写成更窄的官方 / 标准 / 厂商一手资料查询");
-  expect(prompt).toContain("不要静默切回“基于常识先写一版”");
-  expect(prompt).toContain("如果本地源文档已经覆盖了当前写作阶段所需的大部分事实");
-  expect(prompt).toContain("只有在你能明确说出“当前还缺哪一个事实/标准/API 细节”时");
-  expect(prompt).toContain("如果当前缺口本质上仍是“这两份本地资料还没读透、还没提取完、还没把章节事实整理出来”");
-  expect(prompt).toContain("读完本地核心资料后，不要连续发起多个只是复述题目或系统名的泛化搜索");
-  expect(prompt).toContain("单个写作阶段最多进行 3 次有明确目标的定向搜索");
-  expect(prompt).toContain("联网补充默认一次只追 1 个已记录缺口");
-  expect(prompt).toContain("默认先进行 1 次最小定向搜索");
-  expect(prompt).toContain("才允许继续最多 2 次更窄的跟进搜索");
+  expect(prompt).not.toContain("像 `https://www.jd.com/` 这种与任务无关的主页探测");
+  expect(prompt).not.toContain("单个写作阶段最多进行 3 次有明确目标的定向搜索");
+  expect(prompt).not.toContain("联网补充默认一次只追 1 个已记录缺口");
 });
 
 test("common-work forbids broad unfiltered workspace scans before locating real source documents", async () => {
@@ -451,33 +432,12 @@ test("common-work defaults API examples to relative paths and hostless placehold
   expect(prompt).toContain("不要为了把示例写完整就编造生产环境域名");
   expect(prompt).toContain("只有在用户或权威来源明确给出了真实 host");
   expect(prompt).toContain("默认省略 host");
-  expect(prompt).toContain("`Host: <SERVICE_HOST>`、`BASE_URL=<SERVICE_HOST>`");
-  expect(prompt).toContain("不要在正文里写 `https://<API_HOST>/...`");
-  expect(prompt).toContain("统一使用 `<SERVICE_HOST>`");
-  expect(prompt).toContain("不要再自造 `<API_HOST>`");
+  expect(prompt).toContain("必要时使用显式占位变量");
   expect(prompt).toContain("不要把自造 host/域名混成“可直接调用的真实接口地址”");
-  expect(prompt).toContain("即使在 JSON 字段、回调地址、节点地址、对象存储端点");
-  expect(prompt).toContain("也优先使用 `<CALLBACK_URL>`、`<NODE_ID>`、`<NODE_ADDRESS>`、`<SERVICE_HOST>`、`<OBJECT_STORAGE_ENDPOINT>`、`<OPS_EMAIL_GROUP>`");
-  expect(prompt).toContain("不要随手填 `app.example.com`");
-  expect(prompt).toContain("`gpu-cluster-01.internal.example.com`");
-  expect(prompt).toContain("`s3.example.com`");
-  expect(prompt).toContain("`ops-team@example.com`");
-  expect(prompt).toContain("任何 `*.example.com`、`*@example.com`");
-  expect(prompt).toContain("`internal.example.com`、`kubernetes.example.com`、`admin@example.com`、`security-team@example.com`");
-  expect(prompt).toContain("`<LOGIN_USERNAME>`、`<CONTACT_EMAIL>`、`<PHONE_NUMBER>`、`<ACCOUNT_ID>`");
-  expect(prompt).toContain("`<NODE_ADDRESS>`");
-  expect(prompt).toContain("`<OBJECT_STORAGE_ENDPOINT>`");
-  expect(prompt).toContain("不要写 `user@example.com`");
-  expect(prompt).toContain("不要写 `https://<APP_HOST>/callback/...`");
-  expect(prompt).toContain("把回调地址直接写成 `<CALLBACK_URL>`");
-  expect(prompt).toContain("不要写 `https://callback.example.com/...`");
-  expect(prompt).toContain("把日志链接写成 `<LOG_STREAM_URL>`");
-  expect(prompt).toContain("不要写 `https://logs.example.com/...`");
-  expect(prompt).toContain("不要写 `ops-team@example.com`");
-  expect(prompt).toContain("不要写 `net-team@example.com`");
-  expect(prompt).toContain("不要在 `recipients`、`emailGroups`、`to`、`cc`、`bcc`");
-  expect(prompt).toContain('`["ops-team@example.com"]`');
-  expect(prompt).toContain('`["<OPS_EMAIL_GROUP>"]`');
+  expect(prompt).toContain("不要编造生产环境域名、回调地址、身份信息或通知地址");
+  expect(prompt).not.toContain("`gpu-cluster-01.internal.example.com`");
+  expect(prompt).not.toContain("`ops-team@example.com`");
+  expect(prompt).not.toContain("`https://callback.example.com/...`");
 });
 
 test("common-work adds a concrete final sweep for suspicious internal paths and placeholder hosts", async () => {
@@ -485,35 +445,23 @@ test("common-work adds a concrete final sweep for suspicious internal paths and 
 
   expect(prompt).toContain("完成前做一次显式扫描");
   expect(prompt).toContain("python3 .opencode/references/check_document_delivery.py");
-  expect(prompt).toContain("`example.com`");
-  expect(prompt).toContain("`@example.com`");
-  expect(prompt).toContain("`<ACCESS_TOKEN>`");
-  expect(prompt).toContain("`<access_token>`");
-  expect(prompt).toContain("`Bearer <ACCESS_TOKEN>`");
-  expect(prompt).toContain("`YourSecurePassword123!`");
-  expect(prompt).toContain("`https://example.com/webhooks/`");
-  expect(prompt).toContain("`https://<`");
-  expect(prompt).toContain("`<API_HOST>`");
-  expect(prompt).toContain("`<APP_HOST>`");
-  expect(prompt).toContain("`/root/.openwork`");
-  expect(prompt).toContain("`documents/sessions/`");
-  expect(prompt).toContain("`.tmp/system`");
+  expect(prompt).toContain("检查最终交付物与准备发给用户的总结里是否残留明显伪值或内部路径");
   expect(prompt).toContain("如果命中这些高风险残留");
   expect(prompt).toContain("不要把最终扫描指向整个 `.`");
+  expect(prompt).not.toContain("`https://example.com/webhooks/`");
+  expect(prompt).not.toContain("`YourSecurePassword123!`");
 });
 
 test("common-work forbids placeholder credentials in final API examples", async () => {
   const prompt = await readFile(resolve(root, ".opencode/agent/common-work.md"), "utf8");
 
-  expect(prompt).toContain("不要把 `Bearer <ACCESS_TOKEN>`");
-  expect(prompt).toContain("不要把 `Bearer <access_token>`");
-  expect(prompt).toContain("`Authorization: Bearer access_token`");
-  expect(prompt).toContain("不要写 `YourSecurePassword123!`");
-  expect(prompt).toContain("不要为了凑齐登录示例");
+  expect(prompt).toContain("不要编造凭证、账号、邮箱、手机号或访问令牌");
+  expect(prompt).toContain("鉴权示例优先说明字段和上下文");
   expect(prompt).toContain("`python3 .opencode/references/check_document_delivery.py`");
   expect(prompt).toContain("退出码为 `0`");
   expect(prompt).toContain("`ls`、`glob outputs/*`、只看文件存在");
   expect(prompt).toContain("并重新运行同一条扫描直到退出码为 `0`");
+  expect(prompt).not.toContain("`YourSecurePassword123!`");
 });
 
 test("common-work keeps helper generator scripts out of user-visible deliverable paths", async () => {

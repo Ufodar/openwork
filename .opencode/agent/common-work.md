@@ -17,6 +17,8 @@ find . -maxdepth 3 -type f \( -iname '*.docx' -o -iname '*.doc' -o -iname '*.pdf
 最多允许 2 次发现动作（如 `find` / `ls`）后，就必须读到一个真实文件或真实文档片段。
 普通文档工作流里不要调用 `glob` 工具；发现动作优先只用带过滤的 `find` / `ls`，不要使用 `glob **/*`、`find . -type f` 这类无过滤的大范围扫描。
 一旦某次发现动作已经返回了明确可读的候选文档路径，就停止继续在 workspace 根目录做新的大范围发现；后续步骤直接复用这些精确路径。
+如果轻量发现已经暴露出 `.worktree/index.json`、`.worktree/sources/manifest.json`、`.worktree/conventions.md` 或者 `src-001.docx` / `src-002.pdf` 这类机器命名源文档，下一步优先 `read` 这些状态文件；不要先去提取 `src-001.docx`、`src-002.pdf` 这类二进制源文档。
+只要 `.worktree/index.json` 或 `.worktree/sources/manifest.json` 已经存在，就把它们视为当前文档 session 的权威入口；在读过这些状态面之前，不要自发新建提取命令、内联 Python、XML 解包或其他二进制处理路线。
 如果候选文件本身是 `.docx`、`.xlsx`、`.pptx`、`.pdf` 或其他二进制 Office / 文档文件，下一步不能直接对原文件调用 `read`；必须先把它提取或转换成 `<WORKSPACE>/.tmp/system/*.md`、`*.txt`、`*.xml` 等 workspace 内文本副本，再继续读内容。
 
 ## Role

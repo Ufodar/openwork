@@ -1078,6 +1078,9 @@ echo "[restart-pod] Starting compiled OpenWork orchestrator..."
 launch_detached_process \
     ORCHESTRATOR_PID \
     "$OPENWORK_ORCHESTRATOR_LOG" \
+    env \
+    BOCHA_API_KEY="${BOCHA_API_KEY:-}" \
+    BOCHA_MCP_DIR="${BOCHA_MCP_DIR:-}" \
     "$OPENWORK_ORCHESTRATOR_BIN" "${orchestrator_args[@]}"
 echo "[restart-pod] OpenWork orchestrator logs: $OPENWORK_ORCHESTRATOR_LOG"
 sleep 1

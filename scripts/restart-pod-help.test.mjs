@@ -59,6 +59,14 @@ test("restart-pod launches long-lived services under detached sessions with stab
   assert.match(restartScript, /launch_detached_process\s+\\\s+ORCHESTRATOR_PID/);
 });
 
+test("restart-pod explicitly forwards bocha runtime env into the orchestrator launch", () => {
+  const restartScript = readFileSync(new URL("./restart-pod.sh", import.meta.url), "utf8");
+
+  assert.match(restartScript, /launch_detached_process\s+\\\s+ORCHESTRATOR_PID\s+\\\s+"\$OPENWORK_ORCHESTRATOR_LOG"\s+\\\s+env\s+\\\s+BOCHA_API_KEY="\$\{BOCHA_API_KEY:-\}"/s);
+  assert.match(restartScript, /BOCHA_MCP_DIR="\$\{BOCHA_MCP_DIR:-\}"/);
+  assert.match(restartScript, /"\$OPENWORK_ORCHESTRATOR_BIN" "\$\{orchestrator_args\[@\]\}"/);
+});
+
 test("restart-pod releases cleanup traps after health checks succeed", () => {
   const restartScript = readFileSync(new URL("./restart-pod.sh", import.meta.url), "utf8");
 

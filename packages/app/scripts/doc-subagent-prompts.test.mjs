@@ -320,6 +320,8 @@ test("common-work treats docx/pdf labels as routes instead of literal tool names
 
   expect(prompt).toContain("不保证当前 runtime 一定存在同名 tool");
   expect(prompt).toContain("不要直接尝试调用名为 `docx`、`pdf`、`xlsx`、`pptx` 的 tool");
+  expect(prompt).toContain("如果 source inventory / manifest 条目已经提供了 workspace 内可直接 `read` 的文本副本路径");
+  expect(prompt).toContain("优先直接读取那份文本副本");
   expect(prompt).toContain("如果 `pandoc` 可用，先直接");
   expect(prompt).toContain("pandoc <input>.docx -t plain -o <WORKSPACE>/.tmp/system/<name>.txt");
   expect(prompt).toContain("不要先手写新的 `extract_docx.py`");

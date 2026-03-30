@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { writeFileSync } from "node:fs";
 import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -160,5 +161,39 @@ test("preserves original upload metadata for machine-named session sources when 
     originalName: "天河监控运维一体化平台软件介绍 v0.3.docx",
     originalRelativePath: "资料 2026/天河监控运维一体化平台软件介绍 v0.3.docx",
   });
+});
+
+test("records a workspace-local text extract for supported uploaded sources", async () => {
+  const runtimeDir = await mkdtemp(join(tmpdir(), "openwork-doc-bootstrap-text-ref-"));
+  await writeFile(join(runtimeDir, "src-001.docx"), "docx", "utf8");
+
+  await refreshBootstrapDocumentState(runtimeDir, {
+    runCommand(command, args) {
+      expect(command).toBe("pandoc");
+      expect(args).toEqual([
+        join(runtimeDir, "src-001.docx"),
+        "-t",
+        "plain",
+        "-o",
+        join(runtimeDir, ".worktree", "sources", "text", "doc-src-001.txt"),
+      ]);
+      writeFileSync(join(runtimeDir, ".worktree", "sources", "text", "doc-src-001.txt"), "extracted plain text\n", "utf8");
+      return {
+        status: 0,
+        stdout: "",
+        stderr: "",
+      } as any;
+    },
+  });
+
+  const manifest = JSON.parse(await readFile(join(runtimeDir, ".worktree", "sources", "manifest.json"), "utf8"));
+  expect(manifest.sources).toHaveLength(1);
+  expect(manifest.sources[0]).toMatchObject({
+    relativePath: "src-001.docx",
+    textRelativePath: ".worktree/sources/text/doc-src-001.txt",
+    textStatus: "ready",
+    textExtractor: "pandoc",
+  });
+  expect(await readFile(join(runtimeDir, ".worktree", "sources", "text", "doc-src-001.txt"), "utf8")).toContain("extracted plain text");
 });
 });

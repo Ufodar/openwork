@@ -154,7 +154,19 @@ const BOOTSTRAP_ALLOWED_EXTENSIONS = new Set([
     ...SLIDE_EXTENSIONS,
     ".pdf",
 ]);
+const BOOTSTRAP_DIRECT_TEXT_EXTENSIONS = new Set([
+    ".txt",
+    ".md",
+    ".markdown",
+    ".csv",
+    ".tsv",
+]);
 const SESSION_SOURCE_FILE_BASENAME = /^src-(\d+)(\.[^./]+)?$/i;
+type BootstrapCommandRunner = typeof spawnSync;
+
+interface RefreshBootstrapDocumentStateOptions {
+    runCommand?: BootstrapCommandRunner;
+}
 
 function resolveBidModuleApiEnabled(): boolean {
     const raw = (process.env.OPENWORK_BID_MODULE_API_ENABLED ?? "").trim().toLowerCase();
@@ -395,6 +407,131 @@ function buildBootstrapProjectName(sources: Array<Record<string, any>>): string 
     return firstTitle || "document-workspace";
 }
 
+function buildBootstrapTextRelativePath(docId: string): string {
+    return `${BOOTSTRAP_STATE_DIR}/sources/text/${docId}.txt`;
+}
+
+function buildBootstrapTextExtractionPlan(input: {
+    relativePath: string;
+    docId: string;
+}): {
+    textRelativePath: string;
+    extractor: string;
+    command: string | null;
+    args: string[];
+    copySource: boolean;
+} | null {
+    const extension = extname(input.relativePath).toLowerCase();
+    const textRelativePath = buildBootstrapTextRelativePath(input.docId);
+    if (BOOTSTRAP_DIRECT_TEXT_EXTENSIONS.has(extension)) {
+        return {
+            textRelativePath,
+            extractor: "copy",
+            command: null,
+            args: [],
+            copySource: true,
+        };
+    }
+    if (DOCX_ZIP_EXTENSIONS.has(extension)) {
+        return {
+            textRelativePath,
+            extractor: "pandoc",
+            command: "pandoc",
+            args: [],
+            copySource: false,
+        };
+    }
+    if (extension === ".pdf") {
+        return {
+            textRelativePath,
+            extractor: "pdftotext",
+            command: "pdftotext",
+            args: [],
+            copySource: false,
+        };
+    }
+    return null;
+}
+
+async function ensureBootstrapSourceText(
+    runtimeDir: string,
+    source: {
+        docId: string;
+        relativePath: string;
+    },
+    previous: Record<string, any>,
+    runCommand: BootstrapCommandRunner,
+): Promise<Record<string, any>> {
+    const priorTextRelativePath = typeof previous.textRelativePath === "string"
+        ? normalizeDocumentPath(previous.textRelativePath)
+        : "";
+    if (priorTextRelativePath) {
+        const priorTextAbsPath = resolveDocumentPathSafe(runtimeDir, priorTextRelativePath);
+        if (await exists(priorTextAbsPath)) {
+            return {
+                textRelativePath: priorTextRelativePath,
+                textStatus: typeof previous.textStatus === "string" && previous.textStatus.trim()
+                    ? previous.textStatus.trim()
+                    : "ready",
+                textExtractor: typeof previous.textExtractor === "string" && previous.textExtractor.trim()
+                    ? previous.textExtractor.trim()
+                    : null,
+            };
+        }
+    }
+
+    const plan = buildBootstrapTextExtractionPlan(source);
+    if (!plan) return {};
+
+    const sourceAbsPath = resolveDocumentPathSafe(runtimeDir, source.relativePath);
+    const textAbsPath = resolveDocumentPathSafe(runtimeDir, plan.textRelativePath);
+    if (await exists(textAbsPath)) {
+        return {
+            textRelativePath: plan.textRelativePath,
+            textStatus: "ready",
+            textExtractor: plan.extractor,
+        };
+    }
+
+    await ensureDir(dirname(textAbsPath));
+
+    if (plan.copySource) {
+        await copyFile(sourceAbsPath, textAbsPath);
+        return {
+            textRelativePath: plan.textRelativePath,
+            textStatus: "ready",
+            textExtractor: plan.extractor,
+        };
+    }
+
+    let args: string[] = [];
+    if (plan.command === "pandoc") {
+        args = [sourceAbsPath, "-t", "plain", "-o", textAbsPath];
+    } else if (plan.command === "pdftotext") {
+        args = ["-layout", "-nopgbrk", sourceAbsPath, textAbsPath];
+    } else {
+        return {};
+    }
+
+    const result = runCommand(plan.command, args, { encoding: "utf8" });
+    if (result.status === 0 && await exists(textAbsPath)) {
+        return {
+            textRelativePath: plan.textRelativePath,
+            textStatus: "ready",
+            textExtractor: plan.extractor,
+        };
+    }
+
+    await rm(textAbsPath, { force: true }).catch(() => undefined);
+    const stderr = String(result.stderr || "").trim();
+    const stdout = String(result.stdout || "").trim();
+    return {
+        textStatus: "unavailable",
+        textExtractor: plan.extractor,
+        textError: stderr || stdout || `${plan.command} failed`,
+    };
+}
+
 function buildBootstrapConventionsMarkdown(input: {
     targetDoc: string | null;
     sources: Array<Record<string, any>>;
@@ -413,12 +550,18 @@ function buildBootstrapConventionsMarkdown(input: {
         "Uploaded source roles:",
     ];
     for (const source of input.sources) {
-        lines.push(`- ${source.docId}: ${source.role} · ${source.relativePath}`);
+        const textRef = typeof source.textRelativePath === "string" && source.textRelativePath.trim()
+            ? ` · text=${source.textRelativePath.trim()}`
+            : "";
+        lines.push(`- ${source.docId}: ${source.role} · ${source.relativePath}${textRef}`);
     }
     return lines.join("\n") + "\n";
 }
 
-export async function refreshBootstrapDocumentState(runtimeDir: string): Promise<void> {
+export async function refreshBootstrapDocumentState(
+    runtimeDir: string,
+    options: RefreshBootstrapDocumentStateOptions = {},
+): Promise<void> {
     const sourcePaths = await listBootstrapSourceFiles(runtimeDir);
     if (!sourcePaths.length) return;
 
@@ -436,7 +579,8 @@ export async function refreshBootstrapDocumentState(runtimeDir: string): Promise
         existingByPath.set(relativePath, source);
     }
 
-    const mergedSources = sourcePaths.map((relativePath) => {
+    const mergedSources: Array<Record<string, any>> = [];
+    for (const relativePath of sourcePaths) {
         const previous = existingByPath.get(relativePath) ?? {};
         const extension = extname(relativePath).toLowerCase();
         const title = typeof previous.title === "string" && previous.title.trim()
@@ -451,7 +595,13 @@ export async function refreshBootstrapDocumentState(runtimeDir: string): Promise
         const docId = typeof previous.docId === "string" && previous.docId.trim()
             ? previous.docId.trim()
             : buildBootstrapDocId(relativePath);
-        return {
+        const textState = await ensureBootstrapSourceText(
+            runtimeDir,
+            { docId, relativePath },
+            previous,
+            options.runCommand ?? spawnSync,
+        );
+        mergedSources.push({
             ...previous,
             docId,
             title,
@@ -461,8 +611,9 @@ export async function refreshBootstrapDocumentState(runtimeDir: string): Promise
                 : (extension.startsWith(".") ? extension.slice(1) : extension || "file"),
             role,
             status,
-        };
-    });
+            ...textState,
+        });
+    }
 
     const targetDoc = typeof existingIndex?.target_doc === "string" && existingIndex.target_doc.trim()
         ? existingIndex.target_doc.trim()

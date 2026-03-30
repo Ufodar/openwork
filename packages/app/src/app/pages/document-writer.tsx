@@ -36,6 +36,8 @@ type DocumentItem = {
   updatedAt: number;
   size: number;
   type: string;
+  originalName?: string;
+  title?: string;
 };
 
 type DocumentListResult = {
@@ -229,6 +231,8 @@ type FileTreeNode = {
   size?: number;
   updatedAt?: number;
   type?: string;
+  originalName?: string;
+  title?: string;
 };
 
 const normalizeRelativePath = (value: string, fallback = "") => {
@@ -345,6 +349,8 @@ function buildFileTree(items: DocumentItem[], directories: string[]): FileTreeNo
       size: item.size,
       updatedAt: item.updatedAt,
       type: item.type,
+      originalName: item.originalName,
+      title: item.title,
     });
   }
 
@@ -697,6 +703,13 @@ export default function DocumentWriterView(props: SessionViewProps) {
     const workspacePath = createMemo(() =>
       toWorkspaceRelativeDocumentPath(nodeProps.node.path, { directory: nodeProps.node.isDirectory }),
     );
+    const nodeTooltip = createMemo(() => {
+      const base = workspacePath();
+      if (nodeProps.node.isDirectory) return base;
+      const original = (nodeProps.node.originalName || "").trim();
+      if (!original || original === nodeProps.node.name) return base;
+      return `${base}\n原名: ${original}`;
+    });
     const toggleExpand = () => {
       setExpandedFolders((prev) => {
         const next = new Set(prev);
@@ -729,7 +742,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
                 setConfigSeq((v) => v + 1);
               }
             }}
-            title={workspacePath()}
+            title={nodeTooltip()}
           >
             <Show when={nodeProps.node.isDirectory}
               fallback={<FileText size={14} class="shrink-0" />}>

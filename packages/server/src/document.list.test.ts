@@ -50,4 +50,70 @@ describe("document routes", () => {
     expect(payload.items.map((item) => item.name)).toEqual(["uploaded.docx"]);
     expect(payload.dirs).toEqual([]);
   });
+
+  test("surfaces original uploaded names from bootstrap manifest when listing session documents", async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), "openwork-document-route-original-name-"));
+    const runtimeDir = join(workspacePath, "documents", "sessions", "runtime-1");
+    await mkdir(join(runtimeDir, ".worktree", "sources"), { recursive: true });
+    await writeFile(join(runtimeDir, "src-001.docx"), "doc", "utf8");
+    await writeFile(join(runtimeDir, ".worktree", "sources", "manifest.json"), JSON.stringify({
+      generated_at: "2026-03-30T00:00:00.000Z",
+      goal: "",
+      target_doc: null,
+      blockers: [],
+      sources: [
+        {
+          docId: "doc-src-001",
+          title: "天河监控运维一体化平台软件介绍 v0.3",
+          relativePath: "src-001.docx",
+          originalName: "天河监控运维一体化平台软件介绍 v0.3.docx",
+          originalRelativePath: "资料 2026/天河监控运维一体化平台软件介绍 v0.3.docx",
+          kind: "docx",
+          role: "参考材料",
+          status: "uploaded",
+        },
+      ],
+    }, null, 2), "utf8");
+
+    const workspace: WorkspaceInfo = {
+      id: "ws_test",
+      name: "test",
+      path: workspacePath,
+      workspaceType: "local",
+      baseUrl: "http://127.0.0.1:8789",
+    };
+
+    const routes: any[] = [];
+    const sessionWorkspaces = {
+      getWorkspace: async () => ({
+        runtimeId: "runtime-1",
+        runtimeDir,
+        createdAt: Date.now(),
+      }),
+      resolveDocumentsDir: async () => runtimeDir,
+    } as unknown as SessionWorkspaceService;
+
+    createDocumentRoutes(routes, sessionWorkspaces);
+
+    const route = routes.find((candidate) => candidate.method === "GET" && candidate.regex.test("/w/ws_test/documents"));
+    expect(route).toBeTruthy();
+
+    const response = await route.handler({
+      request: new Request("http://openwork.local/w/ws_test/documents?session=ses_test"),
+      url: new URL("http://openwork.local/w/ws_test/documents?session=ses_test"),
+      params: { id: "ws_test" },
+      config: { workspaces: [workspace] } as ServerConfig,
+    });
+
+    const payload = (await response.json()) as {
+      items: Array<{ name: string; originalName?: string; title?: string }>;
+      dirs: string[];
+    };
+    expect(payload.items).toHaveLength(1);
+    expect(payload.items[0]).toMatchObject({
+      name: "src-001.docx",
+      originalName: "天河监控运维一体化平台软件介绍 v0.3.docx",
+      title: "天河监控运维一体化平台软件介绍 v0.3",
+    });
+  });
 });

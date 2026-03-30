@@ -154,6 +154,7 @@ const BOOTSTRAP_ALLOWED_EXTENSIONS = new Set([
     ...SLIDE_EXTENSIONS,
     ".pdf",
 ]);
+const SESSION_SOURCE_FILE_BASENAME = /^src-(\d+)(\.[^./]+)?$/i;
 
 function resolveBidModuleApiEnabled(): boolean {
     const raw = (process.env.OPENWORK_BID_MODULE_API_ENABLED ?? "").trim().toLowerCase();
@@ -275,6 +276,66 @@ async function writeJsonAtomic(path: string, payload: unknown): Promise<void> {
     await rename(tmpPath, path);
 }
 
+function nextSessionSourceFilename(existingPaths: string[], originalFilename: string): string {
+    const extension = extname(originalFilename).toLowerCase();
+    const used = new Set<number>();
+    for (const path of existingPaths) {
+        const leaf = basename(path.trim());
+        const match = leaf.match(SESSION_SOURCE_FILE_BASENAME);
+        if (!match) continue;
+        const value = Number.parseInt(match[1] || "", 10);
+        if (Number.isFinite(value) && value > 0) used.add(value);
+    }
+    let next = 1;
+    while (used.has(next)) next += 1;
+    return `src-${String(next).padStart(3, "0")}${extension}`;
+}
+
+async function reserveSessionSourceUploadPath(docsDir: string, originalFilename: string): Promise<string> {
+    const entries = await readdir(docsDir, { withFileTypes: true }).catch(() => []);
+    const existingPaths = entries
+        .filter((entry) => entry.isFile())
+        .map((entry) => entry.name);
+    let candidate = nextSessionSourceFilename(existingPaths, originalFilename);
+    for (let attempt = 0; attempt < 64; attempt += 1) {
+        const absPath = resolveDocumentPathSafe(docsDir, candidate);
+        if (!(await exists(absPath))) return candidate;
+        const nextIndex = Number.parseInt((candidate.match(SESSION_SOURCE_FILE_BASENAME)?.[1] || "0"), 10) + 1;
+        const extension = extname(originalFilename).toLowerCase();
+        candidate = `src-${String(nextIndex).padStart(3, "0")}${extension}`;
+    }
+    throw new ApiError(409, "document_conflict", "Unable to reserve a machine document name");
+}
+
+async function seedBootstrapSourceMetadata(runtimeDir: string, source: {
+    relativePath: string;
+    originalName: string;
+    originalRelativePath: string;
+    title: string;
+    kind: string;
+}) {
+    const manifestPath = join(runtimeDir, BOOTSTRAP_SOURCE_MANIFEST_PATH);
+    const existingManifest = await readJsonRecord(manifestPath);
+    const sources = Array.isArray(existingManifest?.sources) ? existingManifest.sources as Array<Record<string, any>> : [];
+    const nextSources = sources.filter((item) => String(item?.relativePath || "").trim() !== source.relativePath);
+    nextSources.push({
+        ...sources.find((item) => String(item?.relativePath || "").trim() === source.relativePath),
+        relativePath: source.relativePath,
+        originalName: source.originalName,
+        originalRelativePath: source.originalRelativePath,
+        title: source.title,
+        kind: source.kind,
+        status: "uploaded",
+    });
+    await writeJsonAtomic(manifestPath, {
+        generated_at: typeof existingManifest?.generated_at === "string" ? existingManifest.generated_at : new Date().toISOString(),
+        goal: typeof existingManifest?.goal === "string" ? existingManifest.goal : "Compile uploaded source documents into structured state",
+        target_doc: typeof existingManifest?.target_doc === "string" ? existingManifest.target_doc : null,
+        sources: nextSources,
+        blockers: Array.isArray(existingManifest?.blockers) ? existingManifest.blockers : [],
+    });
+}
+
 function isBootstrapVisibleSegment(name: string): boolean {
     if (!name || name === "." || name === "..") return false;
     if (name.startsWith(".")) return false;
@@ -391,6 +452,7 @@ export async function refreshBootstrapDocumentState(runtimeDir: string): Promise
             ? previous.docId.trim()
             : buildBootstrapDocId(relativePath);
         return {
+            ...previous,
             docId,
             title,
             relativePath,
@@ -1052,8 +1114,16 @@ export function createDocumentRoutes(routes: unknown[], sessionWorkspaces?: Sess
 
             const docsDir = await docsDirFor(workspace, sessionId);
             await ensureDir(docsDir);
+            const manifest = await readJsonRecord(join(docsDir, BOOTSTRAP_SOURCE_MANIFEST_PATH));
+            const manifestSources = Array.isArray(manifest?.sources) ? manifest.sources as Array<Record<string, any>> : [];
+            const metadataByPath = new Map<string, Record<string, any>>();
+            for (const source of manifestSources) {
+                const relativePath = typeof source?.relativePath === "string" ? source.relativePath.trim() : "";
+                if (!relativePath) continue;
+                metadataByPath.set(relativePath, source);
+            }
 
-            const docs: Array<{ name: string; updatedAt: number; size: number; type: string }> = [];
+            const docs: Array<{ name: string; updatedAt: number; size: number; type: string; originalName?: string; title?: string }> = [];
             const dirs = new Set<string>();
 
             const walk = async (dir: string) => {
@@ -1072,11 +1142,18 @@ export function createDocumentRoutes(routes: unknown[], sessionWorkspaces?: Sess
                     const info = await stat(fullPath);
                     const relName = relative(docsDir, fullPath).replace(/\\/g, "/");
                     if (shouldHideListedDocumentPath(relName)) continue;
+                    const sourceMetadata = metadataByPath.get(relName);
                     docs.push({
                         name: relName,
                         updatedAt: info.mtimeMs,
                         size: info.size,
                         type: getDocumentType(entry.name),
+                        originalName: typeof sourceMetadata?.originalName === "string" && sourceMetadata.originalName.trim()
+                            ? sourceMetadata.originalName.trim()
+                            : undefined,
+                        title: typeof sourceMetadata?.title === "string" && sourceMetadata.title.trim()
+                            ? sourceMetadata.title.trim()
+                            : undefined,
                     });
                 }
             };
@@ -2349,7 +2426,9 @@ export function createDocumentRoutes(routes: unknown[], sessionWorkspaces?: Sess
                 : "";
 
             let destRel = "";
-            if (requestedBaseDir || requestedRelativePath) {
+            if (sessionId) {
+                destRel = await reserveSessionSourceUploadPath(docsDir, requestedRelativePath || file.name);
+            } else if (requestedBaseDir || requestedRelativePath) {
                 const safeRelativePath = sanitizeUploadedDocumentRelativePath(requestedRelativePath || file.name, file.name);
                 destRel = requestedBaseDir ? `${requestedBaseDir}/${safeRelativePath}` : safeRelativePath;
             } else {
@@ -2372,6 +2451,14 @@ export function createDocumentRoutes(routes: unknown[], sessionWorkspaces?: Sess
             const filePath = resolveDocumentPathSafe(docsDir, destRel);
             await persistUploadedDocumentFile(filePath, file);
             if (sessionId) {
+                const originalRelativePath = normalizeDocumentPath(requestedRelativePath || legacyPath || file.name) || file.name;
+                await seedBootstrapSourceMetadata(docsDir, {
+                    relativePath: destRel,
+                    originalName: file.name,
+                    originalRelativePath,
+                    title: normalizeBootstrapTitle(originalRelativePath || file.name),
+                    kind: extname(file.name).toLowerCase().replace(/^\./, "") || "file",
+                });
                 await refreshBootstrapDocumentState(docsDir);
             }
 

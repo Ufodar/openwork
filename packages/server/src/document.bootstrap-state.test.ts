@@ -126,4 +126,39 @@ test("ignores hosted runtime internals when building bootstrap source inventory"
     "真实源文档.docx",
   ]);
 });
+
+test("preserves original upload metadata for machine-named session sources when bootstrap state refreshes", async () => {
+  const runtimeDir = await mkdtemp(join(tmpdir(), "openwork-doc-bootstrap-original-name-"));
+  await mkdir(join(runtimeDir, ".worktree", "sources"), { recursive: true });
+  await writeFile(join(runtimeDir, "src-001.docx"), "docx", "utf8");
+  await writeFile(join(runtimeDir, ".worktree", "sources", "manifest.json"), JSON.stringify({
+    generated_at: "2026-03-30T00:00:00.000Z",
+    goal: "",
+    target_doc: null,
+    sources: [
+      {
+        docId: "doc-src-001",
+        title: "天河监控运维一体化平台软件介绍 v0.3",
+        relativePath: "src-001.docx",
+        originalName: "天河监控运维一体化平台软件介绍 v0.3.docx",
+        originalRelativePath: "资料 2026/天河监控运维一体化平台软件介绍 v0.3.docx",
+        kind: "docx",
+        role: "参考材料",
+        status: "uploaded",
+      },
+    ],
+    blockers: [],
+  }, null, 2), "utf8");
+  await writeFile(join(runtimeDir, "src-002.pdf"), "pdf", "utf8");
+
+  await refreshBootstrapDocumentState(runtimeDir);
+
+  const manifest = JSON.parse(await readFile(join(runtimeDir, ".worktree", "sources", "manifest.json"), "utf8"));
+  const first = manifest.sources.find((item: any) => item.relativePath === "src-001.docx");
+  expect(first).toMatchObject({
+    title: "天河监控运维一体化平台软件介绍 v0.3",
+    originalName: "天河监控运维一体化平台软件介绍 v0.3.docx",
+    originalRelativePath: "资料 2026/天河监控运维一体化平台软件介绍 v0.3.docx",
+  });
+});
 });

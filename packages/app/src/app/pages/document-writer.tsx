@@ -1021,7 +1021,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
             ? uploadRelativePath(file)
             : normalizeRelativePath(file.name, file.name || "file");
           const destination = joinRelativePath(baseDir, relativePath);
-          return { file, destination };
+          return { file, destination, relativePath };
         })
         .filter((entry) => {
           if (hasHiddenPathSegment(entry.destination)) {
@@ -1047,6 +1047,10 @@ export default function DocumentWriterView(props: SessionViewProps) {
       for (const entry of uploadEntries) {
         const form = new FormData();
         form.append("file", entry.file);
+        if (baseDir) {
+          form.append("baseDir", baseDir);
+        }
+        form.append("relativePath", entry.relativePath);
         if (entry.destination) {
           form.append("path", entry.destination);
         }
@@ -1193,6 +1197,11 @@ export default function DocumentWriterView(props: SessionViewProps) {
       const uploadUrl = buildUrl(cfg.baseUrl, cfg.workspaceId, "/document/upload", uploadQuery);
       const form = new FormData();
       form.append("file", blob, destinationPath.split("/").pop() ?? "file");
+      const destinationBaseDir = destinationPath.split("/").slice(0, -1).join("/");
+      if (destinationBaseDir) {
+        form.append("baseDir", destinationBaseDir);
+      }
+      form.append("relativePath", destinationPath.split("/").pop() ?? "file");
       form.append("path", destinationPath);
       await fetchJson(uploadUrl, cfg.token, {
         method: "POST",

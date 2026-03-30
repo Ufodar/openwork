@@ -693,6 +693,56 @@ function normalizeDocumentPath(value: string): string {
     return parts.join("/");
 }
 
+function sanitizeUploadedDocumentSegment(value: string, fallback: string): string {
+    const cleaned = value
+        .normalize("NFKC")
+        .trim()
+        .replace(/[\\/]+/g, "-")
+        .replace(/[^\p{Letter}\p{Number}]+/gu, "-")
+        .replace(/-+/g, "-")
+        .replace(/^-+|-+$/g, "");
+    return cleaned || fallback;
+}
+
+function sanitizeUploadedDocumentLeafName(filename: string): string {
+    const ext = extname(filename).toLowerCase();
+    const stem = basename(filename, ext);
+    const safeStem = sanitizeUploadedDocumentSegment(stem, "file");
+    return `${safeStem}${ext}`;
+}
+
+function sanitizeUploadedDocumentRelativePath(relativePath: string, fallbackFilename: string): string {
+    const normalized = normalizeDocumentPath(relativePath);
+    const segments = normalized.split("/").filter(Boolean);
+    if (!segments.length) return sanitizeUploadedDocumentLeafName(fallbackFilename);
+    return segments
+        .map((segment, index) => {
+            if (index === segments.length - 1) {
+                return sanitizeUploadedDocumentLeafName(segment);
+            }
+            return sanitizeUploadedDocumentSegment(segment, "folder");
+        })
+        .join("/");
+}
+
+async function ensureUniqueUploadedDocumentPath(docsDir: string, relPath: string): Promise<string> {
+    let candidate = normalizeDocumentPath(relPath);
+    if (!candidate) {
+        throw new ApiError(400, "invalid_request", "Document path is required");
+    }
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+        const absPath = resolveDocumentPathSafe(docsDir, candidate);
+        if (!(await exists(absPath))) return candidate;
+        const ext = extname(candidate);
+        const stem = basename(candidate, ext);
+        const dir = dirname(candidate);
+        const suffix = shortId().replace(/-/g, "").slice(0, 8);
+        const uniqueName = `${stem}-${suffix}${ext}`;
+        candidate = dir && dir !== "." ? `${dir}/${uniqueName}` : uniqueName;
+    }
+    throw new ApiError(409, "document_conflict", "Unable to generate a unique document name");
+}
+
 const ALLOWED_HIDDEN_FILE_NAMES = new Set([
     ".env",
     ".gitignore",
@@ -2292,18 +2342,32 @@ export function createDocumentRoutes(routes: unknown[], sessionWorkspaces?: Sess
             const docsDir = await docsDirFor(workspace, sessionId);
             await ensureDir(docsDir);
 
-            const name = basename(file.name);
-            const requestedPath = typeof formData.get("path") === "string" ? String(formData.get("path")) : "";
-            let destRel = normalizeDocumentPath(requestedPath);
-            if (!destRel) {
-                destRel = name;
+            const legacyPath = typeof formData.get("path") === "string" ? String(formData.get("path")) : "";
+            const requestedBaseDir = typeof formData.get("baseDir") === "string" ? normalizeDocumentPath(String(formData.get("baseDir"))) : "";
+            const requestedRelativePath = typeof formData.get("relativePath") === "string"
+                ? normalizeDocumentPath(String(formData.get("relativePath")))
+                : "";
+
+            let destRel = "";
+            if (requestedBaseDir || requestedRelativePath) {
+                const safeRelativePath = sanitizeUploadedDocumentRelativePath(requestedRelativePath || file.name, file.name);
+                destRel = requestedBaseDir ? `${requestedBaseDir}/${safeRelativePath}` : safeRelativePath;
             } else {
-                const tail = destRel.split("/").pop() ?? "";
-                if (!tail || !extname(tail)) {
-                    destRel = `${destRel}/${name}`;
+                const name = sanitizeUploadedDocumentLeafName(file.name);
+                let requestedPath = normalizeDocumentPath(legacyPath);
+                if (!requestedPath) {
+                    requestedPath = name;
+                } else {
+                    const tail = requestedPath.split("/").pop() ?? "";
+                    if (!tail || !extname(tail)) {
+                        requestedPath = `${requestedPath}/${name}`;
+                    }
                 }
+                destRel = sanitizeUploadedDocumentRelativePath(requestedPath, name);
             }
+
             validateDocumentMutationPath(destRel, { allowHiddenLeafFile: true });
+            destRel = await ensureUniqueUploadedDocumentPath(docsDir, destRel);
 
             const filePath = resolveDocumentPathSafe(docsDir, destRel);
             await persistUploadedDocumentFile(filePath, file);

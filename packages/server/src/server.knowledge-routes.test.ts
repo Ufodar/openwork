@@ -42,6 +42,11 @@ describe("knowledge routes", () => {
     datasetId: string;
     files: Array<{ name: string; size: number; type: string; text: string }>;
   }> = [];
+  let ragflowUpdateDatasetCalls: Array<{
+    datasetId: string;
+    chunkMethod: string | null;
+    parserConfig: Record<string, unknown> | null;
+  }> = [];
   let ragflowDeleteDocumentCalls: Array<{ datasetId: string; documentIds: string[] }> = [];
   let ragflowDeleteDatasetCalls: string[] = [];
   let ragflowDocumentsByDataset: Map<string, Array<{
@@ -114,6 +119,7 @@ describe("knowledge routes", () => {
     ragflowCalls = [];
     ragflowCreateDatasetCalls = [];
     ragflowUploadCalls = [];
+    ragflowUpdateDatasetCalls = [];
     ragflowDeleteDocumentCalls = [];
     ragflowDeleteDatasetCalls = [];
     ragflowDocumentsByDataset = new Map();
@@ -137,6 +143,24 @@ describe("knowledge routes", () => {
           id: "ds_created",
           name: input.name,
           description: input.description ?? "",
+          documentCount: 0,
+          chunkCount: 0,
+          embeddingModel: null,
+          permission: "me",
+          chunkMethod: input.chunkMethod ?? null,
+          parserConfig: input.parserConfig ?? null,
+        };
+      },
+      updateDataset: async (input) => {
+        ragflowUpdateDatasetCalls.push({
+          datasetId: input.datasetId,
+          chunkMethod: input.chunkMethod ?? null,
+          parserConfig: input.parserConfig ?? null,
+        });
+        return {
+          id: input.datasetId,
+          name: "updated",
+          description: "",
           documentCount: 0,
           chunkCount: 0,
           embeddingModel: null,
@@ -215,7 +239,7 @@ describe("knowledge routes", () => {
           datasetIds: [...input.datasetIds],
         };
       },
-    } satisfies RagflowClient;
+    } as RagflowClient;
 
     routes = createRoutes(
       config,
@@ -533,6 +557,62 @@ describe("knowledge routes", () => {
       knowledgeId: "kb_alice",
       status: "processing",
       documentCount: 2,
+    });
+  });
+
+  test("normalizes and syncs legacy parser config before uploading documents", async () => {
+    await registry.upsert({
+      knowledgeId: "kb_alice",
+      ragflowDatasetId: "ds_alice",
+      ownerUserId: "user_alice",
+      ownerDisplayName: "alice",
+      title: "兼容旧配置",
+      source: "openwork",
+      visibility: "visible_to_all_users",
+      chunkMethod: "naive",
+      parserConfig: {
+        chunk_token_num: 2000,
+        layout_recognize: "True",
+      },
+      status: "ready",
+      documentCount: 0,
+      chunkCount: 0,
+    });
+
+    const form = new FormData();
+    form.append("file", new File(["pdf-content"], "legacy.pdf", { type: "application/pdf" }));
+
+    const response = await invokeRoute("POST", "/workspace/ws_1/knowledge/kb_alice/documents", {
+      formData: form,
+    });
+
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      item: {
+        parserConfig: {
+          chunk_token_num: 2000,
+          layout_recognize: "DeepDOC",
+        },
+      },
+    });
+
+    expect(ragflowUpdateDatasetCalls).toEqual([
+      {
+        datasetId: "ds_alice",
+        chunkMethod: "naive",
+        parserConfig: {
+          chunk_token_num: 2000,
+          layout_recognize: "DeepDOC",
+        },
+      },
+    ]);
+
+    const stored = await registry.get("kb_alice");
+    expect(stored).toMatchObject({
+      parserConfig: {
+        chunk_token_num: 2000,
+        layout_recognize: "DeepDOC",
+      },
     });
   });
 

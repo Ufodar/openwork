@@ -1,6 +1,7 @@
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { ApiError } from "./errors.js";
+import { sanitizeKnowledgeParserConfig } from "./knowledge-parser-config.js";
 import type { ServerConfig } from "./types.js";
 
 export type RagflowServerConfig = {
@@ -22,6 +23,16 @@ export type RagflowDatasetSummary = {
 
 export type RagflowDatasetCreateInput = {
   name: string;
+  description?: string | null;
+  embeddingModel?: string | null;
+  permission?: string | null;
+  chunkMethod?: string | null;
+  parserConfig?: Record<string, unknown> | null;
+};
+
+export type RagflowDatasetUpdateInput = {
+  datasetId: string;
+  name?: string | null;
   description?: string | null;
   embeddingModel?: string | null;
   permission?: string | null;
@@ -102,6 +113,7 @@ export type RagflowRetrieveInput = {
 export type RagflowClient = {
   listDatasets: (options?: { query?: string | null; limit?: number | null }) => Promise<RagflowDatasetSummary[]>;
   createDataset: (input: RagflowDatasetCreateInput) => Promise<RagflowDatasetSummary>;
+  updateDataset: (input: RagflowDatasetUpdateInput) => Promise<RagflowDatasetSummary>;
   uploadDocuments: (input: RagflowUploadDocumentsInput) => Promise<RagflowDocumentSummary[]>;
   listDocuments: (input: RagflowListDocumentsInput) => Promise<RagflowDocumentSummary[]>;
   startParse: (input: RagflowStartParseInput) => Promise<void>;
@@ -169,8 +181,8 @@ function objectValue(value: unknown): Record<string, unknown> | null {
 }
 
 function normalizeParserConfig(value: unknown): Record<string, unknown> | null {
-  const object = objectValue(value);
-  return object ? { ...object } : null;
+  const parserConfig = sanitizeKnowledgeParserConfig(value);
+  return Object.keys(parserConfig).length > 0 ? parserConfig : null;
 }
 
 function describeFetchFailure(error: unknown): { message: string; details: Record<string, unknown> } {
@@ -584,6 +596,42 @@ export function createRagflowClient(input: {
       return summary;
     },
 
+    async updateDataset(input) {
+      const datasetId = stringValue(input.datasetId);
+      if (!datasetId) {
+        throw new ApiError(400, "invalid_ragflow_dataset", "A dataset id is required.");
+      }
+      const payload = {
+        ...(stringValue(input.name) ? { name: stringValue(input.name) } : {}),
+        ...(stringValue(input.description) ? { description: stringValue(input.description) } : {}),
+        ...(stringValue(input.embeddingModel) ? { embedding_model: stringValue(input.embeddingModel) } : {}),
+        ...(stringValue(input.permission) ? { permission: stringValue(input.permission) } : {}),
+        ...(stringValue(input.chunkMethod) ? { chunk_method: stringValue(input.chunkMethod) } : {}),
+        ...(normalizeParserConfig(input.parserConfig) ? { parser_config: normalizeParserConfig(input.parserConfig) } : {}),
+      };
+
+      const data = await fetchRagflowJson<Record<string, unknown>>(
+        baseUrl,
+        apiKey,
+        `/datasets/${encodeURIComponent(datasetId)}`,
+        fetchImpl,
+        requestImpl,
+        allowInsecureTls,
+        {
+          method: "PUT",
+          body: JSON.stringify(payload),
+        },
+      );
+
+      const summary = mapDatasetSummary(data);
+      if (!summary) {
+        throw new ApiError(502, "ragflow_invalid_response", "RAGFlow returned an unexpected dataset response.", {
+          url: `${baseUrl}/api/v1/datasets/${encodeURIComponent(datasetId)}`,
+        });
+      }
+      return summary;
+    },
+
     async uploadDocuments(input) {
       const datasetId = stringValue(input.datasetId);
       if (!datasetId) {
@@ -816,6 +864,16 @@ export function createConfiguredRagflowClient(
         fetchImpl: clientOptions?.fetchImpl,
         requestImpl: clientOptions?.requestImpl,
       }).createDataset(input);
+    },
+    async updateDataset(input) {
+      const resolved = assertConfigured(resolveRagflowServerConfig(config, env));
+      return createRagflowClient({
+        baseUrl: resolved.baseUrl,
+        apiKey: resolved.apiKey,
+        allowInsecureTls: resolved.insecureTls,
+        fetchImpl: clientOptions?.fetchImpl,
+        requestImpl: clientOptions?.requestImpl,
+      }).updateDataset(input);
     },
     async uploadDocuments(input) {
       const resolved = assertConfigured(resolveRagflowServerConfig(config, env));

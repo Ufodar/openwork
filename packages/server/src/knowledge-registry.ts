@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { readFile, rename, writeFile } from "node:fs/promises";
 
 import { ensureDir, exists } from "./utils.js";
+import { sanitizeKnowledgeParserConfig } from "./knowledge-parser-config.js";
 
 export type KnowledgeSource = "openwork" | "imported";
 export type KnowledgeVisibility = "visible_to_all_users";
@@ -66,8 +67,7 @@ function normalizeCount(value: number | null | undefined): number {
 }
 
 function normalizeParserConfig(value: Record<string, unknown> | null | undefined): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-  return { ...value };
+  return sanitizeKnowledgeParserConfig(value);
 }
 
 function normalizeStatus(value: string | null | undefined): KnowledgeStatus {

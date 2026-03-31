@@ -2,6 +2,7 @@ import { createHash, randomInt } from "node:crypto";
 import { readFile, writeFile, rm, readdir, rename, stat, unlink } from "node:fs/promises";
 import { homedir, hostname } from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import type { ApprovalRequest, Capabilities, ServerConfig, WorkspaceInfo, Actor, ReloadReason, ReloadTrigger, TokenScope } from "./types.js";
 import { ApprovalService } from "./approvals.js";
 import { addPlugin, listPlugins, normalizePluginSpec, removePlugin } from "./plugins.js";
@@ -27,6 +28,7 @@ import { KnowledgeRegistryService, type KnowledgeRegistryRecord } from "./knowle
 import { handleDocumentStateMcpRequest } from "./document-state-mcp.js";
 import { handleKnowledgeMcpRequest } from "./knowledge-mcp.js";
 import { createConfiguredRagflowClient, type RagflowClient } from "./ragflow.js";
+import { buildDefaultKnowledgeParserConfig, normalizeKnowledgeLayoutRecognize, sanitizeKnowledgeParserConfig } from "./knowledge-parser-config.js";
 import { RuntimeDocumentStateTokenService } from "./runtime-document-state-tokens.js";
 import { RuntimeKnowledgeTokenService } from "./runtime-knowledge-tokens.js";
 import { SessionOwnershipService } from "./session-ownership.js";
@@ -3095,7 +3097,7 @@ export function createRoutes(
     await resolveWorkspace(config, ctx.params.id);
     const user = await resolveKnowledgeCaller(auth, ctx);
     const knowledgeId = normalizeKnowledgeId(ctx.params.knowledgeId);
-    const record = await knowledgeRegistry.get(knowledgeId);
+    let record = await knowledgeRegistry.get(knowledgeId);
     if (!record || !isKnowledgeVisible(record)) {
       throw new ApiError(404, "knowledge_not_found", "Knowledge base not found");
     }
@@ -3112,6 +3114,8 @@ export function createRoutes(
     if (!files.length) {
       throw new ApiError(400, "file_required", "Form field 'file' is required");
     }
+
+    record = await ensureKnowledgeUploadConfig(knowledgeRegistry, ragflow, record);
 
     const uploaded = await ragflow.uploadDocuments({
       datasetId: record.ragflowDatasetId,
@@ -5367,33 +5371,6 @@ function normalizeKnowledgeChunkMethod(value: unknown): string {
   return chunkMethod || "naive";
 }
 
-function buildDefaultKnowledgeParserConfig(): Record<string, unknown> {
-  return {
-    chunk_token_num: 2000,
-    delimiter: "\n",
-    layout_recognize: "DeepDOC",
-    html4excel: false,
-    raptor: { use_raptor: false },
-  };
-}
-
-function normalizeKnowledgeLayoutRecognize(value: unknown): string | undefined {
-  if (typeof value === "boolean") {
-    return value ? "DeepDOC" : "Plain Text";
-  }
-  if (typeof value !== "string") return undefined;
-  const trimmed = value.trim();
-  if (!trimmed) return undefined;
-  const normalized = trimmed.toLowerCase();
-  if (["true", "1", "yes", "on", "deepdoc"].includes(normalized)) {
-    return "DeepDOC";
-  }
-  if (["false", "0", "no", "off", "plaintext", "plain text"].includes(normalized)) {
-    return "Plain Text";
-  }
-  return trimmed;
-}
-
 function normalizeKnowledgeParserConfig(value: unknown, chunkMethod: string): Record<string, unknown> {
   if (value == null) {
     return chunkMethod === "naive" ? buildDefaultKnowledgeParserConfig() : {};
@@ -5401,7 +5378,7 @@ function normalizeKnowledgeParserConfig(value: unknown, chunkMethod: string): Re
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new ApiError(400, "invalid_payload", "parserConfig must be an object");
   }
-  const parserConfig = { ...(value as Record<string, unknown>) };
+  const parserConfig = sanitizeKnowledgeParserConfig(value);
   if (chunkMethod === "naive" && typeof parserConfig.chunk_token_num !== "number") {
     parserConfig.chunk_token_num = 2000;
   }
@@ -5466,6 +5443,42 @@ function serializeKnowledgeDocument(document: {
     run: document.run,
     type: document.type,
   };
+}
+
+async function ensureKnowledgeUploadConfig(
+  knowledgeRegistry: KnowledgeRegistryService,
+  ragflow: RagflowClient,
+  record: KnowledgeRegistryRecord,
+): Promise<KnowledgeRegistryRecord> {
+  const chunkMethod = normalizeKnowledgeChunkMethod(record.chunkMethod);
+  const parserConfig = normalizeKnowledgeParserConfig(record.parserConfig, chunkMethod);
+  const nextRecordInput = {
+    knowledgeId: record.knowledgeId,
+    ragflowDatasetId: record.ragflowDatasetId,
+    ownerUserId: record.ownerUserId,
+    ownerDisplayName: record.ownerDisplayName,
+    title: record.title,
+    ...(record.description ? { description: record.description } : {}),
+    source: record.source,
+    visibility: record.visibility,
+    ...(record.ingestionPreset ? { ingestionPreset: record.ingestionPreset } : {}),
+    chunkMethod,
+    parserConfig,
+    ...(record.embeddingModel ? { embeddingModel: record.embeddingModel } : {}),
+    status: record.status,
+    documentCount: record.documentCount ?? 0,
+    chunkCount: record.chunkCount ?? 0,
+  } as const;
+  const needsRegistryUpdate =
+    record.chunkMethod !== chunkMethod ||
+    !isDeepStrictEqual(record.parserConfig ?? {}, parserConfig);
+  await ragflow.updateDataset({
+    datasetId: record.ragflowDatasetId,
+    chunkMethod,
+    parserConfig,
+    ...(record.embeddingModel ? { embeddingModel: record.embeddingModel } : {}),
+  });
+  return needsRegistryUpdate ? knowledgeRegistry.upsert(nextRecordInput) : record;
 }
 
 async function listKnowledgeRecordsByIds(

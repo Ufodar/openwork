@@ -166,6 +166,65 @@ describe("ragflow client", () => {
     ]);
   });
 
+  test("updates datasets with normalized parser config", async () => {
+    const calls: unknown[] = [];
+    const client = createRagflowClient({
+      baseUrl: "http://ragflow.local",
+      apiKey: "test",
+      fetchImpl: async (_url, init) => {
+        calls.push({
+          method: init?.method,
+          body: JSON.parse(String(init?.body ?? "{}")),
+        });
+        return new Response(
+          JSON.stringify({
+            code: 0,
+            data: {
+              id: "ds_1",
+              name: "Commercial Docs",
+              description: "Shared qualifications",
+              doc_num: 0,
+              chunk_num: 0,
+              embd_id: "bge-large",
+              permission: "me",
+            },
+          }),
+          { status: 200 },
+        );
+      },
+    });
+
+    await expect(client.updateDataset({
+      datasetId: "ds_1",
+      chunkMethod: "naive",
+      parserConfig: {
+        chunk_token_num: 2000,
+        layout_recognize: "True",
+      },
+    })).resolves.toEqual({
+      id: "ds_1",
+      name: "Commercial Docs",
+      description: "Shared qualifications",
+      documentCount: 0,
+      chunkCount: 0,
+      embeddingModel: "bge-large",
+      permission: "me",
+    });
+
+    expect(calls).toEqual([
+      {
+        method: "PUT",
+        body: {
+          chunk_method: "naive",
+          parser_config: {
+            chunk_token_num: 2000,
+            layout_recognize: "DeepDOC",
+          },
+        },
+      },
+    ]);
+  });
+
   test("lists dataset documents and maps run metadata", async () => {
     const client = createRagflowClient({
       baseUrl: "http://ragflow.local",

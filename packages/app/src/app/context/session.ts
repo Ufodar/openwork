@@ -800,7 +800,11 @@ export function createSessionStore(options: {
           error: todoResult.reason instanceof Error ? todoResult.reason.message : safeStringify(todoResult.reason),
         });
         if (abortIfStale("selection changed before todo fallback")) return false;
-        setStore("todos", sessionID, []);
+        const todoErrorText = getErrorText(todoResult.reason).trim();
+        addError(
+          todoErrorText ? new Error(`Failed to load session tasks: ${todoErrorText}`) : todoResult.reason,
+          "Failed to load session tasks",
+        );
       }
 
       if (permissionResult.status !== "fulfilled") {

@@ -14,6 +14,7 @@ import ToolMonitorPanel from "../components/tool-monitor/tool-monitor-panel";
 import { shouldShowDocumentAgentChatLoading } from "../lib/document-agent-loading";
 import { DOCUMENT_UPLOAD_ACCEPT } from "../lib/documents";
 import { MARKDOWN_PREVIEW_CLASS, renderMarkdownPreview } from "../lib/markdown-preview";
+import { isTodoCompletedStatus } from "../lib/todo-status";
 import {
   resolveCurrentOnlyOfficePayload,
   resolveOnlyOfficeContainerId,
@@ -573,7 +574,7 @@ export default function DocumentAgentView(props: SessionViewProps) {
   let lastToolMonitorAssistantMessageId: string | null = null;
   const todoList = createMemo(() => (props.todos ?? []).filter((todo) => todo.content.trim()));
   const todoCount = createMemo(() => todoList().length);
-  const todoCompletedCount = createMemo(() => todoList().filter((todo) => todo.status === "completed").length);
+  const todoCompletedCount = createMemo(() => todoList().filter((todo) => isTodoCompletedStatus(todo.status)).length);
   const todoLabel = createMemo(() => {
     const total = todoCount();
     if (!total) return "";
@@ -2573,7 +2574,7 @@ export default function DocumentAgentView(props: SessionViewProps) {
                 <div class="px-4 pb-3 space-y-2.5 max-h-60 overflow-auto border-t border-gray-6/50">
                   <For each={todoList()}>
                     {(todo, index) => {
-                      const done = () => todo.status === "completed";
+                      const done = () => isTodoCompletedStatus(todo.status);
                       const cancelled = () => todo.status === "cancelled";
                       const active = () => todo.status === "in_progress";
                       return (

@@ -5,6 +5,7 @@ import type { TodoItem, WorkspaceConnectionState } from "../../types";
 import type { WorkspaceInfo } from "../../lib/tauri";
 import { currentLocale, t } from "../../../i18n";
 import { formatSessionDisplayTitle } from "../../lib/session-title";
+import { isTodoCompletedStatus } from "../../lib/todo-status";
 
 type SessionSummary = {
   id: string;
@@ -183,7 +184,7 @@ export default function SessionSidebar(props: SidebarProps) {
     const activeTodos = realTodos();
     const total = activeTodos.length;
     if (!total) return [] as boolean[];
-    const completed = activeTodos.filter((todo) => todo.status === "completed").length;
+    const completed = activeTodos.filter((todo) => isTodoCompletedStatus(todo.status)).length;
     return Array.from({ length: total }, (_, idx) => idx < completed);
   });
 

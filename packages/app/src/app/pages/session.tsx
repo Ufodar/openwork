@@ -81,6 +81,7 @@ import {
 import { buildSessionPreferenceHint } from "../lib/session-preferences";
 import { formatSessionDisplayTitle } from "../lib/session-title";
 import { finishPerf, perfNow, recordPerfLog } from "../lib/perf-log";
+import { isTodoCompletedStatus } from "../lib/todo-status";
 
 import browserSetupTemplate from "../data/commands/browser-setup.md?raw";
 import soulSetupTemplate from "../data/commands/give-me-a-soul.md?raw";
@@ -336,7 +337,7 @@ export default function SessionView(props: SessionViewProps) {
   const todoList = createMemo(() => props.todos.filter((todo) => todo.content.trim()));
   const todoCount = createMemo(() => todoList().length);
   const todoCompletedCount = createMemo(() =>
-    todoList().filter((todo) => todo.status === "completed").length
+    todoList().filter((todo) => isTodoCompletedStatus(todo.status)).length
   );
 
   const commandPaletteSessionOptions = createMemo(() => {
@@ -3367,7 +3368,7 @@ export default function SessionView(props: SessionViewProps) {
               <div class="px-4 pb-3 space-y-2.5 max-h-60 overflow-auto border-t border-gray-6/50">
                 <For each={todoList()}>
                   {(todo, index) => {
-                    const done = () => todo.status === "completed";
+                    const done = () => isTodoCompletedStatus(todo.status);
                     const cancelled = () => todo.status === "cancelled";
                     const active = () => todo.status === "in_progress";
                     return (

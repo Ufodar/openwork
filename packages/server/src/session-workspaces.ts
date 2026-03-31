@@ -729,6 +729,7 @@ export async function writeRuntimeDocumentStateCarrierConfig(input: {
 export function buildSessionPermissionRules(): PermissionRuleset {
   return [
     ...buildHostedSystemTempBashDenyRules(),
+    { permission: "glob", pattern: "**/*", action: "deny" },
     { permission: "external_directory", pattern: "*", action: "deny" },
   ];
 }

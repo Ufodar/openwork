@@ -206,6 +206,7 @@ describe("proxyOpencodeRequest session creation", () => {
     expect(Array.isArray(captured.body?.permission)).toBe(true);
     expect(captured.body?.permission).toEqual(expect.arrayContaining([
       { permission: "external_directory", pattern: "*", action: "deny" },
+      { permission: "glob", pattern: "**/*", action: "deny" },
       { permission: "bash", pattern: "*-o /tmp/*.md*", action: "deny" },
       { permission: "bash", pattern: "*> /private/tmp/*.docx*", action: "deny" },
     ]));

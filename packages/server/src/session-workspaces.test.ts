@@ -23,11 +23,12 @@ describe("provisionSessionWorkspace", () => {
   test("denies external directories and system-temp document outputs for hosted session runtimes", () => {
     const rules = buildSessionPermissionRules();
 
-    expect(rules).toHaveLength(41);
+    expect(rules).toHaveLength(42);
     expect(rules).toContainEqual({ permission: "bash", pattern: "*-o /tmp/*.md*", action: "deny" });
     expect(rules).toContainEqual({ permission: "bash", pattern: "*> /tmp/*.md*", action: "deny" });
     expect(rules).toContainEqual({ permission: "bash", pattern: "*-o /private/tmp/*.docx*", action: "deny" });
     expect(rules).toContainEqual({ permission: "bash", pattern: "*> /private/tmp/*.pptx*", action: "deny" });
+    expect(rules).toContainEqual({ permission: "glob", pattern: "**/*", action: "deny" });
     expect(rules).toContainEqual({ permission: "external_directory", pattern: "*", action: "deny" });
   });
 

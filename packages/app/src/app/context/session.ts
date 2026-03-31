@@ -153,6 +153,7 @@ export function createSessionStore(options: {
   developerMode: () => boolean;
   setError: (message: string | null) => void;
   setSseConnected: (connected: boolean) => void;
+  prepareConnection?: () => Promise<boolean>;
   markReloadRequired?: (reason: ReloadReason, trigger?: ReloadTrigger) => void;
   onHotReloadApplied?: () => void;
 }) {
@@ -618,8 +619,19 @@ export function createSessionStore(options: {
   }
 
   async function selectSession(sessionID: string) {
+    if (options.prepareConnection) {
+      const ready = await options.prepareConnection();
+      if (!ready) {
+        options.setError("OpenWork server not connected.");
+        return false;
+      }
+    }
+
     const c = options.client();
-    if (!c) return false;
+    if (!c) {
+      options.setError("OpenWork server not connected.");
+      return false;
+    }
 
     const perfEnabled = options.developerMode();
     options.setSelectedSessionId(sessionID);

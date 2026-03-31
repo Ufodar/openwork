@@ -51,6 +51,7 @@ import { buildAdminSessionWorkspacePlan } from "./lib/admin-session-workspace-pl
 import { resolveDashboardClientConnected } from "./lib/dashboard-client-status";
 import { shouldAutoConnectWebClient } from "./lib/web-autoconnect";
 import { reconcileOpenworkServerProbe } from "./lib/openwork-server-status";
+import { ensureOpenworkServerActionReady } from "./lib/openwork-server-action";
 import {
   mergeOpenworkSessionPrefs,
   type OpenworkSessionPrefs,
@@ -971,6 +972,15 @@ export default function App() {
     developerMode,
     setError,
     setSseConnected,
+    prepareConnection: async () => {
+      const ready = await ensureOpenworkServerActionReady({
+        getStatus: openworkServerStatus,
+        getHasClient: () => Boolean(client()),
+        reconnect: reconnectOpenworkServer,
+        allowLimited: true,
+      });
+      return ready.ok;
+    },
     onHotReloadApplied: () => {
       void refreshSkills({ force: true });
       void refreshPlugins(pluginScope());
@@ -5472,11 +5482,6 @@ export default function App() {
   }
 
   async function createSessionAndOpen(options?: CreateSessionOptions) {
-    const c = client();
-    if (!c) {
-      return;
-    }
-
     const perfEnabled = developerMode();
     const startedAt = perfNow();
     const runId = (() => {
@@ -5513,18 +5518,26 @@ export default function App() {
     setCreatingSession(true);
 
     try {
-      // Quick health check to detect stale connection
-      mark("health:start");
-      try {
-        const health = unwrap(await c.global.health({ signal: AbortSignal.timeout(3_000) }));
-        if (!health?.healthy) {
-          throw new Error("Server reported unhealthy status.");
-        }
-        mark("health:ok");
-      } catch (healthErr) {
-        mark("health:error", {
-          error: healthErr instanceof Error ? healthErr.message : safeStringify(healthErr),
+      mark("connection:ensure:start");
+      const ready = await ensureOpenworkServerActionReady({
+        getStatus: openworkServerStatus,
+        getHasClient: () => Boolean(client()),
+        reconnect: reconnectOpenworkServer,
+        allowLimited: true,
+      });
+      if (!ready.ok) {
+        mark("connection:ensure:error", {
+          reason: ready.reason,
+          status: openworkServerStatus(),
+          hasClient: Boolean(client()),
         });
+        throw new Error(t("app.connection_lost", currentLocale()));
+      }
+      mark("connection:ensure:ok", { status: ready.status });
+
+      const c = client();
+      if (!c) {
+        mark("client:missing");
         throw new Error(t("app.connection_lost", currentLocale()));
       }
 

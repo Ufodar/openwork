@@ -9,3 +9,10 @@ test("createSessionAndOpen forwards preferred session hints to the server create
   expect(file).toContain("openworkPreferredAgent: requestedAgent");
   expect(file).toContain("openworkPreferredAgentLock: requestedAgentLock");
 });
+
+test("createSessionAndOpen uses the shared OpenWork action gate instead of an inline health precheck", () => {
+  const file = readFileSync(join(import.meta.dir, "app.tsx"), "utf8");
+
+  expect(file).toContain("ensureOpenworkServerActionReady({");
+  expect(file).not.toContain("const health = unwrap(await c.global.health");
+});

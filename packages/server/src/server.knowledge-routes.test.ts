@@ -348,7 +348,7 @@ describe("knowledge routes", () => {
         parserConfig: {
           chunk_token_num: 2000,
           delimiter: "\n",
-          layout_recognize: "True",
+          layout_recognize: "DeepDOC",
           html4excel: false,
           raptor: { use_raptor: false },
         },
@@ -363,7 +363,7 @@ describe("knowledge routes", () => {
         parserConfig: {
           chunk_token_num: 2000,
           delimiter: "\n",
-          layout_recognize: "True",
+          layout_recognize: "DeepDOC",
           html4excel: false,
           raptor: { use_raptor: false },
         },
@@ -380,6 +380,34 @@ describe("knowledge routes", () => {
       chunkMethod: "naive",
       parserConfig: {
         chunk_token_num: 2000,
+      },
+    });
+  });
+
+  test("normalizes legacy layout_recognize values before creating a knowledge base", async () => {
+    const response = await invokeRoute("POST", "/workspace/ws_1/knowledge", {
+      body: {
+        title: "兼容旧配置",
+        parserConfig: {
+          layout_recognize: "True",
+        },
+      },
+    });
+
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      item: {
+        parserConfig: {
+          chunk_token_num: 2000,
+          layout_recognize: "DeepDOC",
+        },
+      },
+    });
+
+    expect(ragflowCreateDatasetCalls.at(-1)).toMatchObject({
+      parserConfig: {
+        chunk_token_num: 2000,
+        layout_recognize: "DeepDOC",
       },
     });
   });
@@ -459,7 +487,7 @@ describe("knowledge routes", () => {
       parserConfig: {
         chunk_token_num: 2000,
         delimiter: "\n",
-        layout_recognize: "True",
+        layout_recognize: "DeepDOC",
         html4excel: false,
         raptor: { use_raptor: false },
       },

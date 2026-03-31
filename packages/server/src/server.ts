@@ -5371,10 +5371,27 @@ function buildDefaultKnowledgeParserConfig(): Record<string, unknown> {
   return {
     chunk_token_num: 2000,
     delimiter: "\n",
-    layout_recognize: "True",
+    layout_recognize: "DeepDOC",
     html4excel: false,
     raptor: { use_raptor: false },
   };
+}
+
+function normalizeKnowledgeLayoutRecognize(value: unknown): string | undefined {
+  if (typeof value === "boolean") {
+    return value ? "DeepDOC" : "Plain Text";
+  }
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const normalized = trimmed.toLowerCase();
+  if (["true", "1", "yes", "on", "deepdoc"].includes(normalized)) {
+    return "DeepDOC";
+  }
+  if (["false", "0", "no", "off", "plaintext", "plain text"].includes(normalized)) {
+    return "Plain Text";
+  }
+  return trimmed;
 }
 
 function normalizeKnowledgeParserConfig(value: unknown, chunkMethod: string): Record<string, unknown> {
@@ -5388,8 +5405,11 @@ function normalizeKnowledgeParserConfig(value: unknown, chunkMethod: string): Re
   if (chunkMethod === "naive" && typeof parserConfig.chunk_token_num !== "number") {
     parserConfig.chunk_token_num = 2000;
   }
-  if (typeof parserConfig.layout_recognize === "boolean") {
-    parserConfig.layout_recognize = parserConfig.layout_recognize ? "True" : "False";
+  const normalizedLayoutRecognize = normalizeKnowledgeLayoutRecognize(parserConfig.layout_recognize);
+  if (normalizedLayoutRecognize) {
+    parserConfig.layout_recognize = normalizedLayoutRecognize;
+  } else if (chunkMethod === "naive") {
+    parserConfig.layout_recognize = "DeepDOC";
   }
   return parserConfig;
 }

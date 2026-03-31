@@ -14,6 +14,7 @@ describe("document routes", () => {
     await mkdir(runtimeDir, { recursive: true });
     await writeFile(join(runtimeDir, "opencode.json"), JSON.stringify({ model: "test" }), "utf8");
     await writeFile(join(runtimeDir, "opencode.jsonc"), JSON.stringify({ model: "test" }), "utf8");
+    await writeFile(join(runtimeDir, ".gitignore"), ".openwork-runtime/\n.tmp/\n", "utf8");
     await writeFile(join(runtimeDir, "uploaded.docx"), "doc", "utf8");
 
     const workspace: WorkspaceInfo = {

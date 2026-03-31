@@ -997,6 +997,8 @@ function shouldHideDocumentEntry(entryName: string, isDirectory: boolean): boole
 function shouldHideListedDocumentPath(relPath: string): boolean {
     const normalized = relPath.replace(/\\/g, "/").replace(/^\/+/, "").trim();
     if (!normalized) return false;
+    const leaf = basename(normalized).trim().toLowerCase();
+    if (leaf.startsWith(".")) return true;
     return RESERVED_DOCUMENT_ROOT_FILES.has(normalized);
 }
 

@@ -237,17 +237,21 @@ describe("proxyOpencodeRequest session activity routing", () => {
     globalThis.fetch = (async () =>
       new Response(JSON.stringify([
         {
-          id: "msg_1",
-          summary: {
-            diffs: Array.from({ length: 25 }, (_, index) => ({
-              file: `outputs/part-${index + 1}.md`,
-              status: "modified",
-              additions: index + 1,
-              deletions: index,
-              before: "a".repeat(50_000),
-              after: "b".repeat(50_000),
-            })),
+          info: {
+            id: "msg_1",
+            role: "user",
+            summary: {
+              diffs: Array.from({ length: 25 }, (_, index) => ({
+                file: `outputs/part-${index + 1}.md`,
+                status: "modified",
+                additions: index + 1,
+                deletions: index,
+                before: "a".repeat(50_000),
+                after: "b".repeat(50_000),
+              })),
+            },
           },
+          parts: [],
         },
       ]), {
         status: 200,
@@ -307,8 +311,8 @@ describe("proxyOpencodeRequest session activity routing", () => {
     });
 
     expect(response.status).toBe(200);
-    const payload = await response.json() as Array<{ summary?: Record<string, unknown> }>;
-    const summary = payload[0]?.summary ?? {};
+    const payload = await response.json() as Array<{ info?: { summary?: Record<string, unknown> } }>;
+    const summary = payload[0]?.info?.summary ?? {};
     expect(Array.isArray(summary.diffs)).toBe(true);
     expect((summary.diffs as unknown[]).length).toBe(20);
     expect(summary.diffsTruncated).toBe(true);

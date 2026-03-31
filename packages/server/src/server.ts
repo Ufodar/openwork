@@ -691,13 +691,10 @@ function normalizeSessionMessagePayload(value: unknown): Array<Record<string, un
 
 const MAX_PROXY_MESSAGE_SUMMARY_DIFFS = 20;
 
-function sanitizeMessageSummaryForProxy(message: Record<string, unknown>): Record<string, unknown> {
-  const summary = message.summary;
-  if (!summary || typeof summary !== "object") return message;
-
+function sanitizeSummaryRecordForProxy(summary: Record<string, unknown>): Record<string, unknown> {
   const summaryRecord = summary as Record<string, unknown>;
   const rawDiffs = Array.isArray(summaryRecord.diffs) ? summaryRecord.diffs : null;
-  if (!rawDiffs || rawDiffs.length === 0) return message;
+  if (!rawDiffs || rawDiffs.length === 0) return summaryRecord;
 
   const hasAdditions = typeof summaryRecord.additions === "number" && Number.isFinite(summaryRecord.additions);
   const hasDeletions = typeof summaryRecord.deletions === "number" && Number.isFinite(summaryRecord.deletions);
@@ -732,20 +729,46 @@ function sanitizeMessageSummaryForProxy(message: Record<string, unknown>): Recor
   });
 
   return {
-    ...message,
-    summary: {
-      ...summaryRecord,
-      additions: totalAdditions,
-      deletions: totalDeletions,
-      files:
-        typeof summaryRecord.files === "number" && Number.isFinite(summaryRecord.files)
-          ? summaryRecord.files
-          : rawDiffs.length,
-      diffs: compactDiffs,
-      diffsTruncated: rawDiffs.length > compactDiffs.length,
-      omittedDiffCount: Math.max(0, rawDiffs.length - compactDiffs.length),
-    },
+    ...summaryRecord,
+    additions: totalAdditions,
+    deletions: totalDeletions,
+    files:
+      typeof summaryRecord.files === "number" && Number.isFinite(summaryRecord.files)
+        ? summaryRecord.files
+        : rawDiffs.length,
+    diffs: compactDiffs,
+    diffsTruncated: rawDiffs.length > compactDiffs.length,
+    omittedDiffCount: Math.max(0, rawDiffs.length - compactDiffs.length),
   };
+}
+
+function sanitizeMessageSummaryForProxy(message: Record<string, unknown>): Record<string, unknown> {
+  let nextMessage = message;
+
+  const summary = nextMessage.summary;
+  if (summary && typeof summary === "object") {
+    nextMessage = {
+      ...nextMessage,
+      summary: sanitizeSummaryRecordForProxy(summary as Record<string, unknown>),
+    };
+  }
+
+  const info = nextMessage.info;
+  if (info && typeof info === "object") {
+    const infoRecord = info as Record<string, unknown>;
+    const infoSummary = infoRecord.summary;
+    if (infoSummary && typeof infoSummary === "object") {
+      nextMessage = {
+        ...nextMessage,
+        info: {
+          ...infoRecord,
+          summary: sanitizeSummaryRecordForProxy(infoSummary as Record<string, unknown>),
+        },
+      };
+    }
+  }
+
+  return nextMessage;
 }
 
 function sanitizeSessionMessagesResponseForProxy(value: unknown): unknown {

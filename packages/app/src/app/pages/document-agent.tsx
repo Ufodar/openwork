@@ -677,6 +677,14 @@ export default function DocumentAgentView(props: SessionViewProps) {
       documentsReady: !initialDocumentsLoading(),
     })
   );
+  const sessionLoadError = createMemo(() => {
+    const raw = props.error?.trim() ?? "";
+    if (!raw) return null;
+    if (/session not found/i.test(raw)) {
+      return "当前连接的工作区不包含这条会话，或该会话属于其他 worker。请切换到创建该会话的 worker 后重试。";
+    }
+    return raw;
+  });
   const [expandedFolders, setExpandedFolders] = createSignal<Set<string>>(new Set());
 
   const expandFolderPath = (folderPath: string) => {
@@ -2507,6 +2515,15 @@ export default function DocumentAgentView(props: SessionViewProps) {
               </div>
             }
           >
+            <Show when={sessionLoadError()}>
+              {(message) => (
+                <div class="px-4 pt-4">
+                  <div class="rounded-xl border border-red-7 bg-red-3/70 px-3 py-2 text-sm text-red-11">
+                    {message()}
+                  </div>
+                </div>
+              )}
+            </Show>
             <MessageList
               messages={props.messages}
               sessionStatus={props.sessionStatus}

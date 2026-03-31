@@ -689,6 +689,83 @@ function normalizeSessionMessagePayload(value: unknown): Array<Record<string, un
   return [];
 }
 
+const MAX_PROXY_MESSAGE_SUMMARY_DIFFS = 20;
+
+function sanitizeMessageSummaryForProxy(message: Record<string, unknown>): Record<string, unknown> {
+  const summary = message.summary;
+  if (!summary || typeof summary !== "object") return message;
+
+  const summaryRecord = summary as Record<string, unknown>;
+  const rawDiffs = Array.isArray(summaryRecord.diffs) ? summaryRecord.diffs : null;
+  if (!rawDiffs || rawDiffs.length === 0) return message;
+
+  const hasAdditions = typeof summaryRecord.additions === "number" && Number.isFinite(summaryRecord.additions);
+  const hasDeletions = typeof summaryRecord.deletions === "number" && Number.isFinite(summaryRecord.deletions);
+  let totalAdditions = hasAdditions ? Number(summaryRecord.additions) : 0;
+  let totalDeletions = hasDeletions ? Number(summaryRecord.deletions) : 0;
+
+  if (!hasAdditions || !hasDeletions) {
+    let computedAdditions = 0;
+    let computedDeletions = 0;
+    for (const diff of rawDiffs) {
+      if (!diff || typeof diff !== "object") continue;
+      const record = diff as Record<string, unknown>;
+      if (typeof record.additions === "number" && Number.isFinite(record.additions)) {
+        computedAdditions += record.additions;
+      }
+      if (typeof record.deletions === "number" && Number.isFinite(record.deletions)) {
+        computedDeletions += record.deletions;
+      }
+    }
+    if (!hasAdditions) totalAdditions = computedAdditions;
+    if (!hasDeletions) totalDeletions = computedDeletions;
+  }
+
+  const compactDiffs = rawDiffs.slice(0, MAX_PROXY_MESSAGE_SUMMARY_DIFFS).map((diff) => {
+    const record = diff && typeof diff === "object" ? diff as Record<string, unknown> : {};
+    const next: Record<string, unknown> = {};
+    if (typeof record.file === "string") next.file = record.file;
+    if (typeof record.status === "string") next.status = record.status;
+    if (typeof record.additions === "number" && Number.isFinite(record.additions)) next.additions = record.additions;
+    if (typeof record.deletions === "number" && Number.isFinite(record.deletions)) next.deletions = record.deletions;
+    return next;
+  });
+
+  return {
+    ...message,
+    summary: {
+      ...summaryRecord,
+      additions: totalAdditions,
+      deletions: totalDeletions,
+      files:
+        typeof summaryRecord.files === "number" && Number.isFinite(summaryRecord.files)
+          ? summaryRecord.files
+          : rawDiffs.length,
+      diffs: compactDiffs,
+      diffsTruncated: rawDiffs.length > compactDiffs.length,
+      omittedDiffCount: Math.max(0, rawDiffs.length - compactDiffs.length),
+    },
+  };
+}
+
+function sanitizeSessionMessagesResponseForProxy(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) =>
+      item && typeof item === "object" ? sanitizeMessageSummaryForProxy(item as Record<string, unknown>) : item,
+    );
+  }
+  if (value && typeof value === "object" && Array.isArray((value as Record<string, unknown>).items)) {
+    const record = value as Record<string, unknown>;
+    return {
+      ...record,
+      items: ((record.items as unknown[]) ?? []).map((item) =>
+        item && typeof item === "object" ? sanitizeMessageSummaryForProxy(item as Record<string, unknown>) : item,
+      ),
+    };
+  }
+  return value;
+}
+
 async function sessionHasConversationHistory(workspace: WorkspaceInfo, sessionId: string): Promise<boolean> {
   const payload = await fetchOpencodeJson(workspace, `/session/${encodeURIComponent(sessionId)}/message`, {
     method: "GET",
@@ -1545,6 +1622,20 @@ export async function proxyOpencodeRequest(input: {
         return new Response(JSON.stringify(nextPayload), { status: response.status, headers: nextHeaders });
       }
       return new Response(raw, { status: response.status, headers: response.headers });
+    }
+
+    if (method === "GET" && /^\/session\/[^/]+\/message$/.test(normalizedProxyPath) && response.ok) {
+      const raw = await response.text();
+      let parsed: unknown = null;
+      try {
+        parsed = raw ? JSON.parse(raw) : [];
+      } catch {
+        return new Response(raw, { status: response.status, headers: response.headers });
+      }
+      const payload = sanitizeSessionMessagesResponseForProxy(parsed);
+      const nextHeaders = new Headers(response.headers);
+      nextHeaders.set("Content-Type", "application/json");
+      return new Response(JSON.stringify(payload), { status: response.status, headers: nextHeaders });
     }
 
     if (workspaceId && method === "DELETE" && pathSessionId && response.ok) {

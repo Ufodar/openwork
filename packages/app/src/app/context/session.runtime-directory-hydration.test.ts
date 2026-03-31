@@ -653,4 +653,110 @@ describe("createSessionStore runtime directory hydration", () => {
     ]);
     expect(store.sessions().find((session) => session.id === "ses_1")?.directory).toBe(runtimeDirectory);
   });
+
+  test("aborts session hydration early when the shared connection gate cannot restore readiness", async () => {
+    const callOrder: string[] = [];
+    const errors: Array<string | null> = [];
+
+    const runtimeDirectory = "/root/.openwork/user-workspaces/user-1/documents/sessions/runtime-1";
+    const workspaceRoot = "/root/.openwork/user-workspaces/user-1";
+    let prepareCalls = 0;
+
+    const store = createRoot((dispose) => {
+      disposeCurrent = dispose;
+      const [selectedSessionId, setSelectedSessionId] = createSignal<string | null>(null);
+      const [sessionModelState, setSessionModelState] = createSignal<SessionModelState>({
+        overrides: {},
+        resolved: {},
+      });
+
+      const client = {
+        event: {
+          subscribe: async (_input?: { directory?: string }, options?: { signal?: AbortSignal }) => ({
+            stream: (async function* () {
+              await new Promise<void>((resolve) => {
+                options?.signal?.addEventListener("abort", () => resolve(), { once: true });
+              });
+            })(),
+          }),
+        },
+        global: {
+          health: async () => {
+            callOrder.push("global.health");
+            return { data: { healthy: true } };
+          },
+        },
+        session: {
+          get: async ({ sessionID }: { sessionID: string }) => {
+            callOrder.push(`session.get:${sessionID}`);
+            return {
+              data: {
+                id: sessionID,
+                title: "Runtime session",
+                slug: null,
+                directory: runtimeDirectory,
+                time: { created: 1, updated: 2 },
+              },
+            };
+          },
+          messages: async ({ sessionID }: { sessionID: string }) => {
+            callOrder.push(`session.messages:${sessionID}`);
+            return { data: [] };
+          },
+          todo: async ({ sessionID }: { sessionID: string }) => {
+            callOrder.push(`session.todo:${sessionID}`);
+            return { data: [] };
+          },
+        },
+        permission: {
+          list: async () => ({ data: [] }),
+        },
+        question: {
+          list: async () => ({ data: [] }),
+        },
+      } as any;
+
+      const store = createSessionStore({
+        client: () => client,
+        activeWorkspaceRoot: () => workspaceRoot,
+        selectedSessionId,
+        setSelectedSessionId,
+        sessionModelState,
+        setSessionModelState: (updater) => {
+          const next = updater(sessionModelState());
+          setSessionModelState(next);
+          return next;
+        },
+        lastUserModelFromMessages: () => null,
+        developerMode: () => false,
+        setError: (message) => errors.push(message),
+        setSseConnected: () => undefined,
+        prepareConnection: async () => {
+          prepareCalls += 1;
+          return false;
+        },
+      });
+
+      store.setSessions([
+        {
+          id: "ses_1",
+          title: "Runtime session",
+          slug: null,
+          directory: "",
+          time: { created: 1, updated: 1 },
+        } as any,
+      ]);
+
+      return store;
+    });
+
+    await wait();
+    const ok = await store.selectSession("ses_1");
+    await wait();
+
+    expect(ok).toBe(false);
+    expect(prepareCalls).toBe(1);
+    expect(callOrder).toEqual([]);
+    expect(errors.at(-1)).toBe("OpenWork server not connected.");
+  });
 });

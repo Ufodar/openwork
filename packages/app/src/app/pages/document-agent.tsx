@@ -12,6 +12,7 @@ import QuestionModal from "../components/question-modal";
 import SessionKnowledgeSurface from "../components/session/session-knowledge-surface";
 import ToolMonitorPanel from "../components/tool-monitor/tool-monitor-panel";
 import { shouldShowDocumentAgentChatLoading } from "../lib/document-agent-loading";
+import { createDocumentSessionReconnectRecovery } from "../lib/document-session-recovery";
 import { DOCUMENT_UPLOAD_ACCEPT } from "../lib/documents";
 import { MARKDOWN_PREVIEW_CLASS, renderMarkdownPreview } from "../lib/markdown-preview";
 import { isTodoCompletedStatus } from "../lib/todo-status";
@@ -685,6 +686,17 @@ export default function DocumentAgentView(props: SessionViewProps) {
       return "当前连接的工作区不包含这条会话，或该会话属于其他 worker。请切换到创建该会话的 worker 后重试。";
     }
     return raw;
+  });
+  createDocumentSessionReconnectRecovery({
+    serverStatus: () => props.openworkServerStatus,
+    workspaceId,
+    sessionId,
+    ready: () => Boolean(apiConfig()) && !sessionHydrating(),
+    recover: async (activeSessionId) => {
+      const hydrated = await props.selectSession(activeSessionId);
+      if (hydrated === false) return;
+      await refetchDocuments();
+    },
   });
   const [expandedFolders, setExpandedFolders] = createSignal<Set<string>>(new Set());
 

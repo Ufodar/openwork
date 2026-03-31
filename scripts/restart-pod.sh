@@ -188,7 +188,8 @@ log_leak_counts() {
     local opencode_tui_count="$3"
     local bocha_uv_count="$4"
     local bocha_python_count="$5"
-    echo "[restart-pod] Leak counts ${stage}: opencode serve=${opencode_serve_count} opencode -s=${opencode_tui_count} bocha uv=${bocha_uv_count} bocha python=${bocha_python_count}"
+    local snapshot_git_count="$6"
+    echo "[restart-pod] Leak counts ${stage}: opencode serve=${opencode_serve_count} opencode -s=${opencode_tui_count} bocha uv=${bocha_uv_count} bocha python=${bocha_python_count} snapshot git=${snapshot_git_count}"
 }
 
 ensure_pattern_drained() {
@@ -981,13 +982,15 @@ BOCHA_UV_PATTERN="uv --directory ${BOCHA_MCP_DIR_PATTERN} run bocha-search-mcp"
 BOCHA_PYTHON_PATTERN="${BOCHA_MCP_DIR_PATTERN}/\\.venv/bin/python .*bocha-search-mcp"
 OPENCODE_SERVE_PATTERN="opencode serve --hostname"
 OPENCODE_TUI_PATTERN="opencode -s "
+GIT_SNAPSHOT_ADD_PATTERN="git --git-dir .*/snapshot/global --work-tree .* add \\."
 
 log_leak_counts \
     "before cleanup" \
     "$(count_pattern_matches "$OPENCODE_SERVE_PATTERN")" \
     "$(count_pattern_matches "$OPENCODE_TUI_PATTERN")" \
     "$(count_pattern_matches "$BOCHA_UV_PATTERN")" \
-    "$(count_pattern_matches "$BOCHA_PYTHON_PATTERN")"
+    "$(count_pattern_matches "$BOCHA_PYTHON_PATTERN")" \
+    "$(count_pattern_matches "$GIT_SNAPSHOT_ADD_PATTERN")"
 
 # Kill known process signatures first (more reliable than port-only cleanup).
 kill_by_pattern "dev-headless-web wrapper" "bun scripts/dev-headless-web.ts"
@@ -1005,6 +1008,7 @@ kill_by_pattern "generic opencode serve" "$OPENCODE_SERVE_PATTERN"
 kill_by_pattern "interactive opencode tui" "$OPENCODE_TUI_PATTERN"
 kill_by_pattern "bocha-search-mcp uv launcher" "$BOCHA_UV_PATTERN"
 kill_by_pattern "bocha-search-mcp python worker" "$BOCHA_PYTHON_PATTERN"
+kill_by_pattern "opencode snapshot git add" "$GIT_SNAPSHOT_ADD_PATTERN"
 
 # Port-level fallback cleanup.
 for p in "$OPENWORK_PORT" "$PORT" "$OPENWORK_WEB_PORT" "$OPENWORK_PUBLIC_WEB_PORT" 8789 5173 32765; do
@@ -1015,6 +1019,7 @@ ensure_pattern_drained "generic opencode serve" "$OPENCODE_SERVE_PATTERN"
 ensure_pattern_drained "interactive opencode tui" "$OPENCODE_TUI_PATTERN"
 ensure_pattern_drained "bocha-search-mcp uv launcher" "$BOCHA_UV_PATTERN"
 ensure_pattern_drained "bocha-search-mcp python worker" "$BOCHA_PYTHON_PATTERN"
+ensure_pattern_drained "opencode snapshot git add" "$GIT_SNAPSHOT_ADD_PATTERN"
 
 for p in "$OPENWORK_PORT" "$PORT" "$OPENWORK_WEB_PORT" "$OPENWORK_PUBLIC_WEB_PORT" 8789 5173 32765; do
     ensure_port_free "$p"
@@ -1025,7 +1030,8 @@ log_leak_counts \
     "$(count_pattern_matches "$OPENCODE_SERVE_PATTERN")" \
     "$(count_pattern_matches "$OPENCODE_TUI_PATTERN")" \
     "$(count_pattern_matches "$BOCHA_UV_PATTERN")" \
-    "$(count_pattern_matches "$BOCHA_PYTHON_PATTERN")"
+    "$(count_pattern_matches "$BOCHA_PYTHON_PATTERN")" \
+    "$(count_pattern_matches "$GIT_SNAPSHOT_ADD_PATTERN")"
 
 sleep 1
 

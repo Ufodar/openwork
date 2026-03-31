@@ -329,8 +329,14 @@ export async function provisionSessionWorkspace(
 
 async function writeRuntimeProjectBoundary(runtimeDir: string): Promise<void> {
   const gitMarkerPath = join(runtimeDir, ".git");
-  if (await exists(gitMarkerPath)) return;
-  await writeFile(gitMarkerPath, "gitdir: .openwork-runtime/git\n", "utf8");
+  if (!(await exists(gitMarkerPath))) {
+    await writeFile(gitMarkerPath, "gitdir: .openwork-runtime/git\n", "utf8");
+  }
+
+  const gitignorePath = join(runtimeDir, ".gitignore");
+  if (!(await exists(gitignorePath))) {
+    await writeFile(gitignorePath, [".openwork-runtime/", ".tmp/", ""].join("\n"), "utf8");
+  }
 }
 
 async function mirrorWorkspaceOpencodeSupportFiles(

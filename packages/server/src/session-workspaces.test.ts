@@ -80,9 +80,11 @@ describe("provisionSessionWorkspace", () => {
       instructions?: string[];
     };
     const runtimeInstructionRaw = await readFile(join(result.runtimeDir, ".opencode", "openwork-runtime.md"), "utf8");
+    const runtimeGitignoreRaw = await readFile(join(result.runtimeDir, ".gitignore"), "utf8");
 
     expect(result.runtimeDir.startsWith(join(workspacePath, "documents", "sessions"))).toBe(true);
     expect(await exists(join(result.runtimeDir, ".git"))).toBe(true);
+    expect(await exists(join(result.runtimeDir, ".gitignore"))).toBe(true);
     expect(await exists(join(result.runtimeDir, "opencode.json"))).toBe(false);
     expect(await exists(join(result.runtimeDir, "opencode.jsonc"))).toBe(true);
     expect(await exists(join(result.runtimeDir, ".tmp", "system"))).toBe(true);
@@ -97,6 +99,8 @@ describe("provisionSessionWorkspace", () => {
     expect(runtimeInstructionRaw).toContain("Keep persisted state, user-visible deliverables");
     expect(runtimeInstructionRaw).toContain("Treat system temp paths such as `/tmp/*` and `/private/tmp/*` as shell-local only");
     expect(runtimeInstructionRaw).toContain("Do not rely on workspace-external absolute paths or `external_directory`");
+    expect(runtimeGitignoreRaw).toContain(".openwork-runtime/");
+    expect(runtimeGitignoreRaw).toContain(".tmp/");
   });
 
   test("prunes runtime skills and unrelated MCP entries for document-agent sessions", async () => {

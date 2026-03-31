@@ -83,10 +83,14 @@ test("restart-pod cleans leaked bocha and interactive opencode processes and log
   assert.match(restartScript, /BOCHA_PYTHON_PATTERN=".*bocha-search-mcp"/);
   assert.match(restartScript, /OPENCODE_TUI_PATTERN="opencode -s "/);
   assert.match(restartScript, /kill_by_pattern "interactive opencode tui" "\$OPENCODE_TUI_PATTERN"/);
+  assert.match(restartScript, /GIT_SNAPSHOT_ADD_PATTERN=".*snapshot\/global.*add \\\\."/
+  );
+  assert.match(restartScript, /kill_by_pattern "opencode snapshot git add" "\$GIT_SNAPSHOT_ADD_PATTERN"/);
   assert.match(restartScript, /log_leak_counts\s+\\\s+"before cleanup"/s);
   assert.match(restartScript, /log_leak_counts\s+\\\s+"after cleanup"/s);
   assert.match(restartScript, /opencode serve=/);
   assert.match(restartScript, /opencode -s=/);
   assert.match(restartScript, /bocha uv=/);
   assert.match(restartScript, /bocha python=/);
+  assert.match(restartScript, /snapshot git=/);
 });

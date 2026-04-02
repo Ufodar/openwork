@@ -108,9 +108,9 @@ describe("proxyOpencodeRequest session creation", () => {
     await expect(readFile(join(runtime?.runtimeDir ?? "", ".opencode", "doc-state.md"), "utf8")).rejects.toThrow();
   });
 
-  test("provisions document-state overlays when the session requests the bid-writer runtime profile", async () => {
+  test("provisions document-state overlays when the session requests the document-writer runtime profile", async () => {
     globalThis.fetch = (async () =>
-      new Response(JSON.stringify({ id: "ses_bid", title: "Bid Session" }), {
+      new Response(JSON.stringify({ id: "ses_document_writer", title: "Document Writer Session" }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       })) as unknown as typeof fetch;
@@ -123,7 +123,7 @@ describe("proxyOpencodeRequest session creation", () => {
     const response = await proxyOpencodeRequest({
       request: new Request("http://openwork.local/w/ws_1/opencode/session", {
         method: "POST",
-        body: JSON.stringify({ title: "Bid Session", openworkEnableDocState: true }),
+        body: JSON.stringify({ title: "Document Writer Session", openworkEnableDocState: true }),
       }),
       url: new URL("http://openwork.local/w/ws_1/opencode/session"),
       workspace,
@@ -138,7 +138,7 @@ describe("proxyOpencodeRequest session creation", () => {
 
     expect(response.status).toBe(200);
 
-    const runtime = await sessionWorkspaces.getWorkspace(workspace.id, "ses_bid");
+    const runtime = await sessionWorkspaces.getWorkspace(workspace.id, "ses_document_writer");
     const raw = await readFile(join(runtime?.runtimeDir ?? "", "opencode.jsonc"), "utf8");
     const parsed = JSON.parse(raw) as {
       mcp?: Record<string, unknown>;

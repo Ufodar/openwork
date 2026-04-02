@@ -478,6 +478,8 @@ describe("provisionSessionWorkspace", () => {
     });
     expect(parsed.instructions).toContain(".opencode/openwork-runtime.md");
     expect(parsed.instructions).toContain(".opencode/doc-state.md");
+    expect(instructionRaw).toContain("Use the existing `.worktree/**`, `requirements.csv`, and `reports/**` artifacts");
+    expect(instructionRaw).not.toContain("`.bid/**`");
     expect(instructionRaw).toContain("The `.worktree/**` files remain the source of truth");
     expect(instructionRaw).not.toContain("doc_state_state_get_brief");
     expect(instructionRaw).not.toContain("doc_state_state_get_facts");

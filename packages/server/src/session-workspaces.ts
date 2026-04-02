@@ -604,7 +604,7 @@ function buildRuntimeDocumentStateInstructions(): string {
   return [
     "# Document State",
     "",
-    "Use the existing `.worktree/**`, `.bid/**`, `requirements.csv`, and `reports/**` artifacts as the durable document-state surface.",
+    "Use the existing `.worktree/**`, `requirements.csv`, and `reports/**` artifacts as the durable document-state surface.",
     "The `.worktree/**` files remain the source of truth even when a state-tool overlay is available.",
     "If the current state is missing or stale, update the owning files instead of inventing a parallel summary surface.",
     "If the state-tool overlay is unavailable, continue directly from the files.",

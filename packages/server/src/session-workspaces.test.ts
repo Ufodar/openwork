@@ -426,7 +426,9 @@ describe("provisionSessionWorkspace", () => {
     });
     expect(parsed.instructions).toContain(".opencode/openwork-runtime.md");
     expect(parsed.instructions).toContain(".opencode/openwork-knowledge.md");
-    expect(instructionRaw).toContain("openwork_knowledge_search");
+    expect(instructionRaw).toContain("do not skip it for relevant recall tasks");
+    expect(instructionRaw).toContain("use `openwork_knowledge_search` at least once before external search or broad workspace discovery");
+    expect(instructionRaw).toContain("For purely local file editing, format conversion, or directed rewriting against already-open local material");
     expect(instructionRaw).toContain("Attached knowledge count: 0");
     expect(instructionRaw).toContain("If no knowledge bases are attached, or attached knowledge is insufficient");
     expect(instructionRaw).toContain("Do not use `memory_search_nodes` or `memory_read_graph` as a substitute for attached knowledge retrieval");

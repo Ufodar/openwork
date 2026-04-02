@@ -8,6 +8,37 @@ import type { SessionWorkspaceService } from "./session-workspaces.js";
 import type { ServerConfig, WorkspaceInfo } from "./types.js";
 
 describe("document routes", () => {
+  test("does not register retired bid module routes", async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), "openwork-document-route-no-bid-"));
+    const runtimeDir = join(workspacePath, "documents", "sessions", "runtime-1");
+    await mkdir(runtimeDir, { recursive: true });
+
+    const routes: any[] = [];
+    const sessionWorkspaces = {
+      getWorkspace: async () => ({
+        runtimeId: "runtime-1",
+        runtimeDir,
+        createdAt: Date.now(),
+      }),
+      resolveDocumentsDir: async () => runtimeDir,
+    } as unknown as SessionWorkspaceService;
+
+    createDocumentRoutes(routes, sessionWorkspaces);
+
+    const retiredPaths = [
+      "/w/ws_test/bid/fill",
+      "/w/ws_test/bid/facts",
+      "/w/ws_test/bid/qc",
+      "/w/ws_test/bid/dedupe",
+      "/w/ws_test/bid/preview-pdf",
+    ];
+
+    for (const path of retiredPaths) {
+      const route = routes.find((candidate) => candidate.regex.test(path));
+      expect(route).toBeUndefined();
+    }
+  });
+
   test("hides runtime config files from session document listings", async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), "openwork-document-route-"));
     const runtimeDir = join(workspacePath, "documents", "sessions", "runtime-1");

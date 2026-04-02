@@ -8,8 +8,6 @@ from pathlib import Path
 
 
 SYSTEM_MATERIAL_HINTS = {
-    "项目申报",
-    "申报材料",
     "技术材料",
     "建设方案",
     "实施方案",
@@ -194,7 +192,7 @@ def infer_topic(statement: str) -> str:
     if "质保" in statement or "保修" in statement:
         return "warranty"
     if "保证金" in statement:
-        return "bid-security"
+        return "commercial-baseline"
     if "付款" in statement or "预付" in statement:
         return "payment"
     if "节点" in statement and ("gpu" in lowered or "智算" in statement):
@@ -218,7 +216,7 @@ def is_noise_statement(statement: str, topic: str, profile: dict) -> bool:
         positive_hits = sum(1 for keyword in SYSTEM_MATERIAL_KEYWORDS if keyword in lowered)
         if positive_hits <= 2:
             return True
-    if profile["system_material"] and topic in {"payment", "commercial-baseline", "bid-security"}:
+    if profile["system_material"] and topic in {"payment", "commercial-baseline"}:
         return True
     return False
 

@@ -45,23 +45,13 @@ describe("document state MCP handler", () => {
       "utf8",
     );
     await writeFile(
-      join(workspacePath, "documents", "sessions", "rt_1", ".bid", "facts.json"),
+      join(workspacePath, "documents", "sessions", "rt_1", ".worktree", "facts.json"),
       JSON.stringify({
         projectName: "多文档测试项目",
         facts: [{ key: "cpu", value: "8 cores" }],
       }, null, 2),
       "utf8",
-    ).catch(async () => {
-      await mkdir(join(workspacePath, "documents", "sessions", "rt_1", ".bid"), { recursive: true });
-      await writeFile(
-        join(workspacePath, "documents", "sessions", "rt_1", ".bid", "facts.json"),
-        JSON.stringify({
-          projectName: "多文档测试项目",
-          facts: [{ key: "cpu", value: "8 cores" }],
-        }, null, 2),
-        "utf8",
-      );
-    });
+    );
     runtimeTokens = new RuntimeDocumentStateTokenService();
   });
 

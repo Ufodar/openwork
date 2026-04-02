@@ -21,10 +21,7 @@
         "openwork-knowledge*": true
       },
       "permission": {
-        "task": {
-          "*": "deny",
-          "doc-*": "allow"
-        },
+        "task": "allow",
         "read": {
           "*": "deny",
           ".worktree/index.json": "allow",
@@ -41,8 +38,6 @@
           "**/.worktree/coverage.json": "allow",
           ".worktree/verify/coverage.json": "allow",
           "**/.worktree/verify/coverage.json": "allow",
-          ".bid/**": "allow",
-          "**/.bid/**": "allow",
           "requirements.csv": "allow",
           "**/requirements.csv": "allow",
           "reports/**": "allow",
@@ -54,10 +49,6 @@
           ".worktree/**": "allow",
           "**/.worktree": "allow",
           "**/.worktree/**": "allow",
-          ".bid": "allow",
-          ".bid/**": "allow",
-          "**/.bid": "allow",
-          "**/.bid/**": "allow",
           "reports": "allow",
           "reports/**": "allow",
           "**/reports": "allow",
@@ -75,10 +66,8 @@
           "*.md": "allow",
           "**/*.md": "allow",
           ".worktree/**": "allow",
-          ".bid/**": "allow",
           "reports/**": "allow",
           "**/.worktree/**": "allow",
-          "**/.bid/**": "allow",
           "**/reports/**": "allow"
         },
         "edit": "deny",
@@ -208,7 +197,6 @@
           ".worktree/index.json": "allow",
           ".worktree/sources/manifest.json": "allow",
           ".worktree/sources/*.json": "allow",
-          ".bid/**": "allow",
           "requirements.csv": "allow",
           "reports/**": "allow"
         },
@@ -216,15 +204,12 @@
           "*": "deny",
           ".worktree": "allow",
           ".worktree/**": "allow",
-          ".bid": "allow",
-          ".bid/**": "allow",
           "reports": "allow",
           "reports/**": "allow"
         },
         "glob": {
           "*": "deny",
           ".worktree/**": "allow",
-          ".bid/**": "allow",
           "reports/**": "allow"
         },
         "write": {
@@ -273,8 +258,6 @@
           "**/.worktree/plan/solution-plan.json": "allow",
           ".worktree/coverage.json": "allow",
           "**/.worktree/coverage.json": "allow",
-          ".bid/**": "allow",
-          "**/.bid/**": "allow",
           "requirements.csv": "allow",
           "**/requirements.csv": "allow",
           "reports/**": "allow",
@@ -284,15 +267,12 @@
           "*": "deny",
           ".worktree": "allow",
           ".worktree/**": "allow",
-          ".bid": "allow",
-          ".bid/**": "allow",
           "reports": "allow",
           "reports/**": "allow"
         },
         "glob": {
           "*": "deny",
           ".worktree/**": "allow",
-          ".bid/**": "allow",
           "reports/**": "allow"
         },
         "write": {

@@ -28,8 +28,8 @@ Script resolution discipline:
 Default execution path:
 - first resolve `SCRIPT_PATH`, then run `python3 "$SCRIPT_PATH" --workspace . --plan-out .worktree/plan/solution-plan.json --coverage-out .worktree/coverage.json`
 - if the task explicitly provides a user objective or target document, pass them through with `--goal` and `--target-doc`
-- if the user named systems, exact output headings, mandatory subsections, or a specific proposal deliverable, treat those strings as a hard contract and pass them through explicitly; do not accept a generic placeholder plan with sections like “执行摘要 / 主体内容 / 待确认事项”
-- do not infer a named multi-system proposal skeleton only from source titles or domain keywords; require the user goal or accepted task contract to make that structure explicit
+- if the user named systems, exact output headings, mandatory subsections, or a specific deliverable form, treat those strings as a hard contract and pass them through explicitly; do not accept a generic placeholder plan with sections like “执行摘要 / 主体内容 / 待确认事项”
+- do not infer a rigid named multi-system section skeleton only from source titles or domain keywords; require the user goal or accepted task contract to make that structure explicit
 - only hand-edit the generated JSON when the script output is clearly insufficient for the writer
 - do not replace the script-emitted section schema with a custom `system/modules/key_facts` shape; if you enrich the plan, preserve `id`, `title`, `required_subsections`, `required_evidence`, and `source_context_refs` as the canonical control surface
 
@@ -57,10 +57,10 @@ Planning discipline:
 - flag unresolved conflicts that block high-confidence drafting
 - prefer explicit section-by-section acceptance criteria over vague “write a good answer”
 - keep outputs machine-readable first and prose-light second
-- named systems are the primary section contract when the user explicitly lists them; do not replace them with generic proposal headings or mixed business modules
+- named systems are the primary section contract when the user explicitly lists them; do not replace them with generic top-level headings or mixed business modules
 - if you add helper summaries for human readability, add them alongside the canonical section objects instead of replacing the machine-readable schema that downstream writer and verifier expect
-- do not promote irrelevant commercial, payment, coupon, recharge, consumer checkout, product-offline, storefront, or account-operations facts into primary sections, acceptance criteria, or writer instructions unless the user explicitly asked for those business topics
-- if merged facts still contain mixed-signal platform运营内容, keep it out of `sections` and `required_evidence`, and at most park it under `open_questions` or omit it when it has no bearing on the requested systems
+- do not promote low-relevance business, operations, or domain-noise facts into primary sections, acceptance criteria, or writer instructions unless the user explicitly asked for those topics
+- if merged facts still contain mixed-signal operational content, keep it out of `sections` and `required_evidence`, and at most park it under `open_questions` or omit it when it has no bearing on the requested sections
 - do not read `.worktree/sources/*.json` unless the task explicitly authorizes a targeted direct-source reread
 
 Do not:

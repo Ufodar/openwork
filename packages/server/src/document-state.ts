@@ -154,7 +154,6 @@ export async function readDocumentStateDoc(runtimeDir: string, docId: string): P
 export async function readDocumentStateFacts(runtimeDir: string): Promise<Record<string, unknown> | null> {
   return readFirstAvailable(runtimeDir, [
     ".worktree/facts.json",
-    ".bid/facts.json",
   ]);
 }
 

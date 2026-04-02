@@ -27,7 +27,7 @@ def looks_like_heading(value: str) -> bool:
     patterns = [
         r"^第[一二三四五六七八九十百0-9]+[章节部分篇]",
         r"^[0-9一二三四五六七八九十]+[、.．)]",
-        r"^(项目概况|服务要求|技术要求|评分标准|投标要求|建设内容|实施方案|商务条款)",
+        r"^(项目概况|服务要求|技术要求|评分标准|响应要求|建设内容|实施方案|商务条款)",
     ]
     return any(re.match(pattern, text) for pattern in patterns)
 
@@ -133,8 +133,8 @@ def infer_role(relative_path: str, explicit_role: str | None) -> str:
         return "招标文件"
     if "终版" in relative_path or "final" in lower:
         return "终版材料"
-    if "投标" in relative_path or "bid" in lower:
-        return "投标文件"
+    if "响应" in relative_path or "response" in lower:
+        return "响应材料"
     return "参考材料"
 
 

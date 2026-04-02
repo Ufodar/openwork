@@ -55,7 +55,6 @@ GENERIC_RISK_TOPICS = [
     "warranty",
     "commercial-baseline",
     "payment",
-    "bid-security",
 ]
 
 REFERENCE_SECTION_KEYWORDS = {
@@ -387,7 +386,7 @@ def score_fact(item: dict, profile: dict) -> int:
     topic = str(item.get("topic") or "")
     if topic in profile["preferred_topics"]:
         score += 6
-    if topic in {"payment", "commercial-baseline", "bid-security"} and "resource-aggregation" in profile["preferred_topics"]:
+    if topic in {"payment", "commercial-baseline"} and "resource-aggregation" in profile["preferred_topics"]:
         score -= 12
     source_count = len(item.get("sources") or [])
     score += min(source_count, 3) * 2

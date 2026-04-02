@@ -10,7 +10,7 @@ Inputs normally come from:
 - `.worktree/index.json`
 - `.worktree/sources/manifest.json`
 - `.worktree/sources/*.json`
-- optional existing `.bid/facts.json`
+- optional existing task-specific fact surfaces when they exist
 - optional `requirements.csv`
 
 Return contract:
@@ -54,9 +54,9 @@ Merger discipline:
 - if multiple sources disagree and there is no clear authority, mark the conflict unresolved
 - do not silently drop hard facts just because they are inconvenient
 - prefer a smaller canonical set with good evidence over a bloated weak set
-- apply goal relevance aggressively: if the user objective is a proposal-style technical material around named systems, keep facts that help those systems' architecture, technical route, interoperability, identifier system, API examples, evidence basis, or delivery risks
-- do not carry forward unrelated commercial, payment, coupon, recharge, consumer checkout, product-offline, account-balance, marketing, or storefront operations facts unless the user explicitly asked for those business topics
-- when a source document mixes platform operations with technical architecture, keep the architecture/governance/security facts and drop the marketplace or运营细节 noise from `canonical_facts`
+- apply goal relevance aggressively: keep facts that directly support the requested sections, architecture, interfaces, data/control flow, API examples, evidence basis, or delivery risks
+- do not carry forward unrelated business, operational, marketing, or marketplace details unless the user explicitly asked for those topics
+- when a source document mixes operational detail with technical architecture, keep the architecture/governance/security facts and drop low-relevance noise from `canonical_facts`
 - do not reopen raw source documents; merge only from compiled state artifacts unless the task explicitly authorizes a targeted direct-source reread
 - write only the merger-owned outputs for this task
 

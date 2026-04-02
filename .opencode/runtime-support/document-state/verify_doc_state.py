@@ -485,7 +485,7 @@ def proposal_style_goal(goal: str) -> bool:
     text = normalize_text(goal)
     if not text:
         return False
-    markers = ("项目申报", "技术材料", "建设方案", "实施方案", "解决方案", "投标", "标书", "技术方案")
+    markers = ("正式技术材料", "技术材料", "建设方案", "实施方案", "解决方案", "响应材料", "技术方案")
     return any(marker in text for marker in markers)
 
 

@@ -36,8 +36,8 @@ const agentTypes: AgentType[] = [
   },
   {
     id: "document-writer",
-    nameKey: "agents.bid_writer_name",
-    descriptionKey: "agents.bid_writer_desc",
+    nameKey: "agents.document_writer_name",
+    descriptionKey: "agents.document_writer_desc",
     icon: FileText,
     status: "available",
   },

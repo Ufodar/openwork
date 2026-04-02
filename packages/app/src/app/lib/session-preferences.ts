@@ -140,24 +140,18 @@ const inferLegacySessionPreferences = (title?: string | null): {
     return { view: null, agent: null, agentLock: null };
   }
 
-  if (normalized.includes("document writer")) {
+  if (
+    normalized.includes("document writer") ||
+    normalized.includes("formal document writer") ||
+    normalized.includes("bid writer") ||
+    normalized.includes("正式文档助手") ||
+    normalized.includes("标书写作助手")
+  ) {
     return { view: "document-writer", agent: "document-writer", agentLock: "document-writer" };
-  }
-
-  if (normalized.includes("bid writer")) {
-    return { view: "document-writer", agent: "document-writer", agentLock: "document-writer" };
-  }
-
-  if (normalized.includes("bid dedupe")) {
-    return { view: "document-agent", agent: "bid-dedupe", agentLock: null };
   }
 
   if (normalized.includes("document agent") || normalized.includes("文档智能体")) {
     return { view: "document-agent", agent: "common-work", agentLock: "common-work" };
-  }
-
-  if (normalized.includes("标书写作助手")) {
-    return { view: "document-writer", agent: "document-writer", agentLock: "document-writer" };
   }
 
   return { view: null, agent: null, agentLock: null };

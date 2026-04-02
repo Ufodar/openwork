@@ -142,7 +142,7 @@ describe("resolveSessionPreferences", () => {
         agent: "document-writer",
         agentLock: "document-writer",
       },
-      title: "标书写作助手",
+      title: "Document Writer",
     });
 
     expect(resolved.view).toEqual({ value: "document-writer", source: "stored" });
@@ -150,7 +150,17 @@ describe("resolveSessionPreferences", () => {
     expect(resolved.agentLock).toEqual({ value: "document-writer", source: "stored" });
   });
 
-  test("maps 标书写作助手 legacy titles to the document-writer view and lock", () => {
+  test("maps new document writer titles to the document-writer view and lock", () => {
+    const resolved = resolveSessionPreferences({
+      title: "Document Writer",
+    });
+
+    expect(resolved.view).toEqual({ value: "document-writer", source: "legacy" });
+    expect(resolved.agent).toEqual({ value: "document-writer", source: "legacy" });
+    expect(resolved.agentLock).toEqual({ value: "document-writer", source: "legacy" });
+  });
+
+  test("keeps legacy 标书写作助手 titles mapped to the document-writer view and lock", () => {
     const resolved = resolveSessionPreferences({
       title: "标书写作助手",
     });

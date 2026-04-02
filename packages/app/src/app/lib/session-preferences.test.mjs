@@ -34,7 +34,7 @@ describe("resolveSessionPreferences", () => {
     expect(resolved.view).toEqual({ value: "document-agent", source: "legacy" });
   });
 
-  test("stored document view can still use legacy agent lock for old sessions", () => {
+  test("stored document view can still use legacy agent defaults for old 标书写作助手 sessions", () => {
     const resolved = resolveSessionPreferences({
       stored: { view: "document-agent" },
       title: "标书写作助手",

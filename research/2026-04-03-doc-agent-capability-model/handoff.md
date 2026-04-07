@@ -41,6 +41,9 @@
 - 当前最新阻塞已经收紧到 runtime/tool/perms mismatch：
   - `common-work` 在真实 Qin 样例里卡在空输入的 `write`
   - `document-writer` 主代理会尝试读取 `.worktree/text/**`，但当前 runtime surface 不允许
+- hosted 证据现在必须按两层看：
+  - **公网入口层**：上传/连接可能异常慢或 reset
+  - **产品内链路层**：即使直连 pod 内部入口，`common-work` 仍会卡进空输入 `write` pending
 - 不要把“可自我修正的一两步短弯路”也当成必须用全局禁令消灭的问题。
   - 后续约束重点应放在：
     - 默认观察面

@@ -36,6 +36,9 @@
 - 运行时排查进入新的收口原则：
   - 不为一两步可自我修正的短弯路牺牲通用能力
   - 优先修“默认观察面 / phase ownership / 重复打转”这类会真正破坏主循环的问题
+- hosted 排查已进一步分层：
+  - 公网入口存在上传/连接毛刺
+  - 即使改走 pod 内部入口，`common-work` 仍会在真实写作阶段卡进空输入 `write` pending
 - 只有先排清这些 blocker，后面的广义文档质量验证才有意义。
 
 ## 当前还没完成
@@ -51,6 +54,7 @@
 
 1. **先排 runtime/tool/perms mismatch**
    - 查清 `common-work` 空 `write` 调用的触发条件
+   - 把公网入口问题和产品内链路问题继续分开记录，不再混成同一类 hosted 失败
    - 查清 `document-writer` 为何会去读 `.worktree/text/**`
    - 判断这条路径该不该继续作为 controller 默认观察面；优先考虑交还给 owning phase，而不是全局禁工具
 2. 在 blocker 排清后，再做广义文档任务最小验证

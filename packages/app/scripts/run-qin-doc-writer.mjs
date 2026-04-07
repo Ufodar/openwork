@@ -20,6 +20,14 @@ const OPENWORK_BASE = process.env.OPENWORK_BASE ?? "http://192.168.5.10:32765/op
 const USERNAME = process.env.OPENWORK_USERNAME ?? "fuda";
 const PASSWORD = process.env.OPENWORK_PASSWORD ?? "1";
 const MODEL_REF = process.env.OPENWORK_COMPARE_MODEL ?? "my-company/MiniMax-2.5";
+const MALFORMED_PENDING_TOOL_TIMEOUT_MS = Number.parseInt(
+  process.env.OPENWORK_MALFORMED_PENDING_TOOL_TIMEOUT_MS ?? "180000",
+  10,
+);
+const STALLED_PENDING_TOOL_TIMEOUT_MS = Number.parseInt(
+  process.env.OPENWORK_STALLED_PENDING_TOOL_TIMEOUT_MS ?? "300000",
+  10,
+);
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const OUTPUT_PATH =
   typeof process.env.OPENWORK_COMPARE_OUTPUT === "string" && process.env.OPENWORK_COMPARE_OUTPUT.trim()
@@ -272,6 +280,8 @@ async function waitForSessionSettled(client, sessionId, runPrompt, options = {})
         messages,
         lastProgressAt,
         now: performance.now(),
+        malformedPendingToolTimeoutMs: MALFORMED_PENDING_TOOL_TIMEOUT_MS,
+        stalledPendingToolTimeoutMs: STALLED_PENDING_TOOL_TIMEOUT_MS,
       });
       if (stalledPendingTools) {
         throw new Error(

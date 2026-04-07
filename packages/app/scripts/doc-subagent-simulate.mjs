@@ -44,6 +44,14 @@ const scenarioFilter = args.get("scenario")?.trim() ?? "";
 const outputRoot = join(root, "packages", "app", "pr", "doc-subagent-orchestration");
 const simulationRoot = join(outputRoot, "simulations");
 const openworkDataDir = join(root, "tmp", "doc-subagent-sim", "openwork-data");
+const MALFORMED_PENDING_TOOL_TIMEOUT_MS = Number.parseInt(
+  process.env.OPENWORK_MALFORMED_PENDING_TOOL_TIMEOUT_MS ?? "180000",
+  10,
+);
+const STALLED_PENDING_TOOL_TIMEOUT_MS = Number.parseInt(
+  process.env.OPENWORK_STALLED_PENDING_TOOL_TIMEOUT_MS ?? "300000",
+  10,
+);
 
 const scenarios = [
   {
@@ -296,6 +304,8 @@ async function waitForSessionSettled(client, sessionId, runPrompt, {
         messages,
         lastProgressAt,
         now: now(),
+        malformedPendingToolTimeoutMs: MALFORMED_PENDING_TOOL_TIMEOUT_MS,
+        stalledPendingToolTimeoutMs: STALLED_PENDING_TOOL_TIMEOUT_MS,
       });
       if (stalledPendingTools) {
         throw new Error(

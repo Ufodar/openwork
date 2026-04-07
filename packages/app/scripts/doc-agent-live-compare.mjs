@@ -49,6 +49,14 @@ const MESSAGE_POLL_TIMEOUT_MS = Number.parseInt(
   process.env.OPENWORK_COMPARE_MESSAGE_POLL_TIMEOUT_MS ?? "15000",
   10,
 );
+const MALFORMED_PENDING_TOOL_TIMEOUT_MS = Number.parseInt(
+  process.env.OPENWORK_MALFORMED_PENDING_TOOL_TIMEOUT_MS ?? "180000",
+  10,
+);
+const STALLED_PENDING_TOOL_TIMEOUT_MS = Number.parseInt(
+  process.env.OPENWORK_STALLED_PENDING_TOOL_TIMEOUT_MS ?? "300000",
+  10,
+);
 
 const legacyScenarios = {
   qin: {
@@ -461,6 +469,8 @@ async function waitForSessionSettled(
         messages,
         lastProgressAt,
         now: performance.now(),
+        malformedPendingToolTimeoutMs: MALFORMED_PENDING_TOOL_TIMEOUT_MS,
+        stalledPendingToolTimeoutMs: STALLED_PENDING_TOOL_TIMEOUT_MS,
       });
       if (stalledPendingTools) {
         throw new Error(

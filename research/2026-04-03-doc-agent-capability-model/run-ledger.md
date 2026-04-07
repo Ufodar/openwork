@@ -159,6 +159,38 @@
     - 少做动作级微观纠偏
     - 多保护主控制循环和默认工作面
 
+## RL-008 把入口层上传噪音与 common-work 内部写入悬挂分离
+
+- 目标：
+  - 弄清 hosted Qin 样例中“长时间无结果”到底是公网入口问题、compare harness 误判，还是 common-work 产品内链路真的挂住。
+- 新证据：
+  - repo / GitHub / Gitee / pod 统一到 `f05ffd09` 后，公网入口运行 `qin-one-shot-compare` 仍不稳定：
+    - 外部 `curl http://192.168.5.10:32765/openwork/health` 仍偶发 `connection reset`
+    - pod 日志出现一次文档上传 `POST /document/upload 200 171876ms`
+  - 改用 SSH 隧道直连 pod 内部 `127.0.0.1:32765` 后：
+    - `qin-common-work-debug.mjs` 的两次上传都在几秒内完成
+    - common-work 能稳定进入 assistant payload 连续推进阶段
+  - 但在隧道条件下，common-work 仍会进入同一个悬挂点：
+    - session：`ses_298b4a5a6ffeh2mOCpVd3rwCzQ`
+    - runtime dir：`/root/.openwork/user-workspaces/c503a0f6-a558-41f4-8ba4-899eb1ed6923/documents/sessions/3e37240828d7452199fe0ec69da144fc`
+    - `/message` 明确显示 pending tool:
+      - `tool=write`
+      - `raw=\"\"`
+      - `input={}`
+      - `inputKeys=[]`
+    - 这说明它不是正常文件写入，而是空输入 placeholder write 悬挂
+- 新结论：
+  - 现在必须把问题拆成两层：
+    1. **入口层问题**：公网入口存在上传/连接毛刺，会放大比较脚本与真实样例的噪音
+    2. **产品内链路问题**：即使绕开公网入口，common-work 仍会在真实写作阶段卡进空 `write` pending`
+  - compare/debug harness 的较长 pending timeout 是必要的，但它只能减少假阳性，不能掩盖 common-work 仍然存在的空写入悬挂
+- 后续动作：
+  - 入口层：
+    - 继续把直连 pod 内部入口的结果与公网入口结果分开记录
+  - 产品层：
+    - 直接定位 common-work 为什么会在写作阶段发出空输入 `write`
+    - 不再把这个问题泛化成“prompt 需要更多微观禁令”
+
 ## 当前台账的用途
 
 后续只要发生下面任一类变化，就应追加新轮次：

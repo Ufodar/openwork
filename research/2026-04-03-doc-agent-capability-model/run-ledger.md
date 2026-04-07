@@ -369,6 +369,129 @@
   - 在上传链路稳定前，不要把这轮 `common-work` 复验结果解读成“早升级规则无效”
   - 如果后续继续验证 `common-work` 路由，应优先选择不被上传链路反复污染的路径
 
+## RL-013 upload-only 对照说明 `document/upload AbortError` 目前是间歇性问题，不足以直接归因到代理层
+
+- 目标：
+  - 把 RL-012 里的上传失败进一步拆开，判断问题是否稳定出在：
+    - `32765` 的 public web proxy
+    - 还是 `8789` 的后端上传实现
+- 运行基线：
+  - repo head：`6027f18e`
+  - hosted pod runtime：最近一次重启加载产品改动 `08d8351e`
+  - 同一组样例：
+    - `/Users/storm/Pictures/秦老师/天河监控运维一体化平台软件介绍v0.3.docx`
+    - `/Users/storm/Pictures/秦老师/融合算力云平台白皮书.docx`
+  - 对照路径：
+    - `http://127.0.0.1:40081` 直连 pod 内部 `8789`
+    - `http://127.0.0.1:40080/openwork` 经过 `32765` proxy
+  - 对照动作：
+    - 仅做 `auth/login -> create session -> sequential upload x2`
+    - 不进入 `common-work` 提示词执行
+- 新证据：
+  - 直连后端 `40081 -> 8789`：
+    - 第一份上传成功：`65947ms`
+    - 第二份上传成功：`10036ms`
+  - 经过 proxy `40080 -> 32765 -> 8789`：
+    - 第一份上传成功：`11739ms`
+    - 第二份上传成功：`10242ms`
+  - 这说明在 upload-only probe 中，无论是否经过 proxy，两份文件都可以成功上传。
+- 新结论：
+  - RL-012 中出现的 `document/upload AbortError` 目前不是“稳定可复现的代理层 bug”。
+  - 现有证据更接近：
+    - 上传失败是间歇性问题
+    - 它可能与完整调试 harness、时序、连接状态，或环境瞬时波动有关
+    - 但还不足以直接修改 `serve-web-prod.mjs` 或 `document/upload` 生产实现
+  - 因此当前不能把“偶发上传失败”直接升级成明确代码根因。
+- 后续动作：
+  - 继续把它记录为 hosted 验证噪音 / blocker，而不是已定位产品缺陷
+  - 如果后续要修，先拿到稳定重现条件，再写 failing test 或生产补丁
+  - 在没有稳定重现前，产品主线仍优先关注：
+    - `common-work` 的空输入 `write`
+    - 长篇正式交付物是否应更早升级到 `document-writer`
+
+## RL-014 小材料路由探针证明 `common-work` 当前不会主动升级到 `document-writer`
+
+- 目标：
+  - 去掉大文件上传噪音，只用两个很小的 `.md` 材料验证：
+    - `common-work` 看到“多源 + 正式技术材料 + 明确结构要求”时，是否真的会升级到 `document-writer`
+- 运行基线：
+  - repo head：`6027f18e`
+  - hosted 公网入口：`http://192.168.5.10:32765/openwork`
+  - agent：`common-work`
+  - 模型：`my-company/MiniMax-2.5`
+  - probe：
+    - 创建一个新的 common-work session
+    - 上传两个很小的 Markdown 材料
+    - 提示词明确要求：
+      - 正式技术材料
+      - 三大系统逐项展开
+      - 可交付正式文档
+      - 保留可恢复状态
+- 新证据：
+  - session：`ses_297edf374ffehv6XTBzJOHBIJx`
+  - 对该 session 查询 `/message`：
+    - 没有任何 `task` 调用
+    - 当前可见行为是：
+      - `bash` completed
+      - `glob` error
+      - `glob` running/error
+  - 说明 `common-work` 并没有主动升级到 `document-writer`
+  - 而是继续沿着自己的自由工具面试探
+- 新结论：
+  - 目前加在 `common-work.md` 里的“尽早升级到 document-writer”规则，方向是对的，但约束力还不够。
+  - 仅靠当前这版高层提示，模型仍然会优先使用自己已有的 `bash/glob` 路线，而不是切换到 `document-writer` workflow。
+  - 这条证据比 RL-012 更干净，因为它不受大文件上传噪音影响。
+- 后续动作：
+  - 下一刀应考虑把这条路由从“建议升级”改成更明确的控制规则
+  - 在继续修改前，要先决定这条控制规则该落在：
+    - `common-work.md`
+    - `document-mode-bridge`
+    - 或更硬的配置 / routing 面
+
+## RL-015 强化 `common-work` 与 bridge 后，显式长文任务仍未切到 `document-writer`
+
+- 目标：
+  - 验证把 `common-work` 的升级规则改成“通过 `task` 把控制权交给 `document-writer`”，并在 bridge 里补上同类路由提示后，真实 hosted 运行是否已经改变。
+- 运行基线：
+  - repo head：本地已包含：
+    - [common-work.md](../../.opencode/agent/common-work.md) 的更硬升级文案
+    - [document-mode-bridge.js](../../.opencode/plugins/document-mode-bridge.js) 的长文正式任务路由提示
+  - 本地 prompt 护栏测试：`bun test packages/app/scripts/doc-subagent-prompts.test.mjs` 通过
+  - hosted 公网入口：`http://192.168.5.10:32765/openwork`
+  - 模型：`my-company/MiniMax-2.5`
+- 新证据：
+  - 先做了 API 侧排查：
+    - 默认 session create body：`{ title }` 返回 `500 internal_error`
+    - 显式指定 preferred agent / lock 的 session create body：
+      - `common-work` 成功
+      - `document-writer` 成功
+    - 因此这轮路由验证改用一个已成功创建的 `common-work` session：
+      - `ses_297e347e9ffe9Y5mqVacgLsssq`
+  - 第一轮小材料 prompt（未写明三大系统具体名称）：
+    - 没有 `task`
+    - assistant 读完材料后进入“需要用户确认三大系统”的澄清路径
+  - 第二轮 follow-up prompt（补入明确三大系统表格与交付要求）：
+    - 依然没有任何 `task(document-writer)`
+    - `/message` 可见行为变为：
+      - `bocha-search` x3 completed
+      - `todowrite` completed
+      - `write` completed
+      - 再次 `todowrite` completed
+      - 新的 `write` 进入 `pending`
+    - 到观察窗口结束时，主会话仍未把控制权交给 `document-writer`
+- 新结论：
+  - RL-014 已经不是“提示太弱也许还没触发”的暧昧判断了。
+  - 现在更明确的结论是：
+    - **仅靠当前这类 prompt/bridge 级强化，还不足以让 `common-work` 在真实 hosted 里稳定切到 `document-writer`。**
+    - 在长篇正式交付物场景下，`common-work` 仍然优先走自己的自由工具面（检索、todo、直接写入），而不是显式 workflow。
+  - 因此下一刀不应继续停留在“再写得更像建议一点”的层面。
+  - 更合理的方向是二选一：
+    - 把“长篇正式任务先切 workflow”前移成更明确的第一动作规则
+    - 或者把这条路由提升到更硬的 routing/config 面，而不是只靠提示词自觉执行
+- 后续动作：
+  - 下一轮改动应明确测试“first substantive action / route-before-freeform-tools”，而不是只测试“存在升级措辞”
+  - 若继续失败，应停止只在 prompt 上加重语气，转向更硬的 routing/config 方案
+
 ## 当前台账的用途
 
 后续只要发生下面任一类变化，就应追加新轮次：

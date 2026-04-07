@@ -404,9 +404,21 @@ test("common-work keeps durable drafts and final deliverables in stable workspac
 test("common-work escalates long multi-source formal deliverables into document-writer instead of freeform direct writing", async () => {
   const prompt = await readFile(resolve(root, ".opencode/agent/common-work.md"), "utf8");
 
-  expect(prompt).toContain("尽早升级到 `document-writer` 这条显式 workflow");
+  expect(prompt).toContain("应尽早通过 `task` 把控制权交给 `document-writer`");
   expect(prompt).toContain("用户给了明确的章节、系统、表格或覆盖清单");
+  expect(prompt).toContain("不要继续在当前主会话里用自由工具面推进同一份长文正式交付物");
+  expect(prompt).toContain("这个升级应成为当前主会话的第一实质动作");
+  expect(prompt).toContain("不要先继续搜索、列 todo、直写草稿");
   expect(prompt).toContain("不要再并行直写同一份长文交付物");
+});
+
+test("document-mode bridge steers long formal document work into document-writer instead of open-ended discovery loops", async () => {
+  const bridge = await readFile(resolve(root, ".opencode/plugins/document-mode-bridge.js"), "utf8");
+
+  expect(bridge).toContain("long-form, multi-source, formal deliverable");
+  expect(bridge).toContain("hand control to \\`document-writer\\` early");
+  expect(bridge).toContain("instead of staying in an open-ended \\`bash\\`/\\`glob\\`/\\`read\\` loop");
+  expect(bridge).toContain("before further search, todo planning, or direct drafting");
 });
 
 test("common-work routes relevant factual tasks through attached knowledge before broad discovery", async () => {

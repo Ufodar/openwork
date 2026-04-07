@@ -45,12 +45,14 @@
 - compare/debug harness 当前也确认了一类独立噪音：
   - `/message` 偶发返回坏 JSON
   - 这会让脚本误报失败，但不等于真实 session 没有完成
+- `common-work` 新增“尽早升级到 `document-writer`”规则后，第一次 hosted 复验又被第二个大文件上传的 `AbortError` 挡住了；这说明当前还不能把上传链路问题和 `common-work` 路由问题混为一谈。
 - 只有先排清这些 blocker，后面的广义文档质量验证才有意义。
 
 ## 当前还没完成
 
 - **还没有完成对 runtime/tool/perms blocker 的收敛** ← 当前最紧迫
 - 还没有完成“长篇正式交付物是否应更早升级到显式 workflow harness”的判断
+- 还没有收敛 `document/upload` 的长时上传 / `AbortError` 是否已经成为新的首要 hosted blocker
 - 还没有判断 compare/debug harness 是否要对 `/message` 偶发坏 JSON 做更稳的容错
 - 还没有做一轮“排除 runtime 阻塞后的”广义文档任务验证
 - 还没有开始真正的 harness 实装（Phase 2b）
@@ -62,6 +64,7 @@
 
 1. **先排 runtime/tool/perms mismatch**
    - 查清 `common-work` 空 `write` 调用的触发条件
+   - 查清 `document/upload` 长时上传时的 `AbortError` 是否会稳定阻断新的 hosted 验证轮次
    - 把公网入口问题和产品内链路问题继续分开记录，不再混成同一类 hosted 失败
    - 判断“长篇、多源、正式交付物”是否应更早升级到 `document-writer` workflow；当前证据已经明显偏向“是”
    - 评估 compare/debug harness 是否需要对 `/message` 偶发坏 JSON 做防抖或重试，避免把脚本失败误报成产品失败

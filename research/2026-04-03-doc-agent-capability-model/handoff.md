@@ -54,6 +54,8 @@
 - compare/debug harness 当前还有一类独立噪音：
   - `/message` 偶发返回坏 JSON
   - 这会让脚本报错退出，但不等于真实 session 没有完成
+- `common-work` 新增“尽早升级到 `document-writer`”规则后，第一次 hosted 复验还没能进入真实消息循环，就又被第二个大文件上传的 `AbortError` 挡住了。
+  - 这说明当前还有一条需要单独排查的 upload blocker，不能直接拿来判断 `common-work` 新路由是否有效。
 - 不要把“可自我修正的一两步短弯路”也当成必须用全局禁令消灭的问题。
   - 后续约束重点应放在：
     - 默认观察面
@@ -94,6 +96,7 @@
 
 1. **先排 runtime/tool/perms mismatch**
    - 重点看 `common-work` 空 `write` 调用
+   - 重点看 `document/upload` 长时上传时的 `AbortError`
    - 评估长篇正式交付物是否应更早升级到 `document-writer` workflow，而不是让 `common-work` 先直接大块写文件；当前证据已经明显支持这条方向
    - 判断 compare/debug harness 是否需要对 `/message` 偶发坏 JSON 做容错，避免脚本失败污染产品判断
 2. 在 blocker 排清后，再做 2-3 个广义文档任务验证 prompt 改动效果
@@ -110,6 +113,7 @@
 - 哪个 harness 杠杆应成为第一笔代码改动
 - `common-work` 的自由工具面是否需要增加一层“无效空写入”保护
 - 长篇正式交付物是否应在 `common-work` 中更早路由到显式 `document-writer` harness
+- `document/upload` 的长时上传 `AbortError` 是公网入口问题、内部链路问题，还是上传实现本身的稳定性问题
 - compare/debug harness 对 `/message` 偶发坏 JSON 应该做多强的容错，才不会掩盖真实产品问题
 - 哪些动作级微观禁令其实应该删掉，改成更高层的默认面约束
 

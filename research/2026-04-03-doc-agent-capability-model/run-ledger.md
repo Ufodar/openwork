@@ -329,6 +329,46 @@
     - `common-work` 的空输入 `write`
     - 长篇正式交付物何时应更早升级到显式 workflow harness
 
+## RL-012 `common-work` 新增早升级规则后，第一次 hosted 复验先被上传链路挡住
+
+- 目标：
+  - 验证在 `common-work` 中补入“长篇、多源、正式交付物尽早升级到 `document-writer` workflow”之后，Qin 样例是否会更早走向显式 workflow，而不是再次掉进空输入 `write`。
+- 运行基线：
+  - repo head：`08d8351e`
+  - hosted pod head：`08d8351e`
+  - 部署路径：
+    - `git push origin dev`
+    - `git push gitee dev`
+    - pod 执行 `git pull gitee dev`
+    - pod 执行 `bash scripts/restart-pod.sh --force`
+  - 模型：`my-company/MiniMax-2.5`
+  - 样例：`/Users/storm/Pictures/秦老师` 下两份 `.docx`
+  - 验证路径：
+    - 先走公网入口 `http://192.168.5.10:32765/openwork`
+    - 再改用 SSH 隧道直连 pod 内部 `http://127.0.0.1:40080/openwork`
+- 新证据：
+  - 第一次公网尝试：
+    - session create 首次仍偶发 `internal_error`
+    - 重试后成功建 session：`ses_2984893e0ffegLTQOJREI5RXOl`
+    - 第一份上传成功，但 `document/upload` 明显很慢：
+      - `POST /document/upload 200 151661ms`
+  - 随后改走 SSH 隧道直连 pod 内部 `:32765`，以排除公网入口噪音：
+    - tunnel session：`ses_298445560ffesLMQML4STsv2FW`
+    - 第二份上传阶段在 pod 日志中出现：
+      - `Unhandled error: DOMException { name: "AbortError", message: "The connection was closed." }`
+      - `POST /document/upload 500 97218ms`
+  - 这轮复验还没有进入 `common-work` 的真实消息循环，因此尚不能判断新的早升级规则是否已经生效。
+- 新结论：
+  - 这轮 `common-work` 路由复验目前首先被上传链路挡住了。
+  - 由于同样的失败在 SSH 隧道直连 pod 内部 `:32765` 时也出现，因此这次不能简单归咎为公网入口噪音。
+  - 现阶段应把两个问题继续拆开：
+    - `common-work` 的产品内链路问题：空输入 `write`
+    - `document/upload` 的长时上传 / 连接中断问题：当前会直接阻断新的验证轮次
+- 后续动作：
+  - 先单独确认 `document/upload` 的长时上传 `AbortError` 是否已成为新的首要 hosted blocker
+  - 在上传链路稳定前，不要把这轮 `common-work` 复验结果解读成“早升级规则无效”
+  - 如果后续继续验证 `common-work` 路由，应优先选择不被上传链路反复污染的路径
+
 ## 当前台账的用途
 
 后续只要发生下面任一类变化，就应追加新轮次：

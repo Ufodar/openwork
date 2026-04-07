@@ -91,6 +91,16 @@ test("document-mode bridge stays a thin guardrail instead of a second workflow p
   expect(bridge).toContain("run \\`python3 .opencode/references/check_document_delivery.py --target outputs --target reports\\`");
 });
 
+test("document-mode bridge does not promote extracted source text as a main-session bootstrap surface", async () => {
+  const bridge = await readFile(resolve(root, ".opencode/plugins/document-mode-bridge.js"), "utf8");
+
+  expect(bridge).toContain("\\`.worktree/index.json\\`");
+  expect(bridge).toContain("\\`.worktree/sources/manifest.json\\`");
+  expect(bridge).toContain("Do not treat \\`.worktree/text/*.txt\\` as a main-session bootstrap surface");
+  expect(bridge).not.toContain("If bootstrap state or text refs such as");
+  expect(bridge).not.toContain("read them before extracting the original binary again");
+});
+
 test("writer and verifier prompts treat user-specified section titles as exact headings", async () => {
   const writerPrompt = await readFile(resolve(root, ".opencode/prompts/doc-writer.md"), "utf8");
   const verifierPrompt = await readFile(resolve(root, ".opencode/prompts/doc-verifier.md"), "utf8");

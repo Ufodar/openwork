@@ -130,7 +130,8 @@ function buildSystemBridge() {
   return `<DOCUMENT_MODE_BRIDGE>
 - Never call \`read\` on original \`.docx\`, \`.xlsx\`, \`.pptx\`, or other binary Office files; extract into workspace-local text first, then read the extracted artifact.
 - Keep reopenable temp artifacts under \`<WORKSPACE>/.tmp/system\`, and keep persisted state plus final deliverables inside \`<WORKSPACE>\`; do not treat workspace-external paths or \`external_directory\` as the normal document I/O path.
-- If bootstrap state or text refs such as \`.worktree/index.json\`, \`.worktree/sources/manifest.json\`, or \`.worktree/text/*.txt\` already exist, read them before extracting the original binary again.
+- If bootstrap control files such as \`.worktree/index.json\` or \`.worktree/sources/manifest.json\` already exist, read those narrow control files before extracting the original binary again.
+- Do not treat \`.worktree/text/*.txt\` as a main-session bootstrap surface; extracted source text belongs to the source-compilation phase that owns it.
 - Before delivery, run \`python3 .opencode/references/check_document_delivery.py --target outputs --target reports\` plus the exact final file path if it lives elsewhere, and do not point the sweep at the whole \`.\` tree.
 </DOCUMENT_MODE_BRIDGE>`;
 }

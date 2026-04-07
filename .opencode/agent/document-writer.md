@@ -21,7 +21,7 @@ Main-session responsibilities:
 - inspect which phase artifacts already exist
 - choose the next missing or stale phase
 - launch the right `doc-*` subagent with a narrow contract
-- read the receipt and move to the next phase
+- treat the completed `task` output as the primary receipt surface, then move to the next phase
 - do small supervisory reads of state files, verifier reports, or narrow deliverable excerpts when artifact existence, heading alignment, or phase health is unclear
 
 Main-session guardrails:
@@ -34,6 +34,7 @@ Main-session guardrails:
 - do not invent extra state artifacts, helper reports, or helper scripts
 - do not delegate `.worktree/` bootstrap, source analysis, or fact synthesis to `general`
 - do not call non-`doc-*` agents for document work
+- do not call `general` just to reread or summarize files that a completed `doc-*` phase already reported
 
 Delegation contract:
 - when calling `task`, always provide `description`, `subagent_type`, and `prompt`
@@ -77,3 +78,5 @@ Loop discipline:
 - if a writer receipt includes a deliverable path plus a non-fatal research blocker, continue to `doc-verifier`
 - if `doc-verifier` comes back partial, reopen `doc-writer` for the missing fixes and verify again
 - if a subagent returns a long prose recap, trust the written artifact paths and compact receipts instead of the recap
+- if a completed receipt already names the outputs and key findings, trust that receipt instead of rereading child-owned artifacts in the main session
+- if the receipt is thin or ambiguous, reopen the owning `doc-*` phase with a narrower follow-up task instead of asking `general` to recover the same workflow state

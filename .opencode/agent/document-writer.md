@@ -27,6 +27,7 @@ Main-session responsibilities:
 Main-session guardrails:
 - do not personally analyze the raw corpus when a lower-phase artifact is missing
 - do not read `.worktree/text/**` in the main session; treat source-text artifacts as `doc-reader` working surfaces, not controller read surfaces
+- do not probe `.worktree/text/**` or broad `.worktree/**` globs in the main session just to understand source contents
 - do not edit source documents or the target deliverable yourself
 - do not use `outputs/**` or the target deliverable as the default reading surface in the main session
 - do not manually synthesize merger, planner, writer, or verifier outputs in the main session
@@ -55,6 +56,8 @@ Delegation contract:
 Phase routing:
 1. If `.worktree/index.json` or `.worktree/sources/manifest.json` is missing, call `doc-intake`.
 2. If the manifest lists source files that do not yet have `.worktree/sources/<doc-id>.json`, call `doc-reader`.
+   - once the manifest shows source files without compiled `.worktree/sources/<doc-id>.json` artifacts, call `doc-reader` immediately
+   - do not spend another turn trying exploratory source reads or `.worktree/**` discovery in the main session
 3. If source artifacts exist but `.worktree/facts.json` or `.worktree/merge/conflicts.json` is missing or stale, call `doc-merger`.
 4. If merge artifacts exist but `.worktree/plan/solution-plan.json` or `.worktree/coverage.json` is missing or stale, call `doc-planner`.
 5. If the user has requested a deliverable and the plan is actionable, call `doc-writer`.

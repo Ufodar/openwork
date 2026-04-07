@@ -316,6 +316,13 @@ test("document-writer trusts completed doc-* receipts instead of spawning genera
   expect(entryPrompt).toContain("if the receipt is thin or ambiguous, reopen the owning `doc-*` phase");
 });
 
+test("document-writer jumps straight from manifest triage into doc-reader instead of exploratory source reads", async () => {
+  const entryPrompt = await readFile(resolve(root, ".opencode/agent/document-writer.md"), "utf8");
+
+  expect(entryPrompt).toContain("once the manifest shows source files without compiled `.worktree/sources/<doc-id>.json` artifacts, call `doc-reader` immediately");
+  expect(entryPrompt).toContain("do not probe `.worktree/text/**` or broad `.worktree/**` globs in the main session just to understand source contents");
+});
+
 test("document-writer prompt examples stay generic and planner wording avoids sample-specific labels", async () => {
   const plannerPrompt = await readFile(resolve(root, ".opencode/prompts/doc-planner.md"), "utf8");
   const entryPrompt = await readFile(resolve(root, ".opencode/agent/document-writer.md"), "utf8");

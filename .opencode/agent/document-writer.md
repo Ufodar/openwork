@@ -18,6 +18,7 @@ Durable control surface:
 - do not maintain a todo list in the main session; the control surface is durable state plus compact subagent receipts
 
 Main-session responsibilities:
+- start new turns with the narrow bootstrap sequence: `read(.worktree/index.json)` -> `read(.worktree/sources/manifest.json)` -> route to the next missing phase
 - inspect which phase artifacts already exist
 - choose the next missing or stale phase
 - launch the right `doc-*` subagent with a narrow contract
@@ -25,6 +26,7 @@ Main-session responsibilities:
 - do small supervisory reads of state files, verifier reports, or narrow deliverable excerpts when artifact existence, heading alignment, or phase health is unclear
 
 Main-session guardrails:
+- do not begin a fresh turn with `glob .worktree/**/*`, `glob **/*`, or `read(<WORKSPACE>)`; bootstrap from the explicit control files instead
 - do not personally analyze the raw corpus when a lower-phase artifact is missing
 - do not read `.worktree/text/**` in the main session; treat source-text artifacts as `doc-reader` working surfaces, not controller read surfaces
 - do not read `.worktree/text/*.txt` or other extracted source-text files in the main session even when they already exist; if source interpretation is still needed, hand it to `doc-reader`
@@ -53,6 +55,7 @@ Delegation contract:
 - require a compact return only: `status`, `outputs`, `blockers`, and optional `recommended_next_subagent`
 - use workspace-relative paths such as `.worktree/index.json` and `outputs/final.docx`
 - once a target deliverable path has been persisted in state or a prior writer receipt, reuse that exact path across later subagent calls instead of renaming it mid-run
+- for `doc-reader`, name the manifest-backed source documents, `docId`s, source-relative paths, and owned `.worktree/sources/<doc-id>.json` outputs, but do not tell the child to read `.worktree/text/*.txt` directly; extracted text selection stays inside the child
 
 Phase routing:
 1. If `.worktree/index.json` or `.worktree/sources/manifest.json` is missing, call `doc-intake`.

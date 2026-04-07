@@ -521,9 +521,11 @@ test("document-writer entry agent has orchestrator task and doc_state permission
   }
 
   expect(agentPrompt).toContain("If `.worktree/index.json` or `.worktree/sources/manifest.json` is missing, call `doc-intake`");
+  expect(agentPrompt).toContain("do not begin a fresh turn with `glob .worktree/**/*`, `glob **/*`, or `read(<WORKSPACE>)`");
   expect(agentPrompt).toContain("do not maintain a todo list in the main session");
   expect(agentPrompt).toContain("do not sample `.worktree/text/*.txt` first");
   expect(agentPrompt).toContain("do not glob `outputs/**`, `reports/**`, or `**/*.md`");
+  expect(agentPrompt).toContain("do not tell the child to read `.worktree/text/*.txt` directly");
   expect(agentPrompt).toContain("when calling `task`, always provide `description`, `subagent_type`, and `prompt`");
   expect(agentPrompt).toContain("Delegation contract:");
 });

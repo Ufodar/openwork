@@ -2583,3 +2583,136 @@
   - 修复后，后续 hosted baseline 不应再依赖手工覆盖 user workspace 资产
 - 后续动作：
   - 后续再做一轮登录后新 session 验证，确认无需手工同步也能继承最新 repo 资产
+
+## RL-046 `efb7ba0e` + `MiniMax-2.5` hosted 重跑：主风险切回 runtime/tool 链路，而不是旧 prompt 契约
+
+- 时间：
+  - 2026-04-07 12:25 CST
+- baseline：
+  - repo / GitHub / Gitee / pod `HEAD` 已统一到 `efb7ba0e`
+  - pod 已执行 repo-first `git pull gitee dev` + `bash scripts/restart-pod.sh --force`
+  - hosted 模型基线：
+    - `my-company/MiniMax-2.5`
+- 相关 session：
+  - `common-work`：
+    - `ses_299d2e2b7ffe8ySP8ypVeSIXlg`
+    - runtime dir: `/root/.openwork/user-workspaces/c503a0f6-a558-41f4-8ba4-899eb1ed6923/documents/sessions/958947438d0249b8b6ef9026ee000a1d`
+  - `document-writer`：
+    - `ses_299d28874ffeNkN3pk3M6r62UM`
+    - runtime dir: `/root/.openwork/user-workspaces/c503a0f6-a558-41f4-8ba4-899eb1ed6923/documents/sessions/a53a6d0d5795418684495a2fd31999eb`
+- `common-work` 新证据：
+  - 第一跳就先调用 `glob("**/*")`
+    - 直接被 hosted permission deny
+  - 随后改成 `glob("*.{docx,pdf,txt,md}")`
+    - 返回 `The socket connection was closed unexpectedly`
+  - 在未稳定读到本地源材料前，已经开始联网 `bocha-search`
+  - 后续尝试：
+    - `skill("docx")` -> `The socket connection was closed unexpectedly`
+    - `bash mkdir -p .../.tmp/system` -> completed
+    - `write` -> `status: pending`，且 `input` 为空
+- 对 `common-work` 的当前判断：
+  - 这轮不是“最终写作能力差”先暴露
+  - 而是 hosted runtime 下：
+    - `glob` 工具链不稳定
+    - `skill` 工具链也不稳定
+    - agent 在工具异常后继续退化为无输入 `write`
+  - 当前主风险是 runtime/tool 面，而不是 `common-work.md` 文字本身
+- `document-writer` 新证据：
+  - 同样先调用 `glob("**/*")`
+    - 被 permission deny
+  - 再调用 `glob("*.docx")`
+    - 返回 `Unable to connect`
+  - 之后它能回退到 `.worktree/index.json`
+    - 已确认 session 中有：
+      - `src-001.docx`
+      - `src-002.docx`
+      - manifest 内含 `textStatus = ready`
+  - 但主代理随后尝试直接 `read(.worktree/text/src-001.txt)`
+    - 被当前 `document-writer` runtime read permission deny
+  - 再之后它启动 `task(doc-reader)`，但 delegated prompt 明显带着过时假设：
+    - 假设输入是 `.worktree/text/src-001.txt`
+    - 假设输出是 `.worktree/sources/doc-src-001.json`
+- 对 `document-writer` 的当前判断：
+  - 当前问题先不是“writer 不会写”
+  - 而是：
+    - 主代理的发现/读取动作与 runtime 权限面不对齐
+    - delegated prompt 与当前 source artifact contract 也不完全对齐
+  - 这比旧 prompt 契约测试变红更值得优先处理
+- 这轮对 prompt 契约测试的影响：
+  - `packages/app/scripts/doc-subagent-prompts.test.mjs` 当前红掉的 10 项里，有一批只是旧措辞绑定
+  - 但 runtime 现场已经证明：
+    - 不能把注意力继续放在“把旧文案修绿”
+    - 应优先保留真正护栏、删掉过时措辞断言，然后集中查 runtime/tool/perms mismatch
+- 后续动作：
+  - 先重写 `doc-subagent-prompts.test.mjs`，只保留仍然有效的系统护栏
+  - 然后定位：
+    - 为什么 hosted `glob` 会在允许 pattern 下返回 socket/connection 错误
+    - 为什么 `skill(docx)` 在 hosted `common-work` 下继续出现 transport 级错误
+    - 为什么 `document-writer` 仍假设可直接读 `.worktree/text/**`
+    - `doc-reader` 当前真正期望的输入/输出 contract 是什么，是否和主代理 prompt 已脱节
+
+## RL-047 RL-046 的纠偏：`common-work` 并未死锁，`document-writer` 当前停在 `doc-planner` 而不是 `doc-reader`
+
+- 时间：
+  - 2026-04-07 12:40 CST
+- 背景：
+  - `RL-046` 中间轮次只看到了运行中的 tool 状态
+  - 根据 repo 规则，后续证据如果推翻先前假设，必须及时改写结论
+- 复核方式：
+  - 直接拉取两条 hosted session 的完整 message 历史
+  - 直接查看 pod 上 session runtime 目录内容
+  - 直接列出 session documents
+- `common-work` 复核结果：
+  - session：
+    - `ses_299d2e2b7ffe8ySP8ypVeSIXlg`
+  - 虽然前面先后撞到了：
+    - denied `glob("**/*")`
+    - transport 级错误的 `glob("*.{docx,pdf,txt,md}")`
+    - `skill(docx)` transport 错误
+  - 但它**最终仍完成**了整轮会话
+  - 最终 documents：
+    - `算力基础设施平台技术方案.docx`
+    - `src-001.docx`
+    - `src-002.docx`
+  - 最后一条 assistant 明确汇报：
+    - 已成功生成技术材料
+    - 最终交付路径是 `算力基础设施平台技术方案.docx`
+- 对 `common-work` 的修正判断：
+  - 当前问题不是“必然卡死”
+  - 而是：
+    - 工具路线明显有噪音
+    - 会先撞 deny/transport 错误
+    - 但在这轮样例中，仍能自我恢复并完成最终交付
+- `document-writer` 复核结果：
+  - session：
+    - `ses_299d28874ffeNkN3pk3M6r62UM`
+  - pod runtime 目录里已经存在：
+    - `.worktree/sources/doc-src-001.json`
+    - `.worktree/sources/doc-src-002.json`
+    - `.worktree/facts.json`
+    - `.worktree/merge/conflicts.json`
+    - `.worktree/text/src-001.txt`
+    - `.worktree/text/src-002.txt`
+  - 这说明它早已越过最初的 `doc-reader` 阶段
+  - 之前看到的 `task(doc-reader)` running 只是中间快照，不是最终死锁点
+  - 继续发送第二轮“生成完整 Markdown”后，当前最新 pending tool 是：
+    - `task(doc-planner)`
+  - 也就是说它现在卡在：
+    - `doc-planner` 子任务阶段是否能稳定完成
+- 对 `document-writer` 的修正判断：
+  - 当前不能再把“卡在 `doc-reader`”当成事实
+  - 更准确的描述是：
+    - 第一轮准备阶段能完成 source compilation / facts / merge
+    - 第二轮继续写作时，主会话当前正在等 `doc-planner`
+- 这轮对优先级的更新：
+  - `common-work`：
+    - 优先级从“卡死排查”下调为“高噪音工具路线排查”
+  - `document-writer`：
+    - 真正要看的不是 `doc-reader`
+    - 而是 `doc-planner` / 后续 `doc-writer` / `doc-verifier` 链能否完成
+- 后续动作：
+  - 保留 `RL-046` 中对 runtime/tool/perms mismatch 的警惕
+  - 但不再把那轮中间快照误写成最终结论
+  - 下一步：
+    - 针对 `common-work`，查为什么会先撞 deny/transport 错误但还能恢复
+    - 针对 `document-writer`，继续跟踪第二轮生成链，重点看 `doc-planner` 是否长时间不返回

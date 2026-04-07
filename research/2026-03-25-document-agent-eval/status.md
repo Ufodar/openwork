@@ -1215,6 +1215,16 @@
   - `docx` skill 在 hosted `common-work` 下会报连接错误或直接挂住
   - 这条问题独立于 Qin 样例本身，也独立于 temp-root 噪音
   - 在继续抬高 `common-work >= raw` 前，需要先查清这条 skill 故障是不是 hosted runtime / tool 执行链的问题
+- 最新 `efb7ba0e` + `MiniMax-2.5` hosted 重跑又把优先级收紧了一步：
+  - `common-work` 第一跳先触发被 deny 的 `glob("**/*")`
+  - 第二跳允许范围内的 `glob("*.{docx,pdf,txt,md}")` 仍返回 socket/transport 错误
+  - `skill(docx)` 也返回同类 transport 错误
+  - `document-writer` 虽能回退到 `.worktree/index.json`，也确实一度试图直接读 `.worktree/text/src-001.txt`，被 runtime read permission deny
+  - 但后续复核已证明它并未停死在 `doc-reader`
+  - 第一轮准备阶段已成功产出 `.worktree/sources/*.json`、`facts.json`、`merge/conflicts.json`
+  - 当前更准确的风险是：
+    - `common-work` 的工具路线噪音很大，但并不必然卡死
+    - `document-writer` 的第二轮当前停在 `doc-planner`，后续链路仍需继续看
 - 当前又新增一个已完成的运行时修正：
   - hosted session 已不再把 `/tmp` 作为默认临时目录策略的一部分
   - `common-work` 也不再把 Bocha 写成唯一合法搜索入口
@@ -1271,5 +1281,11 @@
 3. 基于 `RL-036`，决定是否要把 `common-work` 的默认文档收口从“Markdown-only 也可完成”继续抬到“优先同时落 `.md + .docx`”或更明确的 Word 交付偏好
 4. 先顺着 `RL-040` 继续排 hosted `docx` skill：
    - 为什么 live skill 已可见、可列出，但调用时会报连接错误或卡在 `running`
+5. 补一条新的 runtime 链路排查：
+   - 为什么 `common-work` / `document-writer` 在当前 hosted runtime 里仍会先发出被 deny 的 `glob("**/*")`
+   - 为什么允许范围内的 `glob("*.docx")` / `glob("*.{docx,pdf,txt,md}")` 会进一步报 transport 级错误
+   - 为什么 `common-work` 在撞上这些错误后仍能恢复并完成，而 `document-writer` 的第二轮却推进到 `doc-planner`
+   - 为什么 `document-writer` 仍会短暂尝试直接读 `.worktree/text/**`
+6. 在继续调 prompt 之前，先把 `packages/app/scripts/doc-subagent-prompts.test.mjs` 从“旧文案契约守卫”收成“真实系统护栏测试”
 5. 若基线成立，再回到 `document-writer` 与新 sub-agent 模式比较；若不成立，继续只修基线
 6. 单独跟进公共 Web 上传链路，把网络/代理故障与内容质量问题继续拆开处理

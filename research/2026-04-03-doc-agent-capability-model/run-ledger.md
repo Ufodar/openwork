@@ -191,6 +191,95 @@
     - 直接定位 common-work 为什么会在写作阶段发出空输入 `write`
     - 不再把这个问题泛化成“prompt 需要更多微观禁令”
 
+## RL-009 `common-work` 空壳 `write` 不是 MiniMax 特有，`document-writer` 在同类样例上更稳
+
+- 目标：
+  - 验证 `common-work` 的空输入 `write` 是不是 `MiniMax-2.5` 特有问题；
+  - 对照同一类 Qin 样例下 `document-writer` 的运行路径，判断问题更像模型差异还是长文写入 harness 差异。
+- 运行基线：
+  - hosted 公网入口：`http://192.168.5.10:32765/openwork`
+  - 样例：`/Users/storm/Pictures/秦老师` 下两份 `.docx`
+  - `common-work` 对照模型：
+    - `my-company/MiniMax-2.5`
+    - `my-company/Qwen3.5-397B-A17B`
+  - `document-writer` 对照模型：
+    - `my-company/MiniMax-2.5`
+- 新证据：
+  - `common-work + Qwen3.5-397B-A17B`
+    - session：`ses_29878b962ffef3h5Nl8WLv9rwj`
+    - 先完成上传、一次 `bash`、一次 `glob`、一次 `read`
+    - 进入真正写作阶段后，`/message` 明确显示：
+      - `tool=write`
+      - `status=pending`
+      - `raw=""`
+      - `input={}`
+      - `inputKeys=[]`
+      - `partId=prt_d67880f76001Hnk5tUq1w77ANJ`
+    - 该 pending `write` 在公网入口下持续超过 100 秒，没有变成 concrete `tool-call`
+  - `document-writer + MiniMax-2.5`
+    - session：`ses_298749434ffe8Ycacu3ejIq6Wx`
+    - 已完成：
+      - `doc-reader` 子任务 `编译两个源文档内容`
+      - `doc-reader` 子任务 `继续完成文档编译`
+    - 当前继续推进到新的 `task`：
+      - `title=联网检索补充缺口信息`
+      - `child=session ses_29871dc10ffeCV4XJGCRWh734G`
+    - 到本轮记录为止，没有出现 `common-work` 那种主会话空输入 `write`
+- 新结论：
+  - `common-work` 的空壳 `write` 不是 `MiniMax-2.5` 单模型现象；至少 `Qwen3.5-397B-A17B` 在同类样例和同一路径上也会复现。
+  - 这更像“长文真正落笔时的 tool-call/streaming 半截停住”，而不是“某个模型特殊退化”。
+  - 同一类样例下，`document-writer` 至少当前明显更稳：
+    - 它继续走 `doc-reader -> 补充/后续 phase`
+    - 而不是主会话直接掉进空壳 `write`
+  - 当前更值得优先验证的假设是：
+    - `common-work` 在长篇正式交付物上过早进入“大块直接写文件”路径；
+    - `document-writer/doc-writer` 这条显式 workflow harness 因为先走 state / phase / staging draft，更不容易触发同类半截 `write`
+- 后续动作：
+  - 继续观察 `document-writer` 是否能进一步进入 writer/verifier，而不是后面再掉进同类空写入
+  - 在不增加微观禁令的前提下，评估是否应让 `common-work` 对“长篇、多源、正式交付物”更早升级到 `document-writer` workflow
+  - 如果后续证据继续支持这一点，再把“长文写入 harness 比模型差异更关键”提升为正式决策
+
+## RL-010 `document-writer + MiniMax` 在同样例上完成整轮写作与验证，进一步支持“问题主要在写入 harness”
+
+- 目标：
+  - 在 RL-009 的基础上继续验证：`document-writer` 是否只是“暂时没挂”，还是能真正完成长文写作与验证。
+- 运行基线：
+  - hosted 公网入口：`http://192.168.5.10:32765/openwork`
+  - 样例：`/Users/storm/Pictures/秦老师` 下两份 `.docx`
+  - agent：`document-writer`
+  - 模型：`my-company/MiniMax-2.5`
+  - harness：`bun run packages/app/scripts/run-qin-doc-writer.mjs`
+- 新证据：
+  - session：`ses_298749434ffe8Ycacu3ejIq6Wx`
+  - 两轮 prompt 均完成：
+    - `prompt 1/2`：`261638ms`
+    - `prompt 2/2`：`194048ms`
+  - 第一轮完成的主要 phase：
+    - `doc-reader`：`编译两个源文档内容`
+    - `doc-reader`：`继续完成文档编译`
+    - `general`：`联网检索补充缺口信息`
+    - `general`：`创建材料理解中间状态`
+  - 第二轮完成的主要 phase：
+    - `doc-writer`：`生成完整技术文档`
+    - `doc-verifier`：`验证技术文档完整性`
+  - 最终生成：
+    - `outputs/qin-technical-material.md`
+    - `.worktree/verify/coverage.json`
+  - 该轮没有复现 `common-work` 那种主会话空输入 `write`
+- 新结论：
+  - 同样例、同 hosted 路径、同 `MiniMax-2.5` 基线下，`document-writer` 可以完成长文任务闭环，而 `common-work` 会在真正落笔时卡进空壳 `write`。
+  - 这进一步支持当前更强的解释：
+    - 主问题不是“模型整体不会写”
+    - 也不是“某个模型单独退化”
+    - 而是 `common-work` 在长篇正式交付物上更容易进入脆弱的大块直接写入路径；`document-writer` 这条显式 workflow harness 更能把长文写作拆进可完成的 phase 链
+  - 因此接下来的第一优先级，应从“继续给 `common-work` 加局部禁令”转向：
+    - 什么时候应该更早升级到 `document-writer`
+    - 如何让长文写作默认走更稳的 staging / workflow 路径
+- 后续动作：
+  - 评估是否把“长篇、多源、正式交付物优先升级到 `document-writer`”提升为正式设计决策
+  - 继续检查 `document-writer` 当前是否仍有不必要的 `general` 旁路，避免把这条更稳的 harness 又重新做散
+  - 再决定要不要修 `common-work` 的长文直写路径，还是直接把这类任务更早路由出去
+
 ## 当前台账的用途
 
 后续只要发生下面任一类变化，就应追加新轮次：

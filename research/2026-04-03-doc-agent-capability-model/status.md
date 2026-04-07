@@ -32,7 +32,9 @@
 
 - Phase 2a prompt 改动已落地，但真实样例已经证明：当前第一优先级不是继续争论旧 prompt 文案，而是先排 runtime/tool/perms blocker。
 - `common-work` 的最新主风险是运行态生成了空输入的 `write` 调用，而不是简单的“能力不足”。
+- `common-work` 的空输入 `write` 已在 `MiniMax-2.5` 与 `Qwen3.5-397B-A17B` 两条 hosted 样例上复现，因此它不是单模型特有问题。
 - `document-writer` 的最新主风险是主代理动作面与 runtime 权限面不对齐，尤其是 `.worktree/text/**` 的读取错位。
+- 同一类 Qin 样例下，`document-writer + MiniMax-2.5` 已完成两轮 prompt、`doc-writer` 与 `doc-verifier`，并生成 `outputs/qin-technical-material.md`；到本轮为止，它没有复现 `common-work` 的空输入 `write`。
 - 运行时排查进入新的收口原则：
   - 不为一两步可自我修正的短弯路牺牲通用能力
   - 优先修“默认观察面 / phase ownership / 重复打转”这类会真正破坏主循环的问题
@@ -44,6 +46,8 @@
 ## 当前还没完成
 
 - **还没有完成对 runtime/tool/perms blocker 的收敛** ← 当前最紧迫
+- 还没有完成“长篇正式交付物是否应更早升级到显式 workflow harness”的判断
+- 还没有处理 `document-writer` 当前流程里仍会调用 `general` 参与材料理解/联网补充的问题
 - 还没有做一轮“排除 runtime 阻塞后的”广义文档任务验证
 - 还没有开始真正的 harness 实装（Phase 2b）
 - 还没有增强 document-intake/evidence/compose/verify 四个 skill
@@ -56,7 +60,8 @@
    - 查清 `common-work` 空 `write` 调用的触发条件
    - 把公网入口问题和产品内链路问题继续分开记录，不再混成同一类 hosted 失败
    - 查清 `document-writer` 为何会去读 `.worktree/text/**`
-   - 判断这条路径该不该继续作为 controller 默认观察面；优先考虑交还给 owning phase，而不是全局禁工具
+   - 判断“长篇、多源、正式交付物”是否应更早升级到 `document-writer` workflow；当前证据已经明显偏向“是”
+   - 清理 `document-writer` 当前仍会借道 `general` 的旁路，让更稳的 workflow harness 自己闭环
 2. 在 blocker 排清后，再做广义文档任务最小验证
 3. 根据验证结果决定 harness 第一刀具体落在哪
 4. 再增强四个文档 skill（intake/evidence/compose/verify）

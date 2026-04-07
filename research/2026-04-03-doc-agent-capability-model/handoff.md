@@ -41,6 +41,11 @@
 - 当前最新阻塞已经收紧到 runtime/tool/perms mismatch：
   - `common-work` 在真实 Qin 样例里卡在空输入的 `write`
   - `document-writer` 主代理会尝试读取 `.worktree/text/**`，但当前 runtime surface 不允许
+- `common-work` 的空输入 `write` 不是 `MiniMax-2.5` 单模型现象；`Qwen3.5-397B-A17B` 在同类样例上也能复现。
+- `document-writer` 在同一类 Qin 样例上当前明显更稳：
+  - 已完成 reader、writer、verifier 的整轮流程
+  - 已生成 `outputs/qin-technical-material.md`
+  - 到目前为止没有复现 `common-work` 那种主会话空输入 `write`
 - hosted 证据现在必须按两层看：
   - **公网入口层**：上传/连接可能异常慢或 reset
   - **产品内链路层**：即使直连 pod 内部入口，`common-work` 仍会卡进空输入 `write` pending
@@ -85,6 +90,8 @@
 1. **先排 runtime/tool/perms mismatch**
    - 重点看 `common-work` 空 `write` 调用
    - 重点看 `document-writer` 与 `.worktree/text/**` 的权限/动作错位
+   - 评估长篇正式交付物是否应更早升级到 `document-writer` workflow，而不是让 `common-work` 先直接大块写文件；当前证据已经明显支持这条方向
+   - 清理 `document-writer` 当前仍会借道 `general` 的旁路，避免更稳的 harness 被重新做散
 2. 在 blocker 排清后，再做 2-3 个广义文档任务验证 prompt 改动效果
 3. 根据验证结果增强四个文档 skill（intake/evidence/compose/verify）
 4. 再决定 harness 第一刀的落点
@@ -99,6 +106,8 @@
 - 哪个 harness 杠杆应成为第一笔代码改动
 - `document-writer` 是否应继续感知 `.worktree/text/**`，还是应完全通过 `doc-reader` 间接消费
 - `common-work` 的自由工具面是否需要增加一层“无效空写入”保护
+- 长篇正式交付物是否应在 `common-work` 中更早路由到显式 `document-writer` harness
+- `document-writer` 当前借道 `general` 完成联网补充与材料理解，是否应该收回到 `doc-*` workflow 内部
 - 哪些动作级微观禁令其实应该删掉，改成更高层的默认面约束
 
 ## 交接纪律

@@ -115,3 +115,13 @@
     - controller 被错误观察面吸住
     - 主循环被重复错误吞掉
     - 为了压局部坏习惯而整体缩小 agent 能力
+
+## D-013 当前 hosted 基线下，长篇、多源、正式交付物优先走 `document-writer` workflow
+
+- 决策：
+  - 在当前 hosted 基线与现有证据下，长篇、多源、正式交付物优先视为 `document-writer` 工作形态，而不是先让 `common-work` 自由地直接长篇写入。
+  - 这是一条当前执行决策，不是对最终架构的永久锁死；后续若有更强反证，可以回滚。
+- 原因：
+  - `common-work` 的空输入 `write` 已在 `MiniMax-2.5` 与 `Qwen3.5-397B-A17B` 上复现，说明它不是单模型偶发问题。
+  - 同一样例下，`document-writer + MiniMax-2.5` 已完成 reader、writer、verifier 的整轮流程并生成结果。
+  - 当前更强的解释是：长文正式交付物更需要显式 workflow harness，而不是继续给 `common-work` 增加动作级微观禁令。

@@ -19,7 +19,10 @@
         "openwork-knowledge*": true
       },
       "permission": {
-        "task": "allow",
+        "task": {
+          "*": "deny",
+          "doc-*": "allow"
+        },
         "read": {
           "*": "deny",
           ".worktree/index.json": "allow",

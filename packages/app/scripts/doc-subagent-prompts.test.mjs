@@ -299,6 +299,15 @@ test("document-writer prompts keep document form task-driven instead of forcing 
   expect(entryPrompt).toContain("do not use `outputs/**` or the target deliverable as the default reading surface in the main session");
 });
 
+test("document-writer keeps source text and state bootstrap inside the owning doc-* phases", async () => {
+  const entryPrompt = await readFile(resolve(root, ".opencode/agent/document-writer.md"), "utf8");
+
+  expect(entryPrompt).toContain("do not read `.worktree/text/**` in the main session");
+  expect(entryPrompt).toContain("treat source-text artifacts as `doc-reader` working surfaces");
+  expect(entryPrompt).toContain("do not delegate `.worktree/` bootstrap, source analysis, or fact synthesis to `general`");
+  expect(entryPrompt).toContain("keep intake, source compilation, merge, planning, drafting, and verification inside the owning `doc-*` phase");
+});
+
 test("document-writer prompt examples stay generic and planner wording avoids sample-specific labels", async () => {
   const plannerPrompt = await readFile(resolve(root, ".opencode/prompts/doc-planner.md"), "utf8");
   const entryPrompt = await readFile(resolve(root, ".opencode/agent/document-writer.md"), "utf8");

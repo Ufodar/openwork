@@ -1224,7 +1224,17 @@
   - 第一轮准备阶段已成功产出 `.worktree/sources/*.json`、`facts.json`、`merge/conflicts.json`
   - 当前更准确的风险是：
     - `common-work` 的工具路线噪音很大，但并不必然卡死
-    - `document-writer` 的第二轮当前停在 `doc-planner`，后续链路仍需继续看
+  - `document-writer` 的第二轮当前停在 `doc-planner`，后续链路仍需继续看
+- 当前又新增一个已完成的 harness / prompt 收口：
+  - Qin 专用调试脚本已经统一接入 stalled-pending-tool 护栏
+  - 因此后续如果再出现空输入 `write` 或无效 pending tool，不会再长时间等到总超时
+  - `document-writer` 也已明确写死：
+    - 主会话不读 `.worktree/text/**`
+    - `.worktree/text/**` 属于 `doc-reader` 工作面
+    - `.worktree/` bootstrap、source analysis、fact synthesis 不得委派给 `general`
+  - 所以下一轮 hosted 结果会更适合区分：
+    - 仍然是 runtime/tool/perms mismatch
+    - 还是 prompt phase boundary 仍然不足
 - 当前又新增一个已完成的运行时修正：
   - hosted session 已不再把 `/tmp` 作为默认临时目录策略的一部分
   - `common-work` 也不再把 Bocha 写成唯一合法搜索入口
@@ -1287,5 +1297,8 @@
    - 为什么 `common-work` 在撞上这些错误后仍能恢复并完成，而 `document-writer` 的第二轮却推进到 `doc-planner`
    - 为什么 `document-writer` 仍会短暂尝试直接读 `.worktree/text/**`
 6. 在继续调 prompt 之前，先把 `packages/app/scripts/doc-subagent-prompts.test.mjs` 从“旧文案契约守卫”收成“真实系统护栏测试”
-5. 若基线成立，再回到 `document-writer` 与新 sub-agent 模式比较；若不成立，继续只修基线
-6. 单独跟进公共 Web 上传链路，把网络/代理故障与内容质量问题继续拆开处理
+7. 先把当前 repo 改动 push 并更新 pod，然后用同一 Qin 样例重新验证：
+   - `common-work` 是否仍会进入空输入 `write`
+   - `document-writer` 是否还会调用 `general` 或尝试读 `.worktree/text/**`
+8. 若基线成立，再回到 `document-writer` 与新 sub-agent 模式比较；若不成立，继续只修基线
+9. 单独跟进公共 Web 上传链路，把网络/代理故障与内容质量问题继续拆开处理

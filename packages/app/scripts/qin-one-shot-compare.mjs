@@ -11,6 +11,10 @@ import {
 } from "./_util.mjs";
 
 import { joinVisibleAssistantText } from "./_assistant-text.mjs";
+import {
+  detectStalledPendingTools,
+  shouldTreatFingerprintChangeAsProgress,
+} from "./session-settle-guards.mjs";
 
 const OPENWORK_BASE = process.env.OPENWORK_BASE ?? "http://192.168.5.10:32765/openwork";
 const USERNAME = process.env.OPENWORK_USERNAME ?? "fuda";
@@ -244,7 +248,20 @@ async function waitForSessionSettled(client, sessionId, runPrompt, options = {})
       const fingerprint = messagesFingerprint(messages);
       if (fingerprint !== lastFingerprint) {
         lastFingerprint = fingerprint;
-        lastProgressAt = performance.now();
+        if (shouldTreatFingerprintChangeAsProgress(messages)) {
+          lastProgressAt = performance.now();
+        }
+      }
+
+      const stalledPendingTools = detectStalledPendingTools({
+        messages,
+        lastProgressAt,
+        now: performance.now(),
+      });
+      if (stalledPendingTools) {
+        throw new Error(
+          `${stalledPendingTools.kind}: ${JSON.stringify(stalledPendingTools.pendingTools.slice(0, 3))}`,
+        );
       }
 
       if (!hasAnyAssistantMessage(messages) && performance.now() - lastProgressAt >= noProgressTimeoutMs) {

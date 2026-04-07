@@ -7,6 +7,10 @@ import {
   fetchHostedSessionRecord,
   uploadHostedDocument,
 } from "./_util.mjs";
+import {
+  detectStalledPendingTools,
+  shouldTreatFingerprintChangeAsProgress,
+} from "./session-settle-guards.mjs";
 
 const OPENWORK_BASE = process.env.OPENWORK_BASE ?? "http://192.168.5.10:32765/openwork";
 const USERNAME = process.env.OPENWORK_USERNAME ?? "fuda";
@@ -176,7 +180,9 @@ async function debugWaitForSessionSettled(client, sessionId, runPrompt, options 
       const fingerprint = messagesFingerprint(messages);
       if (fingerprint !== lastFingerprint) {
         lastFingerprint = fingerprint;
-        lastProgressAt = performance.now();
+        if (shouldTreatFingerprintChangeAsProgress(messages)) {
+          lastProgressAt = performance.now();
+        }
       }
 
       const hasAnyAssistantPayload = messages.some(
@@ -197,6 +203,17 @@ async function debugWaitForSessionSettled(client, sessionId, runPrompt, options 
           summary: summarizeMessages(messages),
         }),
       );
+
+      const stalledPendingTools = detectStalledPendingTools({
+        messages,
+        lastProgressAt,
+        now: performance.now(),
+      });
+      if (stalledPendingTools) {
+        throw new Error(
+          `${stalledPendingTools.kind}: ${JSON.stringify(stalledPendingTools.pendingTools.slice(0, 3))}`,
+        );
+      }
 
       if (!hasAnyAssistantPayload && performance.now() - lastProgressAt >= noProgressTimeoutMs) {
         throw new Error(`No assistant progress after ${elapsedMs}ms`);

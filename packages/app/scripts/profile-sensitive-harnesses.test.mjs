@@ -54,4 +54,10 @@ test("qin compare scripts pin hosted sessions to the intended runtime profiles",
   expect(commonDebug).toContain('preferredView: "document-agent"');
   expect(commonDebug).toContain('preferredAgentLock: "common-work"');
   expect(commonDebug).toContain("workspacePath: auth.workspace.path");
+  expect(oneShot).toContain("detectStalledPendingTools");
+  expect(oneShot).toContain("shouldTreatFingerprintChangeAsProgress");
+  expect(writerOnly).toContain("detectStalledPendingTools");
+  expect(writerOnly).toContain("shouldTreatFingerprintChangeAsProgress");
+  expect(commonDebug).toContain("detectStalledPendingTools");
+  expect(commonDebug).toContain("shouldTreatFingerprintChangeAsProgress");
 });

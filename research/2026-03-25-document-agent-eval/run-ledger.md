@@ -2716,3 +2716,52 @@
   - 下一步：
     - 针对 `common-work`，查为什么会先撞 deny/transport 错误但还能恢复
     - 针对 `document-writer`，继续跟踪第二轮生成链，重点看 `doc-planner` 是否长时间不返回
+
+## RL-048 收紧 Qin 调试 harness，并把 `document-writer` 的 phase 边界写死到 prompt
+
+- 时间：
+  - 2026-04-07 13:05 CST
+- 代码变更：
+  - `packages/app/scripts/qin-common-work-debug.mjs`
+  - `packages/app/scripts/qin-one-shot-compare.mjs`
+  - `packages/app/scripts/run-qin-doc-writer.mjs`
+  - `packages/app/scripts/profile-sensitive-harnesses.test.mjs`
+  - `.opencode/agent/document-writer.md`
+  - `packages/app/scripts/doc-subagent-prompts.test.mjs`
+- 本轮目的：
+  - 不再让 Qin 调试脚本在 malformed pending tool 上长时间空等
+  - 把 `document-writer` 的 controller 边界写得更具体，避免它再去读 `.worktree/text/**` 或把 bootstrap / facts synthesis 交给 `general`
+- 具体收口：
+  - 三个 Qin harness 现在都接入了：
+    - `shouldTreatFingerprintChangeAsProgress`
+    - `detectStalledPendingTools`
+  - 这让脚本在遇到：
+    - 空输入 `write`
+    - 长时间无效 pending tool
+    时更快失败并给出明确错误，而不是继续把它误读成“无进展”或一直等到总超时
+  - `document-writer.md` 新增了更具体的 controller 护栏：
+    - 主会话不读 `.worktree/text/**`
+    - `.worktree/text/**` 属于 `doc-reader` 工作面
+    - 不把 `.worktree/` bootstrap、source analysis、fact synthesis 委派给 `general`
+    - intake / source compilation / merge / planning / drafting / verification 都要留在拥有 phase 的 `doc-*`
+- 当前判断更新：
+  - `common-work` 这条线仍主要是 runtime/tool 问题
+  - `document-writer` 这条线除了 runtime/tool 问题，prompt 也需要把 phase ownership 写得更硬，否则模型会偷跑回 `general`
+- 本地验证：
+  - `bun test packages/app/scripts/session-settle-guards.test.mjs packages/app/scripts/profile-sensitive-harnesses.test.mjs packages/app/scripts/doc-subagent-prompts.test.mjs`
+    - `47 pass / 0 fail`
+  - `node --check packages/app/scripts/qin-one-shot-compare.mjs`
+  - `node --check packages/app/scripts/qin-common-work-debug.mjs`
+  - `node --check packages/app/scripts/run-qin-doc-writer.mjs`
+  - `node --check packages/app/scripts/doc-agent-live-compare.mjs`
+  - `git diff --check`
+- hosted 快速复核：
+  - 在未重新部署新 prompt 前，重跑 `qin-common-work-debug.mjs` 时先遇到一次 `internal_error`
+  - 因此这轮还不能把 hosted 证据当成“新 prompt 已验证”
+  - 下一步必须先 repo-first 推送并更新 pod，再重跑 Qin 样例
+- 后续动作：
+  - push 本轮 repo 改动
+  - pod `git pull gitee dev` + `bash scripts/restart-pod.sh --force`
+  - 再用 Qin 样例复核：
+    - `common-work` 是否仍会掉进空输入 `write`
+    - `document-writer` 是否还会调用 `general` 或尝试直接读 `.worktree/text/**`

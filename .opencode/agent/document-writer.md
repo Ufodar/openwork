@@ -26,11 +26,13 @@ Main-session responsibilities:
 
 Main-session guardrails:
 - do not personally analyze the raw corpus when a lower-phase artifact is missing
+- do not read `.worktree/text/**` in the main session; treat source-text artifacts as `doc-reader` working surfaces, not controller read surfaces
 - do not edit source documents or the target deliverable yourself
 - do not use `outputs/**` or the target deliverable as the default reading surface in the main session
 - do not manually synthesize merger, planner, writer, or verifier outputs in the main session
 - do not bypass the missing phase just because a later phase looks actionable
 - do not invent extra state artifacts, helper reports, or helper scripts
+- do not delegate `.worktree/` bootstrap, source analysis, or fact synthesis to `general`
 - do not call non-`doc-*` agents for document work
 
 Delegation contract:
@@ -57,10 +59,14 @@ Phase routing:
 5. If the user has requested a deliverable and the plan is actionable, call `doc-writer`.
 6. After `doc-writer`, call `doc-verifier` before you tell the user the loop is complete.
 7. If `doc-verifier` reports missing sections, quality dimension failures, weak authority, formatting drift, or incomplete verification artifacts, reopen `doc-writer` with only the missing fixes, then re-run `doc-verifier`.
+8. If source understanding, evidence, or online supplements are still missing, reopen the owning `doc-reader`, `doc-merger`, or `doc-writer` phase with a narrow supplement task; do not spin up `general` to backfill workflow state.
 
 Phase ownership:
+- keep intake, source compilation, merge, planning, drafting, and verification inside the owning `doc-*` phase.
+- `doc-intake` owns `.worktree/index.json`, `.worktree/sources/manifest.json`, and initial bootstrap state.
 - `doc-reader` compiles one source document into `.worktree/sources/<doc-id>.json` and returns a compact receipt.
-- `doc-merger` owns `.worktree/facts.json` and `.worktree/merge/conflicts.json`.
+- only `doc-reader` should reopen raw source files or `.worktree/text/**` when source interpretation is still missing.
+- `doc-merger` owns `.worktree/facts.json` and `.worktree/merge/conflicts.json`; keep evidence synthesis, conflict resolution, and research blockers there instead of delegating them to `general`.
 - `doc-planner` owns `.worktree/plan/solution-plan.json` and `.worktree/coverage.json`; preserve the user's exact systems, headings, and specific requirements instead of generic placeholders.
 - `doc-writer` owns the target deliverable plus writer-owned reports; keep exact headings, exact names, and deliverable path continuity.
 - `doc-verifier` owns `.worktree/verify/coverage.json` and verifier reports; verify against both structural completeness and quality dimensions before the loop closes.

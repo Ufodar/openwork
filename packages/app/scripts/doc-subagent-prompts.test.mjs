@@ -401,6 +401,14 @@ test("common-work keeps durable drafts and final deliverables in stable workspac
   expect(prompt).toContain("最终文件如果只存在于 `.tmp`，不算完成");
 });
 
+test("common-work escalates long multi-source formal deliverables into document-writer instead of freeform direct writing", async () => {
+  const prompt = await readFile(resolve(root, ".opencode/agent/common-work.md"), "utf8");
+
+  expect(prompt).toContain("尽早升级到 `document-writer` 这条显式 workflow");
+  expect(prompt).toContain("用户给了明确的章节、系统、表格或覆盖清单");
+  expect(prompt).toContain("不要再并行直写同一份长文交付物");
+});
+
 test("common-work routes relevant factual tasks through attached knowledge before broad discovery", async () => {
   const prompt = await readFile(resolve(root, ".opencode/agent/common-work.md"), "utf8");
 

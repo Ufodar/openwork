@@ -125,3 +125,15 @@
   - `common-work` 的空输入 `write` 已在 `MiniMax-2.5` 与 `Qwen3.5-397B-A17B` 上复现，说明它不是单模型偶发问题。
   - 同一样例下，`document-writer + MiniMax-2.5` 已完成 reader、writer、verifier 的整轮流程并生成结果。
   - 当前更强的解释是：长文正式交付物更需要显式 workflow harness，而不是继续给 `common-work` 增加动作级微观禁令。
+
+## D-014 当前 hosted 基线下，`document-writer` 只允许调度 `doc-*` 子代理
+
+- 决策：
+  - 将 `document-writer.permission.task` 收紧为：
+    - `* -> deny`
+    - `doc-* -> allow`
+  - 在当前 hosted 基线下，`document-writer` 不再把 `general` 作为默认旁路。
+- 原因：
+  - 真实 Qin 样例已经证明：在收紧 task 权限后，`document-writer` 仍然可以只靠 `doc-reader -> doc-reader -> doc-writer -> doc-verifier -> doc-intake` 完成闭环。
+  - 这说明 `general` 不是它当前完成该类长文任务的必要依赖。
+  - 相比继续在 prompt 里写“不要调 general”，配置级 task surface 更硬、更不容易漂回旧旁路。

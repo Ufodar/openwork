@@ -280,6 +280,55 @@
   - 继续检查 `document-writer` 当前是否仍有不必要的 `general` 旁路，避免把这条更稳的 harness 又重新做散
   - 再决定要不要修 `common-work` 的长文直写路径，还是直接把这类任务更早路由出去
 
+## RL-011 `document-writer` 收紧为只允许 `doc-*` 后，Qin 样例在 hosted pod 上已不再调用 `general`
+
+- 目标：
+  - 验证将 `document-writer.permission.task` 收紧为仅允许 `doc-*` 之后，真实 hosted 样例是否还能完整完成，同时确认 `general` 旁路是否已经消失。
+- 运行基线：
+  - repo head：`b252066c`
+  - hosted pod head：`b252066c`
+  - 部署路径：
+    - `git push origin dev`
+    - `git push gitee dev`
+    - pod 执行 `git pull gitee dev`
+    - pod 执行 `bash scripts/restart-pod.sh --force`
+  - hosted 公网入口：`http://192.168.5.10:32765/openwork`
+  - agent：`document-writer`
+  - 模型：`my-company/MiniMax-2.5`
+  - 样例：`/Users/storm/Pictures/秦老师` 下两份 `.docx`
+  - harness：`bun run packages/app/scripts/run-qin-doc-writer.mjs`
+- 新证据：
+  - session：`ses_298655890ffe0Uh0yFQC7uNEsc`
+  - 第一轮 `prompt 1/2` 完成：`368319ms`
+  - 对同一 session 直接查询 `/message`，可见 task 链已经变为：
+    - `doc-reader`：`编译两个源文档`
+    - `doc-reader`：`联网检索行业能力`
+    - `doc-writer`：`生成三大系统技术材料`
+    - `doc-verifier`：`验证技术材料完整性`
+    - `doc-intake`：`更新工作状态`
+  - 本轮没有再出现 `general` task call。
+  - 同一 session 已生成：
+    - `outputs/qin-technical-material.md`
+  - `run-qin-doc-writer.mjs` 本轮曾因 `/message` 的一次坏 JSON 响应退出：
+    - `SyntaxError: JSON Parse error: Expected '}'`
+  - 但这次脚本失败后，再直接查询同一 session，可见：
+    - assistant 最终 turn 已 completed
+    - `doc-writer` / `doc-verifier` / `doc-intake` 都已 completed
+    - 生成文件已存在
+- 新结论：
+  - 把 `document-writer` 的 task 权限收紧到仅允许 `doc-*` 后，当前 Qin 样例已不再借道 `general`，并且仍能完成整轮 workflow 闭环。
+  - 因此当前更强的解释是：
+    - `general` 不是 `document-writer` 完成该类长文任务的必要依赖
+    - 真正的新增噪音转移到了 compare/debug harness：
+      - `/message` 偶发坏 JSON 会让脚本误报失败
+      - 不能再把这种脚本失败直接等价成产品失败
+- 后续动作：
+  - 将“当前 hosted 基线下，`document-writer` 仅允许 `doc-*` 子代理”提升为正式决策
+  - 后续比较需要把 `/message` 坏 JSON 视为 harness 噪音单独记录
+  - 继续把主注意力放回：
+    - `common-work` 的空输入 `write`
+    - 长篇正式交付物何时应更早升级到显式 workflow harness
+
 ## 当前台账的用途
 
 后续只要发生下面任一类变化，就应追加新轮次：

@@ -45,22 +45,22 @@ export function shouldTreatFingerprintChangeAsProgress(messages) {
   let sawPendingTool = false;
   let sawNonMalformedPendingTool = false;
   let sawSettledTool = false;
+  let sawMalformedPendingPlaceholder = false;
 
   for (const part of toolParts) {
     const status = typeof part?.state?.status === "string" ? part.state.status : "";
     if (status === "pending" || status === "running") {
       sawPendingTool = true;
-      const tool = String(part?.tool ?? "").toLowerCase();
       const raw = typeof part?.state?.raw === "string" ? part.state.raw : "";
       const input = part?.state?.input && typeof part.state.input === "object" ? part.state.input : {};
       if (raw.trim() || Object.keys(input).length > 0) {
         sawNonMalformedPendingTool = true;
-      } else if (tool === "read" || tool === "glob") {
-        // OpenCode sometimes emits a short-lived placeholder `read`/`glob`
-        // before attaching the concrete file path or pattern; count the new
-        // step as progress and let the malformed timeout catch it only if it
-        // actually persists with real input missing.
-        sawNonMalformedPendingTool = true;
+      } else {
+        // OpenCode can emit short-lived placeholder pending tool steps before
+        // it attaches concrete input. Count the new step as progress once, but
+        // still let the malformed timeout catch it if the placeholder actually
+        // persists with empty input.
+        sawMalformedPendingPlaceholder = true;
       }
       continue;
     }
@@ -69,7 +69,7 @@ export function shouldTreatFingerprintChangeAsProgress(messages) {
   }
 
   if (!sawPendingTool) return true;
-  if (sawNonMalformedPendingTool || sawSettledTool) return true;
+  if (sawNonMalformedPendingTool || sawSettledTool || sawMalformedPendingPlaceholder) return true;
   return false;
 }
 
@@ -77,7 +77,7 @@ export function detectStalledPendingTools({
   messages,
   lastProgressAt,
   now,
-  malformedPendingToolTimeoutMs = 30_000,
+  malformedPendingToolTimeoutMs = 60_000,
   stalledPendingToolTimeoutMs = 120_000,
 }) {
   const pendingTools = summarizePendingToolStates(messages);

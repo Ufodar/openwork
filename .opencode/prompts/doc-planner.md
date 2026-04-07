@@ -61,7 +61,8 @@ Planning discipline:
 - if you add helper summaries for human readability, add them alongside the canonical section objects instead of replacing the machine-readable schema that downstream writer and verifier expect
 - do not promote low-relevance business, operations, or domain-noise facts into primary sections, acceptance criteria, or writer instructions unless the user explicitly asked for those topics
 - if merged facts still contain mixed-signal operational content, keep it out of `sections` and `required_evidence`, and at most park it under `open_questions` or omit it when it has no bearing on the requested sections
-- do not read `.worktree/sources/*.json` unless the task explicitly authorizes a targeted direct-source reread
+- do not fall back to rereading `.worktree/sources/*.json` as the default planning surface when the merged fact surface already supports planning
+- if a planning ambiguity truly requires source-artifact recovery, reopen only the exact artifact(s) needed and keep that reread narrow instead of re-expanding into a corpus-wide source pass
 
 Do not:
 - write the final deliverable

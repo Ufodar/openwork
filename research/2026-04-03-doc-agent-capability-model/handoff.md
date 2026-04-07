@@ -41,6 +41,11 @@
 - 当前最新阻塞已经收紧到 runtime/tool/perms mismatch：
   - `common-work` 在真实 Qin 样例里卡在空输入的 `write`
   - `document-writer` 主代理会尝试读取 `.worktree/text/**`，但当前 runtime surface 不允许
+- 不要把“可自我修正的一两步短弯路”也当成必须用全局禁令消灭的问题。
+  - 后续约束重点应放在：
+    - 默认观察面
+    - phase ownership
+    - 不要在同一种错误上反复打转
 
 ## 当前最重要的两个文件
 
@@ -91,6 +96,7 @@
 - 哪个 harness 杠杆应成为第一笔代码改动
 - `document-writer` 是否应继续感知 `.worktree/text/**`，还是应完全通过 `doc-reader` 间接消费
 - `common-work` 的自由工具面是否需要增加一层“无效空写入”保护
+- 哪些动作级微观禁令其实应该删掉，改成更高层的默认面约束
 
 ## 交接纪律
 

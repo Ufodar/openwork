@@ -131,6 +131,34 @@
     - `common-work` 空 `write` 调用为什么会出现、怎样在 harness 上避免
     - `document-writer` 为什么会去读 `.worktree/text/**`，以及这条路径究竟该被允许、禁止还是改由 `doc-reader` 消费
 
+## RL-007 把“不要缩能力”收成 prompt/harness 护栏
+
+- 目标：
+  - 回答一个新的收口问题：为了纠正模型的局部坏习惯，哪些约束值得写进 prompt / bridge / skill，哪些不值得。
+- 主要变更：
+  - [document-writer.md](../../.opencode/agent/document-writer.md)
+    - 保留 controller 默认观察面与 phase ownership 约束
+    - 不再把 child-owned readable artifacts 写成近似全局禁令
+  - [document-mode-bridge.js](../../.opencode/plugins/document-mode-bridge.js)
+    - 保留“优先 readable working surface / control files”这类高层桥接规则
+    - 不再把 `.worktree/text/**` 一类路径当成需要硬封死的默认主题
+  - hidden `doc-*` prompts：
+    - [doc-merger.md](../../.opencode/prompts/doc-merger.md)
+    - [doc-planner.md](../../.opencode/prompts/doc-planner.md)
+    - [doc-writer.md](../../.opencode/prompts/doc-writer.md)
+    - [doc-verifier.md](../../.opencode/prompts/doc-verifier.md)
+    - 统一改成：默认不要回退到重读原始面，但必要时允许 narrow source reread
+- 新结论：
+  - 可自我修正的一两步短弯路，不值得用大量系统提示词或工具禁用去压。
+  - 真正该保护的是：
+    - 默认观察面
+    - phase ownership
+    - 不要在同一种错误上反复打转
+  - 因此后续 prompt/harness 收口原则应是：
+    - 少做全局禁令
+    - 少做动作级微观纠偏
+    - 多保护主控制循环和默认工作面
+
 ## 当前台账的用途
 
 后续只要发生下面任一类变化，就应追加新轮次：

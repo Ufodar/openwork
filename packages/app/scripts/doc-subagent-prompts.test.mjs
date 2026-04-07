@@ -259,6 +259,26 @@ test("doc-writer avoids reading the full facts store when section evidence is al
   expect(writerPrompt).toContain("targeted `bash` extraction");
 });
 
+test("hidden doc-* prompts prefer owned state surfaces before narrow source rereads", async () => {
+  const mergerPrompt = await readFile(resolve(root, ".opencode/prompts/doc-merger.md"), "utf8");
+  const plannerPrompt = await readFile(resolve(root, ".opencode/prompts/doc-planner.md"), "utf8");
+  const writerPrompt = await readFile(resolve(root, ".opencode/prompts/doc-writer.md"), "utf8");
+  const verifierPrompt = await readFile(resolve(root, ".opencode/prompts/doc-verifier.md"), "utf8");
+
+  expect(mergerPrompt).toContain("merge from compiled state artifacts first");
+  expect(mergerPrompt).toContain("exact source slice needed");
+  expect(mergerPrompt).not.toContain("unless the task explicitly authorizes a targeted direct-source reread");
+
+  expect(plannerPrompt).toContain("do not fall back to rereading `.worktree/sources/*.json` as the default planning surface");
+  expect(plannerPrompt).toContain("reopen only the exact artifact(s) needed");
+
+  expect(writerPrompt).toContain("do not fall back to `.worktree/sources/*.json` or raw source documents as the default drafting surface");
+  expect(writerPrompt).toContain("reopen only the exact source artifact or source slice needed for that claim");
+
+  expect(verifierPrompt).toContain("do not default to reopening `.worktree/sources/*.json` or raw source documents");
+  expect(verifierPrompt).toContain("reopen only the exact source artifact or source slice needed to confirm the risk");
+});
+
 test("doc-writer keeps structured technical deliverables readable and flags mirrored authority in verification", async () => {
   const writerPrompt = await readFile(resolve(root, ".opencode/prompts/doc-writer.md"), "utf8");
   const verifierPrompt = await readFile(resolve(root, ".opencode/prompts/doc-verifier.md"), "utf8");

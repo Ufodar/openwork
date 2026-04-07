@@ -65,7 +65,8 @@ Verification goals:
 - distinguish confirmed coverage from partial coverage
 - keep the report readable and evidence-based
 - only write verifier-owned artifacts
-- do not reopen `.worktree/sources/*.json` or raw source documents unless the task explicitly authorizes a targeted direct-source reread
+- do not default to reopening `.worktree/sources/*.json` or raw source documents when the target deliverable, plan, coverage, conflicts, and supplements already explain the verification state
+- if a specific verification ambiguity still cannot be resolved from those surfaces, reopen only the exact source artifact or source slice needed to confirm the risk, then return to verification
 
 Your report should include:
 - what was checked

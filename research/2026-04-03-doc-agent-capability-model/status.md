@@ -33,6 +33,9 @@
 - Phase 2a prompt 改动已落地，但真实样例已经证明：当前第一优先级不是继续争论旧 prompt 文案，而是先排 runtime/tool/perms blocker。
 - `common-work` 的最新主风险是运行态生成了空输入的 `write` 调用，而不是简单的“能力不足”。
 - `document-writer` 的最新主风险是主代理动作面与 runtime 权限面不对齐，尤其是 `.worktree/text/**` 的读取错位。
+- 运行时排查进入新的收口原则：
+  - 不为一两步可自我修正的短弯路牺牲通用能力
+  - 优先修“默认观察面 / phase ownership / 重复打转”这类会真正破坏主循环的问题
 - 只有先排清这些 blocker，后面的广义文档质量验证才有意义。
 
 ## 当前还没完成
@@ -49,7 +52,7 @@
 1. **先排 runtime/tool/perms mismatch**
    - 查清 `common-work` 空 `write` 调用的触发条件
    - 查清 `document-writer` 为何会去读 `.worktree/text/**`
-   - 判断这条路径是该开放、改写还是应完全交给 `doc-reader`
+   - 判断这条路径该不该继续作为 controller 默认观察面；优先考虑交还给 owning phase，而不是全局禁工具
 2. 在 blocker 排清后，再做广义文档任务最小验证
 3. 根据验证结果决定 harness 第一刀具体落在哪
 4. 再增强四个文档 skill（intake/evidence/compose/verify）

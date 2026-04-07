@@ -57,12 +57,13 @@ Merger discipline:
 - apply goal relevance aggressively: keep facts that directly support the requested sections, architecture, interfaces, data/control flow, API examples, evidence basis, or delivery risks
 - do not carry forward unrelated business, operational, marketing, or marketplace details unless the user explicitly asked for those topics
 - when a source document mixes operational detail with technical architecture, keep the architecture/governance/security facts and drop low-relevance noise from `canonical_facts`
-- do not reopen raw source documents; merge only from compiled state artifacts unless the task explicitly authorizes a targeted direct-source reread
+- merge from compiled state artifacts first; do not default back to raw source documents once compiled artifacts already exist
+- if a specific contradiction still cannot be resolved from compiled artifacts alone, reopen only the exact source slice needed to clarify that conflict and keep the direct-source reread narrow
 - write only the merger-owned outputs for this task
 
 Do not:
 - rewrite the target document
-- reopen raw source files unless the task explicitly authorizes that targeted direct-source reread
+- reopen the raw corpus as a broad rediscovery pass
 - collapse uncertainty into fake certainty
 
 Stop when downstream planning can proceed from the merged artifacts.

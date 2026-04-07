@@ -71,6 +71,31 @@ test("detectStalledPendingTools flags malformed pending tools on the short timeo
   });
 });
 
+test("detectStalledPendingTools keeps the default malformed timeout at 60 seconds", () => {
+  const messages = [{
+    parts: [
+      {
+        type: "tool",
+        tool: "bash",
+        state: {
+          status: "pending",
+          input: {},
+          raw: "",
+        },
+      },
+    ],
+  }];
+
+  expect(
+    detectStalledPendingTools({
+      messages,
+      lastProgressAt: 0,
+      now: 31_000,
+      stalledPendingToolTimeoutMs: 120_000,
+    }),
+  ).toBeNull();
+});
+
 test("detectStalledPendingTools flags generic stalled pending tools on the long timeout", () => {
   const messages = [{
     parts: [
@@ -217,7 +242,7 @@ test("detectStalledPendingTools stays quiet when no pending tools exist", () => 
   ).toBeNull();
 });
 
-test("shouldTreatFingerprintChangeAsProgress ignores malformed-pending-only assistant messages", () => {
+test("shouldTreatFingerprintChangeAsProgress treats malformed placeholder steps as progress until they actually stall", () => {
   const messages = [{
     role: "assistant",
     parts: [
@@ -233,7 +258,7 @@ test("shouldTreatFingerprintChangeAsProgress ignores malformed-pending-only assi
     ],
   }];
 
-  expect(shouldTreatFingerprintChangeAsProgress(messages)).toBe(false);
+  expect(shouldTreatFingerprintChangeAsProgress(messages)).toBe(true);
 });
 
 test("shouldTreatFingerprintChangeAsProgress treats placeholder reads as progress", () => {
@@ -262,6 +287,44 @@ test("shouldTreatFingerprintChangeAsProgress treats placeholder globs as progres
       {
         type: "tool",
         tool: "glob",
+        state: {
+          status: "pending",
+          input: {},
+          raw: "",
+        },
+      },
+    ],
+  }];
+
+  expect(shouldTreatFingerprintChangeAsProgress(messages)).toBe(true);
+});
+
+test("shouldTreatFingerprintChangeAsProgress treats placeholder writes as progress", () => {
+  const messages = [{
+    role: "assistant",
+    parts: [
+      {
+        type: "tool",
+        tool: "write",
+        state: {
+          status: "pending",
+          input: {},
+          raw: "",
+        },
+      },
+    ],
+  }];
+
+  expect(shouldTreatFingerprintChangeAsProgress(messages)).toBe(true);
+});
+
+test("shouldTreatFingerprintChangeAsProgress treats placeholder bash steps as progress", () => {
+  const messages = [{
+    role: "assistant",
+    parts: [
+      {
+        type: "tool",
+        tool: "bash",
         state: {
           status: "pending",
           input: {},

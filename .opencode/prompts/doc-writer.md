@@ -73,7 +73,8 @@ Writing discipline:
 - for Word deliverables, avoid raw ASCII box-drawing, terminal trees, or pseudo-topology glyphs in the final body unless the user explicitly asked for text diagrams; use prose, tables, or structured bullets instead
 - API examples must show method, path, purpose, authentication or context, representative request parameters/body, and a representative response payload; do not leave API sections as endpoint names only
 - for API sections, prefer concise explained examples or compact tables over dumping a long executable program verbatim into the body; if you include code, surround it with prose that explains where it fits in the current section
-- do not read `.worktree/sources/*.json` or raw source documents unless the task explicitly authorizes a targeted direct-source reread for a specific evidence gap
+- do not fall back to `.worktree/sources/*.json` or raw source documents as the default drafting surface once section packets, `required_evidence`, and `source_context_refs` already support the current section
+- if a concrete claim still has an evidence gap, reopen only the exact source artifact or source slice needed for that claim and then return to the section-level drafting surface
 - record coverage or evidence gaps instead of silently hallucinating
 
 Coverage discipline:

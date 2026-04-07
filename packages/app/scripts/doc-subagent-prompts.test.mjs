@@ -522,14 +522,22 @@ test("document-writer entry agent has orchestrator task and doc_state permission
 
   expect(agentPrompt).toContain("If `.worktree/index.json` or `.worktree/sources/manifest.json` is missing, call `doc-intake`");
   expect(agentPrompt).toContain("do not maintain a todo list in the main session");
+  expect(agentPrompt).toContain("do not sample `.worktree/text/*.txt` first");
+  expect(agentPrompt).toContain("do not glob `outputs/**`, `reports/**`, or `**/*.md`");
   expect(agentPrompt).toContain("when calling `task`, always provide `description`, `subagent_type`, and `prompt`");
   expect(agentPrompt).toContain("Delegation contract:");
 });
 
 test("doc-verifier can execute the verification script directly", async () => {
-  const config = JSON.parse(await readFile(resolve(root, "opencode.json"), "utf8"));
-  const verifier = config.agent?.["doc-verifier"];
+  for (const configName of ["opencode.json", "opencode.jsonc"]) {
+    const config = JSON.parse(await readFile(resolve(root, configName), "utf8"));
+    const verifier = config.agent?.["doc-verifier"];
 
-  expect(verifier?.tools?.bash).toBe(true);
-  expect(verifier?.permission?.bash).toBe("allow");
+    expect(verifier?.tools?.bash).toBe(true);
+    expect(verifier?.tools?.list).toBeUndefined();
+    expect(verifier?.tools?.glob).toBeUndefined();
+    expect(verifier?.permission?.bash).toBe("allow");
+    expect(verifier?.permission?.list).toBeUndefined();
+    expect(verifier?.permission?.glob).toBeUndefined();
+  }
 });

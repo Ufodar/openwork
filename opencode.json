@@ -356,8 +356,6 @@
       "tools": {
         "*": false,
         "read": true,
-        "list": true,
-        "glob": true,
         "bash": true,
         "write": true,
         "edit": true,
@@ -385,12 +383,6 @@
           "**/*.doc": "allow",
           "*.docx": "allow",
           "**/*.docx": "allow"
-        },
-        "list": {
-          "*": "allow"
-        },
-        "glob": {
-          "*": "allow"
         },
         "write": {
           "*": "deny",

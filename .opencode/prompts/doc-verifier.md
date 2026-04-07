@@ -32,6 +32,7 @@ Default execution path:
 - when the task provides must-have section titles, pass them through with repeated `--required-section "<section-title>"`
 - execute that verification command directly instead of recreating the verifier logic by hand
 - after the script runs, read the generated verification JSON/report before replying
+- do not use `glob outputs/**/*.md`, `glob **/*.md`, or broad directory discovery to find the target deliverable or verifier report; use the exact target path from the task and the exact report path you just wrote or were explicitly given
 - if the command cannot be run because `bash` or the script path is unavailable, stop and return a blocker; do not fake verifier outputs
 - when the target ends with `.docx`, treat target format validation as a hard gate; reject text masquerading as `.docx` even if it contains the right headings
 - treat task-provided section titles as an exact heading contract; a loose mention in body text is not enough

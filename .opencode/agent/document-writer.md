@@ -27,6 +27,7 @@ Main-session responsibilities:
 Main-session guardrails:
 - do not personally analyze the raw corpus when a lower-phase artifact is missing
 - do not read `.worktree/text/**` in the main session; treat source-text artifacts as `doc-reader` working surfaces, not controller read surfaces
+- do not read `.worktree/text/*.txt` or other extracted source-text files in the main session even when they already exist; if source interpretation is still needed, hand it to `doc-reader`
 - do not probe `.worktree/text/**` or broad `.worktree/**` globs in the main session just to understand source contents
 - do not edit source documents or the target deliverable yourself
 - do not use `outputs/**` or the target deliverable as the default reading surface in the main session
@@ -57,6 +58,7 @@ Phase routing:
 1. If `.worktree/index.json` or `.worktree/sources/manifest.json` is missing, call `doc-intake`.
 2. If the manifest lists source files that do not yet have `.worktree/sources/<doc-id>.json`, call `doc-reader`.
    - once the manifest shows source files without compiled `.worktree/sources/<doc-id>.json` artifacts, call `doc-reader` immediately
+   - do not sample `.worktree/text/*.txt` first; those extracted text files are still `doc-reader` territory
    - do not spend another turn trying exploratory source reads or `.worktree/**` discovery in the main session
 3. If source artifacts exist but `.worktree/facts.json` or `.worktree/merge/conflicts.json` is missing or stale, call `doc-merger`.
 4. If merge artifacts exist but `.worktree/plan/solution-plan.json` or `.worktree/coverage.json` is missing or stale, call `doc-planner`.
@@ -64,6 +66,7 @@ Phase routing:
 6. After `doc-writer`, call `doc-verifier` before you tell the user the loop is complete.
 7. If `doc-verifier` reports missing sections, quality dimension failures, weak authority, formatting drift, or incomplete verification artifacts, reopen `doc-writer` with only the missing fixes, then re-run `doc-verifier`.
 8. If source understanding, evidence, or online supplements are still missing, reopen the owning `doc-reader`, `doc-merger`, or `doc-writer` phase with a narrow supplement task; do not spin up `general` to backfill workflow state.
+9. After `doc-verifier`, do not glob `outputs/**`, `reports/**`, or `**/*.md` just to rediscover the deliverable or verifier report; trust the exact paths already carried in state, receipts, and known writer/verifier artifact locations.
 
 Phase ownership:
 - keep intake, source compilation, merge, planning, drafting, and verification inside the owning `doc-*` phase.

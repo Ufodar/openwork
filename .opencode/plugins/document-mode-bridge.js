@@ -129,7 +129,6 @@ function classifyWorkspace(rootDir) {
 function buildSystemBridge() {
   return `<DOCUMENT_MODE_BRIDGE>
 - Prefer a readable working surface for binary Office files: reuse an existing readable artifact or use the appropriate document capability before treating the original binary like plain text.
-- If the task is a long-form, multi-source, formal deliverable, hand control to \`document-writer\` early before further search, todo planning, or direct drafting instead of staying in an open-ended \`bash\`/\`glob\`/\`read\` loop in the main session.
 - Keep reopenable temp artifacts under \`<WORKSPACE>/.tmp/system\`, and keep persisted state plus final deliverables inside \`<WORKSPACE>\`; do not treat workspace-external paths or \`external_directory\` as the normal document I/O path.
 - If bootstrap control files such as \`.worktree/index.json\` or \`.worktree/sources/manifest.json\` already exist, read those narrow control files before doing another broad rediscovery pass.
 - Do not let extracted source text replace control files as the main-session bootstrap surface; source-compilation phases can still consume whichever readable artifacts they need.

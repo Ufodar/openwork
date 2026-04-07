@@ -4,7 +4,11 @@
 
 ## 当前目标
 
-把 OpenWork 第二阶段文档重构从“只完成了 prompt 层最小收口”推进到“先排清真实 runtime/tool/perms blocker，再进入广义文档任务验证”。
+把 OpenWork 第二阶段拉回到研究目录约束下的正确轨道：
+
+- 保留已经拿到的样例证据
+- 撤回把样例观察直接固化成共享产品逻辑的实现
+- 先按研究 harness 继续判断 runtime blocker、prompt 边界与真正的 harness 落点
 
 ## 已完成
 
@@ -27,46 +31,37 @@
 - **已完成一轮新的 hosted 真实样例排查（RL-006）：**
   - `common-work` 在 `MiniMax-2.5` 基线下卡在空输入的 `write` tool call
   - `document-writer` 在 `MiniMax-2.5` 基线下暴露出 `.worktree/text/**` 读取权限错位
+- **已完成一轮偏航修正（RL-019）：**
+  - 保留了“样例上更早进入 `document-writer` 更稳”的实验性证据
+  - 撤回了把该观察直接做成共享产品启发式路由的实现
+  - 明确恢复“研究目录是硬约束面”的工作顺序
 
 ## 当前最重要的判断
 
-- Phase 2a prompt 改动已落地，但真实样例已经证明：当前第一优先级不是继续争论旧 prompt 文案，而是先排 runtime/tool/perms blocker。
-- `common-work` 的最新主风险是运行态生成了空输入的 `write` 调用，而不是简单的“能力不足”。
-- `common-work` 的空输入 `write` 已在 `MiniMax-2.5` 与 `Qwen3.5-397B-A17B` 两条 hosted 样例上复现，因此它不是单模型特有问题。
-- `document-writer` 这条 hosted 工作流当前已经明显稳于 `common-work`；它最新需要单独处理的不是产品闭环缺失，而是 compare/debug harness 对 `/message` 坏 JSON 的误报噪音。
-- 同一类 Qin 样例下，`document-writer + MiniMax-2.5` 已完成两轮 prompt、`doc-writer` 与 `doc-verifier`，并生成 `outputs/qin-technical-material.md`；到本轮为止，它没有复现 `common-work` 的空输入 `write`。
-- 在把 `document-writer.permission.task` 收紧为仅允许 `doc-*` 后，同一类 Qin 样例已不再调用 `general`，并且仍能完成 `doc-reader -> doc-reader -> doc-writer -> doc-verifier -> doc-intake` 的闭环。
-- 运行时排查进入新的收口原则：
+- Phase 2a prompt 改动与研究 harness 仍然成立；偏航的是后续把样例观察直接做成共享产品路由的实现形式，而不是前面的研究框架本身。
+- `common-work` 的主风险仍是：
+  - 在真实样例上出现空输入 `write`
+  - 更广义地说，是长文正式任务下的主循环稳定性不足
+- 这个问题已经在 `MiniMax-2.5` 与 `Qwen3.5-397B-A17B` 两条 hosted 样例上都出现过，因此不能简单归为单模型问题。
+- `document-writer` 在同类 Qin 样例上当前确实更稳，这是一条重要样例证据；但这条证据当前只支持“后续要继续研究更合适的 workflow entry / harness”，不支持直接把样例驱动路由固化成共享产品默认。
+- 在把 `document-writer.permission.task` 收紧为仅允许 `doc-*` 后，同一类 Qin 样例已不再调用 `general`，并且仍能完成 `doc-reader -> doc-reader -> doc-writer -> doc-verifier -> doc-intake` 的闭环；这条配置级收口仍有效。
+- 运行时排查的收口原则保持不变：
   - 不为一两步可自我修正的短弯路牺牲通用能力
   - 优先修“默认观察面 / phase ownership / 重复打转”这类会真正破坏主循环的问题
-- hosted 排查已进一步分层：
+- hosted 排查也继续按两层分开看：
   - 公网入口存在上传/连接毛刺
-  - 即使改走 pod 内部入口，`common-work` 仍会在真实写作阶段卡进空输入 `write` pending
-- compare/debug harness 当前也确认了一类独立噪音：
+  - 产品内链路存在 `common-work` 空输入 `write` 等更实质的问题
+- compare/debug harness 仍有独立噪音：
   - `/message` 偶发返回坏 JSON
   - 这会让脚本误报失败，但不等于真实 session 没有完成
-- `common-work` 新增“尽早升级到 `document-writer`”规则后，第一次 hosted 复验又被第二个大文件上传的 `AbortError` 挡住了；这说明当前还不能把上传链路问题和 `common-work` 路由问题混为一谈。
-- 后续 upload-only 对照又显示：
-  - 直连 `8789` 与经过 `32765` proxy 的“两份文件顺序上传”都能成功
-  - 因此当前 `document/upload AbortError` 更像间歇性 hosted 噪音，而不是已经锁定的稳定代码缺陷
-- 小材料路由探针进一步证明：
-  - 当前 `common-work` 即便面对“多源 + 正式技术材料 + 明确结构要求”，也不会主动升级到 `document-writer`
-  - 它仍会先走自己的自由工具面
-- 在补强 `common-work` 与 bridge 的升级文案后，新的显式 follow-up probe 仍然表明：
-  - `common-work` 不会稳定发出 `task(document-writer)`
-  - 它仍会优先走 `bocha-search -> todowrite -> write`
-  - 因此“只靠提示词加重语气”目前不足以改变真实 hosted 路由
-- 本地代码与测试现在已经证明：
-  - server proxy 可以在首条 `prompt/prompt_async` 时，把满足“长篇 + 正式交付物 + 多源综合 + 明确结构覆盖”的 `common-work` 请求升级成 `document-writer`
-  - 这次升级不仅能改请求里的 `agent`，还能同步升级 session 元数据和 runtime profile
-  - 但这条更硬的 routing 面还没有做 hosted 复验
-- 只有先排清这些 blocker，后面的广义文档质量验证才有意义。
+- RL-017 / RL-018 仍然保留为有效研究证据，但 RL-019 已经明确：
+  - 这些证据不能再被当成“当前产品应该自动根据 prompt 关键词/长度改派 agent”的依据
+  - 研究目录优先级高于这种样例驱动实现
 
 ## 当前还没完成
 
 - **还没有完成对 runtime/tool/perms blocker 的收敛** ← 当前最紧迫
-- 还没有完成“长篇正式交付物是否应更早升级到显式 workflow harness”的判断
-- 还没有完成“更硬的首条 prompt 路由”在 hosted pod 上的 Qin 样例复验
+- 还没有给出一个不依赖样例关键词/长度猜测的通用 workflow entry 方案
 - 还没有收敛 `document/upload` 的间歇性 `AbortError` 触发条件
 - 还没有判断 compare/debug harness 是否要对 `/message` 偶发坏 JSON 做更稳的容错
 - 还没有做一轮“排除 runtime 阻塞后的”广义文档任务验证
@@ -77,22 +72,32 @@
 
 ## 当前推荐的下一步
 
-1. **先排 runtime/tool/perms mismatch**
-   - 先把当前本地已通过测试的 server-side 首条 prompt 路由部署到 hosted pod
-   - 先用小材料 probe 和 Qin 两份 `.docx` 样例复验：这条更硬路由能不能真正把 `common-work` 任务切进 `document-writer`
-   - 再看 `common-work` 空 `write` 是否因此显著减少或消失
-   - 继续记录 `document/upload` 间歇性 `AbortError`，但在拿到稳定复现前，不要过早改 proxy 或 upload 实现
-   - 把公网入口问题和产品内链路问题继续分开记录，不再混成同一类 hosted 失败
-   - 评估 compare/debug harness 是否需要对 `/message` 偶发坏 JSON 做防抖或重试，避免把脚本失败误报成产品失败
-2. 在 blocker 排清后，再做广义文档任务最小验证
-3. 根据验证结果决定 harness 第一刀具体落在哪
-4. 再增强四个文档 skill（intake/evidence/compose/verify）
+1. **继续按研究 harness 排 blocker，而不是继续改路由**
+   - 继续查 `common-work` 空输入 `write`
+   - 继续把公网入口问题与产品内链路问题分开记录
+   - 评估 compare/debug harness 对 `/message` 坏 JSON 的最小必要容错
+2. **先做统一面审计，再决定哪一类问题一起改**
+   - `common-work`
+   - `document-writer`
+   - `document-mode-bridge`
+   - runtime instructions
+   - 必要的 `doc-*` prompts
+   - 目标是找出：
+     - 哪些属于必要护栏
+     - 哪些是过细的动作级纠偏
+     - 哪些是技术偏置或样例偏置
+3. 在 blocker 与面审计都更清楚之后，再决定：
+   - workflow entry 到底应不应该更显式
+   - 如果要更显式，应该落在哪一层，而不是先写实现
+4. 再做广义文档任务最小验证，并决定 harness 第一刀
 
 ## 不建议现在做的事
 
 - 不建议在 runtime blocker 未排清前直接进入 Phase 2b（改大块 schema / carrier）
 - 不建议现在继续加更多过程产物
 - 不建议把具体业务场景写进基础 prompt
+- 不建议继续加任何样例驱动的 prompt 关键词路由、长度路由或结构路由
+- 不建议为了压住局部坏习惯，再回到动作级微观禁令堆叠
 
 ## 当前目录角色
 

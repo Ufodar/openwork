@@ -36,7 +36,6 @@ import { readRuntimeProfilePreferences, recoverWorkspaceSessionRecords } from ".
 import {
   buildSessionPermissionRules,
   provisionSessionWorkspace,
-  reconfigureRuntimeSessionProfile,
   SessionWorkspaceService,
   sessionDirectoryBelongsToWorkspace,
   writeRuntimeDocumentStateCarrierConfig,
@@ -809,111 +808,6 @@ async function sessionHasConversationHistory(workspace: WorkspaceInfo, sessionId
   });
 }
 
-function extractPromptTextFromRunPayload(payload: Record<string, unknown>): string {
-  const parts = Array.isArray(payload.parts) ? payload.parts : [];
-  return parts
-    .flatMap((part) => {
-      if (!part || typeof part !== "object") return [];
-      const record = part as Record<string, unknown>;
-      if ((record.type ?? "") !== "text") return [];
-      return typeof record.text === "string" ? [record.text] : [];
-    })
-    .join("\n")
-    .trim();
-}
-
-function looksLikeCommonWorkSession(entry: SessionWorkspaceEntry | null | undefined): boolean {
-  const view = typeof entry?.preferredView === "string" ? entry.preferredView.trim().toLowerCase() : "";
-  const agent = typeof entry?.preferredAgent === "string" ? entry.preferredAgent.trim().toLowerCase() : "";
-  const agentLock = typeof entry?.preferredAgentLock === "string" ? entry.preferredAgentLock.trim().toLowerCase() : "";
-  return view === "document-agent" || agent === "common-work" || agentLock === "common-work";
-}
-
-function looksLikeLongFormalDocumentPrompt(promptText: string): boolean {
-  const text = promptText.trim();
-  if (!text) return false;
-  const lower = text.toLowerCase();
-
-  const hasFormalDeliverableCue =
-    /(申报|技术材料|白皮书|方案|报告|正式文档|汇报|说明书|材料|proposal|report|white paper|deliverable|formal document)/i.test(text);
-  const hasSynthesisCue =
-    /(结合|参考|两篇|多篇|联网|网络资料|补充资料|查找网络|依据|sources?|references?|based on|using the uploaded)/i.test(text);
-  const hasStructuredCoverageCue =
-    /(\|.+\||围绕以下|分[为成].{0,8}(部分|系统|章节)|三大系统|每个系统|技术架构|技术路线|互联互通|标识系统|api|接口示例|section|architecture|roadmap)/i
-      .test(text);
-  const hasOutputCue =
-    /(生成\s*(word|docx|pdf|markdown)|写一份|输出到|写到 outputs\/|生成文档|deliverable|write .*document)/i.test(lower);
-  const isLongPrompt = text.length >= 120;
-
-  const score = [hasFormalDeliverableCue, hasSynthesisCue, hasStructuredCoverageCue, hasOutputCue, isLongPrompt]
-    .filter(Boolean)
-    .length;
-
-  return score >= 4 || (score >= 3 && hasFormalDeliverableCue && hasSynthesisCue);
-}
-
-async function maybePromoteCommonWorkSessionRun(input: {
-  workspace: WorkspaceInfo;
-  workspaceId: string;
-  sessionId: string;
-  runtimeEntry: SessionWorkspaceEntry | null;
-  targetWorkspace: WorkspaceInfo;
-  payload: Record<string, unknown>;
-  sessionWorkspaces: SessionWorkspaceService;
-  runtimeDocumentStateTokens: RuntimeDocumentStateTokenService;
-  openworkBaseUrl: string;
-}): Promise<Record<string, unknown>> {
-  const requestedAgent = typeof input.payload.agent === "string" ? input.payload.agent.trim().toLowerCase() : "";
-  if (requestedAgent && requestedAgent !== "common-work") return input.payload;
-  if (!looksLikeCommonWorkSession(input.runtimeEntry)) return input.payload;
-
-  const promptText = extractPromptTextFromRunPayload(input.payload);
-  if (!looksLikeLongFormalDocumentPrompt(promptText)) return input.payload;
-
-  const hasHistory = await sessionHasConversationHistory(input.targetWorkspace, input.sessionId);
-  if (hasHistory) return input.payload;
-
-  const nextHints = {
-    preferredView: "document-writer",
-    preferredAgent: "document-writer",
-    preferredAgentLock: "document-writer",
-  } as const;
-
-  if (input.runtimeEntry?.runtimeDir) {
-    await reconfigureRuntimeSessionProfile({
-      workspacePath: input.workspace.path,
-      runtimeDir: input.runtimeEntry.runtimeDir,
-      hints: nextHints,
-    });
-    try {
-      const issued = await input.runtimeDocumentStateTokens.issue({
-        workspaceId: input.workspaceId,
-        sessionId: input.sessionId,
-        runtimeId: input.runtimeEntry.runtimeId,
-      });
-      await writeRuntimeDocumentStateCarrierConfig({
-        workspacePath: input.workspace.path,
-        runtimeDir: input.runtimeEntry.runtimeDir,
-        mcpUrl: `${input.openworkBaseUrl}/workspace/${encodeURIComponent(input.workspaceId)}/doc-state/mcp`,
-        runtimeToken: issued.token,
-      });
-    } catch (error) {
-      console.warn("[openwork-server] Failed to upgrade common-work session into document-writer doc-state carrier:", error);
-    }
-    await input.sessionWorkspaces.setWorkspace(input.workspaceId, input.sessionId, {
-      ...input.runtimeEntry,
-      preferredView: nextHints.preferredView,
-      preferredAgent: nextHints.preferredAgent,
-      preferredAgentLock: nextHints.preferredAgentLock,
-    });
-  }
-
-  return {
-    ...input.payload,
-    agent: "document-writer",
-  };
-}
-
 function workspaceWithDirectory(workspace: WorkspaceInfo, directory: string | null | undefined): WorkspaceInfo {
   const nextDirectory = (directory ?? "").trim();
   if (!nextDirectory) return workspace;
@@ -1508,7 +1402,6 @@ export async function proxyOpencodeRequest(input: {
   let enableDocumentStateForProvisionedSession = false;
   let body: BodyInit | undefined = method === "GET" || method === "HEAD" ? undefined : (input.request.body ?? undefined);
   const startsSessionRun = method === "POST" && /^\/session\/[^/]+\/(prompt|prompt_async|command|shell)$/.test(normalizedProxyPath);
-  const isPromptRun = method === "POST" && /^\/session\/[^/]+\/(prompt|prompt_async)$/.test(normalizedProxyPath);
   let targetWorkspace = workspace;
   if (workspace && runtimeWorkspace && pathSessionId) {
     targetWorkspace = runtimeWorkspace.opencodeRuntime && input.sessionRuntimeService
@@ -1593,30 +1486,6 @@ export async function proxyOpencodeRequest(input: {
     ];
     payload.permission = nextPermissions;
     body = JSON.stringify(payload);
-  }
-  if (workspace && workspaceId && pathSessionId && isPromptRun && runtimeWorkspace && targetWorkspace) {
-    const rawBody = await input.request.text();
-    if (rawBody.trim()) {
-      try {
-        const parsedBody = JSON.parse(rawBody) as Record<string, unknown>;
-        const promotedBody = await maybePromoteCommonWorkSessionRun({
-          workspace,
-          workspaceId,
-          sessionId: pathSessionId,
-          runtimeEntry: runtimeWorkspace,
-          targetWorkspace,
-          payload: parsedBody,
-          sessionWorkspaces: input.sessionWorkspaces,
-          runtimeDocumentStateTokens: input.runtimeDocumentStateTokens,
-          openworkBaseUrl: input.openworkBaseUrl,
-        });
-        body = JSON.stringify(promotedBody);
-      } catch {
-        body = rawBody;
-      }
-    } else {
-      body = rawBody;
-    }
   }
   if (workspace && input.sessionActivity) {
     if (workspaceId && pathSessionId && runtimeWorkspace?.opencodeRuntime && startsSessionRun && targetWorkspace) {

@@ -116,15 +116,15 @@
     - 主循环被重复错误吞掉
     - 为了压局部坏习惯而整体缩小 agent 能力
 
-## D-013 当前 hosted 基线下，长篇、多源、正式交付物优先走 `document-writer` workflow
+## D-013 样例证据可以支持新假设，但不得直接固化成共享产品路由
 
 - 决策：
-  - 在当前 hosted 基线与现有证据下，长篇、多源、正式交付物优先视为 `document-writer` 工作形态，而不是先让 `common-work` 自由地直接长篇写入。
-  - 这是一条当前执行决策，不是对最终架构的永久锁死；后续若有更强反证，可以回滚。
+  - 样例中如果观察到“某类任务更适合某条 workflow”，可以把它记为研究假设或实验结论。
+  - 但在没有显式产品设计与更广验证前，不得把这种结论直接固化成共享产品逻辑，尤其不能写成依赖 prompt 关键词、长度或样例结构的 server-side/task-routing heuristics。
 - 原因：
-  - `common-work` 的空输入 `write` 已在 `MiniMax-2.5` 与 `Qwen3.5-397B-A17B` 上复现，说明它不是单模型偶发问题。
-  - 同一样例下，`document-writer + MiniMax-2.5` 已完成 reader、writer、verifier 的整轮流程并生成结果。
-  - 当前更强的解释是：长文正式交付物更需要显式 workflow harness，而不是继续给 `common-work` 增加动作级微观禁令。
+  - 这种实现会把产品行为绑死在措辞和样例形状上。
+  - 它看起来像是解决了一个问题，实际是在把一次实验观察偷渡成共享系统默认。
+  - 这违背了第二阶段当前“先能力模型与最小收口，再决定真正 harness 形态”的工作顺序。
 
 ## D-014 当前 hosted 基线下，`document-writer` 只允许调度 `doc-*` 子代理
 
@@ -137,3 +137,11 @@
   - 真实 Qin 样例已经证明：在收紧 task 权限后，`document-writer` 仍然可以只靠 `doc-reader -> doc-reader -> doc-writer -> doc-verifier -> doc-intake` 完成闭环。
   - 这说明 `general` 不是它当前完成该类长文任务的必要依赖。
   - 相比继续在 prompt 里写“不要调 general”，配置级 task surface 更硬、更不容易漂回旧旁路。
+
+## D-015 `research/2026-04-03-doc-agent-capability-model/` 对后续改动具有硬约束作用
+
+- 决策：
+  - 后续任何产品改动，如果和本目录中的 `handoff / decisions / status / README / prompt-surface-audit` 冲突，默认先停下来修正方向，而不是继续实现。
+  - 研究目录不是聊天记录的备忘录，而是当前第二阶段工作的硬约束面。
+- 原因：
+  - 当前这轮偏航已经证明：如果只把研究目录当参考资料，很容易重新滑回局部优化、样例驱动、启发式补丁。

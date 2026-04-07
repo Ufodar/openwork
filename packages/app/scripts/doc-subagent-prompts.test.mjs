@@ -401,24 +401,25 @@ test("common-work keeps durable drafts and final deliverables in stable workspac
   expect(prompt).toContain("最终文件如果只存在于 `.tmp`，不算完成");
 });
 
-test("common-work escalates long multi-source formal deliverables into document-writer instead of freeform direct writing", async () => {
+test("common-work keeps long-form workflow escalation high-level instead of hardcoding route mechanics", async () => {
   const prompt = await readFile(resolve(root, ".opencode/agent/common-work.md"), "utf8");
 
-  expect(prompt).toContain("应尽早通过 `task` 把控制权交给 `document-writer`");
+  expect(prompt).toContain("应尽早升级到 `document-writer` 这条显式 workflow");
   expect(prompt).toContain("用户给了明确的章节、系统、表格或覆盖清单");
-  expect(prompt).toContain("不要继续在当前主会话里用自由工具面推进同一份长文正式交付物");
-  expect(prompt).toContain("这个升级应成为当前主会话的第一实质动作");
-  expect(prompt).toContain("不要先继续搜索、列 todo、直写草稿");
+  expect(prompt).toContain("不要在当前主会话里自由直写整份最终稿");
   expect(prompt).toContain("不要再并行直写同一份长文交付物");
+  expect(prompt).not.toContain("通过 `task` 把控制权交给 `document-writer`");
+  expect(prompt).not.toContain("这个升级应成为当前主会话的第一实质动作");
+  expect(prompt).not.toContain("不要先继续搜索、列 todo、直写草稿");
 });
 
-test("document-mode bridge steers long formal document work into document-writer instead of open-ended discovery loops", async () => {
+test("document-mode bridge does not hardcode long-form document routing heuristics", async () => {
   const bridge = await readFile(resolve(root, ".opencode/plugins/document-mode-bridge.js"), "utf8");
 
-  expect(bridge).toContain("long-form, multi-source, formal deliverable");
-  expect(bridge).toContain("hand control to \\`document-writer\\` early");
-  expect(bridge).toContain("instead of staying in an open-ended \\`bash\\`/\\`glob\\`/\\`read\\` loop");
-  expect(bridge).toContain("before further search, todo planning, or direct drafting");
+  expect(bridge).not.toContain("long-form, multi-source, formal deliverable");
+  expect(bridge).not.toContain("hand control to \\`document-writer\\` early");
+  expect(bridge).not.toContain("open-ended \\`bash\\`/\\`glob\\`/\\`read\\` loop");
+  expect(bridge).toContain("Do not let extracted source text replace control files as the main-session bootstrap surface");
 });
 
 test("common-work routes relevant factual tasks through attached knowledge before broad discovery", async () => {

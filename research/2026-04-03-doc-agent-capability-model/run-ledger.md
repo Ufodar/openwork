@@ -534,6 +534,166 @@
     - `/message` 中是否出现真正的 `task(document-writer)` / 或等价的 `agent=document-writer` 路由结果
     - 是否因此避开 `common-work` 之前那条 `bocha-search -> todowrite -> write` 的自由工具面路径
 
+## RL-017 hosted 小材料 probe 已验证 server-side 首条路由真的会把 `common-work` 提升到 `document-writer`
+
+- 目标：
+  - 在真实 hosted pod 上验证 RL-016 的 server-side 首条 prompt 路由，不再只停留在本地测试层。
+- 运行基线：
+  - repo 代码：本地与 GitHub `origin/dev` 在 `d25f37ce`
+  - Gitee：本轮仍落后，因为 `git push gitee dev` 持续 `connection reset`
+  - pod 部署路径：**repo-first，经 GitHub origin**
+    - `git pull origin dev`
+    - `pnpm --filter openwork-server build:bin`
+    - `bash scripts/restart-pod.sh --force`
+  - 探针脚本：
+    - [common-work-route-probe.mjs](../../packages/app/scripts/common-work-route-probe.mjs)
+  - 探针输入：
+    - 两份很小的 `.md` 材料
+    - 首条 prompt 明确具备：
+      - 长篇正式技术材料
+      - 多源综合
+      - 明确结构覆盖
+      - 应用层 API 示例
+- 新证据：
+  - session：`ses_297bb19a4ffehR0teTRJmVkB3f`
+  - prompt 前 session profile：
+    - `openworkPreferredView=document-agent`
+    - `openworkPreferredAgent=common-work`
+    - `openworkPreferredAgentLock=common-work`
+  - 首条 `promptAsync(agent=common-work)` 之后，session profile 变成：
+    - `openworkPreferredView=document-writer`
+    - `openworkPreferredAgent=document-writer`
+    - `openworkPreferredAgentLock=document-writer`
+  - 本轮消息面还比较早：
+    - `messageCount=2`
+    - 尚未观察到 `doc-*` task call
+    - 但 session 元数据与 runtime 入口已经完成切换
+- 新结论：
+  - RL-016 不再只是“本地代码与测试证明可行”。
+  - 现在已经拿到第一条**真实 hosted 证据**：
+    - server-side 首条 prompt 路由，确实能把 `common-work` 的长篇正式请求提升到 `document-writer`
+  - 这说明：
+    - 之前 RL-014 / RL-015 暴露的“只靠 prompt/bridge 语气不够”判断没有错
+    - 但 RL-016 这条更硬的 routing 面，在 hosted 上是有效的
+  - 当前还没完成的，只剩下一件更重要的验证：
+    - 在真实 Qin 两份 `.docx` 样例上，这条路由是否能稳定避开 `common-work` 旧的自由工具面路径，并显著减少空输入 `write`
+- 后续动作：
+  - 用 Qin 两份 `.docx` 样例继续复验
+  - 重点看：
+    - 是否同样先发生 session/profile promotion
+    - 后续是否进入 `doc-*` workflow
+    - 是否不再回到 `bocha-search -> todowrite -> write` 的旧 common-work 路径
+    - `common-work` 的空输入 `write` 是否显著减少或消失
+
+## RL-018 Qin 两份 `.docx` 大样例已证明：新的 server-side 路由会把 `common-work` 真正带进 `doc-*` workflow
+
+- 目标：
+  - 验证 RL-017 的小材料结果在真实 Qin 两份 `.docx` 大样例上是否仍成立；
+  - 核心不是看最终稿是否立刻完成，而是看旧的 `common-work` 自由工具面主循环是否已经被替换。
+- 运行基线：
+  - repo 代码：本地与 GitHub `origin/dev` 在 `d25f37ce`
+  - pod 部署路径：**repo-first，经 GitHub origin pull + build + restart**
+  - 探针脚本：
+    - [qin-common-work-debug.mjs](../../packages/app/scripts/qin-common-work-debug.mjs)
+  - 样例：
+    - `/Users/storm/Pictures/秦老师/天河监控运维一体化平台软件介绍v0.3.docx`
+    - `/Users/storm/Pictures/秦老师/融合算力云平台白皮书.docx`
+  - 模型：
+    - `my-company/MiniMax-2.5`
+- 新证据：
+  - session：`ses_297b90af0ffeJRDuB5c7hyTw0o`
+  - prompt 前 session profile：
+    - `openworkPreferredView=document-agent`
+    - `openworkPreferredAgent=common-work`
+    - `openworkPreferredAgentLock=common-work`
+  - 两份 `.docx` 上传成功，没有先卡在 upload blocker
+  - prompt 发出后，可见消息流先进入：
+    - `read` pending（启动阶段）
+    - 很快转成 `task` running
+  - 随后直接查询 session record 与消息，可见：
+    - session profile 已切到：
+      - `openworkPreferredView=document-writer`
+      - `openworkPreferredAgent=document-writer`
+      - `openworkPreferredAgentLock=document-writer`
+    - 第一个子任务：
+      - `subagent_type=doc-reader`
+      - `description=编译源文档为结构化状态`
+    - 第一个子任务完成后，第二个子任务继续进入：
+      - `subagent_type=doc-merger`
+      - `description=合并源文档事实与冲突`
+    - 后续继续观察同一 session，可见：
+      - `doc-merger` 已完成
+      - 当前已进入第三个子任务：
+        - `subagent_type=doc-planner`
+        - `description=制定技术材料撰写计划`
+    - 再继续观察同一 session，可见：
+      - `doc-planner` 已完成
+      - 当前已进入第四个子任务：
+        - `subagent_type=doc-writer`
+        - `description=撰写算力平台技术方案文档`
+      - 同一 session 的文档列表里已经出现：
+        - `reports/doc-writer/generate_docx.py`
+        - `reports/docx-draft/draft.md`
+      - 说明 `doc-writer` 不只是被调起，而且已经开始产出写作阶段工件
+    - 中途短暂出现过一个 `pending task input={}` 的过渡态，但后续事实证明：
+      - 它不是稳定挂死点
+      - 同一 session 已继续推进到 `doc-writer`
+- 新结论：
+  - RL-017 的 hosted 小材料结果不是偶然。
+  - 在真实 Qin 两份 `.docx` 大样例上，新的 server-side 首条 prompt 路由已经证明：
+    - `common-work` 会被提升到 `document-writer`
+    - 旧的 `bocha-search -> todowrite -> write` 自由工具面主循环已经被替换掉
+    - 当前真实主循环已经进入 `doc-reader -> doc-merger -> doc-planner -> doc-writer -> ...` 的显式 workflow
+  - 这意味着：
+    - 之前围绕 `common-work` 空输入 `write` 的主问题，至少在这条“长篇正式交付物尽早切 workflow”的路径上已经明显收敛
+    - 当前未决问题不再是“该不该切”，而是：
+      - 切进去之后的大样例吞吐与稳定性如何
+      - 后续 phase 是否还会在别的位置卡住
+      - `doc-writer -> doc-verifier -> 最终交付物` 是否能稳定收尾
+- 后续动作：
+  - 下一轮不再优先怀疑路由本身
+  - 应直接观察：
+    - `doc-merger -> doc-planner/doc-writer/doc-verifier` 是否稳定推进
+    - 是否仍有新的长时间挂起 task
+    - 如果挂起，问题已经从“common-work 首动作错误”转移到“workflow 子阶段吞吐/稳定性”
+
+## RL-019 保留 RL-017 / RL-018 的样例证据，但撤回启发式产品路由
+
+- 目标：
+  - 对 RL-017 / RL-018 做一次彻底修正：保留“样例上更早进入 `document-writer` 更稳”的证据，但撤回把这条观察直接做成共享产品逻辑的实现。
+- 触发原因：
+  - RL-017 / RL-018 证明了一个实验现象：
+    - Qin 这类长篇、多源、正式交付物样例，在更早进入显式 workflow 时更稳。
+  - 但随后把这个现象直接实现成：
+    - server 侧根据 prompt 关键词 / 长度 / 结构做首条路由
+    - prompt / bridge 里更重的“尽早切换”路由语气
+  - 这和本目录中的 D-013、D-015 冲突：
+    - 不能把样例观察直接偷渡成共享产品默认
+    - 研究目录必须约束实现，而不是被实现反向带偏
+- 已执行的修正：
+  - 撤回产品侧启发式路由：
+    - [server.ts](../../packages/server/src/server.ts)
+    - [session-workspaces.ts](../../packages/server/src/session-workspaces.ts)
+    - 删除 [server.proxy-common-work-routing.test.ts](../../packages/server/src/server.proxy-common-work-routing.test.ts)
+  - 撤回额外加重的一层路由语气：
+    - [common-work.md](../../.opencode/agent/common-work.md)
+    - [document-mode-bridge.js](../../.opencode/plugins/document-mode-bridge.js)
+- 新结论：
+  - RL-017 / RL-018 仍然是有效的研究证据，但它们现在只说明：
+    - “更早进入显式 workflow”可能是值得继续研究的方向
+  - 它们**不再**被视为：
+    - “当前产品应该自动根据 prompt 关键词 / 长度 / 样例结构改派 agent”
+  - 正确顺序应恢复为：
+    - 先保留证据
+    - 再按研究 harness 继续做更广验证和更通用的设计判断
+    - 在没有更强设计前，不把这类路由写成共享默认
+- 后续动作：
+  - 若继续研究 workflow entry，应优先考虑：
+    - 显式产品入口
+    - 用户 / 配置可见的工作形态选择
+    - 非样例绑定的通用 harness 设计
+  - 在拿到更广证据前，不再往 server/prompt/bridge 里继续叠加新的样例驱动启发式路由
+
 ## 当前台账的用途
 
 后续只要发生下面任一类变化，就应追加新轮次：

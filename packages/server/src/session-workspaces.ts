@@ -379,7 +379,6 @@ async function mirrorWorkspaceOpencodeSupportFiles(
       continue;
     }
     if (relativeDir === "runtime-support" && runtimeProfile.id !== "document-writer") {
-      await rm(targetDir, { recursive: true, force: true }).catch(() => undefined);
       continue;
     }
     await cp(sourceDir, targetDir, { recursive: true, force: true });
@@ -642,20 +641,6 @@ export async function writeRuntimeSessionCarrierConfig(input: {
   await writeRuntimeSessionProfile(input.runtimeDir, runtimeProfile);
   await writeJsoncFile(runtimeConfigPath, baseConfig);
   return runtimeConfigPath;
-}
-
-export async function reconfigureRuntimeSessionProfile(input: {
-  workspacePath: string;
-  runtimeDir: string;
-  hints: SessionRuntimeProvisioningHints;
-}): Promise<void> {
-  const profile = resolveRuntimeSessionProfile(input.hints);
-  await mirrorWorkspaceOpencodeSupportFiles(input.workspacePath, input.runtimeDir, profile);
-  await writeRuntimeSessionCarrierConfig({
-    workspacePath: input.workspacePath,
-    runtimeDir: input.runtimeDir,
-    profile,
-  });
 }
 
 export async function writeRuntimeKnowledgeCarrierConfig(input: {

@@ -54,24 +54,11 @@
 - compare/debug harness 当前还有一类独立噪音：
   - `/message` 偶发返回坏 JSON
   - 这会让脚本报错退出，但不等于真实 session 没有完成
-- `common-work` 新增“尽早升级到 `document-writer`”规则后，第一次 hosted 复验还没能进入真实消息循环，就又被第二个大文件上传的 `AbortError` 挡住了。
-  - 这说明当前还有一条需要单独排查的 upload blocker，不能直接拿来判断 `common-work` 新路由是否有效。
-- 但后续 upload-only 对照又显示：
-  - 直连 `8789` 与经过 `32765` proxy 的“两份文件顺序上传”都能成功
-  - 所以当前 `document/upload AbortError` 还不能被当成已经定位的稳定代码根因
-- 小材料路由探针进一步证明：
-  - 当前 `common-work` 即便面对“多源 + 正式技术材料 + 明确结构要求”，也不会主动升级到 `document-writer`
-  - 它仍然会先走自己的 `bash/glob` 自由工具面
-- 在进一步补强 `common-work` 与 bridge 的升级文案后，新的 follow-up probe 仍然表明：
-  - `common-work` 不会稳定发出 `task(document-writer)`
-  - 它仍优先走自己的自由工具面，最新可见链路是：
-    - `bocha-search -> todowrite -> write`
-  - 因此不能再把希望放在“只靠提示词把路由语气写得更重”
-- 当前本地代码已经有一个更硬、且通过测试的下一步方案：
-  - server 可在首条 `prompt/prompt_async` 时识别“长篇 + 正式交付物 + 多源综合 + 明确结构覆盖”的 `common-work` 请求
-  - 然后把这次请求升级成 `document-writer`
-  - 同时把 session 元数据与 runtime profile 一起切到 `document-writer`
-  - 这条路线目前还没做 hosted 复验
+- RL-017 / RL-018 提供了一条重要的样例证据：
+  - 在 Qin 这类长篇、多源、正式交付物样例上，更早进入 `document-writer` workflow，表现明显好于让 `common-work` 自由发挥。
+  - 但 RL-019 已经明确：这条证据当前只能保留为研究结论，不能直接被实现成共享产品里的 prompt 关键词 / 长度 / 结构启发式路由。
+- 当前研究目录已经被提升为硬约束面：
+  - 如果后续代码改动与本目录冲突，默认先停下来修正方向，而不是继续实现。
 - 不要把“可自我修正的一两步短弯路”也当成必须用全局禁令消灭的问题。
   - 后续约束重点应放在：
     - 默认观察面
@@ -111,15 +98,17 @@
 最合理的下一步是：
 
 1. **先排 runtime/tool/perms mismatch**
-   - 先把当前本地已通过测试的 server-side 首条 prompt 路由部署到 hosted pod
-   - 先用小材料 probe 和 Qin 样例复验：它能不能真实把 `common-work` 切进 `document-writer`
-   - 再回头看 `common-work` 空 `write` 是否因为路由改变而明显收敛
-   - 继续记录 `document/upload` 的间歇性 `AbortError`，但在拿到稳定复现前不要贸然改 upload 代码
-   - 评估长篇正式交付物是否应更早升级到 `document-writer` workflow，而不是让 `common-work` 先直接大块写文件；当前证据已经明显支持这条方向
+   - 重点看 `common-work` 空 `write` 调用
+   - 重点看 `document/upload` 长时上传时的 `AbortError`
    - 判断 compare/debug harness 是否需要对 `/message` 偶发坏 JSON 做容错，避免脚本失败污染产品判断
-2. 在 blocker 排清后，再做 2-3 个广义文档任务验证 prompt 改动效果
-3. 根据验证结果增强四个文档 skill（intake/evidence/compose/verify）
-4. 再决定 harness 第一刀的落点
+2. **做统一面审计，而不是继续局部补丁**
+   - 审 `common-work`
+   - 审 `document-writer`
+   - 审 `document-mode-bridge`
+   - 审 runtime instructions
+   - 必要时再审 `doc-*`
+3. 在更广验证前，不再新增任何样例驱动的 server-side 路由
+4. blocker 与面审计更清楚后，再决定 harness 第一刀
 
 ## 当前开放问题
 
@@ -131,8 +120,7 @@
 - 哪个 harness 杠杆应成为第一笔代码改动
 - `common-work` 的自由工具面是否需要增加一层“无效空写入”保护
 - 长篇正式交付物是否应在 `common-work` 中更早路由到显式 `document-writer` harness
-- 这条路由已经有一个本地通过测试的 server-side 版本；当前未决的是它在 hosted 真实样例上是否足够稳、是否需要继续收紧或放宽分类条件
-- 如果继续保留 `common-work` 的大工具面，怎样才能只约束“第一动作路由”，而不是再次滑回微观工具禁令
+- 如果后续确实需要更显式的 workflow entry，应落在什么层，并如何避免再次滑回样例驱动启发式
 - `document/upload` 的间歇性 `AbortError` 到底由什么稳定触发
 - compare/debug harness 对 `/message` 偶发坏 JSON 应该做多强的容错，才不会掩盖真实产品问题
 - 哪些动作级微观禁令其实应该删掉，改成更高层的默认面约束

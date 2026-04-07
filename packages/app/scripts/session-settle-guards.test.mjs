@@ -165,6 +165,32 @@ test("detectStalledPendingTools ignores malformed delegated task placeholders on
   ).toBeNull();
 });
 
+test("detectStalledPendingTools ignores malformed glob placeholders on the short timeout", () => {
+  const messages = [{
+    parts: [
+      {
+        type: "tool",
+        tool: "glob",
+        state: {
+          status: "pending",
+          input: {},
+          raw: "",
+        },
+      },
+    ],
+  }];
+
+  expect(
+    detectStalledPendingTools({
+      messages,
+      lastProgressAt: 0,
+      now: 31_000,
+      malformedPendingToolTimeoutMs: 30_000,
+      stalledPendingToolTimeoutMs: 120_000,
+    }),
+  ).toBeNull();
+});
+
 test("detectStalledPendingTools stays quiet when no pending tools exist", () => {
   const messages = [{
     parts: [
@@ -217,6 +243,25 @@ test("shouldTreatFingerprintChangeAsProgress treats placeholder reads as progres
       {
         type: "tool",
         tool: "read",
+        state: {
+          status: "pending",
+          input: {},
+          raw: "",
+        },
+      },
+    ],
+  }];
+
+  expect(shouldTreatFingerprintChangeAsProgress(messages)).toBe(true);
+});
+
+test("shouldTreatFingerprintChangeAsProgress treats placeholder globs as progress", () => {
+  const messages = [{
+    role: "assistant",
+    parts: [
+      {
+        type: "tool",
+        tool: "glob",
         state: {
           status: "pending",
           input: {},

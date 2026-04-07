@@ -55,10 +55,11 @@ export function shouldTreatFingerprintChangeAsProgress(messages) {
       const input = part?.state?.input && typeof part.state.input === "object" ? part.state.input : {};
       if (raw.trim() || Object.keys(input).length > 0) {
         sawNonMalformedPendingTool = true;
-      } else if (tool === "read") {
-        // OpenCode sometimes emits a short-lived placeholder `read` before
-        // attaching the concrete file path; count the new step as progress and
-        // let the malformed timeout catch it only if it actually persists.
+      } else if (tool === "read" || tool === "glob") {
+        // OpenCode sometimes emits a short-lived placeholder `read`/`glob`
+        // before attaching the concrete file path or pattern; count the new
+        // step as progress and let the malformed timeout catch it only if it
+        // actually persists with real input missing.
         sawNonMalformedPendingTool = true;
       }
       continue;
@@ -83,7 +84,9 @@ export function detectStalledPendingTools({
   if (!pendingTools.length) return null;
 
   const elapsedSinceProgress = now - lastProgressAt;
-  const malformedPendingTools = pendingTools.filter((tool) => tool.malformed && !tool.delegated);
+  const malformedPendingTools = pendingTools.filter(
+    (tool) => tool.malformed && !tool.delegated && tool.tool !== "glob",
+  );
   if (malformedPendingTools.length && elapsedSinceProgress >= malformedPendingToolTimeoutMs) {
     return {
       kind: "malformed-pending-tool",

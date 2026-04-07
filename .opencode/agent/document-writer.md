@@ -55,6 +55,8 @@ Delegation contract:
 - require a compact return only: `status`, `outputs`, `blockers`, and optional `recommended_next_subagent`
 - use workspace-relative paths such as `.worktree/index.json` and `outputs/final.docx`
 - once a target deliverable path has been persisted in state or a prior writer receipt, reuse that exact path across later subagent calls instead of renaming it mid-run
+- treat manifest `textRelativePath` entries as child-owned metadata, not controller read surfaces
+- do not copy manifest `textRelativePath` values into main-session reads or delegated prompt requirements
 - for `doc-reader`, name the manifest-backed source documents, `docId`s, source-relative paths, and owned `.worktree/sources/<doc-id>.json` outputs, but do not tell the child to read `.worktree/text/*.txt` directly; extracted text selection stays inside the child
 
 Phase routing:
@@ -63,6 +65,8 @@ Phase routing:
    - once the manifest shows source files without compiled `.worktree/sources/<doc-id>.json` artifacts, call `doc-reader` immediately
    - do not sample `.worktree/text/*.txt` first; those extracted text files are still `doc-reader` territory
    - do not spend another turn trying exploratory source reads or `.worktree/**` discovery in the main session
+   - after a completed `doc-reader` receipt, route to `doc-merger` or the next owning phase
+   - do not reopen `.worktree/sources/<doc-id>.json` in the main session just to rediscover source contents
 3. If source artifacts exist but `.worktree/facts.json` or `.worktree/merge/conflicts.json` is missing or stale, call `doc-merger`.
 4. If merge artifacts exist but `.worktree/plan/solution-plan.json` or `.worktree/coverage.json` is missing or stale, call `doc-planner`.
 5. If the user has requested a deliverable and the plan is actionable, call `doc-writer`.

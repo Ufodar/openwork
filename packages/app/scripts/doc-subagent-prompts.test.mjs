@@ -38,6 +38,8 @@ test("document-writer agent entrypoint uses orchestrator-style delegation rules"
   expect(agentPrompt).toContain("when a later user turn is only a short continuation signal");
   expect(agentPrompt).toContain("exact headings, exact system names, target format, or specific requirements");
   expect(agentPrompt).toContain("carry that wording forward literally into later `doc-*` tasks");
+  expect(agentPrompt).toContain("treat manifest `textRelativePath` entries as child-owned metadata");
+  expect(agentPrompt).toContain("do not copy manifest `textRelativePath` values into main-session reads or delegated prompt requirements");
   expect(agentPrompt).toContain("do not invent extra state artifacts, helper reports, or helper scripts");
   expect(agentPrompt).toContain("do not bypass the missing phase");
   expect(agentPrompt).toContain("if a subagent returns partial work, continue from the artifact it produced or relaunch that same subagent");
@@ -331,6 +333,8 @@ test("document-writer jumps straight from manifest triage into doc-reader instea
 
   expect(entryPrompt).toContain("once the manifest shows source files without compiled `.worktree/sources/<doc-id>.json` artifacts, call `doc-reader` immediately");
   expect(entryPrompt).toContain("do not probe `.worktree/text/**` or broad `.worktree/**` globs in the main session just to understand source contents");
+  expect(entryPrompt).toContain("after a completed `doc-reader` receipt, route to `doc-merger` or the next owning phase");
+  expect(entryPrompt).toContain("do not reopen `.worktree/sources/<doc-id>.json` in the main session just to rediscover source contents");
 });
 
 test("document-writer prompt examples stay generic and planner wording avoids sample-specific labels", async () => {

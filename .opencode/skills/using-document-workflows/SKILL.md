@@ -17,7 +17,7 @@ description: Use when a document task is multi-source, long-running, revision-he
 
 - `.worktree/index.json`
 - `.worktree/sources/manifest.json`
-- `.worktree/text/*.txt`
+- `.worktree/sources/<doc-id>.json`
 - `.worktree/facts.json`
 - `.worktree/coverage.json`
 - `reports/verify.*`
@@ -25,7 +25,7 @@ description: Use when a document task is multi-source, long-running, revision-he
 路由规则：
 
 1. 还没有 workspace 清单、目标文档或来源清单时，用 `document-intake`
-2. 已有来源但还没有可靠文本、副本事实或证据面时，用 `document-evidence`
+2. 已有来源但还没有可靠 source artifact、事实或证据面时，用 `document-evidence`
 3. 已经知道目标文档和证据，但还需要起草、改写、扩写或定向修改时，用 `document-compose`
 4. 已经有草稿或最终交付物，需要检查章节、事实、缺口或交付路径时，用 `document-verify`
 

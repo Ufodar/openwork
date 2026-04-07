@@ -128,10 +128,10 @@ function classifyWorkspace(rootDir) {
 
 function buildSystemBridge() {
   return `<DOCUMENT_MODE_BRIDGE>
-- Never call \`read\` on original \`.docx\`, \`.xlsx\`, \`.pptx\`, or other binary Office files; extract into workspace-local text first, then read the extracted artifact.
+- Prefer a readable working surface for binary Office files: reuse an existing readable artifact or use the appropriate document capability before treating the original binary like plain text.
 - Keep reopenable temp artifacts under \`<WORKSPACE>/.tmp/system\`, and keep persisted state plus final deliverables inside \`<WORKSPACE>\`; do not treat workspace-external paths or \`external_directory\` as the normal document I/O path.
-- If bootstrap control files such as \`.worktree/index.json\` or \`.worktree/sources/manifest.json\` already exist, read those narrow control files before extracting the original binary again.
-- Do not treat \`.worktree/text/*.txt\` as a main-session bootstrap surface; extracted source text belongs to the source-compilation phase that owns it.
+- If bootstrap control files such as \`.worktree/index.json\` or \`.worktree/sources/manifest.json\` already exist, read those narrow control files before doing another broad rediscovery pass.
+- Do not let extracted source text replace control files as the main-session bootstrap surface; source-compilation phases can still consume whichever readable artifacts they need.
 - Before delivery, run \`python3 .opencode/references/check_document_delivery.py --target outputs --target reports\` plus the exact final file path if it lives elsewhere, and do not point the sweep at the whole \`.\` tree.
 </DOCUMENT_MODE_BRIDGE>`;
 }

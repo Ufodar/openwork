@@ -38,8 +38,8 @@ test("document-writer agent entrypoint uses orchestrator-style delegation rules"
   expect(agentPrompt).toContain("when a later user turn is only a short continuation signal");
   expect(agentPrompt).toContain("exact headings, exact system names, target format, or specific requirements");
   expect(agentPrompt).toContain("carry that wording forward literally into later `doc-*` tasks");
-  expect(agentPrompt).toContain("treat manifest `textRelativePath` entries as child-owned metadata");
-  expect(agentPrompt).toContain("do not copy manifest `textRelativePath` values into main-session reads or delegated prompt requirements");
+  expect(agentPrompt).toContain("treat manifest `textRelativePath` entries and similar extraction hints as child-owned metadata");
+  expect(agentPrompt).toContain("do not mirror child-owned extraction hints back into main-session read plans or delegated prompt requirements");
   expect(agentPrompt).toContain("do not invent extra state artifacts, helper reports, or helper scripts");
   expect(agentPrompt).toContain("do not bypass the missing phase");
   expect(agentPrompt).toContain("if a subagent returns partial work, continue from the artifact it produced or relaunch that same subagent");
@@ -88,7 +88,7 @@ test("document-mode bridge stays a thin guardrail instead of a second workflow p
   expect(bridge).not.toContain("Use systematic-debugging only");
   expect(bridge).not.toContain("Use verification-before-completion only");
   expect(bridge).not.toContain("Do not auto-route to generic brainstorming");
-  expect(bridge).toContain("Never call \\`read\\` on original \\`.docx\\`");
+  expect(bridge).toContain("Prefer a readable working surface for binary Office files");
   expect(bridge).toContain("Keep reopenable temp artifacts under \\`<WORKSPACE>/.tmp/system\\`");
   expect(bridge).toContain("run \\`python3 .opencode/references/check_document_delivery.py --target outputs --target reports\\`");
 });
@@ -98,9 +98,9 @@ test("document-mode bridge does not promote extracted source text as a main-sess
 
   expect(bridge).toContain("\\`.worktree/index.json\\`");
   expect(bridge).toContain("\\`.worktree/sources/manifest.json\\`");
-  expect(bridge).toContain("Do not treat \\`.worktree/text/*.txt\\` as a main-session bootstrap surface");
+  expect(bridge).toContain("Do not let extracted source text replace control files as the main-session bootstrap surface");
+  expect(bridge).toContain("source-compilation phases can still consume whichever readable artifacts they need");
   expect(bridge).not.toContain("If bootstrap state or text refs such as");
-  expect(bridge).not.toContain("read them before extracting the original binary again");
 });
 
 test("writer and verifier prompts treat user-specified section titles as exact headings", async () => {
@@ -314,8 +314,8 @@ test("document-writer prompts keep document form task-driven instead of forcing 
 test("document-writer keeps source text and state bootstrap inside the owning doc-* phases", async () => {
   const entryPrompt = await readFile(resolve(root, ".opencode/agent/document-writer.md"), "utf8");
 
-  expect(entryPrompt).toContain("do not read `.worktree/text/**` in the main session");
-  expect(entryPrompt).toContain("treat source-text artifacts as `doc-reader` working surfaces");
+  expect(entryPrompt).toContain("do not let raw source text, extracted text, or other child-owned readable artifacts become the controller's default rediscovery surface");
+  expect(entryPrompt).toContain("hand source interpretation back to `doc-reader`");
   expect(entryPrompt).toContain("do not delegate `.worktree/` bootstrap, source analysis, or fact synthesis to `general`");
   expect(entryPrompt).toContain("keep intake, source compilation, merge, planning, drafting, and verification inside the owning `doc-*` phase");
 });
@@ -332,9 +332,9 @@ test("document-writer jumps straight from manifest triage into doc-reader instea
   const entryPrompt = await readFile(resolve(root, ".opencode/agent/document-writer.md"), "utf8");
 
   expect(entryPrompt).toContain("once the manifest shows source files without compiled `.worktree/sources/<doc-id>.json` artifacts, call `doc-reader` immediately");
-  expect(entryPrompt).toContain("do not probe `.worktree/text/**` or broad `.worktree/**` globs in the main session just to understand source contents");
-  expect(entryPrompt).toContain("after a completed `doc-reader` receipt, route to `doc-merger` or the next owning phase");
-  expect(entryPrompt).toContain("do not reopen `.worktree/sources/<doc-id>.json` in the main session just to rediscover source contents");
+  expect(entryPrompt).toContain("do not spend another turn trying exploratory source rediscovery in the main session once `doc-reader` is clearly the owning phase");
+  expect(entryPrompt).toContain("after a completed `doc-reader` receipt, route to `doc-merger` or the next owning phase unless the receipt explicitly says source compilation is still blocked");
+  expect(entryPrompt).toContain("reopen `doc-reader` with a narrower follow-up task instead of probing child-owned source artifacts yourself");
 });
 
 test("document-writer prompt examples stay generic and planner wording avoids sample-specific labels", async () => {
@@ -406,7 +406,7 @@ test("common-work forbids broad unfiltered workspace scans before locating real 
   expect(prompt).toContain("不要对整个 workspace 做无过滤的大范围文件扫描");
   expect(prompt).toContain("开始时只做一次轻量发现");
   expect(prompt).toContain("如果候选源文件是 `.docx`、`.xlsx`、`.pptx`、`.pdf` 等二进制文档");
-  expect(prompt).toContain("优先使用 workspace 内已有的文本副本");
+  expect(prompt).toContain("优先进入一个可读的工作面");
 });
 
 test("common-work prefers durable state over rediscovery", async () => {
@@ -537,9 +537,9 @@ test("document-writer entry agent has orchestrator task and doc_state permission
   expect(agentPrompt).toContain("If `.worktree/index.json` or `.worktree/sources/manifest.json` is missing, call `doc-intake`");
   expect(agentPrompt).toContain("do not begin a fresh turn with `glob .worktree/**/*`, `glob **/*`, or `read(<WORKSPACE>)`");
   expect(agentPrompt).toContain("do not maintain a todo list in the main session");
-  expect(agentPrompt).toContain("do not sample `.worktree/text/*.txt` first");
+  expect(agentPrompt).toContain("do not spend another turn trying exploratory source rediscovery in the main session");
   expect(agentPrompt).toContain("do not glob `outputs/**`, `reports/**`, or `**/*.md`");
-  expect(agentPrompt).toContain("do not tell the child to read `.worktree/text/*.txt` directly");
+  expect(agentPrompt).toContain("let the child choose the right readable working surface");
   expect(agentPrompt).toContain("when calling `task`, always provide `description`, `subagent_type`, and `prompt`");
   expect(agentPrompt).toContain("Delegation contract:");
 });

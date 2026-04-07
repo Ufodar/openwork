@@ -28,9 +28,9 @@ Main-session responsibilities:
 Main-session guardrails:
 - do not begin a fresh turn with `glob .worktree/**/*`, `glob **/*`, or `read(<WORKSPACE>)`; bootstrap from the explicit control files instead
 - do not personally analyze the raw corpus when a lower-phase artifact is missing
-- do not read `.worktree/text/**` in the main session; treat source-text artifacts as `doc-reader` working surfaces, not controller read surfaces
-- do not read `.worktree/text/*.txt` or other extracted source-text files in the main session even when they already exist; if source interpretation is still needed, hand it to `doc-reader`
-- do not probe `.worktree/text/**` or broad `.worktree/**` globs in the main session just to understand source contents
+- do not let raw source text, extracted text, or other child-owned readable artifacts become the controller's default rediscovery surface when control files or phase receipts already exist
+- if one quick probe only reveals child-owned metadata or fails to clarify the source, hand source interpretation back to `doc-reader` instead of turning the main session into a source-reading loop
+- avoid repeated exploratory source reads or broad `.worktree/**` discovery in the main session once manifest, phase ownership, and receipts already point to the next step
 - do not edit source documents or the target deliverable yourself
 - do not use `outputs/**` or the target deliverable as the default reading surface in the main session
 - do not manually synthesize merger, planner, writer, or verifier outputs in the main session
@@ -55,18 +55,17 @@ Delegation contract:
 - require a compact return only: `status`, `outputs`, `blockers`, and optional `recommended_next_subagent`
 - use workspace-relative paths such as `.worktree/index.json` and `outputs/final.docx`
 - once a target deliverable path has been persisted in state or a prior writer receipt, reuse that exact path across later subagent calls instead of renaming it mid-run
-- treat manifest `textRelativePath` entries as child-owned metadata, not controller read surfaces
-- do not copy manifest `textRelativePath` values into main-session reads or delegated prompt requirements
-- for `doc-reader`, name the manifest-backed source documents, `docId`s, source-relative paths, and owned `.worktree/sources/<doc-id>.json` outputs, but do not tell the child to read `.worktree/text/*.txt` directly; extracted text selection stays inside the child
+- treat manifest `textRelativePath` entries and similar extraction hints as child-owned metadata, not controller requirements
+- do not mirror child-owned extraction hints back into main-session read plans or delegated prompt requirements unless the child explicitly asks for them
+- for `doc-reader`, name the manifest-backed source documents, `docId`s, source-relative paths, and owned `.worktree/sources/<doc-id>.json` outputs; let the child choose the right readable working surface
 
 Phase routing:
 1. If `.worktree/index.json` or `.worktree/sources/manifest.json` is missing, call `doc-intake`.
 2. If the manifest lists source files that do not yet have `.worktree/sources/<doc-id>.json`, call `doc-reader`.
    - once the manifest shows source files without compiled `.worktree/sources/<doc-id>.json` artifacts, call `doc-reader` immediately
-   - do not sample `.worktree/text/*.txt` first; those extracted text files are still `doc-reader` territory
-   - do not spend another turn trying exploratory source reads or `.worktree/**` discovery in the main session
-   - after a completed `doc-reader` receipt, route to `doc-merger` or the next owning phase
-   - do not reopen `.worktree/sources/<doc-id>.json` in the main session just to rediscover source contents
+   - do not spend another turn trying exploratory source rediscovery in the main session once `doc-reader` is clearly the owning phase
+   - after a completed `doc-reader` receipt, route to `doc-merger` or the next owning phase unless the receipt explicitly says source compilation is still blocked
+   - if the receipt is not enough, reopen `doc-reader` with a narrower follow-up task instead of probing child-owned source artifacts yourself
 3. If source artifacts exist but `.worktree/facts.json` or `.worktree/merge/conflicts.json` is missing or stale, call `doc-merger`.
 4. If merge artifacts exist but `.worktree/plan/solution-plan.json` or `.worktree/coverage.json` is missing or stale, call `doc-planner`.
 5. If the user has requested a deliverable and the plan is actionable, call `doc-writer`.
@@ -79,7 +78,7 @@ Phase ownership:
 - keep intake, source compilation, merge, planning, drafting, and verification inside the owning `doc-*` phase.
 - `doc-intake` owns `.worktree/index.json`, `.worktree/sources/manifest.json`, and initial bootstrap state.
 - `doc-reader` compiles one source document into `.worktree/sources/<doc-id>.json` and returns a compact receipt.
-- only `doc-reader` should reopen raw source files or `.worktree/text/**` when source interpretation is still missing.
+- `doc-reader` owns raw source reopening plus any child-owned readable working copies needed for source interpretation.
 - `doc-merger` owns `.worktree/facts.json` and `.worktree/merge/conflicts.json`; keep evidence synthesis, conflict resolution, and research blockers there instead of delegating them to `general`.
 - `doc-planner` owns `.worktree/plan/solution-plan.json` and `.worktree/coverage.json`; preserve the user's exact systems, headings, and specific requirements instead of generic placeholders.
 - `doc-writer` owns the target deliverable plus writer-owned reports; keep exact headings, exact names, and deliverable path continuity.

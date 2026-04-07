@@ -9,17 +9,17 @@ description: Use when a document task needs reusable text extraction, traceable 
 
 优先产物：
 
-- `.worktree/text/<doc-id>.txt`
+- `.worktree/sources/<doc-id>.json`
 - `.worktree/facts.json`
 
 可选辅助产物：
 
-- `.worktree/sources/<doc-id>.json`
+- child-owned readable replicas such as `.worktree/text/<doc-id>.txt`
 - `reports/**` 下的窄范围证据报告
 
 工作方式：
 
-- 优先复用已有文本副本和现有 facts；缺什么补什么
+- 优先复用已有 source artifact、可读副本和现有 facts；缺什么补什么
 - 一次只编译或补强一个来源，不要把整个语料一次性摊平成长摘要
 - 保留定位信息、来源线索和显式不确定项
 - 如果多个来源冲突，记录冲突，不要硬合并成“看起来顺”的事实
@@ -32,4 +32,4 @@ description: Use when a document task needs reusable text extraction, traceable 
 
 停止条件：
 
-- 下游起草已经可以从 `.worktree/text/` 和 `.worktree/facts.json` 继续，而不必重新发现来源
+- 下游起草已经可以从 `.worktree/sources/<doc-id>.json` 和 `.worktree/facts.json` 继续，而不必重新发现来源；可读副本只是按需使用的中间工作面

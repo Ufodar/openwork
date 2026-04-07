@@ -492,6 +492,48 @@
   - 下一轮改动应明确测试“first substantive action / route-before-freeform-tools”，而不是只测试“存在升级措辞”
   - 若继续失败，应停止只在 prompt 上加重语气，转向更硬的 routing/config 方案
 
+## RL-016 本地已验证一个更硬的首条 prompt 路由面：server 可把长篇正式 common-work 首轮 prompt 升级到 `document-writer`
+
+- 目标：
+  - 不再继续靠 prompt/bridge 加重语气，而是验证 OpenWork server 是否能在 `POST /session/:id/prompt_async` 时，对满足条件的 `common-work` 首轮 prompt 做更硬的 agent 与 runtime profile 切换。
+- 运行基线：
+  - repo 本地修改：
+    - [server.ts](../../packages/server/src/server.ts)
+    - [session-workspaces.ts](../../packages/server/src/session-workspaces.ts)
+    - [server.proxy-common-work-routing.test.ts](../../packages/server/src/server.proxy-common-work-routing.test.ts)
+  - 本地测试：
+    - `bun test packages/server/src/server.proxy-common-work-routing.test.ts packages/server/src/server.proxy-session-create.test.ts packages/server/src/server.proxy-session-activity.test.ts packages/server/src/session-workspaces.test.ts`
+- 新证据：
+  - 新增正向测试证明：
+    - 当 session 当前是 `document-agent/common-work`
+    - 且首条 `prompt_async` 具备“长篇 + 正式交付物 + 多源综合 + 明确结构覆盖”特征时
+    - server 可以在转发前把 `agent=common-work` 升级为 `agent=document-writer`
+    - 同时把 session 的 `preferredView/preferredAgent/preferredAgentLock` 一起改成 `document-writer`
+    - 并把 runtime profile 从 `document-agent` 升级到 `document-writer`
+  - 新增负向测试证明：
+    - 简单总结类首轮 prompt 不会被误切
+  - 相关旧测试也通过，说明：
+    - session create
+    - session activity routing
+    - runtime workspace profile
+    - document-state carrier
+    - 都没有被这次改动打坏
+- 新结论：
+  - RL-015 里“prompt/bridge 文案不足以改变真实路由”的判断，已经找到一个更合理的下一步实现面：
+    - **在 server proxy 的首条 prompt 路由处做显式升级**
+  - 这条路线的价值在于：
+    - 不需要继续扩大 prompt 约束面
+    - 不需要禁用 `read/glob` 之类通用工具
+    - 可以把“长篇正式交付物更早切 workflow”落实成真实控制行为
+  - 但当前证据还只到本地测试层：
+    - 还没有做 repo-first 部署到 pod 后的 hosted Qin 样例复验
+- 后续动作：
+  - 提交并部署这条 server-side route
+  - 用 Qin 小材料路由探针和真实两份 `.docx` 样例各复验一次
+  - 核心看点只有两个：
+    - `/message` 中是否出现真正的 `task(document-writer)` / 或等价的 `agent=document-writer` 路由结果
+    - 是否因此避开 `common-work` 之前那条 `bocha-search -> todowrite -> write` 的自由工具面路径
+
 ## 当前台账的用途
 
 后续只要发生下面任一类变化，就应追加新轮次：

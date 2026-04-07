@@ -67,6 +67,11 @@
   - 它仍优先走自己的自由工具面，最新可见链路是：
     - `bocha-search -> todowrite -> write`
   - 因此不能再把希望放在“只靠提示词把路由语气写得更重”
+- 当前本地代码已经有一个更硬、且通过测试的下一步方案：
+  - server 可在首条 `prompt/prompt_async` 时识别“长篇 + 正式交付物 + 多源综合 + 明确结构覆盖”的 `common-work` 请求
+  - 然后把这次请求升级成 `document-writer`
+  - 同时把 session 元数据与 runtime profile 一起切到 `document-writer`
+  - 这条路线目前还没做 hosted 复验
 - 不要把“可自我修正的一两步短弯路”也当成必须用全局禁令消灭的问题。
   - 后续约束重点应放在：
     - 默认观察面
@@ -106,8 +111,9 @@
 最合理的下一步是：
 
 1. **先排 runtime/tool/perms mismatch**
-   - 重点看 `common-work` 空 `write` 调用
-   - 不再只做“升级措辞”强化；下一轮应把“长篇、多源、正式交付物先切 `document-writer`”写成更明确的第一动作规则，或转向更硬的 routing/config 面
+   - 先把当前本地已通过测试的 server-side 首条 prompt 路由部署到 hosted pod
+   - 先用小材料 probe 和 Qin 样例复验：它能不能真实把 `common-work` 切进 `document-writer`
+   - 再回头看 `common-work` 空 `write` 是否因为路由改变而明显收敛
    - 继续记录 `document/upload` 的间歇性 `AbortError`，但在拿到稳定复现前不要贸然改 upload 代码
    - 评估长篇正式交付物是否应更早升级到 `document-writer` workflow，而不是让 `common-work` 先直接大块写文件；当前证据已经明显支持这条方向
    - 判断 compare/debug harness 是否需要对 `/message` 偶发坏 JSON 做容错，避免脚本失败污染产品判断
@@ -125,7 +131,7 @@
 - 哪个 harness 杠杆应成为第一笔代码改动
 - `common-work` 的自由工具面是否需要增加一层“无效空写入”保护
 - 长篇正式交付物是否应在 `common-work` 中更早路由到显式 `document-writer` harness
-- 这条路由应该落在 `common-work` 提示词、bridge，还是更硬的 routing/config 面
+- 这条路由已经有一个本地通过测试的 server-side 版本；当前未决的是它在 hosted 真实样例上是否足够稳、是否需要继续收紧或放宽分类条件
 - 如果继续保留 `common-work` 的大工具面，怎样才能只约束“第一动作路由”，而不是再次滑回微观工具禁令
 - `document/upload` 的间歇性 `AbortError` 到底由什么稳定触发
 - compare/debug harness 对 `/message` 偶发坏 JSON 应该做多强的容错，才不会掩盖真实产品问题

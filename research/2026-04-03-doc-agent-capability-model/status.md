@@ -56,13 +56,17 @@
   - `common-work` 不会稳定发出 `task(document-writer)`
   - 它仍会优先走 `bocha-search -> todowrite -> write`
   - 因此“只靠提示词加重语气”目前不足以改变真实 hosted 路由
+- 本地代码与测试现在已经证明：
+  - server proxy 可以在首条 `prompt/prompt_async` 时，把满足“长篇 + 正式交付物 + 多源综合 + 明确结构覆盖”的 `common-work` 请求升级成 `document-writer`
+  - 这次升级不仅能改请求里的 `agent`，还能同步升级 session 元数据和 runtime profile
+  - 但这条更硬的 routing 面还没有做 hosted 复验
 - 只有先排清这些 blocker，后面的广义文档质量验证才有意义。
 
 ## 当前还没完成
 
 - **还没有完成对 runtime/tool/perms blocker 的收敛** ← 当前最紧迫
 - 还没有完成“长篇正式交付物是否应更早升级到显式 workflow harness”的判断
-- 还没有把“长篇正式任务先切 workflow”落实成真实会触发的第一动作规则或更硬路由
+- 还没有完成“更硬的首条 prompt 路由”在 hosted pod 上的 Qin 样例复验
 - 还没有收敛 `document/upload` 的间歇性 `AbortError` 触发条件
 - 还没有判断 compare/debug harness 是否要对 `/message` 偶发坏 JSON 做更稳的容错
 - 还没有做一轮“排除 runtime 阻塞后的”广义文档任务验证
@@ -74,8 +78,9 @@
 ## 当前推荐的下一步
 
 1. **先排 runtime/tool/perms mismatch**
-   - 查清 `common-work` 空 `write` 调用的触发条件
-   - 把“长篇、多源、正式交付物先切 `document-writer`”改成更明确的第一动作规则，或转向更硬的 routing/config 面
+   - 先把当前本地已通过测试的 server-side 首条 prompt 路由部署到 hosted pod
+   - 先用小材料 probe 和 Qin 两份 `.docx` 样例复验：这条更硬路由能不能真正把 `common-work` 任务切进 `document-writer`
+   - 再看 `common-work` 空 `write` 是否因此显著减少或消失
    - 继续记录 `document/upload` 间歇性 `AbortError`，但在拿到稳定复现前，不要过早改 proxy 或 upload 实现
    - 把公网入口问题和产品内链路问题继续分开记录，不再混成同一类 hosted 失败
    - 评估 compare/debug harness 是否需要对 `/message` 偶发坏 JSON 做防抖或重试，避免把脚本失败误报成产品失败

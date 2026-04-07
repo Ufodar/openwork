@@ -33,7 +33,7 @@ import {
 const OPENWORK_BASE = process.env.OPENWORK_BASE ?? "http://192.168.5.10:32765/openwork";
 const USERNAME = process.env.OPENWORK_USERNAME ?? "fuda";
 const PASSWORD = process.env.OPENWORK_PASSWORD ?? "1";
-const MODEL = parseModel(process.env.OPENWORK_COMPARE_MODEL ?? "my-company/Qwen3.5-397B-A17B");
+const MODEL = parseModel(process.env.OPENWORK_COMPARE_MODEL ?? "my-company/MiniMax-2.5");
 const COMPARE_STAGE = normalizeDocumentWorkflowCompareStage(
   process.env.OPENWORK_COMPARE_STAGE ?? "full",
 );

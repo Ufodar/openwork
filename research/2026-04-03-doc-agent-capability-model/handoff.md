@@ -22,7 +22,8 @@
 1. 以广义文档任务为目标，重建基础文档能力模型
 2. 结合 harness engineering 的视角，重新审视核心 prompt
 3. 先完成 `common-work` 和 `document-writer` 的最小收口
-4. 为后续真正的 harness 第一刀建立更可靠的起点
+4. 先排清当前 hosted runtime/tool/perms blocker
+5. 再为后续真正的 harness 第一刀建立更可靠的起点
 
 ## 当前已经确认的结论
 
@@ -37,6 +38,9 @@
 - `document-writer` 当前更像“能工作，但太重”。
 - 当前 related skills 更适合被视为 harness hooks，而不是已完成的 harness。
 - 现有 6-phase / 6-subagent 架构暂时只应视为可运行中间态。
+- 当前最新阻塞已经收紧到 runtime/tool/perms mismatch：
+  - `common-work` 在真实 Qin 样例里卡在空输入的 `write`
+  - `document-writer` 主代理会尝试读取 `.worktree/text/**`，但当前 runtime surface 不允许
 
 ## 当前最重要的两个文件
 
@@ -66,14 +70,16 @@
 ## 当前推荐的下一步
 
 `common-work.md` 和 `document-writer.md` 的 Phase 2a 最小收口已完成（见 RL-005）。
+但在继续做广义文档质量验证前，先要处理 RL-006 暴露出的 runtime blocker。
 
 最合理的下一步是：
 
-1. **用广义文档任务做一次最小验证**
-   - 挑 2-3 个不同类型的文档任务测试重写后的 prompt 效果
-   - 对照 D1-D8 质量维度评估产出
-2. 根据验证结果增强四个文档 skill（intake/evidence/compose/verify）
-3. 再决定 harness 第一刀的落点
+1. **先排 runtime/tool/perms mismatch**
+   - 重点看 `common-work` 空 `write` 调用
+   - 重点看 `document-writer` 与 `.worktree/text/**` 的权限/动作错位
+2. 在 blocker 排清后，再做 2-3 个广义文档任务验证 prompt 改动效果
+3. 根据验证结果增强四个文档 skill（intake/evidence/compose/verify）
+4. 再决定 harness 第一刀的落点
 
 ## 当前开放问题
 
@@ -83,6 +89,8 @@
 - task clarification 是否需要更显式的前置步骤
 - 动作面应工作化到什么程度
 - 哪个 harness 杠杆应成为第一笔代码改动
+- `document-writer` 是否应继续感知 `.worktree/text/**`，还是应完全通过 `doc-reader` 间接消费
+- `common-work` 的自由工具面是否需要增加一层“无效空写入”保护
 
 ## 交接纪律
 

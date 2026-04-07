@@ -95,6 +95,42 @@
 - 新结论：
   - Phase 2a 的 prompt 层最小收口已完成，下一步应进入广义文档任务验证。
 
+## RL-006 Hosted 真实样例复跑后，主风险收紧为 runtime/tool/perms mismatch
+
+- 目标：
+  - 验证当前 `common-work` / `document-writer` 在真实 Qin 样例上的主要问题，到底是 prompt 文案、模型基线，还是 runtime/tool 链路。
+- 运行基线：
+  - repo / GitHub / Gitee / pod 已统一到 `efb7ba0e`
+  - pod 已执行 repo-first `git pull gitee dev` + `bash scripts/restart-pod.sh --force`
+  - compare/debug 模型基线使用 `my-company/MiniMax-2.5`
+- 新证据：
+  - `common-work`
+    - 脚本：`packages/app/scripts/qin-common-work-debug.mjs`
+    - session：`ses_299cf247dffeDnG0Jld9gKniYR`
+    - 先读取本地两篇材料并完成一次 `bocha-search`
+    - 然后进入 `todowrite`
+    - 最后卡在一个 `write` tool call，状态长期 `pending`
+    - 该 `write` 调用的 `input` 为空对象 `{}`，不是正常文件写入请求
+  - `document-writer`
+    - session：`ses_299ca6bd1ffe4gnAn4wt4FfmqP`
+    - intake 与 manifest 读取正常
+    - manifest 已明确给出 `.worktree/text/src-001.txt` / `src-002.txt` 为 ready
+    - 主代理随后尝试直接 `read(.worktree/text/src-001.txt)`，被当前 runtime read permission deny
+    - 后续又尝试 `glob(.worktree/text/*.txt)`，同样被 deny
+- 新结论：
+  - 当前 `common-work` 的主问题不是旧 prompt 契约丢失，而是模型在真实样例里发出了无效的空 `write` tool call，运行态无法自恢复。
+  - 当前 `document-writer` 的主问题不是“不会写”，而是主会话动作面与 runtime 权限面不对齐：
+    - intake 产出指向 `.worktree/text/**`
+    - 但主代理 runtime 不允许读这些路径
+  - 因此当前最值得做的，不是继续围绕旧 prompt 文案争论，而是：
+    - 收紧 prompt 测试为真实护栏
+    - 排查 runtime/tool/perms mismatch
+- 后续动作：
+  - 更新 compare/debug 脚本默认模型到 `MiniMax-2.5`
+  - 优先定位：
+    - `common-work` 空 `write` 调用为什么会出现、怎样在 harness 上避免
+    - `document-writer` 为什么会去读 `.worktree/text/**`，以及这条路径究竟该被允许、禁止还是改由 `doc-reader` 消费
+
 ## 当前台账的用途
 
 后续只要发生下面任一类变化，就应追加新轮次：

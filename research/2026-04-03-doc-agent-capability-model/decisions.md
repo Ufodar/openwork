@@ -82,3 +82,21 @@
     - `README.md`
 - 原因：
   - 这样可以先恢复目标、边界、当前状态，再看完整理论框架，降低接手成本。
+
+## D-010 prompt 契约测试只守护系统护栏，不再冻结旧 prompt 措辞
+
+- 决策：
+  - `packages/app/scripts/doc-subagent-prompts.test.mjs` 的定位收成“系统护栏测试”。
+  - 不再要求它绑定旧 prompt 的固定标题、旧中英混合字段名或过窄示例措辞。
+- 原因：
+  - 当前 `common-work` 和 `document-writer` 的 prompt 收口方向已经改变。
+  - 如果测试继续冻结旧文案，会干扰我们判断真实产品问题。
+
+## D-011 当前 hosted 文档 compare/debug 基线默认使用 `my-company/MiniMax-2.5`
+
+- 决策：
+  - 当前 compare/debug 脚本默认模型统一切到 `my-company/MiniMax-2.5`。
+  - 若要复跑 `Qwen3.5-397B-A17B`，通过 `OPENWORK_COMPARE_MODEL` 显式覆盖。
+- 原因：
+  - 当前 pod 默认模型已经切到 `MiniMax-2.5`。
+  - 继续让脚本默认 `Qwen` 会制造基线错位，放大调试噪音。

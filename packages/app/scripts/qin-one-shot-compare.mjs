@@ -15,7 +15,7 @@ import { joinVisibleAssistantText } from "./_assistant-text.mjs";
 const OPENWORK_BASE = process.env.OPENWORK_BASE ?? "http://192.168.5.10:32765/openwork";
 const USERNAME = process.env.OPENWORK_USERNAME ?? "fuda";
 const PASSWORD = process.env.OPENWORK_PASSWORD ?? "1";
-const MODEL_REF = process.env.OPENWORK_COMPARE_MODEL ?? "my-company/Qwen3.5-397B-A17B";
+const MODEL_REF = process.env.OPENWORK_COMPARE_MODEL ?? "my-company/MiniMax-2.5";
 const OUTPUT_PATH = resolve(
   process.cwd(),
   process.env.OPENWORK_COMPARE_OUTPUT ?? "../../tmp/compare-agents/qin-one-shot-compare.json",

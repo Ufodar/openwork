@@ -15,7 +15,7 @@ import { joinVisibleAssistantText } from "./_assistant-text.mjs";
 const OPENWORK_BASE = process.env.OPENWORK_BASE ?? "http://192.168.5.10:32765/openwork";
 const USERNAME = process.env.OPENWORK_USERNAME ?? "fuda";
 const PASSWORD = process.env.OPENWORK_PASSWORD ?? "1";
-const MODEL_REF = process.env.OPENWORK_COMPARE_MODEL ?? "my-company/Qwen3.5-397B-A17B";
+const MODEL_REF = process.env.OPENWORK_COMPARE_MODEL ?? "my-company/MiniMax-2.5";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const OUTPUT_PATH =
   typeof process.env.OPENWORK_COMPARE_OUTPUT === "string" && process.env.OPENWORK_COMPARE_OUTPUT.trim()

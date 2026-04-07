@@ -4,7 +4,7 @@
 
 ## 当前目标
 
-把 OpenWork 第二阶段文档重构从"有一个明确的实现起点"推进到"用广义文档任务验证 prompt 层改动的效果"。
+把 OpenWork 第二阶段文档重构从“只完成了 prompt 层最小收口”推进到“先排清真实 runtime/tool/perms blocker，再进入广义文档任务验证”。
 
 ## 已完成
 
@@ -22,16 +22,23 @@
 - **已完成 Phase 2a prompt 层最小收口（RL-005）：**
   - [common-work.md](../../.opencode/agent/common-work.md) 已重写：补入任务意图重建、材料角色识别、质量维度验证；去除技术偏置和实现耦合
   - [document-writer.md](../../.opencode/agent/document-writer.md) 已清理：精简控制面列举、统一委派合约语言、删除偏置补丁
+- **已完成 prompt 契约测试的定位收口：**
+  - [doc-subagent-prompts.test.mjs](../../packages/app/scripts/doc-subagent-prompts.test.mjs) 现在以“系统护栏”为主，不再冻结旧 prompt 措辞
+- **已完成一轮新的 hosted 真实样例排查（RL-006）：**
+  - `common-work` 在 `MiniMax-2.5` 基线下卡在空输入的 `write` tool call
+  - `document-writer` 在 `MiniMax-2.5` 基线下暴露出 `.worktree/text/**` 读取权限错位
 
 ## 当前最重要的判断
 
-- Phase 2a prompt 改动已落地，但还未经过实际文档任务验证。
-- 当前改动是保守的"补能力、去偏置、减噪音"，没有改变架构。
-- 下一步的关键判断点是：仅通过 prompt 层改动，广义文档任务的质量能提升多少。
+- Phase 2a prompt 改动已落地，但真实样例已经证明：当前第一优先级不是继续争论旧 prompt 文案，而是先排 runtime/tool/perms blocker。
+- `common-work` 的最新主风险是运行态生成了空输入的 `write` 调用，而不是简单的“能力不足”。
+- `document-writer` 的最新主风险是主代理动作面与 runtime 权限面不对齐，尤其是 `.worktree/text/**` 的读取错位。
+- 只有先排清这些 blocker，后面的广义文档质量验证才有意义。
 
 ## 当前还没完成
 
-- **还没有做"广义文档任务"的验证轮次** ← 当前最紧迫
+- **还没有完成对 runtime/tool/perms blocker 的收敛** ← 当前最紧迫
+- 还没有做一轮“排除 runtime 阻塞后的”广义文档任务验证
 - 还没有开始真正的 harness 实装（Phase 2b）
 - 还没有增强 document-intake/evidence/compose/verify 四个 skill
 - 还没有增加自适应流水线深度（变更 5）
@@ -39,17 +46,17 @@
 
 ## 当前推荐的下一步
 
-1. **用广义文档任务做一次最小验证**
-   - 挑 2-3 个不同类型的文档任务（如：会议纪要、对比报告、技术总结）
-   - 用重写后的 common-work agent 执行
-   - 对照 D1-D8 质量维度评估产出
-   - 看任务意图重建和材料角色识别是否真正起作用
-2. 根据验证结果决定 harness 的第一刀具体落在哪
-3. 增强四个文档 skill（intake/evidence/compose/verify）
+1. **先排 runtime/tool/perms mismatch**
+   - 查清 `common-work` 空 `write` 调用的触发条件
+   - 查清 `document-writer` 为何会去读 `.worktree/text/**`
+   - 判断这条路径是该开放、改写还是应完全交给 `doc-reader`
+2. 在 blocker 排清后，再做广义文档任务最小验证
+3. 根据验证结果决定 harness 第一刀具体落在哪
+4. 再增强四个文档 skill（intake/evidence/compose/verify）
 
 ## 不建议现在做的事
 
-- 不建议在没验证的情况下直接进入 Phase 2b（改代码/改 schema）
+- 不建议在 runtime blocker 未排清前直接进入 Phase 2b（改大块 schema / carrier）
 - 不建议现在继续加更多过程产物
 - 不建议把具体业务场景写进基础 prompt
 

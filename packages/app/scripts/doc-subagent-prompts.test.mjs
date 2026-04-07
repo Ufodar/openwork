@@ -509,12 +509,14 @@ test("document-writer entry agent has orchestrator task and doc_state permission
 
     expect(writer?.tools?.task).toBe(true);
     expect(writer?.tools?.["doc_state_*"]).toBe(true);
+    expect(writer?.tools?.list).toBeUndefined();
+    expect(writer?.tools?.glob).toBeUndefined();
     expect(writer?.tools?.todoread).toBeUndefined();
     expect(writer?.tools?.todowrite).toBeUndefined();
     expect(writer?.permission?.task).toBe("allow");
     expect(writer?.permission?.bash).toBe("deny");
     expect(writer?.permission?.read?.[".worktree/index.json"]).toBe("allow");
-    expect(writer?.permission?.glob?.["**/*.{docx,doc,pdf,md}"]).toBe("allow");
+    expect(writer?.permission?.glob).toBeUndefined();
     expect(orchestrator).toBeUndefined();
   }
 

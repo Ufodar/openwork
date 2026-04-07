@@ -83,7 +83,7 @@ export function detectStalledPendingTools({
   if (!pendingTools.length) return null;
 
   const elapsedSinceProgress = now - lastProgressAt;
-  const malformedPendingTools = pendingTools.filter((tool) => tool.malformed);
+  const malformedPendingTools = pendingTools.filter((tool) => tool.malformed && !tool.delegated);
   if (malformedPendingTools.length && elapsedSinceProgress >= malformedPendingToolTimeoutMs) {
     return {
       kind: "malformed-pending-tool",

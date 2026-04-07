@@ -139,6 +139,32 @@ test("detectStalledPendingTools does not fast-fail delegated task tools", () => 
   ).toBeNull();
 });
 
+test("detectStalledPendingTools ignores malformed delegated task placeholders on the short timeout", () => {
+  const messages = [{
+    parts: [
+      {
+        type: "tool",
+        tool: "task",
+        state: {
+          status: "pending",
+          input: {},
+          raw: "",
+        },
+      },
+    ],
+  }];
+
+  expect(
+    detectStalledPendingTools({
+      messages,
+      lastProgressAt: 0,
+      now: 31_000,
+      malformedPendingToolTimeoutMs: 30_000,
+      stalledPendingToolTimeoutMs: 120_000,
+    }),
+  ).toBeNull();
+});
+
 test("detectStalledPendingTools stays quiet when no pending tools exist", () => {
   const messages = [{
     parts: [

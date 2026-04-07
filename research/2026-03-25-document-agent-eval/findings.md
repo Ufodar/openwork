@@ -928,3 +928,58 @@
 - 当前状态：
   - 已确认为新的高优先级 hosted runtime / skill 执行问题
   - 当前还没有根因，下一步需要顺着 `skill(name=docx)` 的执行链继续定位
+
+### F-042 `document-writer` 当前 Qin live 链路已跑通，旧的“卡在 `doc-reader` / `doc-merger` 后”结论失效
+
+- 现象：
+  - 最新 Qin `document-writer` live session：
+    - `ses_2994aba77ffeyfqW7DDjmoxJ3l`
+  - 已完整完成：
+    - `doc-reader`
+    - 补充研究
+    - `doc-merger`
+    - `doc-planner`
+    - `doc-writer`
+    - `doc-verifier`
+  - 实际交付已落盘：
+    - `outputs/qin-technical-material.md`
+    - `reports/doc-writer/external-supplements.md`
+    - `reports/doc-verifier/20260407-073000.md`
+- 影响：
+  - 旧理论“`document-writer` 会在 Qin 样例前半段 orchestration 卡死”已经被反证
+  - 后续调优不应继续围绕这个已失效判断展开
+- 当前状态：
+  - 已确认为反证
+  - 当前主问题已从“controller 前半段卡死”缩小到更局部的 harness 与收口问题
+
+### F-043 `run-qin-doc-writer.mjs` 最近的失败已变成 harness 取件路径错误，而不是产品失败
+
+- 现象：
+  - 在 live session 两轮 prompt 均完成后，compare harness 最终报：
+    - `{"code":"not_found","message":"File not found"}`
+  - 直接原因是脚本硬编码读取：
+    - `reports/doc-verifier/summary.md`
+  - 实际 verifier 已输出时间戳报告：
+    - `reports/doc-verifier/20260407-073000.md`
+- 影响：
+  - 这会把一次成功的产品 run 误记成失败
+  - 不修正的话，会继续污染 `document-writer` 稳定性的结论
+- 当前状态：
+  - 已定位为 harness 缺陷
+  - 本地脚本已改为从 `reports/doc-verifier/` 中选择最新 `.md` 报告
+
+### F-044 `document-writer` 顶层仍有少量被拒绝的非阻塞探索动作
+
+- 现象：
+  - 在成功的 Qin live run 中，顶层 controller 仍会尝试：
+    - `read .worktree/text/src-001.txt`
+    - `read .worktree/text/src-002.txt`
+    - `glob outputs/**/*.md`
+    - `glob **/*.md`
+  - 这些调用均被当前权限正确拒绝，但没有阻止最终交付完成
+- 影响：
+  - 说明 controller 仍残留少量“自己再确认一遍”的探索习惯
+  - 它们不会阻塞结果，但会制造噪音，也会掩盖真正必要的工具面
+- 当前状态：
+  - 已定位为次要但真实的收口点
+  - 暂未作为本轮主阻塞项处理

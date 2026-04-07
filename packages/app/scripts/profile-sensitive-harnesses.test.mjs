@@ -60,4 +60,7 @@ test("qin compare scripts pin hosted sessions to the intended runtime profiles",
   expect(writerOnly).toContain("shouldTreatFingerprintChangeAsProgress");
   expect(commonDebug).toContain("detectStalledPendingTools");
   expect(commonDebug).toContain("shouldTreatFingerprintChangeAsProgress");
+  expect(writerOnly).toContain("const verifierReportName = findLatestDocumentName");
+  expect(writerOnly).toContain('prefix: "reports/doc-verifier/"');
+  expect(writerOnly).not.toContain('name: "reports/doc-verifier/summary.md"');
 });

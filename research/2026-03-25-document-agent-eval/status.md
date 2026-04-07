@@ -1,8 +1,43 @@
 # 当前状态
 
-更新时间：2026-03-27
+更新时间：2026-04-07
 
 ## 当前已完成
+
+- `document-writer` 在 Qin live 样例上的主链已被重新确认跑通：
+  - 关键 session：
+    - `ses_2994aba77ffeyfqW7DDjmoxJ3l`
+  - 已完整推进到：
+    - `doc-reader`
+    - 补充研究
+    - `doc-merger`
+    - `doc-planner`
+    - `doc-writer`
+    - `doc-verifier`
+  - 已生成：
+    - `outputs/qin-technical-material.md`
+    - `reports/doc-writer/external-supplements.md`
+    - `reports/doc-verifier/20260407-073000.md`
+  - 这意味着：
+    - 旧结论“`document-writer` 会在前半段 orchestration 卡死”已不再成立
+
+- compare harness 这轮又收掉了两类假阴性：
+  - delegated `task` placeholder 不再触发 `malformed-pending-tool`
+  - `run-qin-doc-writer.mjs` 不再写死 `reports/doc-verifier/summary.md`，会从 `reports/doc-verifier/` 里选最新 `.md` 报告
+  - 本地验证：
+    - `bun test packages/app/scripts/session-settle-guards.test.mjs`
+    - `bun test packages/app/scripts/profile-sensitive-harnesses.test.mjs packages/app/scripts/session-settle-guards.test.mjs`
+    - 当前通过
+  - fresh Qin rerun 已完成并落盘：
+    - session：`ses_2993ee45fffev2nbSDeHOqXxY1`
+    - compare 输出：
+      - `tmp/compare-agents/qin-doc-writer-fresh.json`
+
+- 当前对 Qin `document-writer` lane 的判断已经收敛到：
+  - 主链已通
+  - 当前剩余的是两个更窄的问题：
+    - 顶层 controller 仍有少量被拒绝但不阻塞结果的 `read .worktree/text/*.txt`
+    - verifier 完成后仍有少量被拒绝但不阻塞结果的 `glob` 试探
 
 - 已修掉一个会直接把 pod 拖死的 server 侧问题：
   - `listWorkspaceSessions()` 和 `ensureRuntimeActivitySubscriptions()` 之前会误启动 isolated session runtime

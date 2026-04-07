@@ -218,6 +218,80 @@
 - 同步脚本对 `MY_COMPANY_API_KEY` 采取“空就写空”，没有保留已有配置
 - pod 启动/重启脚本也没有明确给出当前测试所需的 `permission=allow` 基线
 
+## R-009 `document-writer` controller 收紧为“相信 phase receipt，而不是自己重新探测”
+
+### 问题
+
+- 之前 Qin `document-writer` live run 会在前半段 controller 层浪费很多回合：
+  - 重新读 `.worktree/text/*.txt`
+  - 广泛探索 `.worktree/**/*`
+  - 甚至回到 `general` 重新总结已经由 phase subagent 产出的状态
+- 这会让真正的文档链路看起来像是“卡住”，但本质上是 controller 没有足够信任 `doc-*` 的 receipt
+
+### 根因
+
+- `document-writer` prompt 仍给了 controller 太多“自己再确认一遍”的空间
+- 同时 runtime 还暴露了 `list` / `glob` 等 discovery 面，使 controller 很容易滑回探索模式
+
+### 解决方式
+
+- 收紧 `.opencode/agent/document-writer.md`：
+  - completed `task` 输出应被当作主 receipt 面
+  - 不要为已经由 `doc-*` 报告过的结果再调用 `general`
+  - `manifest` 已确认有源文档而编译态缺失时，直接调 `doc-reader`
+  - 不要在主 session 探测 `.worktree/text/**` 或广泛 `.worktree/**`
+- 同时从 `document-writer` 配置中移除：
+  - `list`
+  - `glob`
+
+### 为什么这样解决
+
+- `document-writer` 的职责是控制 phase，不是重新成为“全能读文件 agent”
+- 相信 phase receipt，才能把 controller 的动作面缩回真正必要的调度行为
+
+### 验证
+
+- live Qin session `ses_2994aba77ffeyfqW7DDjmoxJ3l` 已证明 controller 可完整推进到：
+  - `doc-reader`
+  - 补充研究
+  - `doc-merger`
+  - `doc-planner`
+  - `doc-writer`
+  - `doc-verifier`
+
+## R-010 compare harness 不再把 delegated `task` 占位和时间戳 verifier 报告误判成失败
+
+### 问题
+
+- `run-qin-doc-writer.mjs` / settle guard 最近有两类假阴性：
+  1. 短暂的 delegated `task` 占位会被误判成 `malformed-pending-tool`
+  2. verifier 报告被写死成 `reports/doc-verifier/summary.md`，而实际输出已改成时间戳文件名
+
+### 根因
+
+- settle guard 对 delegated `task` placeholder 过于敏感
+- compare harness 假设 verifier 产物路径永远固定
+
+### 解决方式
+
+- `packages/app/scripts/session-settle-guards.mjs`
+  - 不再对 delegated `task` placeholder 走短超时误杀
+- `packages/app/scripts/run-qin-doc-writer.mjs`
+  - 从 `reports/doc-verifier/` 中选择最新 `.md` 报告，而不是硬编码 `summary.md`
+- `packages/app/scripts/profile-sensitive-harnesses.test.mjs`
+  - 新增约束，避免 compare harness 回退到固定 verifier 路径假设
+
+### 为什么这样解决
+
+- 这两类问题都不是产品链路失败，而是 compare harness 自己的取证错误
+- 如果不修，会持续把成功 run 误记成失败，从而污染后续所有判断
+
+### 验证
+
+- `bun test packages/app/scripts/session-settle-guards.test.mjs`
+- `bun test packages/app/scripts/profile-sensitive-harnesses.test.mjs packages/app/scripts/session-settle-guards.test.mjs`
+- 当前均通过
+
 ### 解决方式
 
 - `scripts/sync-global-opencode-config.py`

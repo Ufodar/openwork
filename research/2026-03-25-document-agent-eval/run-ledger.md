@@ -8,6 +8,87 @@
 - 没有落进这份台账的测试，默认视为不可追溯。
 - 如果本轮没有新发现，也要明确写“无新增发现”。
 
+## RL-054 `document-writer` Qin live 链路已跑通，剩余问题缩到 harness 取件与少量非阻塞拒绝
+
+- 时间：
+  - 2026-04-07
+- 目标：
+  - 验证此前“`document-writer` 在 Qin 样例里会卡在 `doc-reader` / `doc-merger` 后面”的判断是否仍成立
+  - 区分：
+    - 产品链路真实卡住
+    - compare harness 自己的假阴性
+- 相关提交：
+  - `7a06c8f1` `Trust doc phase receipts in document writer`
+  - `4aa0a834` `Force document writer into doc-reader after manifest`
+  - `d8ddc9cc` `Remove document writer discovery tools`
+  - `e447f5f3` `Stop compare harness from killing delegated tasks`
+- 本地验证：
+  - `bun test packages/app/scripts/session-settle-guards.test.mjs`
+    - `9 pass / 0 fail`
+  - `bun test packages/app/scripts/profile-sensitive-harnesses.test.mjs packages/app/scripts/session-settle-guards.test.mjs`
+    - `12 pass / 0 fail`
+  - `git diff --check -- packages/app/scripts/run-qin-doc-writer.mjs packages/app/scripts/profile-sensitive-harnesses.test.mjs`
+- repo-first 落地：
+  - 本地提交已 push 到 GitHub / Gitee
+  - pod 已 `git pull gitee dev`
+  - pod 已 `bash scripts/restart-pod.sh --force`
+  - 最新验证时 pod `HEAD = e447f5f3`
+- 关键 live session：
+  - `ses_2994aba77ffeyfqW7DDjmoxJ3l`
+  - runtime dir：
+    - `/root/.openwork/user-workspaces/c503a0f6-a558-41f4-8ba4-899eb1ed6923/documents/sessions/a84bd014619b43b38e3859e312f32494`
+- 关键 live 轨迹：
+  - 顶层 controller 先读：
+    - `.worktree/index.json`
+    - `.worktree/sources/manifest.json`
+  - 然后依次完成：
+    - `task("编译源文档 src-001 和 src-002")`
+    - `task("联网检索补充三大系统技术信息")`
+    - `task("合并源文档和补充研究形成Facts")`
+    - `task("生成解决方案规划文档")`
+    - `task("撰写完整技术材料")`
+    - `task("验证技术材料完整性")`
+  - session 最终已回复“任务完成”
+- 实际交付物：
+  - `outputs/qin-technical-material.md`
+  - `reports/doc-writer/external-supplements.md`
+  - `reports/doc-verifier/20260407-073000.md`
+- 本轮最重要的新结论：
+  - 旧结论“`document-writer` 会在 `doc-reader` / `doc-merger` 后卡住”已被推翻
+  - 当前这条 Qin `document-writer` live 链路已经能完整跑到：
+    - `doc-reader`
+    - 补充研究
+    - `doc-merger`
+    - `doc-planner`
+    - `doc-writer`
+    - `doc-verifier`
+  - 先前一类 compare 失败并不是产品失败，而是 harness 假阴性：
+    - `session-settle-guards.mjs` 会把短暂的 delegated `task` 占位误判成 `malformed-pending-tool`
+  - 修掉上述问题后，又暴露出第二个 harness 假阴性：
+    - `run-qin-doc-writer.mjs` 把 verifier 报告写死成 `reports/doc-verifier/summary.md`
+    - 实际运行产物已改成时间戳文件名，如 `reports/doc-verifier/20260407-073000.md`
+- 仍存在但已降级为次要的问题：
+  - 顶层 controller 仍会试探两次被拒绝的 `read`
+    - `.worktree/text/src-001.txt`
+    - `.worktree/text/src-002.txt`
+  - verifier 完成后，controller 还会试探两次被拒绝的 `glob`
+    - `outputs/**/*.md`
+    - `**/*.md`
+  - 这些拒绝不会阻止最终交付，但说明 prompt / harness 还有收口空间
+- 后续动作：
+  - compare harness 已改成从 `reports/doc-verifier/` 里选择最新 `.md` 报告，而不是写死 `summary.md`
+  - fresh rerun 也已完成并成功产出 compare JSON：
+    - session：`ses_2993ee45fffev2nbSDeHOqXxY1`
+    - 结果：
+      - prompt 1 完成
+      - prompt 2 完成
+      - `doc-planner` / `doc-writer` / `doc-verifier` 全部完成
+      - compare 输出已写入：
+        - `tmp/compare-agents/qin-doc-writer-fresh.json`
+      - `verifierReportName` 已正确解析为：
+        - `reports/doc-verifier/20260407_071100.md`
+  - 下一轮再决定是否继续收掉顶层 `read .worktree/text/*.txt` 和结尾 `glob` 试探
+
 ## RL-052 pod 代码对齐 + 手工恢复到用户可用状态
 
 - 目标：

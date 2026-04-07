@@ -148,6 +148,21 @@ function extractTaskCalls(messages) {
     });
 }
 
+function findLatestDocumentName(items, { prefix, suffix = "" }) {
+  const matches = (Array.isArray(items) ? items : [])
+    .filter((item) => {
+      const name = typeof item?.name === "string" ? item.name : "";
+      return name.startsWith(prefix) && name.endsWith(suffix);
+    })
+    .sort((left, right) => {
+      const leftUpdated = Number(left?.updatedAt ?? 0);
+      const rightUpdated = Number(right?.updatedAt ?? 0);
+      if (rightUpdated !== leftUpdated) return rightUpdated - leftUpdated;
+      return String(right?.name ?? "").localeCompare(String(left?.name ?? ""));
+    });
+  return matches[0]?.name ?? null;
+}
+
 async function requestJson(url, token, init = {}) {
   const headers = new Headers(init.headers || {});
   if (token) headers.set("Authorization", `Bearer ${token}`);
@@ -387,12 +402,18 @@ async function main() {
     sessionId,
     name: "outputs/qin-technical-material.md",
   });
-  const verifierText = await readDocumentText({
-    token,
-    workspaceId,
-    sessionId,
-    name: "reports/doc-verifier/summary.md",
+  const verifierReportName = findLatestDocumentName(finalDocs.items || [], {
+    prefix: "reports/doc-verifier/",
+    suffix: ".md",
   });
+  const verifierText = verifierReportName
+    ? await readDocumentText({
+        token,
+        workspaceId,
+        sessionId,
+        name: verifierReportName,
+      })
+    : "";
 
   const payload = {
     generatedAt: new Date().toISOString(),
@@ -402,6 +423,7 @@ async function main() {
     promptRuns,
     finalDocs: finalDocs.items || [],
     finalText,
+    verifierReportName,
     verifierText,
   };
   await mkdir(dirname(OUTPUT_PATH), { recursive: true });

@@ -1,4 +1,4 @@
-# Document State
+# 文档状态
 
 把现有的 `.worktree/**`、`requirements.csv` 和 `reports/**` 工件当成 durable document-state surface。
 
@@ -8,7 +8,7 @@
 - `.worktree/facts.json` / `.worktree/merge/conflicts.json` 是合并后的事实面
 - `.worktree/plan/solution-plan.json` / `.worktree/coverage.json` 是执行计划面
 
-Canonical runtime-local helper（如果存在）位于：
+标准 runtime-local helper（如果存在）位于：
 
 - `./.opencode/runtime-support/document-state/init_doc_state.py`
 - `./.opencode/runtime-support/document-state/extract_doc_state.py`

@@ -7,10 +7,10 @@ const root = resolve(import.meta.dir, "..", "..", "..");
 test("document-writer entry prompt keeps controller-level phase routing and ownership only", async () => {
   const prompt = await readFile(resolve(root, ".opencode/agent/document-writer.md"), "utf8");
 
-  expect(prompt).toContain("Phase routing:");
-  expect(prompt).toContain("Phase ownership:");
-  expect(prompt).toContain("`doc-reader` compiles one source document");
-  expect(prompt).toContain("`doc-verifier` owns `.worktree/verify/coverage.json`");
+  expect(prompt).toContain("## Phase 路由");
+  expect(prompt).toContain("## Phase 归属");
+  expect(prompt).toContain("`doc-reader` 把单份源文档编译成");
+  expect(prompt).toContain("`doc-verifier` 负责 `.worktree/verify/coverage.json`");
   expect(prompt).not.toContain("extract_doc_state.py");
   expect(prompt).not.toContain("verify_doc_state.py");
   expect(prompt).not.toContain("`.bid/**`");
@@ -19,28 +19,28 @@ test("document-writer entry prompt keeps controller-level phase routing and owne
 test("document-writer agent entrypoint uses orchestrator-style delegation rules", async () => {
   const agentPrompt = await readFile(resolve(root, ".opencode/agent/document-writer.md"), "utf8");
 
-  expect(agentPrompt).toContain("Your job is to keep the control loop coherent");
-  expect(agentPrompt).toContain("formal document and multi-document workflow tasks");
+  expect(agentPrompt).toContain("保持整个控制循环清晰、可恢复、可继续");
+  expect(agentPrompt).toContain("长程正式文档和多文档工作流任务");
   expect(agentPrompt).toContain("正式文档工作流主代理");
   expect(agentPrompt).not.toContain("标书写作助手主代理");
   expect(agentPrompt).not.toContain("bid-writing and formal document work");
-  expect(agentPrompt).toContain("call `doc-intake`");
-  expect(agentPrompt).toContain("do not delegate document work to `general` or non-`doc-*` agents");
-  expect(agentPrompt).toContain("do not edit source documents or the target deliverable yourself");
-  expect(agentPrompt).toContain("After `doc-writer`, always call `doc-verifier`");
-  expect(agentPrompt).toContain("reuse that exact path");
-  expect(agentPrompt).toContain("current user objective");
-  expect(agentPrompt).toContain("allowed input files");
-  expect(agentPrompt).toContain("required first action");
-  expect(agentPrompt).toContain("acceptance criteria");
-  expect(agentPrompt).toContain("stop condition");
-  expect(agentPrompt).toContain("do not collapse a detailed user objective into a generic paraphrase");
-  expect(agentPrompt).toContain("when a later user turn is only a short continuation signal");
-  expect(agentPrompt).toContain("exact headings, exact system names, target format, or specific requirements");
-  expect(agentPrompt).toContain("carry that wording forward literally into later `doc-*` tasks");
-  expect(agentPrompt).toContain("do not invent extra state artifacts, helper reports, or helper scripts");
-  expect(agentPrompt).toContain("do not bypass the missing phase");
-  expect(agentPrompt).toContain("if a subagent returns partial work, continue from the artifact it produced or relaunch that same subagent");
+  expect(agentPrompt).toContain("调用 `doc-intake`");
+  expect(agentPrompt).toContain("不要把文档工作委派给 `general` 或非 `doc-*` agent");
+  expect(agentPrompt).toContain("不要亲自编辑源文档或目标交付物");
+  expect(agentPrompt).toContain("必须先调用 `doc-verifier`");
+  expect(agentPrompt).toContain("后续子代理调用必须复用同一路径");
+  expect(agentPrompt).toContain("当前用户目标");
+  expect(agentPrompt).toContain("允许使用的输入文件");
+  expect(agentPrompt).toContain("必需的首要动作");
+  expect(agentPrompt).toContain("验收标准");
+  expect(agentPrompt).toContain("停止条件");
+  expect(agentPrompt).toContain("不要把详细用户目标压缩成泛化转述");
+  expect(agentPrompt).toContain("如果后续用户回合只是一个简短继续信号");
+  expect(agentPrompt).toContain("精确标题、精确系统名、目标格式或具体要求");
+  expect(agentPrompt).toContain("必须原样带上这些措辞");
+  expect(agentPrompt).toContain("不要发明额外 state artifact、helper report 或 helper script");
+  expect(agentPrompt).toContain("跳过当前缺失的 phase");
+  expect(agentPrompt).toContain("如果子代理只完成了部分工作，就从它产出的工件继续");
 });
 
 test("document config does not inject doc-state schema globally into every agent lane", async () => {
@@ -60,17 +60,17 @@ test("document-writer prompt keeps the control loop but drops product and runtim
   expect(prompt).not.toContain("extract_doc_state.py");
   expect(prompt).not.toContain("verify_doc_state.py");
   expect(prompt).not.toContain("`.bid/**`");
-  expect(prompt).toContain("keep the control loop coherent");
-  expect(prompt).toContain("call `doc-intake`");
-  expect(prompt).toContain("call `doc-writer`");
-  expect(prompt).toContain("call `doc-verifier`");
+  expect(prompt).toContain("保持整个控制循环清晰、可恢复、可继续");
+  expect(prompt).toContain("调用 `doc-intake`");
+  expect(prompt).toContain("调用 `doc-writer`");
+  expect(prompt).toContain("调用 `doc-verifier`");
 });
 
 test("doc-state schema stays a file-level reference instead of teaching MCP call sequences", async () => {
   const schema = await readFile(resolve(root, ".opencode/references/doc-state-schema.md"), "utf8");
 
-  expect(schema).toContain("## Canonical state files");
-  expect(schema).toContain("## Ownership model");
+  expect(schema).toContain("## 标准状态文件");
+  expect(schema).toContain("## 归属模型");
   expect(schema).not.toContain("doc_state_state_get_brief");
   expect(schema).not.toContain("doc_state_state_get_plan");
   expect(schema).not.toContain("Primary-agent boundary");
@@ -86,9 +86,9 @@ test("document-mode bridge stays a thin guardrail instead of a second workflow p
   expect(bridge).not.toContain("Use systematic-debugging only");
   expect(bridge).not.toContain("Use verification-before-completion only");
   expect(bridge).not.toContain("Do not auto-route to generic brainstorming");
-  expect(bridge).toContain("Prefer a readable working surface for binary Office files");
-  expect(bridge).toContain("Keep reopenable temp artifacts under \\`<WORKSPACE>/.tmp/system\\`");
-  expect(bridge).toContain("run \\`python3 .opencode/references/check_document_delivery.py --target outputs --target reports\\`");
+  expect(bridge).toContain("优先进入可读工作面");
+  expect(bridge).toContain("可重开的临时工件放在 \\`<WORKSPACE>/.tmp/system\\`");
+  expect(bridge).toContain("运行 \\`python3 .opencode/references/check_document_delivery.py --target outputs --target reports\\`");
 });
 
 test("document-mode bridge does not promote extracted source text as a main-session bootstrap surface", async () => {
@@ -96,7 +96,7 @@ test("document-mode bridge does not promote extracted source text as a main-sess
 
   expect(bridge).toContain("\\`.worktree/index.json\\`");
   expect(bridge).toContain("\\`.worktree/sources/manifest.json\\`");
-  expect(bridge).toContain("read those narrow control files before doing another broad rediscovery pass");
+  expect(bridge).toContain("先读这些窄控制文件");
   expect(bridge).not.toContain("hand control to \\`document-writer\\` early");
 });
 
@@ -105,14 +105,14 @@ test("writer and verifier prompts treat user-specified section titles as exact h
   const verifierPrompt = await readFile(resolve(root, ".opencode/prompts/doc-verifier.md"), "utf8");
   const entryPrompt = await readFile(resolve(root, ".opencode/agent/document-writer.md"), "utf8");
 
-  expect(writerPrompt).toContain("literal heading contract");
-  expect(verifierPrompt).toContain("exact heading contract");
-  expect(verifierPrompt).toContain("do not fake verifier outputs");
-  expect(entryPrompt).toContain("exact headings, exact names");
-  expect(entryPrompt).toContain("do not delegate document work to `general` or non-`doc-*` agents");
-  expect(writerPrompt).toContain("real Office document");
-  expect(verifierPrompt).toContain("text masquerading as `.docx`");
-  expect(entryPrompt).toContain("exact headings, exact system names");
+  expect(writerPrompt).toContain("字面 heading 合同");
+  expect(verifierPrompt).toContain("精确 heading 合同");
+  expect(verifierPrompt).toContain("不要伪造 verifier 输出");
+  expect(entryPrompt).toContain("精确标题、精确名称");
+  expect(entryPrompt).toContain("不要把文档工作委派给 `general` 或非 `doc-*` agent");
+  expect(writerPrompt).toContain("真正的 Office 文档包");
+  expect(verifierPrompt).toContain("伪装成 `.docx` 的纯文本");
+  expect(entryPrompt).toContain("精确标题、精确系统名");
 });
 
 test("doc-reader does not allow docx/pdf skills for standard source compilation", async () => {
@@ -127,11 +127,11 @@ test("doc-reader does not allow docx/pdf skills for standard source compilation"
   expect(reader.tools?.edit).toBeUndefined();
   expect(reader.permission?.write).toBeUndefined();
   expect(reader.permission?.edit).toBeUndefined();
-  expect(prompt).toContain("resolve the actual extractor path");
+  expect(prompt).toContain("先定位实际 extractor 路径");
   expect(prompt).toContain("./.opencode/runtime-support/document-state/extract_doc_state.py");
-  expect(prompt).toContain("do not use `glob`");
-  expect(prompt).toContain("do not call `write` or `edit` directly");
-  expect(prompt).toContain("return the blocker");
+  expect(prompt).toContain("不要用 `glob` 或 `list`");
+  expect(prompt).toContain("不要直接调用 `write` 或 `edit`");
+  expect(prompt).toContain("返回 blocker");
 });
 
 test("doc-intake can bootstrap workspace state with bash when direct write permissions are insufficient", async () => {
@@ -141,8 +141,8 @@ test("doc-intake can bootstrap workspace state with bash when direct write permi
   expect(config.agent?.["doc-intake"]?.tools?.bash).toBe(true);
   expect(config.agent?.["doc-intake"]?.permission?.bash).toBe("allow");
   expect(intakePrompt).toContain("init_doc_state.py");
-  expect(intakePrompt).toContain("If no init script is available, use `bash`");
-  expect(intakePrompt).toContain("Do not write bootstrap artifacts to `/tmp`");
+  expect(intakePrompt).toContain("如果没有 init script，就在当前 workspace 内使用 `bash`");
+  expect(intakePrompt).toContain("不要把 bootstrap artifact 写到 `/tmp`");
 });
 
 test("doc-writer can read runtime state files and write nested outputs in session workspaces", async () => {
@@ -179,11 +179,10 @@ test("planner and document-writer prompts preserve the machine-readable plan sch
   const plannerPrompt = await readFile(resolve(root, ".opencode/prompts/doc-planner.md"), "utf8");
   const entryPrompt = await readFile(resolve(root, ".opencode/agent/document-writer.md"), "utf8");
 
-  expect(plannerPrompt).toContain("do not replace the script-emitted section schema");
-  expect(plannerPrompt).toContain("custom `system/modules/key_facts` shape");
-  expect(plannerPrompt).toContain("preserve `id`, `title`, `required_subsections`, `required_evidence`, and `source_context_refs`");
-  expect(entryPrompt).toContain("`doc-planner` owns `.worktree/plan/solution-plan.json` and `.worktree/coverage.json`");
-  expect(entryPrompt).toContain("preserve the user's exact systems, headings, and specific requirements");
+  expect(plannerPrompt).toContain("不要把脚本生成的 section schema 换成自定义 `system/modules/key_facts` 形状");
+  expect(plannerPrompt).toContain("保留 `id`、`title`、`required_subsections`、`required_evidence`、`source_context_refs`");
+  expect(entryPrompt).toContain("`doc-planner` 负责 `.worktree/plan/solution-plan.json` 和 `.worktree/coverage.json`");
+  expect(entryPrompt).toContain("保留用户的精确系统名、标题和具体要求");
 });
 
 test("doc-writer preserves the official bocha search capability for external supplements", async () => {
@@ -202,13 +201,13 @@ test("doc-writer preserves the official bocha search capability for external sup
   }
 
   expect(writerPrompt).toContain("external-supplements.md");
-  expect(writerPrompt).toContain("record that topic as a blocker");
+  expect(writerPrompt).toContain("把该主题记录为 blocker");
   expect(writerPrompt).toContain("source titles");
   expect(writerPrompt).toContain("source URLs");
-  expect(writerPrompt).toContain("section-level evidence");
+  expect(writerPrompt).toContain("章节级证据");
   expect(writerPrompt).not.toContain("web_search_fallback.py");
   expect(writerPrompt).not.toContain("if no web-search tool is available but `bash` is allowed");
-  expect(entryPrompt).toContain("After `doc-writer`, always call `doc-verifier`");
+  expect(entryPrompt).toContain("必须先调用 `doc-verifier`");
 });
 
 test("doc-* helper prompts require runtime-local script resolution instead of repo-root fallback", async () => {
@@ -226,15 +225,15 @@ test("doc-* helper prompts require runtime-local script resolution instead of re
     expect(prompt).toContain('if [ -f "./.opencode/runtime-support/document-state/');
     expect(prompt).not.toContain("git rev-parse --show-toplevel");
     expect(prompt).not.toContain("REPO_ROOT");
-    expect(prompt).toContain("do not use `glob`");
+    expect(prompt).toContain("不要用 `glob` 或 `list`");
   }
 });
 
 test("doc-writer avoids reading the full facts store when section evidence is already available", async () => {
   const writerPrompt = await readFile(resolve(root, ".opencode/prompts/doc-writer.md"), "utf8");
 
-  expect(writerPrompt).toContain("treat `.worktree/facts.json` as a backing store");
-  expect(writerPrompt).toContain("when section-level evidence already exists, do not read the whole facts file into context");
+  expect(writerPrompt).toContain("把 `.worktree/facts.json` 当成 backing store");
+  expect(writerPrompt).toContain("当章节级证据已存在时，不要把整份 facts 文件全部读入上下文");
   expect(writerPrompt).toContain("required_evidence");
 });
 
@@ -244,32 +243,32 @@ test("hidden doc-* prompts prefer owned state surfaces before narrow source rere
   const writerPrompt = await readFile(resolve(root, ".opencode/prompts/doc-writer.md"), "utf8");
   const verifierPrompt = await readFile(resolve(root, ".opencode/prompts/doc-verifier.md"), "utf8");
 
-  expect(mergerPrompt).toContain("merge from compiled state artifacts first");
-  expect(mergerPrompt).toContain("exact source slice needed");
+  expect(mergerPrompt).toContain("优先基于 compiled state artifact 合并");
+  expect(mergerPrompt).toContain("精确 source slice");
 
-  expect(plannerPrompt).toContain("do not fall back to rereading `.worktree/sources/*.json` as the default planning surface");
-  expect(plannerPrompt).toContain("reopen only the exact artifact(s) needed");
+  expect(plannerPrompt).toContain("不要再把 `.worktree/sources/*.json` 作为默认 planning surface");
+  expect(plannerPrompt).toContain("只重开解决该问题所需的精确 artifact");
 
-  expect(writerPrompt).toContain("do not fall back to `.worktree/sources/*.json` or raw source documents as the default drafting surface");
-  expect(writerPrompt).toContain("reopen only the exact source artifact needed for that claim");
+  expect(writerPrompt).toContain("不要再把 `.worktree/sources/*.json` 或原始源文档当成默认起草面");
+  expect(writerPrompt).toContain("只重开解决该 claim 所需的精确 source artifact");
 
-  expect(verifierPrompt).toContain("do not default to reopening `.worktree/sources/*.json` or raw source documents");
-  expect(verifierPrompt).toContain("reopen only the exact source artifact needed to confirm the risk");
+  expect(verifierPrompt).toContain("不要默认重开 `.worktree/sources/*.json` 或原始源文档");
+  expect(verifierPrompt).toContain("只重开确认该风险所需的精确 source artifact");
 });
 
 test("document-writer trusts completed doc-* receipts instead of spawning general to reread phase outputs", async () => {
   const entryPrompt = await readFile(resolve(root, ".opencode/agent/document-writer.md"), "utf8");
 
-  expect(entryPrompt).toContain("treat the completed `task` output as the primary receipt surface");
-  expect(entryPrompt).toContain("if the receipt is thin or ambiguous, reopen the owning `doc-*` phase");
+  expect(entryPrompt).toContain("把已完成的 `task` 输出视为主要回执面");
+  expect(entryPrompt).toContain("如果回执过薄或含糊，就用更窄的 follow-up task 重新打开");
 });
 
 test("document-writer jumps straight from manifest triage into doc-reader instead of exploratory source reads", async () => {
   const entryPrompt = await readFile(resolve(root, ".opencode/agent/document-writer.md"), "utf8");
 
-  expect(entryPrompt).toContain("If the manifest lists sources without `.worktree/sources/<doc-id>.json`, call `doc-reader`");
-  expect(entryPrompt).toContain("avoid repeated exploratory source reads in the main session");
-  expect(entryPrompt).toContain("If source understanding, evidence, or online supplements are still missing, reopen the owning `doc-*` phase with a narrow supplement task");
+  expect(entryPrompt).toContain("如果 manifest 列出了还没有 `.worktree/sources/<doc-id>.json` 的源文件，调用 `doc-reader`");
+  expect(entryPrompt).toContain("避免在主会话里重复做探索式源读取");
+  expect(entryPrompt).toContain("如果源理解、证据或联网补充仍缺失，就用窄补充任务重新打开");
 });
 
 test("document-writer prompt examples stay generic and planner wording avoids sample-specific labels", async () => {
@@ -277,7 +276,7 @@ test("document-writer prompt examples stay generic and planner wording avoids sa
   const entryPrompt = await readFile(resolve(root, ".opencode/agent/document-writer.md"), "utf8");
 
   expect(plannerPrompt).not.toContain("Qin-like");
-  expect(plannerPrompt).toContain("keep the fallback structure generic");
+  expect(plannerPrompt).toContain("fallback 结构保持通用");
   expect(entryPrompt).not.toContain("outputs/ly-solution.md");
   expect(entryPrompt).not.toContain(".bid/**");
   expect(entryPrompt).toContain("outputs/final.docx");
@@ -331,7 +330,7 @@ test("document-mode bridge does not hardcode long-form document routing heuristi
   expect(bridge).not.toContain("long-form, multi-source, formal deliverable");
   expect(bridge).not.toContain("hand control to \\`document-writer\\` early");
   expect(bridge).not.toContain("open-ended \\`bash\\`/\\`glob\\`/\\`read\\` loop");
-  expect(bridge).toContain("read those narrow control files before doing another broad rediscovery pass");
+  expect(bridge).toContain("先读这些窄控制文件");
 });
 
 test("common-work routes relevant factual tasks through attached knowledge before broad discovery", async () => {
@@ -374,7 +373,7 @@ test("common-work prefers durable state over rediscovery", async () => {
 test("common-work asks only blocking user questions", async () => {
   const prompt = await readFile(resolve(root, ".opencode/agent/common-work.md"), "utf8");
 
-  expect(prompt).toContain("## When To Ask The User");
+  expect(prompt).toContain("## 何时向用户提问");
   expect(prompt).toContain("`target_doc` 不明确");
   expect(prompt).toContain("权威规则彼此冲突");
   expect(prompt).toContain("一次只问一个真正阻塞的问题");
@@ -442,20 +441,20 @@ test("writer and verifier prompts require a durable external supplement report w
   expect(writerPrompt).toContain("reports/doc-writer/external-supplements.md");
   expect(writerPrompt).toContain("query terms");
   expect(writerPrompt).toContain("source URLs");
-  expect(writerPrompt).toContain("surface consumed references");
-  expect(writerPrompt).toContain("prefer authoritative sources");
+  expect(writerPrompt).toContain("把真正消费的参考表面化为具体引用");
+  expect(writerPrompt).toContain("优先使用权威来源");
   expect(verifierPrompt).toContain("external-supplements.md");
-  expect(verifierPrompt).toContain("requested external support");
-  expect(verifierPrompt).toContain("if consumed supplements exist but the deliverable still uses placeholder language instead of concrete citations");
+  expect(verifierPrompt).toContain("当任务要求外部补充时");
+  expect(verifierPrompt).toContain("如果补充材料已经被消费，但交付物里仍然是 placeholder 语言");
 });
 
 test("merger and planner no longer hide sample-specific topic or noise heuristics inside prompts", async () => {
   const mergerPrompt = await readFile(resolve(root, ".opencode/prompts/doc-merger.md"), "utf8");
   const plannerPrompt = await readFile(resolve(root, ".opencode/prompts/doc-planner.md"), "utf8");
 
-  expect(mergerPrompt).toContain("do not turn this helper into a hidden task classifier");
-  expect(plannerPrompt).toContain("treat it as the canonical section contract");
-  expect(plannerPrompt).toContain("keep the fallback structure generic");
+  expect(mergerPrompt).toContain("不要把这个 helper 变成隐藏的任务分类器");
+  expect(plannerPrompt).toContain("把它视为规范章节合同");
+  expect(plannerPrompt).toContain("fallback 结构保持通用");
   expect(plannerPrompt).not.toContain("named systems are the primary section contract");
 });
 
@@ -481,13 +480,13 @@ test("document-writer entry agent has orchestrator task and doc_state permission
     expect(orchestrator).toBeUndefined();
   }
 
-  expect(agentPrompt).toContain("If `.worktree/index.json` is missing or has no `task_model`, call `doc-intake`");
-  expect(agentPrompt).toContain("do not begin a fresh turn with broad glob or workspace-wide reads");
-  expect(agentPrompt).toContain("do not maintain a todo list in the main session");
-  expect(agentPrompt).toContain("avoid repeated exploratory source reads in the main session");
-  expect(agentPrompt).toContain("let the child choose its readable working surface");
-  expect(agentPrompt).toContain("when calling `task`, always provide `description`, `subagent_type`, and `prompt`");
-  expect(agentPrompt).toContain("Delegation contract:");
+  expect(agentPrompt).toContain("如果 `.worktree/index.json` 缺失，或其中没有 `task_model`，调用 `doc-intake`");
+  expect(agentPrompt).toContain("不要从大范围 `glob` 或全 workspace 读取开始");
+  expect(agentPrompt).toContain("不要在主会话里维护 todo list");
+  expect(agentPrompt).toContain("避免在主会话里重复做探索式源读取");
+  expect(agentPrompt).toContain("可读工作面由子代理自行选择");
+  expect(agentPrompt).toContain("调用 `task` 时，始终提供 `description`、`subagent_type` 和 `prompt`");
+  expect(agentPrompt).toContain("## 委派合同");
 });
 
 test("doc-verifier can execute the verification script directly", async () => {

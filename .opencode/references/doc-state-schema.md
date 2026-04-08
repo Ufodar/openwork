@@ -1,20 +1,20 @@
-# Document State Schema
+# 文档状态 Schema
 
-This workspace uses a document-state layer so the primary document agent can supervise long tasks without repeatedly reopening raw source files.
+当前 workspace 使用一层 document-state，让主文档代理能够监督长任务，而无需反复重开原始源文件。
 
-## Design intent
+## 设计意图
 
-- Raw source files are not the main session's default memory surface.
-- Subagents compile source material into durable state files.
-- The primary agent reads state first, then delegates narrow follow-up work.
+- 原始源文件不是主会话的默认记忆面
+- 子代理把源材料编译成 durable state 文件
+- 主代理先读 state，再委派窄后续工作
 
-## Canonical state files
+## 标准状态文件
 
 ### `.worktree/index.json`
 
-The control-plane summary for the current run.
+当前运行的控制面摘要。
 
-Recommended fields:
+推荐字段：
 - `version`
 - `project`
 - `target_doc`
@@ -26,16 +26,16 @@ Recommended fields:
 
 ### `.worktree/sources/manifest.json`
 
-The source registry for the current workspace.
+当前 workspace 的源文件清单。
 
-Recommended fields:
+推荐字段：
 - `generated_at`
 - `goal`
 - `target_doc`
 - `sources`
 - `blockers`
 
-Each source entry should prefer:
+每个 source entry 推荐包含：
 - `docId`
 - `title`
 - `relativePath`
@@ -45,9 +45,9 @@ Each source entry should prefer:
 
 ### `.worktree/sources/<doc-id>.json`
 
-The compiled read model for one source document.
+单份源文档的编译后读取模型。
 
-Recommended fields:
+推荐字段：
 - `docId`
 - `title`
 - `relativePath`
@@ -62,9 +62,9 @@ Recommended fields:
 
 ### `.worktree/facts.json`
 
-The merged canonical fact surface.
+合并后的规范事实面。
 
-Recommended fields:
+推荐字段：
 - `goal`
 - `target_doc`
 - `canonical_facts`
@@ -74,17 +74,17 @@ Recommended fields:
 
 ### `.worktree/merge/conflicts.json`
 
-Explicit contradictions and unresolved questions.
+显式记录冲突与未解决问题。
 
-Recommended fields:
+推荐字段：
 - `conflicts`
 - `open_questions`
 
 ### `.worktree/plan/solution-plan.json`
 
-The writer-facing execution plan.
+面向 writer 的执行计划。
 
-Recommended fields:
+推荐字段：
 - `goal`
 - `target_doc`
 - `recommended_route`
@@ -96,9 +96,9 @@ Recommended fields:
 
 ### `.worktree/coverage.json`
 
-The current drafting coverage surface.
+当前起草覆盖面。
 
-Recommended fields:
+推荐字段：
 - `goal`
 - `targets`
 - `covered`
@@ -108,9 +108,9 @@ Recommended fields:
 
 ### `.worktree/verify/coverage.json`
 
-The verifier's view of actual coverage and remaining risk.
+verifier 视角下的真实覆盖情况与剩余风险。
 
-Recommended fields:
+推荐字段：
 - `checked_at`
 - `verified`
 - `partial`
@@ -118,17 +118,17 @@ Recommended fields:
 - `risks`
 - `recommended_next_action`
 
-## Ownership model
+## 归属模型
 
 - `doc-intake`
-  writes `.worktree/index.json`, `.worktree/sources/manifest.json`, `.worktree/conventions.md`
+  - 写 `.worktree/index.json`、`.worktree/sources/manifest.json`、`.worktree/conventions.md`
 - `doc-reader`
-  writes `.worktree/sources/<doc-id>.json`
+  - 写 `.worktree/sources/<doc-id>.json`
 - `doc-merger`
-  writes `.worktree/facts.json`, `.worktree/merge/conflicts.json`
+  - 写 `.worktree/facts.json`、`.worktree/merge/conflicts.json`
 - `doc-planner`
-  writes `.worktree/plan/solution-plan.json`, `.worktree/coverage.json`
+  - 写 `.worktree/plan/solution-plan.json`、`.worktree/coverage.json`
 - `doc-writer`
-  writes the target deliverable and refreshes `.worktree/coverage.json`
+  - 写目标交付物，并刷新 `.worktree/coverage.json`
 - `doc-verifier`
-  writes `.worktree/verify/coverage.json` and verification reports
+  - 写 `.worktree/verify/coverage.json` 和验证报告

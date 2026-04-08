@@ -1,4 +1,4 @@
-# Attached Knowledge Routing
+# 附加知识库路由
 
 当当前 session 已附加知识库时，相关的 recall 任务不能跳过它。
 

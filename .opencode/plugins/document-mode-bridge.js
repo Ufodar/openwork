@@ -128,23 +128,23 @@ function classifyWorkspace(rootDir) {
 
 function buildSystemBridge() {
   return `<DOCUMENT_MODE_BRIDGE>
-- Prefer a readable working surface for binary Office files: reuse an existing readable artifact or use the appropriate document capability before treating the original binary like plain text.
-- Keep reopenable temp artifacts under \`<WORKSPACE>/.tmp/system\`, and keep persisted state plus final deliverables inside \`<WORKSPACE>\`; do not treat workspace-external paths or \`external_directory\` as the normal document I/O path.
-- If bootstrap control files such as \`.worktree/index.json\` or \`.worktree/sources/manifest.json\` already exist, read those narrow control files before doing another broad rediscovery pass.
-- Before delivery, run \`python3 .opencode/references/check_document_delivery.py --target outputs --target reports\` plus the exact final file path if it lives elsewhere, and do not point the sweep at the whole \`.\` tree.
+- 面对二进制 Office 文件时，优先进入可读工作面：先复用已有可读副本，或先调用合适的文档能力，再去处理原始二进制文件。
+- 可重开的临时工件放在 \`<WORKSPACE>/.tmp/system\`；持久状态和最终交付物放在 \`<WORKSPACE>\` 内，不要把 workspace 外路径或 \`external_directory\` 当成常规文档 I/O 路线。
+- 如果 \`.worktree/index.json\`、\`.worktree/sources/manifest.json\` 这类 bootstrap 控制文件已经存在，先读这些窄控制文件，再决定是否继续做更宽的重新发现。
+- 交付前运行 \`python3 .opencode/references/check_document_delivery.py --target outputs --target reports\`；如果最终文件在别处，再额外传入那个精确路径，不要把整个 \`.\` 树都拿去扫。
 </DOCUMENT_MODE_BRIDGE>`;
 }
 
 function buildCompactionBridge() {
-  return `## Document Session Continuation Contract
-When summarizing for continuation, preserve if present:
-- the authoritative source files and the stable target document
-- the current stage
-- state files already written
-- unresolved blockers and open questions
-- the single best next action
+  return `## 文档会话续跑合同
+在为后续续跑做总结时，如果以下信息存在，必须保留下来：
+- 权威源文件与稳定目标文档
+- 当前阶段
+- 已经写出的 state 文件
+- 尚未解决的 blocker 与 open question
+- 当前最值得做的下一步
 
-Do not collapse exact filenames, target paths, or blockers into vague summaries.`;
+不要把精确文件名、目标路径或 blocker 压缩成模糊总结。`;
 }
 
 function appendSystemPrompt(output, prompt) {

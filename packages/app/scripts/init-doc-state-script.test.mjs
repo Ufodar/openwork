@@ -35,12 +35,14 @@ test("init_doc_state.py bootstraps a document workspace from uploaded source fil
 
     const index = JSON.parse(await readFile(join(workspace, ".worktree", "index.json"), "utf8"));
     const manifest = JSON.parse(await readFile(join(workspace, ".worktree", "sources", "manifest.json"), "utf8"));
+    const intent = JSON.parse(await readFile(join(workspace, ".worktree", "intent.json"), "utf8"));
     const conventions = await readFile(join(workspace, ".worktree", "conventions.md"), "utf8");
 
     expect(index.phase).toBe("intake_ready");
     expect(index.target_doc).toBe("outputs/算力网络项目申报技术材料.docx");
     expect(index.children).toEqual([]);
     expect(index.summary).toContain("2");
+    expect(index.intent_ref).toBe(".worktree/intent.json");
 
     expect(manifest.goal).toContain("项目申报技术材料");
     expect(manifest.target_doc).toBe("outputs/算力网络项目申报技术材料.docx");
@@ -50,6 +52,12 @@ test("init_doc_state.py bootstraps a document workspace from uploaded source fil
       "融合算力云平台白皮书.docx",
     ]);
     expect(manifest.sources.map((item) => item.docId)).toEqual(["src-001", "src-002"]);
+    expect(intent.goal).toContain("项目申报技术材料");
+    expect(intent.target_doc).toBe("outputs/算力网络项目申报技术材料.docx");
+    expect(intent.deliverable_format).toBe("docx");
+    expect(intent.sections).toEqual([]);
+    expect(intent.must_preserve_titles).toEqual([]);
+    expect(intent.evidence_posture).toBe("separate-facts-from-examples");
     expect(conventions).toContain("authoritative source hierarchy");
     expect(conventions).toContain("outputs/算力网络项目申报技术材料.docx");
   } finally {

@@ -8,6 +8,7 @@ Primary outputs:
 
 Inputs normally come from:
 - `.worktree/index.json`
+- `.worktree/intent.json`
 - `.worktree/sources/manifest.json`
 - `.worktree/sources/*.json`
 - optional existing task-specific fact surfaces when they exist
@@ -35,7 +36,7 @@ Responsibilities:
 - normalize hard facts into a canonical structure
 - surface contradictions instead of smoothing them away
 - keep unresolved gaps visible
-- enforce goal relevance before facts reach downstream drafting
+- preserve explicit topics and source traceability when compiled artifacts already provide them
 
 `facts.json` should favor:
 - `goal`
@@ -51,10 +52,10 @@ Responsibilities:
 
 Merger discipline:
 - preserve locator-level traceability whenever possible
-- if multiple sources disagree and there is no clear authority, mark the conflict unresolved
+- when resolving conflicts, read the `authority` field from each source entry in `manifest.json`; prefer sources classified as `constraint` > `authoritative` > `reference` > `exemplar`
+- if compiled artifacts do not provide enough structure to resolve a conflict, keep it unresolved rather than inventing a domain-specific priority rule
 - do not silently drop hard facts just because they are inconvenient
-- prefer a smaller canonical set with good evidence over a bloated weak set
-- apply goal relevance aggressively: keep facts that directly support the requested sections and drop low-relevance content unless the user explicitly asked for it
+- do not turn this helper into a hidden task classifier, domain router, or section planner
 - merge from compiled state artifacts first; do not default back to raw source documents once compiled artifacts already exist
 - if a specific contradiction still cannot be resolved from compiled artifacts alone, reopen only the exact source slice needed to clarify that conflict and keep the direct-source reread narrow
 - write only the merger-owned outputs for this task

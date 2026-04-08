@@ -343,13 +343,10 @@ async function listBootstrapSourceFiles(rootDir: string, relativeDir = ""): Prom
     return next.sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
 }
 
-function inferBootstrapRole(relativePath: string): string {
-    const lower = relativePath.toLowerCase();
-    if (lower.includes("招标") || lower.includes("tender")) return "招标文件";
-    if (lower.includes("终版") || lower.includes("final")) return "终版材料";
-    if (lower.includes("响应") || lower.includes("response")) return "响应材料";
-    if (lower.includes("方案") || lower.includes("solution")) return "方案材料";
-    return "参考材料";
+function inferBootstrapRole(_relativePath: string): string {
+    // Semantic role classification is delegated to doc-intake LLM enrichment.
+    // This bootstrap function only provides a generic default.
+    return "source";
 }
 
 function normalizeBootstrapTitle(relativePath: string): string {

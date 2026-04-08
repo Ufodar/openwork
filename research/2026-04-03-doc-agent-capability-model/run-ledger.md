@@ -779,6 +779,43 @@
   - 这两项都是低风险局部修复，不涉及 prompt/harness 架构变更
   - 排查收敛后，可以进入 status.md 推荐的下一步：广义文档任务最小验证
 
+## RL-022 helper 去启发式重构：把隐形领域规划从 deterministic 脚本中移除
+
+- 目标：
+  - 修正 `.opencode/runtime-support/document-state/*.py` 中把样例驱动启发式写进共享 helper 的问题。
+- 主要变更：
+  - [document.ts](../../packages/server/src/document.ts)
+    - `refreshBootstrapDocumentState()` 不再根据文件名推断“招标文件/方案材料”等语义角色
+    - bootstrap source inventory 默认只写通用 `role=source`，把语义归类交回 `doc-intake`
+  - [init_doc_state.py](../../.opencode/runtime-support/document-state/init_doc_state.py)
+    - 新增 `.worktree/intent.json` skeleton
+    - `index.json` 新增 `intent_ref`
+  - [merge_doc_state.py](../../.opencode/runtime-support/document-state/merge_doc_state.py)
+    - 删除关键词/topic/noise 打分体系
+    - 仅保留 compiled source artifact 的结构化合并、去重、显式 topic 继承与显式 conflict 收集
+  - [plan_doc_state.py](../../.opencode/runtime-support/document-state/plan_doc_state.py)
+    - 删除“多系统建设方案”“点对点解决路径”等 goal 驱动章节猜测
+    - 改为优先消费 `.worktree/intent.json.sections`
+    - 无显式 intent 合同时只回退到通用三段式章节
+  - prompt/runtime docs 同步：
+    - [doc-intake.md](../../.opencode/prompts/doc-intake.md)
+    - [doc-merger.md](../../.opencode/prompts/doc-merger.md)
+    - [doc-planner.md](../../.opencode/prompts/doc-planner.md)
+    - [runtime-document-state-instructions.md](../../.opencode/references/runtime-document-state-instructions.md)
+  - 新合同测试已通过：
+    - [init-doc-state-script.test.mjs](../../packages/app/scripts/init-doc-state-script.test.mjs)
+    - [merge-doc-state-script.test.mjs](../../packages/app/scripts/merge-doc-state-script.test.mjs)
+    - [plan-doc-state-script.test.mjs](../../packages/app/scripts/plan-doc-state-script.test.mjs)
+    - [document.bootstrap-state.test.ts](../../packages/server/src/document.bootstrap-state.test.ts)
+- 新结论：
+  - 之前的 helper 不只是“有一些坏词表”，而是在 deterministic 层偷做了 agent/harness 层该做的领域推断。
+  - `.worktree/intent.json` 现在成为 helper 上游的显式任务合同面。
+  - deterministic helper 的职责应收成：
+    - intake：生成最小状态骨架
+    - merger：合并编译结果
+    - planner：装配显式章节合同与 merged facts
+  - 旧的 prompt 护栏测试仍有大量历史断言未对齐，这不影响这轮 helper 收口结论；后续应把这些测试继续收成真正的系统护栏。
+
 ## 当前台账的用途
 
 后续只要发生下面任一类变化，就应追加新轮次：

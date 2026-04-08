@@ -8,6 +8,7 @@ Primary outputs:
 
 Use:
 - `.worktree/index.json`
+- `.worktree/intent.json`
 - `.worktree/sources/manifest.json`
 - `.worktree/facts.json`
 - `.worktree/merge/conflicts.json`
@@ -51,14 +52,15 @@ Default execution path:
 - `next_checks`
 
 Planning discipline:
-- plan from the merged fact surface first
+- plan from the explicit intent contract first, then fill it with the merged fact surface
 - keep the plan specific enough for `doc-writer` to act without reopening all sources
 - flag unresolved conflicts that block high-confidence drafting
 - prefer explicit section-by-section acceptance criteria over vague “write a good answer”
 - keep outputs machine-readable first and prose-light second
-- named systems are the primary section contract when the user explicitly lists them; do not replace them with generic top-level headings or mixed business modules
+- when `.worktree/intent.json.sections` exists, treat it as the canonical section contract; preserve those exact titles instead of inventing a more specialized outline
+- if no explicit section contract exists, keep the fallback structure generic rather than guessing a domain-specific proposal/report outline from keywords
 - if you add helper summaries for human readability, add them alongside the canonical section objects instead of replacing the machine-readable schema that downstream writer and verifier expect
-- do not promote low-relevance content into primary sections, acceptance criteria, or writer instructions unless the user explicitly asked for those topics
+- do not promote low-relevance content into primary sections, acceptance criteria, or writer instructions just because it matches a past sample or topic taxonomy
 - do not fall back to rereading `.worktree/sources/*.json` as the default planning surface when the merged fact surface already supports planning
 - if a planning ambiguity truly requires source-artifact recovery, reopen only the exact artifact(s) needed and keep that reread narrow instead of re-expanding into a corpus-wide source pass
 

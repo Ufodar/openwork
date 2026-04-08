@@ -45,6 +45,12 @@
   - `common-work` 空输入 `write`：模型生成问题，不是 server 缺陷；缓解靠工作流架构
   - `document/upload AbortError`：proxy `keepAliveTimeout=65s` 太短，可修
   - `/message` 坏 JSON：harness 容错问题，不阻塞产品
+- **已完成 deterministic helper 去启发式收口（RL-022）：**
+  - `packages/server/src/document.ts` 的 bootstrap source inventory 不再按文件名推断语义角色，统一回退到通用 `source`
+  - `init_doc_state.py` 新增 `.worktree/intent.json` skeleton
+  - `merge_doc_state.py` 不再做样例驱动关键词/topic/noise 推断
+  - `plan_doc_state.py` 不再根据 goal 文本偷做章节猜测，改为优先消费显式 `intent.json`
+  - `doc-intake/doc-merger/doc-planner` 与 runtime instructions 已同步新合同
 
 ## 当前最重要的判断
 
@@ -61,6 +67,9 @@
 - hosted 排查也继续按两层分开看：
   - 公网入口存在上传/连接毛刺
   - 产品内链路存在 `common-work` 空输入 `write` 等更实质的问题
+- 当前对 helper 的判断已经拍板：
+  - deterministic helper 只负责整理 state
+  - 任务建模、领域判断、章节策略不再允许藏在 helper 中
 - compare/debug harness 仍有独立噪音：
   - `/message` 偶发返回坏 JSON
   - 这会让脚本误报失败，但不等于真实 session 没有完成
@@ -82,24 +91,28 @@
 - 还没有增强 document-intake/evidence/compose/verify 四个 skill
 - 还没有增加自适应流水线深度（变更 5）
 - 还没有形成第二阶段的产品级实现计划
+- prompt 护栏测试仍有大量历史断言没有继续收口到新 helper 合同
 
 ## 当前推荐的下一步
 
 1. **可选局部修复（低风险）**
    - `serve-web-prod.mjs` 提高 `keepAliveTimeout` 至 120s 以上
    - harness 脚本对 `/message` 坏 JSON 加 retry/try-catch
-2. **广义文档任务最小验证**
+2. **把历史 prompt 护栏测试继续收口**
+   - 删除或改写仍在冻结旧 helper 假设、旧样例结构、旧路由话术的断言
+   - 只保留真正的系统护栏
+3. **广义文档任务最小验证**
    - 选 2-3 个广义文档场景（会议纪要、对比分析、技术摘要等）
    - 分别用 `common-work` 和 `document-writer` 跑一遍
    - 判断 RL-020 精简后的 prompt 表面是否仍然稳定
-3. **判断 workflow entry 落点**
+4. **判断 workflow entry 落点**
    - blocker 排查已收敛，RL-017/RL-018 的证据仍然有效
    - 可以重新评估 workflow entry 应该落在哪一层
    - 选项：显式产品入口、用户可见的工作形态选择、非样例绑定的通用 harness
-4. **场景 skill 基础设施**
+5. **场景 skill 基础设施**
    - RL-020 审计标记了 11 条待下沉的场景特定规则
    - 建立技术方案 / API 文档等场景 skill 来承接这些规则
-5. 在以上都更清楚后，再决定是否进入 Phase 2b（改 schema / carrier）
+6. 在以上都更清楚后，再决定是否进入 Phase 2b（改 schema / carrier）
 
 ## 不建议现在做的事
 

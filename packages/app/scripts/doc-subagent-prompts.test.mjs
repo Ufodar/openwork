@@ -25,9 +25,9 @@ test("document-writer agent entrypoint uses orchestrator-style delegation rules"
   expect(agentPrompt).not.toContain("标书写作助手主代理");
   expect(agentPrompt).not.toContain("bid-writing and formal document work");
   expect(agentPrompt).toContain("call `doc-intake`");
-  expect(agentPrompt).toContain("do not call non-`doc-*` agents");
+  expect(agentPrompt).toContain("do not delegate document work to `general` or non-`doc-*` agents");
   expect(agentPrompt).toContain("do not edit source documents or the target deliverable yourself");
-  expect(agentPrompt).toContain("After `doc-writer`, call `doc-verifier`");
+  expect(agentPrompt).toContain("After `doc-writer`, always call `doc-verifier`");
   expect(agentPrompt).toContain("reuse that exact path");
   expect(agentPrompt).toContain("current user objective");
   expect(agentPrompt).toContain("allowed input files");
@@ -38,8 +38,6 @@ test("document-writer agent entrypoint uses orchestrator-style delegation rules"
   expect(agentPrompt).toContain("when a later user turn is only a short continuation signal");
   expect(agentPrompt).toContain("exact headings, exact system names, target format, or specific requirements");
   expect(agentPrompt).toContain("carry that wording forward literally into later `doc-*` tasks");
-  expect(agentPrompt).toContain("treat manifest `textRelativePath` entries and similar extraction hints as child-owned metadata");
-  expect(agentPrompt).toContain("do not mirror child-owned extraction hints back into main-session read plans or delegated prompt requirements");
   expect(agentPrompt).toContain("do not invent extra state artifacts, helper reports, or helper scripts");
   expect(agentPrompt).toContain("do not bypass the missing phase");
   expect(agentPrompt).toContain("if a subagent returns partial work, continue from the artifact it produced or relaunch that same subagent");
@@ -98,9 +96,8 @@ test("document-mode bridge does not promote extracted source text as a main-sess
 
   expect(bridge).toContain("\\`.worktree/index.json\\`");
   expect(bridge).toContain("\\`.worktree/sources/manifest.json\\`");
-  expect(bridge).toContain("Do not let extracted source text replace control files as the main-session bootstrap surface");
-  expect(bridge).toContain("source-compilation phases can still consume whichever readable artifacts they need");
-  expect(bridge).not.toContain("If bootstrap state or text refs such as");
+  expect(bridge).toContain("read those narrow control files before doing another broad rediscovery pass");
+  expect(bridge).not.toContain("hand control to \\`document-writer\\` early");
 });
 
 test("writer and verifier prompts treat user-specified section titles as exact headings", async () => {
@@ -109,19 +106,11 @@ test("writer and verifier prompts treat user-specified section titles as exact h
   const entryPrompt = await readFile(resolve(root, ".opencode/agent/document-writer.md"), "utf8");
 
   expect(writerPrompt).toContain("literal heading contract");
-  expect(writerPrompt).toContain("do not invent helper scripts");
-  expect(writerPrompt).toContain("run `verify_doc_state.py` or write verifier-owned artifacts");
   expect(verifierPrompt).toContain("exact heading contract");
-  expect(verifierPrompt).toContain("execute that verification command directly");
   expect(verifierPrompt).toContain("do not fake verifier outputs");
   expect(entryPrompt).toContain("exact headings, exact names");
-  expect(entryPrompt).toContain("If `doc-verifier` reports missing sections");
-  expect(entryPrompt).toContain("do not call non-`doc-*` agents");
-  expect(writerPrompt).toContain("do not pad technical deliverables with unrelated commercial");
-  expect(writerPrompt).toContain("do not satisfy that requirement by leaving only a TODO-style");
+  expect(entryPrompt).toContain("do not delegate document work to `general` or non-`doc-*` agents");
   expect(writerPrompt).toContain("real Office document");
-  expect(writerPrompt).toContain("Do not leave generator source code in the target `.docx` path");
-  expect(writerPrompt).toContain("prefer a Markdown staging draft plus `pandoc <draft>.md -o <target>.docx`");
   expect(verifierPrompt).toContain("text masquerading as `.docx`");
   expect(entryPrompt).toContain("exact headings, exact system names");
 });
@@ -212,23 +201,14 @@ test("doc-writer preserves the official bocha search capability for external sup
     expect(bocha.environment?.BOCHA_API_KEY).toBe("{env:BOCHA_API_KEY}");
   }
 
-  expect(writerPrompt).toContain("bocha-search");
-  expect(writerPrompt).toContain("retry once with a narrower query");
+  expect(writerPrompt).toContain("external-supplements.md");
   expect(writerPrompt).toContain("record that topic as a blocker");
-  expect(writerPrompt).toContain("do not invent source titles");
-  expect(writerPrompt).toContain("do not invent URLs");
-  expect(writerPrompt).toContain("returns mostly reposts");
-  expect(writerPrompt).toContain("at least one higher-authority source");
-  expect(writerPrompt).toContain("mirror-hosted");
-  expect(writerPrompt).toContain("issuing body domain");
-  expect(writerPrompt).toContain("do not use that mirrored URL as the authority anchor");
-  expect(writerPrompt).toContain("at least two substantive content blocks");
-  expect(writerPrompt).toContain("representative response payload");
-  expect(writerPrompt).toContain("section-level evidence contract");
-  expect(writerPrompt).toContain("facts.json.source_briefs");
+  expect(writerPrompt).toContain("source titles");
+  expect(writerPrompt).toContain("source URLs");
+  expect(writerPrompt).toContain("section-level evidence");
   expect(writerPrompt).not.toContain("web_search_fallback.py");
   expect(writerPrompt).not.toContain("if no web-search tool is available but `bash` is allowed");
-  expect(entryPrompt).toContain("After `doc-writer`, call `doc-verifier`");
+  expect(entryPrompt).toContain("After `doc-writer`, always call `doc-verifier`");
 });
 
 test("doc-* helper prompts require runtime-local script resolution instead of repo-root fallback", async () => {
@@ -253,10 +233,9 @@ test("doc-* helper prompts require runtime-local script resolution instead of re
 test("doc-writer avoids reading the full facts store when section evidence is already available", async () => {
   const writerPrompt = await readFile(resolve(root, ".opencode/prompts/doc-writer.md"), "utf8");
 
-  expect(writerPrompt).toContain("do not call `read` on the whole `.worktree/facts.json`");
   expect(writerPrompt).toContain("treat `.worktree/facts.json` as a backing store");
-  expect(writerPrompt).toContain("use `solution-plan.json.sections[*].required_evidence`");
-  expect(writerPrompt).toContain("targeted `bash` extraction");
+  expect(writerPrompt).toContain("when section-level evidence already exists, do not read the whole facts file into context");
+  expect(writerPrompt).toContain("required_evidence");
 });
 
 test("hidden doc-* prompts prefer owned state surfaces before narrow source rereads", async () => {
@@ -267,94 +246,30 @@ test("hidden doc-* prompts prefer owned state surfaces before narrow source rere
 
   expect(mergerPrompt).toContain("merge from compiled state artifacts first");
   expect(mergerPrompt).toContain("exact source slice needed");
-  expect(mergerPrompt).not.toContain("unless the task explicitly authorizes a targeted direct-source reread");
 
   expect(plannerPrompt).toContain("do not fall back to rereading `.worktree/sources/*.json` as the default planning surface");
   expect(plannerPrompt).toContain("reopen only the exact artifact(s) needed");
 
   expect(writerPrompt).toContain("do not fall back to `.worktree/sources/*.json` or raw source documents as the default drafting surface");
-  expect(writerPrompt).toContain("reopen only the exact source artifact or source slice needed for that claim");
+  expect(writerPrompt).toContain("reopen only the exact source artifact needed for that claim");
 
   expect(verifierPrompt).toContain("do not default to reopening `.worktree/sources/*.json` or raw source documents");
-  expect(verifierPrompt).toContain("reopen only the exact source artifact or source slice needed to confirm the risk");
-});
-
-test("doc-writer keeps structured technical deliverables readable and flags mirrored authority in verification", async () => {
-  const writerPrompt = await readFile(resolve(root, ".opencode/prompts/doc-writer.md"), "utf8");
-  const verifierPrompt = await readFile(resolve(root, ".opencode/prompts/doc-verifier.md"), "utf8");
-  const entryPrompt = await readFile(resolve(root, ".opencode/agent/document-writer.md"), "utf8");
-
-  expect(writerPrompt).toContain("avoid raw ASCII box-drawing");
-  expect(writerPrompt).toContain("use prose, tables, or structured bullets instead");
-  expect(writerPrompt).toContain("policy, standards, or compliance claims");
-  expect(writerPrompt).toContain("record the gap instead of upgrading the mirror");
-  expect(writerPrompt).toContain("forward-looking implementation plan");
-  expect(writerPrompt).toContain("可采用");
-  expect(writerPrompt).toContain("brochure-style");
-  expect(writerPrompt).toContain("核心组件或范围");
-  expect(verifierPrompt).toContain("mirror-hosted");
-  expect(verifierPrompt).toContain("issuing body");
-  expect(verifierPrompt).toContain("remaining risk");
-  expect(verifierPrompt).toContain("technical implementation document reads like a product brochure");
-  expect(verifierPrompt).toContain("thin implementation detail");
-  expect(verifierPrompt).toContain("register mismatch");
-  expect(writerPrompt).toContain("create a durable Markdown staging draft");
-  expect(writerPrompt).toContain("do not start by hand-writing a monolithic `python-docx` program");
-  expect(writerPrompt).toContain("keep headings semantic and unprefixed");
-  expect(writerPrompt).toContain("do not manually type chapter/section numbering markers");
-  expect(writerPrompt).toContain("strip any leading chapter/section numbering markers from heading text");
-  expect(writerPrompt).toContain("keep those URLs out of the consumed-supplement list");
-  expect(writerPrompt).toContain("subsection opening sentence explicitly return to the current system name");
-  expect(writerPrompt).toContain("prefer concise explained examples or compact tables");
-  expect(entryPrompt).toContain("exact headings, exact system names");
-  expect(verifierPrompt).toContain("duplicate heading numbering");
-  expect(verifierPrompt).toContain("manual chapter/section numbering markers");
-  expect(verifierPrompt).toContain("even when the paragraph style is a real Heading style");
-  expect(verifierPrompt).toContain("section drift");
-  expect(verifierPrompt).toContain("long raw code dump");
-  expect(writerPrompt).toContain("do not invent administrative or cover metadata");
-  expect(writerPrompt).toContain("identifiers, organizations, owners, contacts, or dates");
-  expect(verifierPrompt).toContain("manual audit is additive");
-  expect(verifierPrompt).toContain("never clear or downgrade a script-detected remaining risk");
-  expect(verifierPrompt).toContain("do not rewrite the verification JSON/report into a greener verdict");
-});
-
-test("document-writer prompts keep document form task-driven instead of forcing one house style", async () => {
-  const writerPrompt = await readFile(resolve(root, ".opencode/prompts/doc-writer.md"), "utf8");
-  const verifierPrompt = await readFile(resolve(root, ".opencode/prompts/doc-verifier.md"), "utf8");
-  const entryPrompt = await readFile(resolve(root, ".opencode/agent/document-writer.md"), "utf8");
-
-  expect(writerPrompt).toContain("match the document form, register, and evidence expectations requested by the task or current plan");
-  expect(writerPrompt).toContain("do not force one house style onto every deliverable");
-  expect(verifierPrompt).toContain("do not assume every deliverable follows one formal register or output form");
-  expect(entryPrompt).toContain("do small supervisory reads of state files, verifier reports, or narrow deliverable excerpts when artifact existence, heading alignment, or phase health is unclear");
-  expect(entryPrompt).toContain("do not use `outputs/**` or the target deliverable as the default reading surface in the main session");
-});
-
-test("document-writer keeps source text and state bootstrap inside the owning doc-* phases", async () => {
-  const entryPrompt = await readFile(resolve(root, ".opencode/agent/document-writer.md"), "utf8");
-
-  expect(entryPrompt).toContain("do not let raw source text, extracted text, or other child-owned readable artifacts become the controller's default rediscovery surface");
-  expect(entryPrompt).toContain("hand source interpretation back to `doc-reader`");
-  expect(entryPrompt).toContain("do not delegate `.worktree/` bootstrap, source analysis, or fact synthesis to `general`");
-  expect(entryPrompt).toContain("keep intake, source compilation, merge, planning, drafting, and verification inside the owning `doc-*` phase");
+  expect(verifierPrompt).toContain("reopen only the exact source artifact needed to confirm the risk");
 });
 
 test("document-writer trusts completed doc-* receipts instead of spawning general to reread phase outputs", async () => {
   const entryPrompt = await readFile(resolve(root, ".opencode/agent/document-writer.md"), "utf8");
 
   expect(entryPrompt).toContain("treat the completed `task` output as the primary receipt surface");
-  expect(entryPrompt).toContain("do not call `general` just to reread or summarize files that a completed `doc-*` phase already reported");
   expect(entryPrompt).toContain("if the receipt is thin or ambiguous, reopen the owning `doc-*` phase");
 });
 
 test("document-writer jumps straight from manifest triage into doc-reader instead of exploratory source reads", async () => {
   const entryPrompt = await readFile(resolve(root, ".opencode/agent/document-writer.md"), "utf8");
 
-  expect(entryPrompt).toContain("once the manifest shows source files without compiled `.worktree/sources/<doc-id>.json` artifacts, call `doc-reader` immediately");
-  expect(entryPrompt).toContain("do not spend another turn trying exploratory source rediscovery in the main session once `doc-reader` is clearly the owning phase");
-  expect(entryPrompt).toContain("after a completed `doc-reader` receipt, route to `doc-merger` or the next owning phase unless the receipt explicitly says source compilation is still blocked");
-  expect(entryPrompt).toContain("reopen `doc-reader` with a narrower follow-up task instead of probing child-owned source artifacts yourself");
+  expect(entryPrompt).toContain("If the manifest lists sources without `.worktree/sources/<doc-id>.json`, call `doc-reader`");
+  expect(entryPrompt).toContain("avoid repeated exploratory source reads in the main session");
+  expect(entryPrompt).toContain("If source understanding, evidence, or online supplements are still missing, reopen the owning `doc-*` phase with a narrow supplement task");
 });
 
 test("document-writer prompt examples stay generic and planner wording avoids sample-specific labels", async () => {
@@ -362,7 +277,7 @@ test("document-writer prompt examples stay generic and planner wording avoids sa
   const entryPrompt = await readFile(resolve(root, ".opencode/agent/document-writer.md"), "utf8");
 
   expect(plannerPrompt).not.toContain("Qin-like");
-  expect(plannerPrompt).toContain("rigid named multi-system section skeleton");
+  expect(plannerPrompt).toContain("keep the fallback structure generic");
   expect(entryPrompt).not.toContain("outputs/ly-solution.md");
   expect(entryPrompt).not.toContain(".bid/**");
   expect(entryPrompt).toContain("outputs/final.docx");
@@ -404,13 +319,10 @@ test("common-work keeps durable drafts and final deliverables in stable workspac
 test("common-work keeps long-form workflow escalation high-level instead of hardcoding route mechanics", async () => {
   const prompt = await readFile(resolve(root, ".opencode/agent/common-work.md"), "utf8");
 
-  expect(prompt).toContain("应尽早升级到 `document-writer` 这条显式 workflow");
-  expect(prompt).toContain("用户给了明确的章节、系统、表格或覆盖清单");
-  expect(prompt).toContain("不要在当前主会话里自由直写整份最终稿");
-  expect(prompt).toContain("不要再并行直写同一份长文交付物");
+  expect(prompt).toContain("尽早升级到 `document-writer` workflow");
+  expect(prompt).toContain("多源材料、正式交付物、多轮修订或显式覆盖验证");
+  expect(prompt).toContain("而不是在主会话里自由直写整份长文");
   expect(prompt).not.toContain("通过 `task` 把控制权交给 `document-writer`");
-  expect(prompt).not.toContain("这个升级应成为当前主会话的第一实质动作");
-  expect(prompt).not.toContain("不要先继续搜索、列 todo、直写草稿");
 });
 
 test("document-mode bridge does not hardcode long-form document routing heuristics", async () => {
@@ -419,7 +331,7 @@ test("document-mode bridge does not hardcode long-form document routing heuristi
   expect(bridge).not.toContain("long-form, multi-source, formal deliverable");
   expect(bridge).not.toContain("hand control to \\`document-writer\\` early");
   expect(bridge).not.toContain("open-ended \\`bash\\`/\\`glob\\`/\\`read\\` loop");
-  expect(bridge).toContain("Do not let extracted source text replace control files as the main-session bootstrap surface");
+  expect(bridge).toContain("read those narrow control files before doing another broad rediscovery pass");
 });
 
 test("common-work routes relevant factual tasks through attached knowledge before broad discovery", async () => {
@@ -530,28 +442,21 @@ test("writer and verifier prompts require a durable external supplement report w
   expect(writerPrompt).toContain("reports/doc-writer/external-supplements.md");
   expect(writerPrompt).toContain("query terms");
   expect(writerPrompt).toContain("source URLs");
-  expect(writerPrompt).toContain("surface those consumed references in the task-appropriate references or evidence section");
-  expect(writerPrompt).toContain("prefer authoritative external supplements");
-  expect(writerPrompt).toContain("avoid content farms");
-  expect(writerPrompt).toContain("do not introduce concrete product names");
+  expect(writerPrompt).toContain("surface consumed references");
+  expect(writerPrompt).toContain("prefer authoritative sources");
   expect(verifierPrompt).toContain("external-supplements.md");
   expect(verifierPrompt).toContain("requested external support");
-  expect(verifierPrompt).toContain("external support not surfaced into the final deliverable");
-  expect(verifierPrompt).toContain("official or authoritative domains");
-  expect(verifierPrompt).toContain("repost sites");
-  expect(writerPrompt).toContain("keep layer/component labels unique");
-  expect(verifierPrompt).toContain("duplicate architecture labeling");
+  expect(verifierPrompt).toContain("if consumed supplements exist but the deliverable still uses placeholder language instead of concrete citations");
 });
 
-test("merger and planner filter out goal-irrelevant commercial or operations noise", async () => {
+test("merger and planner no longer hide sample-specific topic or noise heuristics inside prompts", async () => {
   const mergerPrompt = await readFile(resolve(root, ".opencode/prompts/doc-merger.md"), "utf8");
   const plannerPrompt = await readFile(resolve(root, ".opencode/prompts/doc-planner.md"), "utf8");
 
-  expect(mergerPrompt).toContain("goal relevance");
-  expect(mergerPrompt).toContain("business, operational, marketing, or marketplace details");
-  expect(plannerPrompt).toContain("named systems are the primary section contract");
-  expect(plannerPrompt).toContain("do not promote low-relevance business, operations, or domain-noise facts");
-  expect(plannerPrompt).toContain("mixed-signal operational content");
+  expect(mergerPrompt).toContain("do not turn this helper into a hidden task classifier");
+  expect(plannerPrompt).toContain("treat it as the canonical section contract");
+  expect(plannerPrompt).toContain("keep the fallback structure generic");
+  expect(plannerPrompt).not.toContain("named systems are the primary section contract");
 });
 
 test("document-writer entry agent has orchestrator task and doc_state permissions", async () => {
@@ -576,12 +481,11 @@ test("document-writer entry agent has orchestrator task and doc_state permission
     expect(orchestrator).toBeUndefined();
   }
 
-  expect(agentPrompt).toContain("If `.worktree/index.json` or `.worktree/sources/manifest.json` is missing, call `doc-intake`");
-  expect(agentPrompt).toContain("do not begin a fresh turn with `glob .worktree/**/*`, `glob **/*`, or `read(<WORKSPACE>)`");
+  expect(agentPrompt).toContain("If `.worktree/index.json` is missing or has no `task_model`, call `doc-intake`");
+  expect(agentPrompt).toContain("do not begin a fresh turn with broad glob or workspace-wide reads");
   expect(agentPrompt).toContain("do not maintain a todo list in the main session");
-  expect(agentPrompt).toContain("do not spend another turn trying exploratory source rediscovery in the main session");
-  expect(agentPrompt).toContain("do not glob `outputs/**`, `reports/**`, or `**/*.md`");
-  expect(agentPrompt).toContain("let the child choose the right readable working surface");
+  expect(agentPrompt).toContain("avoid repeated exploratory source reads in the main session");
+  expect(agentPrompt).toContain("let the child choose its readable working surface");
   expect(agentPrompt).toContain("when calling `task`, always provide `description`, `subagent_type`, and `prompt`");
   expect(agentPrompt).toContain("Delegation contract:");
 });

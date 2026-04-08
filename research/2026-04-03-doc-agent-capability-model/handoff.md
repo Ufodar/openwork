@@ -65,6 +65,10 @@
     - 默认观察面
     - phase ownership
     - 不要在同一种错误上反复打转
+- helper 去启发式的方向已经拍板：
+  - `.worktree/intent.json` 是 deterministic helper 的上游显式任务合同
+  - `merge_doc_state.py` / `plan_doc_state.py` 不再允许藏领域词表、样例 topic 分类或章节猜测
+  - `document.ts` 的 bootstrap source inventory 也不再根据文件名偷做“招标文件/方案材料”之类的角色推断；这类语义 enrichment 归 `doc-intake`
 
 ## 当前最重要的两个文件
 
@@ -98,18 +102,21 @@ Phase 2a prompt 收口（RL-005）、统一面审计（RL-020）、runtime block
 
 最合理的下一步是：
 
-1. **广义文档任务最小验证**
+1. **把历史 prompt 护栏测试继续收口**
+   - 在进入样例验证前，先把仍冻结旧 helper/旧路由话术的 prompt 护栏测试继续收口
+   - 只保留真正的系统护栏
+2. **广义文档任务最小验证**
    - 选 2-3 个广义文档场景（会议纪要、对比分析、技术摘要等）
    - 分别用 `common-work` 和 `document-writer` 跑一遍
    - 判断 RL-020 精简后的 prompt 表面是否仍然稳定
-2. **判断 workflow entry 落点**
+3. **判断 workflow entry 落点**
    - RL-017/RL-018 的证据仍然有效
    - 可以重新评估 workflow entry 应该落在哪一层
    - 选项：显式产品入口、用户可见的工作形态选择、非样例绑定的通用 harness
-3. **场景 skill 基础设施**
+4. **场景 skill 基础设施**
    - RL-020 审计标记了 11 条待下沉的场景特定规则
    - 建立技术方案 / API 文档等场景 skill 来承接这些规则
-4. 在以上都更清楚后，再决定是否进入 Phase 2b（改 schema / carrier）
+5. 在以上都更清楚后，再决定是否进入 Phase 2b（改 schema / carrier）
 
 ## 当前开放问题
 

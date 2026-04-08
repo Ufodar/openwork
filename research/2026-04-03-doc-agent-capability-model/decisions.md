@@ -145,3 +145,13 @@
   - 研究目录不是聊天记录的备忘录，而是当前第二阶段工作的硬约束面。
 - 原因：
   - 当前这轮偏航已经证明：如果只把研究目录当参考资料，很容易重新滑回局部优化、样例驱动、启发式补丁。
+
+## D-016 deterministic document-state helper 不承担领域推断
+
+- 决策：
+  - `init_doc_state.py` 只负责生成最小 bootstrap state，并写出 `.worktree/intent.json` skeleton。
+  - `merge_doc_state.py` 只负责结构化合并 compiled source artifacts，不再根据关键词、样例结构或领域词表做 topic 推断、事实打分、噪音裁剪。
+  - `plan_doc_state.py` 只负责把显式 intent 合同和 merged facts 组装成可执行 plan，不再根据 goal 文本猜测“多系统建设方案”“点对点解决路径”之类的章节结构。
+- 原因：
+  - 这类 helper 一旦开始承担领域推断，就会变成隐藏的 prompt / 隐藏的 planner。
+  - 当前 repo 已经证明，这种做法会把样例观察偷渡成共享产品逻辑，并与第二阶段研究目录的硬约束直接冲突。

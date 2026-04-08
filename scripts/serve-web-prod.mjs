@@ -194,8 +194,8 @@ function createServer({ backendUrl, distDir, host, port }) {
 
   server.requestTimeout = 0;
   server.timeout = 0;
-  server.keepAliveTimeout = 65_000;
-  server.headersTimeout = 66_000;
+  server.keepAliveTimeout = 300_000;
+  server.headersTimeout = 301_000;
 
   server.listen(port, host, () => {
     console.log(`[prod-web] Serving ${distDir}`);

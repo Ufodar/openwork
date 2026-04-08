@@ -1,6 +1,6 @@
 # Handoff
 
-更新时间：2026-04-07
+更新时间：2026-04-08
 
 ## 这份 handoff 是给谁的
 
@@ -38,9 +38,10 @@
 - `document-writer` 当前更像“能工作，但太重”。
 - 当前 related skills 更适合被视为 harness hooks，而不是已完成的 harness。
 - 现有 6-phase / 6-subagent 架构暂时只应视为可运行中间态。
-- 当前最新阻塞已经收紧到 runtime/tool/perms mismatch：
-  - `common-work` 在真实 Qin 样例里卡在空输入的 `write`
-  - compare/debug harness 会把 `/message` 的偶发坏 JSON 误报成产品失败
+- 当前最新阻塞已经收紧到 runtime/tool/perms mismatch，RL-021 已完成排查收敛：
+  - `common-work` 空输入 `write`：模型生成问题，不是 server 缺陷
+  - `document/upload` 间歇性 `AbortError`：proxy `keepAliveTimeout` 太短，已修复（65s → 300s）
+  - `/message` 坏 JSON：harness 容错问题，不阻塞产品
 - `common-work` 的空输入 `write` 不是 `MiniMax-2.5` 单模型现象；`Qwen3.5-397B-A17B` 在同类样例上也能复现。
 - `document-writer` 在同一类 Qin 样例上当前明显更稳：
   - 已完成 reader、writer、verifier 的整轮流程
@@ -92,23 +93,23 @@
 
 ## 当前推荐的下一步
 
-`common-work.md` 和 `document-writer.md` 的 Phase 2a 最小收口已完成（见 RL-005）。
-但在继续做广义文档质量验证前，先要处理 RL-006 暴露出的 runtime blocker。
+Phase 2a prompt 收口（RL-005）、统一面审计（RL-020）、runtime blocker 排查（RL-021）均已完成。
+`keepAliveTimeout` 已从 65s 提高到 300s（RL-021 定位的 upload AbortError 根因）。
 
 最合理的下一步是：
 
-1. **先排 runtime/tool/perms mismatch**
-   - 重点看 `common-work` 空 `write` 调用
-   - 重点看 `document/upload` 长时上传时的 `AbortError`
-   - 判断 compare/debug harness 是否需要对 `/message` 偶发坏 JSON 做容错，避免脚本失败污染产品判断
-2. **做统一面审计，而不是继续局部补丁**
-   - 审 `common-work`
-   - 审 `document-writer`
-   - 审 `document-mode-bridge`
-   - 审 runtime instructions
-   - 必要时再审 `doc-*`
-3. 在更广验证前，不再新增任何样例驱动的 server-side 路由
-4. blocker 与面审计更清楚后，再决定 harness 第一刀
+1. **广义文档任务最小验证**
+   - 选 2-3 个广义文档场景（会议纪要、对比分析、技术摘要等）
+   - 分别用 `common-work` 和 `document-writer` 跑一遍
+   - 判断 RL-020 精简后的 prompt 表面是否仍然稳定
+2. **判断 workflow entry 落点**
+   - RL-017/RL-018 的证据仍然有效
+   - 可以重新评估 workflow entry 应该落在哪一层
+   - 选项：显式产品入口、用户可见的工作形态选择、非样例绑定的通用 harness
+3. **场景 skill 基础设施**
+   - RL-020 审计标记了 11 条待下沉的场景特定规则
+   - 建立技术方案 / API 文档等场景 skill 来承接这些规则
+4. 在以上都更清楚后，再决定是否进入 Phase 2b（改 schema / carrier）
 
 ## 当前开放问题
 
@@ -118,11 +119,8 @@
 - task clarification 是否需要更显式的前置步骤
 - 动作面应工作化到什么程度
 - 哪个 harness 杠杆应成为第一笔代码改动
-- `common-work` 的自由工具面是否需要增加一层“无效空写入”保护
 - 长篇正式交付物是否应在 `common-work` 中更早路由到显式 `document-writer` harness
 - 如果后续确实需要更显式的 workflow entry，应落在什么层，并如何避免再次滑回样例驱动启发式
-- `document/upload` 的间歇性 `AbortError` 到底由什么稳定触发
-- compare/debug harness 对 `/message` 偶发坏 JSON 应该做多强的容错，才不会掩盖真实产品问题
 - 哪些动作级微观禁令其实应该删掉，改成更高层的默认面约束
 
 ## 交接纪律

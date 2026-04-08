@@ -54,9 +54,7 @@ Merger discipline:
 - if multiple sources disagree and there is no clear authority, mark the conflict unresolved
 - do not silently drop hard facts just because they are inconvenient
 - prefer a smaller canonical set with good evidence over a bloated weak set
-- apply goal relevance aggressively: keep facts that directly support the requested sections, architecture, interfaces, data/control flow, API examples, evidence basis, or delivery risks
-- do not carry forward unrelated business, operational, marketing, or marketplace details unless the user explicitly asked for those topics
-- when a source document mixes operational detail with technical architecture, keep the architecture/governance/security facts and drop low-relevance noise from `canonical_facts`
+- apply goal relevance aggressively: keep facts that directly support the requested sections and drop low-relevance content unless the user explicitly asked for it
 - merge from compiled state artifacts first; do not default back to raw source documents once compiled artifacts already exist
 - if a specific contradiction still cannot be resolved from compiled artifacts alone, reopen only the exact source slice needed to clarify that conflict and keep the direct-source reread narrow
 - write only the merger-owned outputs for this task

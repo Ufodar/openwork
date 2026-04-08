@@ -1,6 +1,6 @@
 # 当前状态
 
-更新时间：2026-04-07
+更新时间：2026-04-08
 
 ## 当前目标
 
@@ -32,9 +32,19 @@
   - `common-work` 在 `MiniMax-2.5` 基线下卡在空输入的 `write` tool call
   - `document-writer` 在 `MiniMax-2.5` 基线下暴露出 `.worktree/text/**` 读取权限错位
 - **已完成一轮偏航修正（RL-019）：**
-  - 保留了“样例上更早进入 `document-writer` 更稳”的实验性证据
+  - 保留了”样例上更早进入 `document-writer` 更稳”的实验性证据
   - 撤回了把该观察直接做成共享产品启发式路由的实现
-  - 明确恢复“研究目录是硬约束面”的工作顺序
+  - 明确恢复”研究目录是硬约束面”的工作顺序
+- **已完成统一面审计与 D-012 精简（RL-020）：**
+  - 审计范围覆盖所有 prompt / bridge / runtime instructions（10 个文件）
+  - 审计产物：[unified-surface-audit.md](./unified-surface-audit.md)
+  - `doc-writer.md` 从 ~95 行降到 ~65 行，`doc-verifier.md` 从 ~85 行降到 ~60 行
+  - `document-writer.md` 从 ~94 行降到 ~78 行
+  - 删除/精简约 30 条微观禁令和跨文件重复
+- **已完成 runtime/tool/perms blocker 代码排查收敛（RL-021）：**
+  - `common-work` 空输入 `write`：模型生成问题，不是 server 缺陷；缓解靠工作流架构
+  - `document/upload AbortError`：proxy `keepAliveTimeout=65s` 太短，可修
+  - `/message` 坏 JSON：harness 容错问题，不阻塞产品
 
 ## 当前最重要的判断
 
@@ -60,7 +70,10 @@
 
 ## 当前还没完成
 
-- **还没有完成对 runtime/tool/perms blocker 的收敛** ← 当前最紧迫
+- **runtime/tool/perms blocker 排查已收敛（RL-021）**
+  - 三个 blocker 的根因已定位
+  - 只有 `document/upload AbortError` 有明确可修的代码根因
+  - 其余两个分别是模型问题和 harness 容错问题
 - 还没有给出一个不依赖样例关键词/长度猜测的通用 workflow entry 方案
 - 还没有收敛 `document/upload` 的间歇性 `AbortError` 触发条件
 - 还没有判断 compare/debug harness 是否要对 `/message` 偶发坏 JSON 做更稳的容错
@@ -72,24 +85,21 @@
 
 ## 当前推荐的下一步
 
-1. **继续按研究 harness 排 blocker，而不是继续改路由**
-   - 继续查 `common-work` 空输入 `write`
-   - 继续把公网入口问题与产品内链路问题分开记录
-   - 评估 compare/debug harness 对 `/message` 坏 JSON 的最小必要容错
-2. **先做统一面审计，再决定哪一类问题一起改**
-   - `common-work`
-   - `document-writer`
-   - `document-mode-bridge`
-   - runtime instructions
-   - 必要的 `doc-*` prompts
-   - 目标是找出：
-     - 哪些属于必要护栏
-     - 哪些是过细的动作级纠偏
-     - 哪些是技术偏置或样例偏置
-3. 在 blocker 与面审计都更清楚之后，再决定：
-   - workflow entry 到底应不应该更显式
-   - 如果要更显式，应该落在哪一层，而不是先写实现
-4. 再做广义文档任务最小验证，并决定 harness 第一刀
+1. **可选局部修复（低风险）**
+   - `serve-web-prod.mjs` 提高 `keepAliveTimeout` 至 120s 以上
+   - harness 脚本对 `/message` 坏 JSON 加 retry/try-catch
+2. **广义文档任务最小验证**
+   - 选 2-3 个广义文档场景（会议纪要、对比分析、技术摘要等）
+   - 分别用 `common-work` 和 `document-writer` 跑一遍
+   - 判断 RL-020 精简后的 prompt 表面是否仍然稳定
+3. **判断 workflow entry 落点**
+   - blocker 排查已收敛，RL-017/RL-018 的证据仍然有效
+   - 可以重新评估 workflow entry 应该落在哪一层
+   - 选项：显式产品入口、用户可见的工作形态选择、非样例绑定的通用 harness
+4. **场景 skill 基础设施**
+   - RL-020 审计标记了 11 条待下沉的场景特定规则
+   - 建立技术方案 / API 文档等场景 skill 来承接这些规则
+5. 在以上都更清楚后，再决定是否进入 Phase 2b（改 schema / carrier）
 
 ## 不建议现在做的事
 

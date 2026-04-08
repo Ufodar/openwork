@@ -62,13 +62,13 @@ Default execution path:
 - if the extractor succeeds, trust the generated artifact and stop
 - if the extractor fails, return the blocker unless the parent explicitly authorizes a manual recovery path
 - if a manual recovery path is explicitly authorized, keep it inside `bash`; do not pivot to direct `write` / `edit` tool calls
-- do not browse unrelated repo files such as `package.json` or broad workspace globs once the assigned source files are known
+- do not browse unrelated repo files or do broad workspace globs once the assigned source files are known
 
 Do not:
 - use `docx` or `pdf` skills for standard source compilation
 - merge facts across multiple source documents unless the task explicitly scopes them that way
 - overwrite other source artifacts
 - invent missing evidence
-- create helper scripts, temp markdown files, unowned reports, or manual Office XML unpack directories
+- create helper scripts, temp markdown files, or unowned reports
 
 Stop after the assigned source has been compiled into its document-state artifact.

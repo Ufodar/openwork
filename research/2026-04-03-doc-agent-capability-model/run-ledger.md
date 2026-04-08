@@ -694,6 +694,91 @@
     - 非样例绑定的通用 harness 设计
   - 在拿到更广证据前，不再往 server/prompt/bridge 里继续叠加新的样例驱动启发式路由
 
+## RL-020 统一面审计 + 按 D-012 精简全部 prompt 表面
+
+- 目标：
+  - 按 D-012（不为可自我修正的短弯路牺牲通用能力）对所有 prompt / bridge / runtime instructions 做统一审计。
+  - 识别并删除/精简/合并微观禁令膨胀。
+- 审计范围：
+  - `common-work.md`、`document-writer.md`、`document-mode-bridge.js`
+  - 6 个 `doc-*` prompts
+  - 2 个 runtime instructions
+- 审计产物：
+  - [unified-surface-audit.md](./unified-surface-audit.md)
+- 发现：
+  - `doc-writer.md` 膨胀最严重（~28 条微观禁令），`doc-verifier.md` 第二（~14 条）
+  - 膨胀来自同一模式：样例失败 → writer 加一条规则 → verifier 镜像加一条 call-out
+  - 跨文件重复严重（mirror URL 出现 3 次、glob rediscovery 出现 3 次等）
+- 主要变更：
+  - `doc-writer.md`：从 ~95 行降到 ~65 行
+    - 删除：heading 编号补丁（2 条）、facts.json 读取指令（2 条）、bocha-search 工具约束（2 条）、mirror URL 重复、subsection 最小内容量、section drift 补丁、重复 checklist
+    - 精简：搜索纪律合并为 1 节、来源质量合并为 1 条
+    - 保留场景特定规则标记为待下沉（技术方案 / API 文档场景 skill）
+  - `doc-verifier.md`：从 ~85 行降到 ~60 行
+    - 删除：heading 编号（2 条）、duplicate architecture labeling、ASCII box-drawing（与 writer 重复）、mirror URL（与 writer 重复）
+    - 精简：质量审计合并为"Quality audit"节
+  - `document-writer.md`：从 ~94 行降到 ~78 行
+    - 删除：quick probe 微观指令、重复的 anti-general 规则、phase routing 9 rediscovery 规则
+    - 精简：guardrails 合并、delegation 合并、phase routing 2 子规则合并
+  - `common-work.md`：Escalate 节从 7 行缩到 2 行
+  - `document-mode-bridge.js`：删除与 document-writer 重复的 extracted-text 规则
+  - `doc-reader.md`：2 条轻微精简
+  - `doc-merger.md`：goal relevance 展开合并为 1 条
+  - `doc-planner.md`：2 条轻微精简
+- 不变项：
+  - Phase routing 整体结构（D-008）
+  - Script resolution discipline（所有 doc-*）
+  - Runtime instructions（无膨胀）
+  - doc-intake.md（无膨胀）
+- 新结论：
+  - 微观禁令膨胀是一个系统性模式，不是个别文件问题
+  - 后续如果再出现样例 failure，应先评估是否属于 D-012 定义的"可自我修正的短弯路"，而不是默认加规则
+  - 场景特定的写作/验证规则（技术方案、API 文档等）不应在基础 prompt 中，应在场景 skill 建立后下沉
+
+## RL-021 Runtime/tool/perms blocker 代码排查收敛
+
+- 目标：
+  - 对 status.md 标记的三个 runtime blocker 做代码级根因排查，判断哪些需要修、哪些只是 harness 容错、哪些是模型问题。
+- 排查范围：
+  - `packages/server/src/server.ts`（proxy、`/message` 端点、sanitize 函数）
+  - `packages/server/src/document.ts`（upload 端点、`persistUploadedDocumentFile`）
+  - `scripts/serve-web-prod.mjs`（proxy 配置、超时设置）
+  - `packages/server/src/session-workspaces.ts`（runtime profile）
+  - `packages/app/scripts/session-settle-guards.mjs`（malformed tool 检测）
+- 三个 blocker 的排查结论：
+  - **`common-work` 空输入 `write`**：
+    - 根因是模型在长文写作阶段发出 `write` tool call，`input={}`, `raw=""`
+    - MiniMax-2.5 和 Qwen3.5-397B-A17B 都复现，不是单模型问题
+    - server proxy 直接透传 tool call，不做验证（`server.ts:1689`）
+    - `session-settle-guards.mjs` 已有 60s 超时检测，但无法修复
+    - 这是模型生成质量问题，不是 server 缺陷
+    - 已知缓解路径：让长文任务走 `document-writer` 分阶段 workflow（RL-009/010/018 已证明）
+    - 当前不需要为此再加 prompt 禁令或 server 拦截
+  - **`document/upload` 间歇性 `AbortError`**：
+    - 可能根因：`serve-web-prod.mjs:197` 的 `keepAliveTimeout = 65_000`
+    - proxy 层在连接空闲 65s 后可能关闭连接
+    - 后端 Bun `idleTimeout=120s`（`server.ts:559`），但 proxy 截断更早
+    - `persistUploadedDocumentFile`（`document.ts:231-240`）用 `file.arrayBuffer()` 全量缓存，大文件慢
+    - 当上传+处理超过 65s 时，proxy 关闭连接导致 `AbortError`
+    - 可修复：提高 `keepAliveTimeout` 至与后端一致的 120s 或更高
+  - **`/message` 偶发坏 JSON**：
+    - `sanitizeMessageSummaryForProxy`（`server.ts:747-774`）代码语法正确，不是缺陷
+    - 坏 JSON 更可能来自 OpenCode 后端偶尔返回不完整响应
+    - `server.ts:1656-1658` 的 catch 分支会把 parse 失败的 raw 文本原样返回
+    - harness 脚本 `JSON.parse(text)` 再次失败，报 `SyntaxError: Expected '}'`
+    - 这是 harness 容错问题，加 retry 或 try/catch 即可
+    - 不影响产品真实 session 的执行
+- 新结论：
+  - 三个 blocker 中，只有 `document/upload AbortError` 有明确可修的代码根因（proxy `keepAliveTimeout` 太短）
+  - `common-work` 空输入 `write` 是模型生成问题，最有效的缓解是工作流架构（让长文走显式 workflow），而不是继续加禁令
+  - `/message` 坏 JSON 是 harness 容错问题，不阻塞产品
+  - runtime/tool/perms blocker 排查至此收敛
+- 后续动作：
+  - 可选修复：`serve-web-prod.mjs` 提高 `keepAliveTimeout`
+  - 可选修复：harness 脚本对 `/message` 坏 JSON 加 retry
+  - 这两项都是低风险局部修复，不涉及 prompt/harness 架构变更
+  - 排查收敛后，可以进入 status.md 推荐的下一步：广义文档任务最小验证
+
 ## 当前台账的用途
 
 后续只要发生下面任一类变化，就应追加新轮次：

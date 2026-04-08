@@ -32,32 +32,24 @@ Default execution path:
 - when the task provides must-have section titles, pass them through with repeated `--required-section "<section-title>"`
 - execute that verification command directly instead of recreating the verifier logic by hand
 - after the script runs, read the generated verification JSON/report before replying
-- do not use `glob outputs/**/*.md`, `glob **/*.md`, or broad directory discovery to find the target deliverable or verifier report; use the exact target path from the task and the exact report path you just wrote or were explicitly given
+- use the exact target path from the task and the exact report path you wrote; do not glob for deliverables or reports
 - if the command cannot be run because `bash` or the script path is unavailable, stop and return a blocker; do not fake verifier outputs
-- when the target ends with `.docx`, treat target format validation as a hard gate; reject text masquerading as `.docx` even if it contains the right headings
+- when the target ends with `.docx`, treat target format validation as a hard gate; reject text masquerading as `.docx`
 - treat task-provided section titles as an exact heading contract; a loose mention in body text is not enough
 - only hand-edit verifier outputs when the generated verification state is clearly insufficient
-- manual audit is additive: if you find a missed problem, append that risk to the generated verifier outputs instead of replacing them
+- manual audit is additive: append missed risks to the generated verifier outputs instead of replacing them
 - never clear or downgrade a script-detected remaining risk unless you reran the verification command and the regenerated artifact removed it
-- do not rewrite the verification JSON/report into a greener verdict than the script produced; preserve the script's `ok` / `remaining_risks` posture and only add evidence-backed risks
-- do not assume every deliverable follows one formal register or output form
-- when the task, plan, or final document shape clearly requires a structured technical deliverable, system-by-system implementation note, or other formal output, apply a stricter manual audit for register drift, section utility, evidence surfacing, and formatting clarity
-- when the generated verification state is clearly insufficient for that structured deliverable, perform a targeted manual audit of the rendered body and add any missed risks to the verifier outputs instead of waving them through
-- when the task requested external support, confirm whether `reports/doc-writer/external-supplements.md` exists and whether it contains query terms, source titles, and source URLs; if it is missing or clearly incomplete, call that out as a remaining risk even when the main headings are present
-- when external supplements are present, prefer official or authoritative domains; if the supplement file relies mainly on repost sites, generic blogs, Q&A pages, or patent aggregator pages, call that out as a remaining risk even when headings are complete
-- if the supplement file treats a mirror-hosted or reposted copy as if it were the issuing body domain, keep that as a remaining risk instead of accepting the mirror as authoritative evidence
-- if `reports/doc-writer/external-supplements.md` contains concrete consumed supplements but the final deliverable's task-required references or evidence section still reads like future-work guidance such as `如需进一步补充` or `建议进行针对性联网检索`, call that out as external support not surfaced into the final deliverable
-- if heading text still contains manual chapter/section numbering markers such as `第一章`, `1.1`, `1.1.1`, or `一、`, call that out as manual heading numbering even when the paragraph style is a real Heading style
-- if headings show stacked manual numbering such as renderer numbering plus `第一章` / `1.1` text prefixes, call that out as duplicate heading numbering instead of treating the document as structurally clean
-- if a `技术架构` subsection repeats the same layer/component label twice without explaining a variant or hierarchy split, call that out as duplicate architecture labeling instead of treating the structure as complete
-- if a subsection under one named system opens by describing another named system's responsibilities, call that out as section drift instead of treating the subsection as covered
-- if the drafted body introduces concrete product names, middleware, protocols, schedulers, databases, or standards identifiers that are not obviously backed by the fact surface or external supplements, call that out as weak support instead of treating the document as cleanly verified
-- if a Word deliverable relies on raw ASCII box-drawing or terminal-tree diagrams where a readable table or structured explanation should exist, call that out as a remaining risk for document readability
-- if a technical implementation document reads like a product brochure instead of implementation guidance, call that out as a remaining risk: unsupported superlatives,泛化价值判断, or large blocks of marketing-style language should not pass as implementation detail
-- if a technical deliverable drifts into unrelated commercial or marketplace wording that does not belong to the requested systems or sections, call that out as commercial noise instead of treating the section as clean
-- if a subsection mainly lists technology names or component labels but does not explain the implementation method, control/data flow, integration boundary, or execution mechanism, mark it as thin implementation detail instead of treating the subsection as substantively covered
-- if an API subsection is mostly a long raw code dump without concise explanation of purpose, auth/context, request, and response, call that out as a remaining risk for document readability
-- if the draft expands source-backed capabilities into implementation guidance without making the inferred framing explicit, call that out as a register mismatch; inferred implementation content should read as `可采用/建议采用/通过…实现`, not as an already-proven现场事实 unless the evidence supports that stronger wording
+- do not rewrite the verification JSON/report into a greener verdict than the script produced
+
+Quality audit (applied after script verification):
+- do not assume every deliverable follows one formal register; match audit depth to the document type
+- when the task requires a structured formal deliverable, apply a stricter manual audit for register drift, section utility, evidence surfacing, and formatting clarity
+- when the task requested external support, confirm whether `reports/doc-writer/external-supplements.md` exists with query terms, source titles, and source URLs; if missing or incomplete, call that out as a remaining risk
+- when external supplements are present, check that they rely on authoritative sources; flag remaining risk if supplements mainly come from repost sites, content farms, or low-authority pages
+- if consumed supplements exist but the deliverable still uses placeholder language instead of concrete citations, call that out
+- if the drafted body introduces concrete product names, middleware, protocols, or standards identifiers not backed by the fact surface or external supplements, call that out as weak support
+- flag sections that drift away from their declared scope into unrelated content
+- flag sections where evidence is too thin to support the claims made
 
 Verification goals:
 - identify missing sections, missing evidence, and unresolved blockers
@@ -66,7 +58,7 @@ Verification goals:
 - keep the report readable and evidence-based
 - only write verifier-owned artifacts
 - do not default to reopening `.worktree/sources/*.json` or raw source documents when the target deliverable, plan, coverage, conflicts, and supplements already explain the verification state
-- if a specific verification ambiguity still cannot be resolved from those surfaces, reopen only the exact source artifact or source slice needed to confirm the risk, then return to verification
+- if a specific verification ambiguity still cannot be resolved from those surfaces, reopen only the exact source artifact needed to confirm the risk
 
 Your report should include:
 - what was checked

@@ -1,6 +1,6 @@
 import { copyFile, readFile, writeFile, readdir, stat, rm, rename, mkdtemp } from "node:fs/promises";
-import { dirname, join, resolve, relative, basename, extname, isAbsolute } from "node:path";
 import { tmpdir } from "node:os";
+import { dirname, join, resolve, relative, basename, extname, isAbsolute } from "node:path";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import jwt from "jsonwebtoken";
@@ -133,39 +133,6 @@ const SLIDE_EXTENSIONS = [
 
 const DOCX_ZIP_EXTENSIONS = new Set([".docx", ".docm", ".dotx", ".dotm"]);
 const SESSION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
-const BOOTSTRAP_STATE_DIR = ".worktree";
-const BOOTSTRAP_SOURCE_MANIFEST_PATH = join(BOOTSTRAP_STATE_DIR, "sources", "manifest.json");
-const BOOTSTRAP_INDEX_PATH = join(BOOTSTRAP_STATE_DIR, "index.json");
-const BOOTSTRAP_CONVENTIONS_PATH = join(BOOTSTRAP_STATE_DIR, "conventions.md");
-const BOOTSTRAP_IGNORED_TOP_LEVEL = new Set([
-    ".opencode",
-    ".openwork-runtime",
-    ".worktree",
-    ".tmp",
-    "artifacts",
-    "reports",
-    "outputs",
-    "tmp",
-]);
-const BOOTSTRAP_ALLOWED_EXTENSIONS = new Set([
-    ...WORD_EXTENSIONS,
-    ...CELL_EXTENSIONS,
-    ...SLIDE_EXTENSIONS,
-    ".pdf",
-]);
-const BOOTSTRAP_DIRECT_TEXT_EXTENSIONS = new Set([
-    ".txt",
-    ".md",
-    ".markdown",
-    ".csv",
-    ".tsv",
-]);
-const SESSION_SOURCE_FILE_BASENAME = /^src-(\d+)(\.[^./]+)?$/i;
-type BootstrapCommandRunner = typeof spawnSync;
-
-interface RefreshBootstrapDocumentStateOptions {
-    runCommand?: BootstrapCommandRunner;
-}
 
 // Helper to get document type from extension
 function getDocumentType(filename: string): "word" | "cell" | "slide" {
@@ -239,410 +206,6 @@ export async function persistUploadedDocumentFile(destPath: string, file: File) 
     await rename(tmpPath, destPath);
 }
 
-async function readJsonRecord(path: string): Promise<Record<string, any> | null> {
-    try {
-        const raw = await readFile(path, "utf8");
-        const parsed = JSON.parse(raw);
-        return parsed && typeof parsed === "object" ? parsed as Record<string, any> : null;
-    } catch {
-        return null;
-    }
-}
-
-async function writeJsonAtomic(path: string, payload: unknown): Promise<void> {
-    await ensureDir(dirname(path));
-    const tmpPath = `${path}.tmp-${shortId()}`;
-    await writeFile(tmpPath, JSON.stringify(payload, null, 2) + "\n", "utf8");
-    await rename(tmpPath, path);
-}
-
-function nextSessionSourceFilename(existingPaths: string[], originalFilename: string): string {
-    const extension = extname(originalFilename).toLowerCase();
-    const used = new Set<number>();
-    for (const path of existingPaths) {
-        const leaf = basename(path.trim());
-        const match = leaf.match(SESSION_SOURCE_FILE_BASENAME);
-        if (!match) continue;
-        const value = Number.parseInt(match[1] || "", 10);
-        if (Number.isFinite(value) && value > 0) used.add(value);
-    }
-    let next = 1;
-    while (used.has(next)) next += 1;
-    return `src-${String(next).padStart(3, "0")}${extension}`;
-}
-
-async function reserveSessionSourceUploadPath(docsDir: string, originalFilename: string): Promise<string> {
-    const entries = await readdir(docsDir, { withFileTypes: true }).catch(() => []);
-    const existingPaths = entries
-        .filter((entry) => entry.isFile())
-        .map((entry) => entry.name);
-    let candidate = nextSessionSourceFilename(existingPaths, originalFilename);
-    for (let attempt = 0; attempt < 64; attempt += 1) {
-        const absPath = resolveDocumentPathSafe(docsDir, candidate);
-        if (!(await exists(absPath))) return candidate;
-        const nextIndex = Number.parseInt((candidate.match(SESSION_SOURCE_FILE_BASENAME)?.[1] || "0"), 10) + 1;
-        const extension = extname(originalFilename).toLowerCase();
-        candidate = `src-${String(nextIndex).padStart(3, "0")}${extension}`;
-    }
-    throw new ApiError(409, "document_conflict", "Unable to reserve a machine document name");
-}
-
-async function seedBootstrapSourceMetadata(runtimeDir: string, source: {
-    relativePath: string;
-    originalName: string;
-    originalRelativePath: string;
-    title: string;
-    kind: string;
-}) {
-    const manifestPath = join(runtimeDir, BOOTSTRAP_SOURCE_MANIFEST_PATH);
-    const existingManifest = await readJsonRecord(manifestPath);
-    const sources = Array.isArray(existingManifest?.sources) ? existingManifest.sources as Array<Record<string, any>> : [];
-    const nextSources = sources.filter((item) => String(item?.relativePath || "").trim() !== source.relativePath);
-    nextSources.push({
-        ...sources.find((item) => String(item?.relativePath || "").trim() === source.relativePath),
-        relativePath: source.relativePath,
-        originalName: source.originalName,
-        originalRelativePath: source.originalRelativePath,
-        title: source.title,
-        kind: source.kind,
-        status: "uploaded",
-    });
-    await writeJsonAtomic(manifestPath, {
-        generated_at: typeof existingManifest?.generated_at === "string" ? existingManifest.generated_at : new Date().toISOString(),
-        goal: typeof existingManifest?.goal === "string" ? existingManifest.goal : "Compile uploaded source documents into structured state",
-        target_doc: typeof existingManifest?.target_doc === "string" ? existingManifest.target_doc : null,
-        sources: nextSources,
-        blockers: Array.isArray(existingManifest?.blockers) ? existingManifest.blockers : [],
-    });
-}
-
-function isBootstrapVisibleSegment(name: string): boolean {
-    if (!name || name === "." || name === "..") return false;
-    if (name.startsWith(".")) return false;
-    if (BOOTSTRAP_IGNORED_TOP_LEVEL.has(name)) return false;
-    if (name === "opencode.json" || name === "opencode.jsonc") return false;
-    return true;
-}
-
-async function listBootstrapSourceFiles(rootDir: string, relativeDir = ""): Promise<string[]> {
-    const absDir = relativeDir ? join(rootDir, relativeDir) : rootDir;
-    const entries = await readdir(absDir, { withFileTypes: true }).catch(() => []);
-    const next: string[] = [];
-    for (const entry of entries) {
-        if (!isBootstrapVisibleSegment(entry.name)) continue;
-        const relPath = relativeDir ? `${relativeDir}/${entry.name}` : entry.name;
-        if (entry.isDirectory()) {
-            next.push(...await listBootstrapSourceFiles(rootDir, relPath));
-            continue;
-        }
-        if (!entry.isFile()) continue;
-        const ext = extname(entry.name).toLowerCase();
-        if (!BOOTSTRAP_ALLOWED_EXTENSIONS.has(ext)) continue;
-        next.push(relPath);
-    }
-    return next.sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
-}
-
-function inferBootstrapRole(_relativePath: string): string {
-    // Semantic role classification is delegated to doc-intake LLM enrichment.
-    // This bootstrap function only provides a generic default.
-    return "source";
-}
-
-function normalizeBootstrapTitle(relativePath: string): string {
-    return basename(relativePath, extname(relativePath))
-        .replace(/[_-]+/g, " ")
-        .replace(/\s+/g, " ")
-        .trim();
-}
-
-function buildBootstrapDocId(relativePath: string): string {
-    const stem = basename(relativePath, extname(relativePath))
-        .normalize("NFKD")
-        .replace(/[^\w]+/g, "-")
-        .replace(/^-+|-+$/g, "")
-        .toLowerCase()
-        .slice(0, 48);
-    if (stem) return `doc-${stem}`;
-    return `doc-${createHash("sha1").update(relativePath).digest("hex").slice(0, 12)}`;
-}
-
-function buildBootstrapProjectName(sources: Array<Record<string, any>>): string {
-    const firstTitle = typeof sources[0]?.title === "string" ? sources[0].title.trim() : "";
-    return firstTitle || "document-workspace";
-}
-
-function sanitizeBootstrapTextStem(value: string): string {
-    return value
-        .trim()
-        .replace(/[^\p{L}\p{N}._-]+/gu, "-")
-        .replace(/-+/g, "-")
-        .replace(/^[-_.]+|[-_.]+$/g, "");
-}
-
-function buildBootstrapTextRelativePath(input: { relativePath: string; docId: string }): string {
-    const sourceStem = sanitizeBootstrapTextStem(basename(input.relativePath, extname(input.relativePath)));
-    const fallbackStem = sanitizeBootstrapTextStem(input.docId);
-    const stem = sourceStem || fallbackStem || "source";
-    return `${BOOTSTRAP_STATE_DIR}/text/${stem}.txt`;
-}
-
-function buildBootstrapTextExtractionPlan(input: {
-    relativePath: string;
-    docId: string;
-}): {
-    textRelativePath: string;
-    extractor: string;
-    command: string | null;
-    args: string[];
-    copySource: boolean;
-} | null {
-    const extension = extname(input.relativePath).toLowerCase();
-    const textRelativePath = buildBootstrapTextRelativePath(input);
-    if (BOOTSTRAP_DIRECT_TEXT_EXTENSIONS.has(extension)) {
-        return {
-            textRelativePath,
-            extractor: "copy",
-            command: null,
-            args: [],
-            copySource: true,
-        };
-    }
-    if (DOCX_ZIP_EXTENSIONS.has(extension)) {
-        return {
-            textRelativePath,
-            extractor: "pandoc",
-            command: "pandoc",
-            args: [],
-            copySource: false,
-        };
-    }
-    if (extension === ".pdf") {
-        return {
-            textRelativePath,
-            extractor: "pdftotext",
-            command: "pdftotext",
-            args: [],
-            copySource: false,
-        };
-    }
-    return null;
-}
-
-async function ensureBootstrapSourceText(
-    runtimeDir: string,
-    source: {
-        docId: string;
-        relativePath: string;
-    },
-    previous: Record<string, any>,
-    runCommand: BootstrapCommandRunner,
-): Promise<Record<string, any>> {
-    const priorTextRelativePath = typeof previous.textRelativePath === "string"
-        ? normalizeDocumentPath(previous.textRelativePath)
-        : "";
-    if (priorTextRelativePath) {
-        const priorTextAbsPath = resolveDocumentPathSafe(runtimeDir, priorTextRelativePath);
-        if (await exists(priorTextAbsPath)) {
-            return {
-                textRelativePath: priorTextRelativePath,
-                textStatus: typeof previous.textStatus === "string" && previous.textStatus.trim()
-                    ? previous.textStatus.trim()
-                    : "ready",
-                textExtractor: typeof previous.textExtractor === "string" && previous.textExtractor.trim()
-                    ? previous.textExtractor.trim()
-                    : null,
-            };
-        }
-    }
-
-    const plan = buildBootstrapTextExtractionPlan(source);
-    if (!plan) return {};
-
-    const sourceAbsPath = resolveDocumentPathSafe(runtimeDir, source.relativePath);
-    const textAbsPath = resolveDocumentPathSafe(runtimeDir, plan.textRelativePath);
-    if (await exists(textAbsPath)) {
-        return {
-            textRelativePath: plan.textRelativePath,
-            textStatus: "ready",
-            textExtractor: plan.extractor,
-        };
-    }
-
-    await ensureDir(dirname(textAbsPath));
-
-    if (plan.copySource) {
-        await copyFile(sourceAbsPath, textAbsPath);
-        return {
-            textRelativePath: plan.textRelativePath,
-            textStatus: "ready",
-            textExtractor: plan.extractor,
-        };
-    }
-
-    let args: string[] = [];
-    if (plan.command === "pandoc") {
-        args = [sourceAbsPath, "-t", "plain", "-o", textAbsPath];
-    } else if (plan.command === "pdftotext") {
-        args = ["-layout", "-nopgbrk", sourceAbsPath, textAbsPath];
-    } else {
-        return {};
-    }
-
-    const result = runCommand(plan.command, args, { encoding: "utf8" });
-    if (result.status === 0 && await exists(textAbsPath)) {
-        return {
-            textRelativePath: plan.textRelativePath,
-            textStatus: "ready",
-            textExtractor: plan.extractor,
-        };
-    }
-
-    await rm(textAbsPath, { force: true }).catch(() => undefined);
-    const stderr = String(result.stderr || "").trim();
-    const stdout = String(result.stdout || "").trim();
-    return {
-        textStatus: "unavailable",
-        textExtractor: plan.extractor,
-        textError: stderr || stdout || `${plan.command} failed`,
-    };
-}
-
-function buildBootstrapConventionsMarkdown(input: {
-    targetDoc: string | null;
-    sources: Array<Record<string, any>>;
-}): string {
-    const lines = [
-        "# Document State Conventions",
-        "",
-        "This file is a deterministic bootstrap created from uploaded filenames.",
-        "",
-        "Rules:",
-        "- Prefer `.worktree/sources/manifest.json` as the initial source inventory.",
-        "- Treat roles inferred from filenames as provisional until reader/merger artifacts refine them.",
-        "- Keep generated deliverables under `outputs/`.",
-        `- Current target deliverable: ${input.targetDoc ?? "(pending user target)"}`,
-        "",
-        "Uploaded source roles:",
-    ];
-    for (const source of input.sources) {
-        const textRef = typeof source.textRelativePath === "string" && source.textRelativePath.trim()
-            ? ` · text=${source.textRelativePath.trim()}`
-            : "";
-        lines.push(`- ${source.docId}: ${source.role} · ${source.relativePath}${textRef}`);
-    }
-    return lines.join("\n") + "\n";
-}
-
-export async function refreshBootstrapDocumentState(
-    runtimeDir: string,
-    options: RefreshBootstrapDocumentStateOptions = {},
-): Promise<void> {
-    const sourcePaths = await listBootstrapSourceFiles(runtimeDir);
-    if (!sourcePaths.length) return;
-
-    const indexPath = join(runtimeDir, BOOTSTRAP_INDEX_PATH);
-    const manifestPath = join(runtimeDir, BOOTSTRAP_SOURCE_MANIFEST_PATH);
-    const conventionsPath = join(runtimeDir, BOOTSTRAP_CONVENTIONS_PATH);
-
-    const existingIndex = await readJsonRecord(indexPath);
-    const existingManifest = await readJsonRecord(manifestPath);
-    const existingSources = Array.isArray(existingManifest?.sources) ? existingManifest?.sources as Array<Record<string, any>> : [];
-    const existingByPath = new Map<string, Record<string, any>>();
-    for (const source of existingSources) {
-        const relativePath = typeof source?.relativePath === "string" ? source.relativePath.trim() : "";
-        if (!relativePath) continue;
-        existingByPath.set(relativePath, source);
-    }
-
-    const mergedSources: Array<Record<string, any>> = [];
-    for (const relativePath of sourcePaths) {
-        const previous = existingByPath.get(relativePath) ?? {};
-        const extension = extname(relativePath).toLowerCase();
-        const title = typeof previous.title === "string" && previous.title.trim()
-            ? previous.title.trim()
-            : normalizeBootstrapTitle(relativePath);
-        const role = typeof previous.role === "string" && previous.role.trim()
-            ? previous.role.trim()
-            : inferBootstrapRole(relativePath);
-        const status = typeof previous.status === "string" && previous.status.trim()
-            ? previous.status.trim()
-            : "uploaded";
-        const docId = typeof previous.docId === "string" && previous.docId.trim()
-            ? previous.docId.trim()
-            : buildBootstrapDocId(relativePath);
-        const textState = await ensureBootstrapSourceText(
-            runtimeDir,
-            { docId, relativePath },
-            previous,
-            options.runCommand ?? spawnSync,
-        );
-        mergedSources.push({
-            ...previous,
-            docId,
-            title,
-            relativePath,
-            kind: typeof previous.kind === "string" && previous.kind.trim()
-                ? previous.kind.trim()
-                : (extension.startsWith(".") ? extension.slice(1) : extension || "file"),
-            role,
-            status,
-            ...textState,
-        });
-    }
-
-    const targetDoc = typeof existingIndex?.target_doc === "string" && existingIndex.target_doc.trim()
-        ? existingIndex.target_doc.trim()
-        : typeof existingManifest?.target_doc === "string" && existingManifest.target_doc.trim()
-        ? existingManifest.target_doc.trim()
-        : null;
-    const phase = typeof existingIndex?.phase === "string" && existingIndex.phase.trim()
-        ? existingIndex.phase.trim()
-        : "intake";
-    const preserveNarration = phase !== "intake";
-    const bootstrapSummary = `Uploaded ${mergedSources.length} source documents. Bootstrap state is ready for source compilation.`;
-    const bootstrapFocus = "Compile uploaded documents into per-source state artifacts.";
-
-    const indexPayload = {
-        version: typeof existingIndex?.version === "number" ? existingIndex.version : 1,
-        project: typeof existingIndex?.project === "string" && existingIndex.project.trim()
-            ? existingIndex.project.trim()
-            : buildBootstrapProjectName(mergedSources),
-        target_doc: targetDoc,
-        phase,
-        summary: preserveNarration && typeof existingIndex?.summary === "string" && existingIndex.summary.trim()
-            ? existingIndex.summary.trim()
-            : bootstrapSummary,
-        current_focus: preserveNarration && typeof existingIndex?.current_focus === "string" && existingIndex.current_focus.trim()
-            ? existingIndex.current_focus.trim()
-            : bootstrapFocus,
-        conventions_ref: typeof existingIndex?.conventions_ref === "string" && existingIndex.conventions_ref.trim()
-            ? existingIndex.conventions_ref.trim()
-            : BOOTSTRAP_CONVENTIONS_PATH,
-        children: Array.isArray(existingIndex?.children) ? existingIndex.children : [],
-    };
-
-    const manifestPayload = {
-        generated_at: new Date().toISOString(),
-        goal: typeof existingManifest?.goal === "string" && existingManifest.goal.trim()
-            ? existingManifest.goal.trim()
-            : "Compile uploaded source documents into structured state",
-        target_doc: targetDoc,
-        sources: mergedSources,
-        blockers: Array.isArray(existingManifest?.blockers) ? existingManifest.blockers : [],
-    };
-
-    await writeJsonAtomic(indexPath, indexPayload);
-    await writeJsonAtomic(manifestPath, manifestPayload);
-    if (!(await exists(conventionsPath))) {
-        await ensureDir(dirname(conventionsPath));
-        await writeFile(
-            conventionsPath,
-            buildBootstrapConventionsMarkdown({ targetDoc, sources: mergedSources }),
-            "utf8",
-        );
-    }
-}
 
 async function ensureDocxZipPath(workspacePath: string, inputPath: string): Promise<string> {
     const ext = extname(inputPath).toLowerCase();
@@ -1243,16 +806,8 @@ export function createDocumentRoutes(routes: unknown[], sessionWorkspaces?: Sess
 
             const docsDir = await docsDirFor(workspace, sessionId);
             await ensureDir(docsDir);
-            const manifest = await readJsonRecord(join(docsDir, BOOTSTRAP_SOURCE_MANIFEST_PATH));
-            const manifestSources = Array.isArray(manifest?.sources) ? manifest.sources as Array<Record<string, any>> : [];
-            const metadataByPath = new Map<string, Record<string, any>>();
-            for (const source of manifestSources) {
-                const relativePath = typeof source?.relativePath === "string" ? source.relativePath.trim() : "";
-                if (!relativePath) continue;
-                metadataByPath.set(relativePath, source);
-            }
 
-            const docs: Array<{ name: string; updatedAt: number; size: number; type: string; originalName?: string; title?: string }> = [];
+            const docs: Array<{ name: string; updatedAt: number; size: number; type: string }> = [];
             const dirs = new Set<string>();
 
             const walk = async (dir: string) => {
@@ -1271,18 +826,11 @@ export function createDocumentRoutes(routes: unknown[], sessionWorkspaces?: Sess
                     const info = await stat(fullPath);
                     const relName = relative(docsDir, fullPath).replace(/\\/g, "/");
                     if (shouldHideListedDocumentPath(relName)) continue;
-                    const sourceMetadata = metadataByPath.get(relName);
                     docs.push({
                         name: relName,
                         updatedAt: info.mtimeMs,
                         size: info.size,
                         type: getDocumentType(entry.name),
-                        originalName: typeof sourceMetadata?.originalName === "string" && sourceMetadata.originalName.trim()
-                            ? sourceMetadata.originalName.trim()
-                            : undefined,
-                        title: typeof sourceMetadata?.title === "string" && sourceMetadata.title.trim()
-                            ? sourceMetadata.title.trim()
-                            : undefined,
                     });
                 }
             };
@@ -1839,7 +1387,8 @@ export function createDocumentRoutes(routes: unknown[], sessionWorkspaces?: Sess
 
             let destRel = "";
             if (sessionId) {
-                destRel = await reserveSessionSourceUploadPath(docsDir, requestedRelativePath || file.name);
+                const requestedPath = requestedRelativePath || legacyPath || file.name;
+                destRel = sanitizeUploadedDocumentRelativePath(requestedPath, file.name);
             } else if (requestedBaseDir || requestedRelativePath) {
                 const safeRelativePath = sanitizeUploadedDocumentRelativePath(requestedRelativePath || file.name, file.name);
                 destRel = requestedBaseDir ? `${requestedBaseDir}/${safeRelativePath}` : safeRelativePath;
@@ -1862,17 +1411,6 @@ export function createDocumentRoutes(routes: unknown[], sessionWorkspaces?: Sess
 
             const filePath = resolveDocumentPathSafe(docsDir, destRel);
             await persistUploadedDocumentFile(filePath, file);
-            if (sessionId) {
-                const originalRelativePath = normalizeDocumentPath(requestedRelativePath || legacyPath || file.name) || file.name;
-                await seedBootstrapSourceMetadata(docsDir, {
-                    relativePath: destRel,
-                    originalName: file.name,
-                    originalRelativePath,
-                    title: normalizeBootstrapTitle(originalRelativePath || file.name),
-                    kind: extname(file.name).toLowerCase().replace(/^\./, "") || "file",
-                });
-                await refreshBootstrapDocumentState(docsDir);
-            }
 
             return jsonResponse({ ok: true, name: destRel });
         },

@@ -46,7 +46,7 @@ export type StartedSessionRuntime = {
 };
 
 const DEFAULT_MAX_ACTIVE_SESSION_RUNTIMES = 30;
-const DEFAULT_SESSION_RUNTIME_IDLE_TTL_MS = 8 * 60 * 60 * 1000;
+const DEFAULT_SESSION_RUNTIME_IDLE_TTL_MS = 3 * 60 * 60 * 1000;
 const STRIPPED_RUNTIME_CONFIG_DIRS = [
   "skills",
   "plugins",

@@ -15,7 +15,7 @@ export type OpencodeAuth = {
   mode?: "basic" | "openwork";
 };
 
-const DEFAULT_OPENCODE_REQUEST_TIMEOUT_MS = 10_000;
+const DEFAULT_OPENCODE_REQUEST_TIMEOUT_MS = 60_000;
 
 async function fetchWithTimeout(
   fetchImpl: typeof globalThis.fetch,
@@ -197,7 +197,7 @@ export async function waitForHealthy(
   client: ReturnType<typeof createClient>,
   options?: { timeoutMs?: number; pollMs?: number },
 ) {
-  const timeoutMs = options?.timeoutMs ?? 10_000;
+  const timeoutMs = options?.timeoutMs ?? 60_000;
   const pollMs = options?.pollMs ?? 250;
 
   const start = Date.now();

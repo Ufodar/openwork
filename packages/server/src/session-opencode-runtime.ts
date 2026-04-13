@@ -89,7 +89,7 @@ function resolveHostXdgDataHome(): string {
   return join(homedir(), ".local", "share");
 }
 
-async function waitForHealthy(url: string, headers?: Record<string, string>, timeoutMs = 10_000, pollMs = 250): Promise<void> {
+async function waitForHealthy(url: string, headers?: Record<string, string>, timeoutMs = 60_000, pollMs = 250): Promise<void> {
   const start = Date.now();
   let lastError: string | null = null;
   while (Date.now() - start < timeoutMs) {

@@ -1537,7 +1537,7 @@ export async function proxyOpencodeRequest(input: {
     headers.set("Content-Type", "application/json");
   }
   const timeoutController = new AbortController();
-  const timeoutId = setTimeout(() => timeoutController.abort(new Error("OpenCode proxy timeout")), 10_000);
+  const timeoutId = setTimeout(() => timeoutController.abort(new Error("OpenCode proxy timeout")), 60_000);
   const signal = AbortSignal.any([input.request.signal, timeoutController.signal]);
   try {
     const response = await fetch(targetUrl.toString(), { method, headers, body, signal });

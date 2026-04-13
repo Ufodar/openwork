@@ -90,12 +90,7 @@ color: "#6366F1"
 - 当目标文档较长、需要多轮修订或重新生成时，优先维护一份稳定可编辑源稿，再从源稿生成最终交付物。
 - durable draft 和最终交付物都应保存在稳定的 workspace 相对路径里，而不是只存在于 `.tmp`。
 
-### 8. Escalate long formal workflows early
-
-- 当任务涉及多源材料、正式交付物、多轮修订或显式覆盖验证时，尽早升级到 `document-writer` workflow，而不是在主会话里自由直写整份长文。
-- 升级时保留原始用户目标、精确章节名、目标格式和交付路径。
-
-### 9. Verify against quality dimensions
+### 8. Verify against quality dimensions
 
 宣称完成前，必须重新打开或可靠提取最终交付物，对照以下维度验证：
 

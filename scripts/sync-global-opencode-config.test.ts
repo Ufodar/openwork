@@ -24,7 +24,8 @@ describe("sync-global-opencode-config.py", () => {
         ...process.env,
         OPENWORK_GLOBAL_CONFIG: configPath,
         OPENWORK_PROVIDER_ID: "my-company",
-        OPENWORK_DEFAULT_MODEL: "MiniMax-2.5",
+        OPENWORK_DEFAULT_MODEL: "DeepSeek-V4",
+        OPENWORK_SMALL_MODEL: "DeepSeek-V4",
         OPENWORK_MODEL_BASE_URL: "http://127.0.0.1:3002/v1",
         MY_COMPANY_API_KEY: "test-key",
       },
@@ -34,15 +35,45 @@ describe("sync-global-opencode-config.py", () => {
     expect(result.status).toBe(0);
 
     const config = JSON.parse(await readFile(configPath, "utf8")) as Record<string, any>;
-    expect(config.model).toBe("my-company/MiniMax-2.5");
-    expect(config.small_model).toBe("my-company/MiniMax-2.5");
+    expect(config.model).toBe("my-company/DeepSeek-V4");
+    expect(config.small_model).toBe("my-company/DeepSeek-V4");
     expect(config.provider?.["my-company"]?.options?.baseURL).toBe("http://127.0.0.1:3002/v1");
     expect(config.provider?.["my-company"]?.options?.apiKey).toBe("test-key");
     expect(Object.keys(config.provider?.["my-company"]?.models ?? {})).toEqual([
+      "DeepSeek-V4",
       "Qwen3.5-397B-A17B",
       "MiniMax-2.5",
       "GLM-5",
     ]);
+    expect(config.provider?.["my-company"]?.models?.["DeepSeek-V4"]?.limit).toEqual({
+      context: 1048576,
+      output: 1048576,
+    });
+    expect(config.provider?.["my-company"]?.models?.["DeepSeek-V4"]?.options).toEqual({
+      chat_template_kwargs: {
+        thinking: true,
+        reasoning_effort: "max",
+      },
+    });
+    expect(config.provider?.["my-company"]?.models?.["DeepSeek-V4"]?.variants).toEqual({
+      "thinking-max": {
+        chat_template_kwargs: {
+          thinking: true,
+          reasoning_effort: "max",
+        },
+      },
+      "thinking-high": {
+        chat_template_kwargs: {
+          thinking: true,
+          reasoning_effort: "high",
+        },
+      },
+      "no-thinking": {
+        chat_template_kwargs: {
+          thinking: false,
+        },
+      },
+    });
     expect(config.provider?.["my-company"]?.models?.["Qwen3.5-397B-A17B"]?.limit).toEqual({
       context: 256000,
       output: 32000,
@@ -88,7 +119,7 @@ describe("sync-global-opencode-config.py", () => {
         ...process.env,
         OPENWORK_GLOBAL_CONFIG: configPath,
         OPENWORK_PROVIDER_ID: "my-company",
-        OPENWORK_DEFAULT_MODEL: "MiniMax-2.5",
+        OPENWORK_DEFAULT_MODEL: "DeepSeek-V4",
         OPENWORK_MODEL_BASE_URL: "http://127.0.0.1:3002/v1",
         MY_COMPANY_API_KEY: "test-key",
       },
@@ -102,7 +133,7 @@ describe("sync-global-opencode-config.py", () => {
     expect(config.mcp?.memory?.enabled).toBe(false);
   });
 
-  test("falls back unsupported default models to MiniMax", async () => {
+  test("falls back unsupported default models to DeepSeek-V4", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openwork-sync-opencode-"));
     tempDirs.push(dir);
     const configPath = join(dir, "opencode.json");
@@ -124,8 +155,8 @@ describe("sync-global-opencode-config.py", () => {
     expect(result.status).toBe(0);
 
     const config = JSON.parse(await readFile(configPath, "utf8")) as Record<string, any>;
-    expect(config.model).toBe("my-company/MiniMax-2.5");
-    expect(config.small_model).toBe("my-company/MiniMax-2.5");
+    expect(config.model).toBe("my-company/DeepSeek-V4");
+    expect(config.small_model).toBe("my-company/DeepSeek-V4");
   });
 
   test("writes explicit global permission posture when configured", async () => {
@@ -139,7 +170,7 @@ describe("sync-global-opencode-config.py", () => {
         ...process.env,
         OPENWORK_GLOBAL_CONFIG: configPath,
         OPENWORK_PROVIDER_ID: "my-company",
-        OPENWORK_DEFAULT_MODEL: "MiniMax-2.5",
+        OPENWORK_DEFAULT_MODEL: "DeepSeek-V4",
         OPENWORK_MODEL_BASE_URL: "http://127.0.0.1:3002/v1",
         OPENWORK_GLOBAL_PERMISSION: "allow",
         MY_COMPANY_API_KEY: "test-key",
@@ -182,7 +213,7 @@ describe("sync-global-opencode-config.py", () => {
         ...process.env,
         OPENWORK_GLOBAL_CONFIG: configPath,
         OPENWORK_PROVIDER_ID: "my-company",
-        OPENWORK_DEFAULT_MODEL: "MiniMax-2.5",
+        OPENWORK_DEFAULT_MODEL: "DeepSeek-V4",
         OPENWORK_MODEL_BASE_URL: "http://127.0.0.1:3002/v1",
         MY_COMPANY_API_KEY: "",
       },

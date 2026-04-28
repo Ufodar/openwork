@@ -6,6 +6,45 @@ from pathlib import Path
 
 
 SUPPORTED_MODELS = {
+    "DeepSeek-V4": {
+        "name": "DeepSeek-V4",
+        "limit": {
+            "context": 1048576,
+            "output": 1048576,
+        },
+        "options": {
+            "chat_template_kwargs": {
+                "thinking": True,
+                "reasoning_effort": "max",
+            },
+        },
+        "capabilities": {
+            "input": {"text": True},
+            "output": {"text": True},
+            "attachment": False,
+            "toolcall": True,
+            "reasoning": True,
+        },
+        "variants": {
+            "thinking-max": {
+                "chat_template_kwargs": {
+                    "thinking": True,
+                    "reasoning_effort": "max",
+                },
+            },
+            "thinking-high": {
+                "chat_template_kwargs": {
+                    "thinking": True,
+                    "reasoning_effort": "high",
+                },
+            },
+            "no-thinking": {
+                "chat_template_kwargs": {
+                    "thinking": False,
+                },
+            },
+        },
+    },
     "Qwen3.5-397B-A17B": {
         "name": "Qwen3.5-397B-A17B",
         "limit": {
@@ -51,7 +90,7 @@ SUPPORTED_MODELS = {
     },
 }
 
-DEFAULT_MODEL_ID = "MiniMax-2.5"
+DEFAULT_MODEL_ID = "DeepSeek-V4"
 
 
 def resolve_default_base_url() -> str:

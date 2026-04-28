@@ -17,8 +17,8 @@ test("sync-global-opencode-config writes bocha search MCP from runtime env", asy
       ...process.env,
       OPENWORK_GLOBAL_CONFIG: output,
       OPENWORK_PROVIDER_ID: "my-company",
-      OPENWORK_DEFAULT_MODEL: "MiniMax-2.5",
-      OPENWORK_SMALL_MODEL: "MiniMax-2.5",
+      OPENWORK_DEFAULT_MODEL: "DeepSeek-V4",
+      OPENWORK_SMALL_MODEL: "DeepSeek-V4",
       OPENWORK_MODEL_BASE_URL: "http://127.0.0.1:3002/v1",
       MY_COMPANY_API_KEY: "provider-key",
       BOCHA_API_KEY: "bocha-test-key",
@@ -34,11 +34,17 @@ test("sync-global-opencode-config writes bocha search MCP from runtime env", asy
   expect(bocha.enabled).toBe(true);
   expect(bocha.environment?.BOCHA_API_KEY).toBe("bocha-test-key");
   expect(bocha.command).toEqual(["uv", "--directory", "/opt/bocha-search-mcp", "run", "bocha-search-mcp"]);
-  expect(config.model).toBe("my-company/MiniMax-2.5");
-  expect(config.small_model).toBe("my-company/MiniMax-2.5");
-  expect(config.provider?.["my-company"]?.models?.["MiniMax-2.5"]?.limit).toEqual({
-    context: 256000,
-    output: 32000,
+  expect(config.model).toBe("my-company/DeepSeek-V4");
+  expect(config.small_model).toBe("my-company/DeepSeek-V4");
+  expect(config.provider?.["my-company"]?.models?.["DeepSeek-V4"]?.limit).toEqual({
+    context: 1048576,
+    output: 1048576,
+  });
+  expect(config.provider?.["my-company"]?.models?.["DeepSeek-V4"]?.variants?.["thinking-high"]).toEqual({
+    chat_template_kwargs: {
+      thinking: true,
+      reasoning_effort: "high",
+    },
   });
   expect(config.provider?.["my-company"]?.models?.["GLM-5"]?.limit).toEqual({
     context: 256000,

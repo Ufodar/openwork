@@ -97,7 +97,7 @@ lines = [
     f"export MY_COMPANY_API_KEY={shell_quote(my_company_api_key or '')}",
     f"export OPENWORK_PROVIDER_ID={shell_quote(provider_id)}",
     f"export OPENWORK_MODEL_BASE_URL={shell_quote(model_base_url or 'http://192.168.5.10:3002/v1')}",
-    "# Supported values: Qwen3.5-397B-A17B, MiniMax-2.5, GLM-5",
+    "# Supported values: DeepSeek-V4, Qwen3.5-397B-A17B, MiniMax-2.5, GLM-5",
     f"export OPENWORK_DEFAULT_MODEL={shell_quote(default_model)}",
     f"export OPENWORK_SMALL_MODEL={shell_quote(default_model)}",
     f"export BOCHA_API_KEY={shell_quote(bocha_api_key or '')}",

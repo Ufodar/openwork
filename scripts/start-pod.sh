@@ -488,7 +488,7 @@ kill_old_processes() {
 load_runtime_env
 export OPENWORK_PROVIDER_ID="${OPENWORK_PROVIDER_ID:-my-company}"
 export OPENWORK_MODEL_BASE_URL="${OPENWORK_MODEL_BASE_URL:-http://${OPENWORK_POD_IP}:3002/v1}"
-export OPENWORK_DEFAULT_MODEL="${OPENWORK_DEFAULT_MODEL:-MiniMax-2.5}"
+export OPENWORK_DEFAULT_MODEL="${OPENWORK_DEFAULT_MODEL:-DeepSeek-V4}"
 export OPENWORK_SMALL_MODEL="${OPENWORK_SMALL_MODEL:-$OPENWORK_DEFAULT_MODEL}"
 sync_global_opencode_config
 sync_opencode_config_files

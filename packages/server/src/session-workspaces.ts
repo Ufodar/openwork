@@ -96,6 +96,7 @@ const DOCUMENT_SESSION_SKILL_ALLOWLIST = [
   "doc-coauthoring",
   "doc-normalize",
   "docx",
+  "hermes-learning-loop",
   "pdf",
   "pptx",
   "xlsx",

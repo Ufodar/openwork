@@ -124,6 +124,80 @@ describe("SessionOpencodeRuntimeService", () => {
     expect(config.mcp).toBeUndefined();
   });
 
+  test("refreshes seeded provider config when a provisioned runtime starts again", async () => {
+    const hostConfigDir = await mkdtemp(join(tmpdir(), "openwork-session-runtime-host-config-refresh-"));
+    process.env.OPENCODE_CONFIG_DIR = hostConfigDir;
+
+    await writeFile(
+      join(hostConfigDir, "opencode.json"),
+      JSON.stringify({
+        provider: {
+          test: {
+            options: {
+              baseURL: "http://127.0.0.1:3002/v1",
+              apiKey: "old-secret",
+            },
+            models: {
+              OldModel: { name: "OldModel" },
+            },
+          },
+        },
+        model: "test/OldModel",
+      }),
+      "utf8",
+    );
+
+    const runtimeDir = join(workspacePath, "documents", "sessions", "runtime-refresh");
+    await mkdir(runtimeDir, { recursive: true });
+
+    const service = new SessionOpencodeRuntimeService({ enabled: true });
+    const entry = await service.provisionSessionRuntime(workspace, {
+      runtimeId: "runtime-refresh",
+      runtimeDir,
+      createdAt: 1,
+    });
+
+    await writeFile(
+      join(hostConfigDir, "opencode.json"),
+      JSON.stringify({
+        provider: {
+          test: {
+            options: {
+              baseURL: "http://127.0.0.1:3002/v1",
+              apiKey: "new-secret",
+            },
+            models: {
+              NewModel: { name: "NewModel" },
+            },
+          },
+        },
+        model: "test/NewModel",
+      }),
+      "utf8",
+    );
+
+    const starter = new SessionOpencodeRuntimeService({
+      enabled: true,
+      findFreePort: async () => 4222,
+      waitForHealthy: async () => undefined,
+      spawnProcess: () => ({
+        pid: 333,
+        kill: () => true,
+        on: () => undefined,
+      }) as any,
+    });
+    await starter.startProvisionedRuntime(workspace, entry);
+
+    const configRaw = await readFile(join(entry.opencodeRuntime?.configDir ?? "", "opencode.json"), "utf8");
+    const config = JSON.parse(configRaw) as {
+      provider?: Record<string, { options?: { apiKey?: string }; models?: Record<string, unknown> }>;
+      model?: string;
+    };
+    expect(config.model).toBe("test/NewModel");
+    expect(config.provider?.test?.options?.apiKey).toBe("new-secret");
+    expect(Object.keys(config.provider?.test?.models ?? {})).toEqual(["NewModel"]);
+  });
+
   test("spawns opencode serve with session-scoped env and resolves a dedicated runtime workspace", async () => {
     const runtimeDir = join(workspacePath, "documents", "sessions", "runtime-2");
     await mkdir(runtimeDir, { recursive: true });
@@ -207,6 +281,7 @@ describe("SessionOpencodeRuntimeService", () => {
       baseUrl: "http://127.0.0.1:4777",
       pid: 4777,
       dispose: async () => undefined,
+      runtimeReservationId: "runtime-3",
     });
 
     expect(service.peekSessionWorkspace(workspace, workspace.id, "ses_peek", entry)).toMatchObject({

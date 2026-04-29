@@ -4,7 +4,7 @@ import type { Part } from "@opencode-ai/sdk/v2/client";
 import { Check, ChevronDown, ChevronRight, Copy, Eye, File, FileEdit, FolderSearch, Pencil, Search, Sparkles, Terminal } from "lucide-solid";
 
 import type { MessageGroup, MessageInfo, MessageWithParts } from "../../types";
-import { groupMessageParts, summarizeStep } from "../../utils";
+import { groupMessageParts, safeStringify, summarizeStep } from "../../utils";
 import PartView from "../part-view";
 import { preserveScrollPositionOnToggle } from "../../lib/chat-scroll";
 import { perfNow, recordPerfLog } from "../../lib/perf-log";
@@ -142,6 +142,31 @@ function getTaskStepInfo(part: Part): TaskStepInfo {
   const sessionId = typeof rawSessionId === "string" && rawSessionId.trim() ? rawSessionId.trim() : undefined;
 
   return { isTask: true, agentType, sessionId };
+}
+
+function truncateMessageErrorField(value: unknown, maxLength: number): string {
+  if (value === null || value === undefined) return "";
+  const text = typeof value === "string" ? value : safeStringify(value);
+  const trimmed = text.trim();
+  if (!trimmed) return "";
+  return trimmed.length > maxLength ? `${trimmed.slice(0, maxLength)}...` : trimmed;
+}
+
+function messageErrorLines(message: MessageWithParts): string[] {
+  const error = (message.info as any)?.error;
+  if (!error || typeof error !== "object") return [];
+  const record = error as Record<string, unknown>;
+  const lines: string[] = [];
+
+  const name = truncateMessageErrorField(record.name, 120);
+  const status = truncateMessageErrorField(record.statusCode ?? record.status ?? record.code, 120);
+  const messageText = truncateMessageErrorField(record.message ?? record.data, 700);
+
+  if (messageText) lines.push(messageText);
+  if (status) lines.push(`Status: ${status}`);
+  if (name) lines.push(`Type: ${name}`);
+
+  return lines.length ? lines : [truncateMessageErrorField(error, 700)];
 }
 
 export default function MessageList(props: MessageListProps) {
@@ -355,7 +380,8 @@ export default function MessageList(props: MessageListProps) {
 
     props.messages.forEach((message, index) => {
       const renderableParts = renderablePartsForMessage(message);
-      if (!renderableParts.length) return;
+      const errorLines = messageErrorLines(message);
+      if (!renderableParts.length && !errorLines.length) return;
 
       const messageId = String((message.info as any).id ?? "");
       const idKey = messageId || `idx:${index}`;
@@ -370,7 +396,7 @@ export default function MessageList(props: MessageListProps) {
 
       toolPartCount += renderableParts.reduce((count, part) => (part.type === "tool" ? count + 1 : count), 0);
       const groupId = String((message.info as any).id ?? "message");
-      const groups = groupMessageParts(renderableParts, groupId);
+      const groups = renderableParts.length ? groupMessageParts(renderableParts, groupId) : [];
       const isUser = (message.info as any).role === "user";
       const isStepsOnly = groups.length > 0 && groups.every((group) => group.kind === "steps");
       const stepGroups = isStepsOnly ? (groups as { kind: "steps"; id: string; parts: Part[]; segment: "execution" }[]) : [];
@@ -734,6 +760,22 @@ export default function MessageList(props: MessageListProps) {
           <Show when={durationLabel()}>
             <span>{durationLabel()}</span>
           </Show>
+        </div>
+      </Show>
+    );
+  };
+
+  const MessageError = (errorProps: { message: MessageWithParts }) => {
+    const lines = createMemo(() => messageErrorLines(errorProps.message));
+    return (
+      <Show when={lines().length > 0}>
+        <div class="rounded-2xl border border-red-6 bg-red-2/70 px-3.5 py-3 text-[13px] leading-relaxed text-red-11">
+          <div class="font-medium">{tr("session.message_error_title")}</div>
+          <div class="mt-1 space-y-1">
+            <For each={lines()}>
+              {(line) => <p class="whitespace-pre-wrap break-words">{line}</p>}
+            </For>
+          </div>
         </div>
       </Show>
     );
@@ -1136,6 +1178,9 @@ export default function MessageList(props: MessageListProps) {
                     </div>
                   )}
                 </For>
+                <Show when={!block.isUser}>
+                  <MessageError message={block.message} />
+                </Show>
                 <Show when={!block.isUser}>
                   <MessageMeta message={block.message} />
                 </Show>

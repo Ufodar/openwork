@@ -447,14 +447,26 @@ async function seedIsolatedRuntime(runtime: IsolatedOpencodeRuntime): Promise<vo
   await ensureDir(runtime.tempDir);
 
   const seededMarker = join(runtime.rootDir, ".seeded");
-  if (await exists(seededMarker)) return;
+  const alreadySeeded = await exists(seededMarker);
 
-  const hostConfigDir = resolveHostOpencodeConfigDir();
-  if (await exists(hostConfigDir)) {
-    await cp(hostConfigDir, runtime.configDir, { recursive: true, force: true });
-    await sanitizeSeededRuntimeConfigDir(runtime);
+  if (alreadySeeded) {
+    await syncSeededRuntimeConfigFiles(runtime);
+  } else {
+    const hostConfigDir = resolveHostOpencodeConfigDir();
+    if (await exists(hostConfigDir)) {
+      await cp(hostConfigDir, runtime.configDir, { recursive: true, force: true });
+      await sanitizeSeededRuntimeConfigDir(runtime);
+    }
   }
 
+  await syncSeededRuntimeAuthFiles(runtime);
+  await ensureDir(runtime.rootDir);
+  if (!alreadySeeded) {
+    await writeFile(seededMarker, "seeded\n", "utf8");
+  }
+}
+
+async function syncSeededRuntimeAuthFiles(runtime: IsolatedOpencodeRuntime): Promise<void> {
   const hostOpencodeDataDir = join(resolveHostXdgDataHome(), "opencode");
   const targetOpencodeDataDir = join(runtime.dataDir, "opencode");
   await ensureDir(targetOpencodeDataDir);
@@ -465,8 +477,18 @@ async function seedIsolatedRuntime(runtime: IsolatedOpencodeRuntime): Promise<vo
       await writeFile(join(targetOpencodeDataDir, fileName), contents, "utf8");
     }
   }
-  await ensureDir(runtime.rootDir);
-  await writeFile(seededMarker, "seeded\n", "utf8");
+}
+
+async function syncSeededRuntimeConfigFiles(runtime: IsolatedOpencodeRuntime): Promise<void> {
+  const hostConfigDir = resolveHostOpencodeConfigDir();
+  if (!(await exists(hostConfigDir))) return;
+
+  for (const fileName of ["opencode.json", "opencode.jsonc"]) {
+    const sourcePath = join(hostConfigDir, fileName);
+    if (!(await exists(sourcePath))) continue;
+    const targetPath = join(runtime.configDir, fileName);
+    await writeSanitizedRuntimeConfigFile(sourcePath, targetPath, runtime);
+  }
 }
 
 async function sanitizeSeededRuntimeConfigDir(runtime: IsolatedOpencodeRuntime): Promise<void> {
@@ -479,13 +501,21 @@ async function sanitizeSeededRuntimeConfigDir(runtime: IsolatedOpencodeRuntime):
   for (const fileName of ["opencode.json", "opencode.jsonc"]) {
     const configPath = join(runtime.configDir, fileName);
     if (!(await exists(configPath))) continue;
-    const { data } = await readJsoncFile<Record<string, unknown>>(configPath, {});
-    const stripped = sanitizeRuntimeConfigForSession(data, {
-      runtimeDir: runtime.tempDir ? join(runtime.tempDir, "..", "..") : undefined,
-    });
-    const sanitized = buildSeededRuntimeConfigRecord(stripped);
-    await writeJsoncFile(configPath, sanitized);
+    await writeSanitizedRuntimeConfigFile(configPath, configPath, runtime);
   }
+}
+
+async function writeSanitizedRuntimeConfigFile(
+  sourcePath: string,
+  targetPath: string,
+  runtime: IsolatedOpencodeRuntime,
+): Promise<void> {
+  const { data } = await readJsoncFile<Record<string, unknown>>(sourcePath, {});
+  const stripped = sanitizeRuntimeConfigForSession(data, {
+    runtimeDir: runtime.tempDir ? join(runtime.tempDir, "..", "..") : undefined,
+  });
+  const sanitized = buildSeededRuntimeConfigRecord(stripped);
+  await writeJsoncFile(targetPath, sanitized);
 }
 
 function buildSeededRuntimeConfigRecord(configInput: Record<string, unknown>): Record<string, unknown> {

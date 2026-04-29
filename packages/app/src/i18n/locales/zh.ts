@@ -567,6 +567,7 @@ export default {
   "session.run_retrying": "重试中",
   "session.run_responding": "响应中",
   "session.run_failed": "运行失败",
+  "session.message_error_title": "模型调用失败",
   "session.run_stall_soft": "已 {seconds} 秒无新进展，仍在处理中…",
   "session.run_stall_hard": "已 {seconds} 秒无新进展，可能在压缩上下文或工具执行较慢。",
   "session.knowledge": "知识库",

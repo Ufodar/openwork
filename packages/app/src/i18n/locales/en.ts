@@ -566,6 +566,7 @@ export default {
   "session.run_retrying": "Retrying",
   "session.run_responding": "Responding",
   "session.run_failed": "Run failed",
+  "session.message_error_title": "Model call failed",
   "session.run_stall_soft": "No progress for {seconds}s. Still working…",
   "session.run_stall_hard": "No progress for {seconds}s. This may be context compaction or a slow tool run.",
   "session.knowledge": "Knowledge",

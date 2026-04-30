@@ -18,7 +18,7 @@ import { recordAudit, readAuditEntries, readLastAudit } from "./audit.js";
 import { ReloadEventStore } from "./events.js";
 import { parseFrontmatter } from "./frontmatter.js";
 import { opencodeConfigPath, openworkConfigPath, projectCommandsDir, projectSkillsDir } from "./workspace-files.js";
-import { ensureDir, exists, hashToken, shortId } from "./utils.js";
+import { createAscendingPrefixedId, ensureDir, exists, hashToken, shortId } from "./utils.js";
 import { workspaceIdForPath } from "./workspaces.js";
 import { sanitizeCommandName, validateMcpName } from "./validators.js";
 import { TokenService } from "./tokens.js";
@@ -1551,7 +1551,7 @@ export async function proxyOpencodeRequest(input: {
     const existingMessageId = typeof promptPayload.messageID === "string"
       ? promptPayload.messageID.trim()
       : "";
-    bidNodeMessageId = existingMessageId || `msg_${shortId().replace(/-/g, "")}`;
+    bidNodeMessageId = existingMessageId || createAscendingPrefixedId("msg");
     promptPayload.messageID = bidNodeMessageId;
     body = JSON.stringify(promptPayload);
   }

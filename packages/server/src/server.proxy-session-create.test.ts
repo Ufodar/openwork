@@ -36,9 +36,7 @@ async function writeOutlineDocx(
 ) {
   const absolutePath = join(
     workspacePath,
-    ".opencode",
-    "openwork",
-    "inbox",
+    "documents",
     relativePath,
   );
   await mkdir(dirname(absolutePath), { recursive: true });
@@ -613,6 +611,7 @@ describe("proxyOpencodeRequest session creation", () => {
 
     expect(promptResponse.status).toBe(200);
     expect(proxiedMessageId).toBeTruthy();
+    expect(proxiedMessageId).toMatch(/^msg_[0-9a-f]{12}[0-9A-Za-z]{14}$/);
 
     const messageResponse = await proxyOpencodeRequest({
       request: new Request("http://openwork.local/w/ws_1/opencode/session/ses_author/message", {

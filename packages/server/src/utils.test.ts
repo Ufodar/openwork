@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { hashToken, shortId, parseList, ensureDir, exists } from "./utils.js";
+import { createAscendingPrefixedId, hashToken, shortId, parseList, ensureDir, exists } from "./utils.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -31,6 +31,19 @@ describe("shortId", () => {
   test("returns unique values", () => {
     const ids = new Set(Array.from({ length: 100 }, () => shortId()));
     expect(ids.size).toBe(100);
+  });
+});
+
+describe("createAscendingPrefixedId", () => {
+  test("returns an OpenCode-compatible prefixed id", () => {
+    const id = createAscendingPrefixedId("msg", 1_700_000_000_000);
+    expect(id).toMatch(/^msg_[0-9a-f]{12}[0-9A-Za-z]{14}$/);
+  });
+
+  test("preserves lexical ordering within the same timestamp", () => {
+    const first = createAscendingPrefixedId("msg", 1_700_000_000_123);
+    const second = createAscendingPrefixedId("msg", 1_700_000_000_123);
+    expect(first < second).toBe(true);
   });
 });
 

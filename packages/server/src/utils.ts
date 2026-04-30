@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { mkdir, readFile, stat } from "node:fs/promises";
 
 export async function exists(path: string): Promise<boolean> {
@@ -29,6 +29,36 @@ export function hashToken(token: string): string {
 
 export function shortId(): string {
   return randomUUID();
+}
+
+const ASCENDING_ID_LENGTH = 26;
+const BASE62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+let lastAscendingTimestamp = 0;
+let ascendingCounter = 0;
+
+function randomBase62(length: number): string {
+  let result = "";
+  const bytes = randomBytes(length);
+  for (let index = 0; index < length; index += 1) {
+    result += BASE62[bytes[index] % BASE62.length];
+  }
+  return result;
+}
+
+export function createAscendingPrefixedId(prefix: string, timestamp = Date.now()): string {
+  if (timestamp !== lastAscendingTimestamp) {
+    lastAscendingTimestamp = timestamp;
+    ascendingCounter = 0;
+  }
+  ascendingCounter += 1;
+
+  const encoded = BigInt(timestamp) * 0x1000n + BigInt(ascendingCounter);
+  const timeBytes = Buffer.alloc(6);
+  for (let index = 0; index < 6; index += 1) {
+    timeBytes[index] = Number((encoded >> BigInt(40 - 8 * index)) & 0xffn);
+  }
+
+  return `${prefix}_${timeBytes.toString("hex")}${randomBase62(ASCENDING_ID_LENGTH - 12)}`;
 }
 
 export function parseList(input: string | undefined): string[] {

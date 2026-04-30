@@ -1547,6 +1547,7 @@ export function createOpenworkServerClient(options: { baseUrl: string; token?: s
         path?: string | null;
         baseDir?: string | null;
         relativePath?: string | null;
+        overwrite?: boolean;
       },
     ) => {
       const search = new URLSearchParams();
@@ -1557,6 +1558,7 @@ export function createOpenworkServerClient(options: { baseUrl: string; token?: s
       if (payload.path?.trim()) form.append("path", payload.path.trim());
       if (payload.baseDir?.trim()) form.append("baseDir", payload.baseDir.trim());
       if (payload.relativePath?.trim()) form.append("relativePath", payload.relativePath.trim());
+      if (payload.overwrite === true) form.append("overwrite", "true");
       return requestMultipartJson<{ ok: boolean; name: string }>(
         baseUrl,
         `/w/${encodeURIComponent(workspaceId)}/document/upload${suffix ? `?${suffix}` : ""}`,

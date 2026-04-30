@@ -402,6 +402,7 @@ export default function BidWorkbenchView(props: SessionViewProps) {
           file,
           baseDir: FILE_CATEGORY_ROOTS[category],
           relativePath,
+          overwrite: true,
         });
       }
       await refreshAll();

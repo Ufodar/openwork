@@ -1384,6 +1384,7 @@ export function createDocumentRoutes(routes: unknown[], sessionWorkspaces?: Sess
             const requestedRelativePath = typeof formData.get("relativePath") === "string"
                 ? normalizeDocumentPath(String(formData.get("relativePath")))
                 : "";
+            const overwriteRequested = String(formData.get("overwrite") ?? "").trim().toLowerCase() === "true";
 
             let destRel = "";
             if (sessionId) {
@@ -1407,7 +1408,9 @@ export function createDocumentRoutes(routes: unknown[], sessionWorkspaces?: Sess
             }
 
             validateDocumentMutationPath(destRel, { allowHiddenLeafFile: true });
-            destRel = await ensureUniqueUploadedDocumentPath(docsDir, destRel);
+            if (!overwriteRequested) {
+                destRel = await ensureUniqueUploadedDocumentPath(docsDir, destRel);
+            }
 
             const filePath = resolveDocumentPathSafe(docsDir, destRel);
             await persistUploadedDocumentFile(filePath, file);

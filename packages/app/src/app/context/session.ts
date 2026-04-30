@@ -780,6 +780,7 @@ export function createSessionStore(options: {
       mark("session.messages done");
       if (abortIfStale("selection changed before messages applied")) return false;
       setMessagesForSession(sessionID, msgs);
+      clearRecoverableSelectedSessionError(sessionID);
 
       const model = options.lastUserModelFromMessages(msgs);
       if (model) {

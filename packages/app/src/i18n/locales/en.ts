@@ -131,6 +131,8 @@ export default {
   "agents.document_agent_desc": "Document viewing, editing, and AI collaboration with tree file browser",
   "agents.document_writer_name": "Formal Document Writer",
   "agents.document_writer_desc": "Workflow assistant for long-form deliverables, structured drafting, and multi-document synthesis",
+  "agents.bid_workbench_name": "Bid Collaboration Workbench",
+  "agents.bid_workbench_desc": "Section-level collaborative workspace for proposal writing with node-scoped chats, material binding, and later merge",
 
   // ==================== Document Agent ====================
   "docagent.documents": "Documents",

@@ -18,15 +18,13 @@ description: 在 OpenWork 中，任务完成后把经过证据验证的流程知
 
 ## 目标
 
-把已经被代码、日志、文档或成功执行结果支持的经验，沉淀为 **OpenWork 共享 skill**，供未来同一 workspace、同一部署链路、同一多用户系统复用。
+把已经被代码、日志、文档或成功执行结果支持的经验，沉淀为 **OpenWork 共享 skill**，供未来同一部署链路、同一多用户系统、以及真正适用的 project workspace 复用。
 
-在 OpenWork 中，默认沉淀位置是：
+在 OpenWork 中，先判断 lesson 的作用范围，再选择沉淀位置。
 
-```text
-<WORKSPACE>/.opencode/skills/
-```
-
-而不是 `~/.codex/skills`。只有在经验明确属于操作者本机私有工作流、且不应进入项目版本控制时，才考虑停留在项目外。
+- **系统级共享经验**：`~/.config/opencode/skills/`
+- **项目级共享经验**：项目源码 workspace 下的 `.opencode/skills/`
+- **会话级 runtime `<WORKSPACE>`**：不是 durable 共享记忆面，不要把它当成共享 skill 的默认沉淀位置
 
 ## 非谈判规则
 
@@ -72,8 +70,10 @@ description: 在 OpenWork 中，任务完成后把经过证据验证的流程知
 
 ### 3. 选择沉淀位置
 
-- **共享 OpenWork 行为**：写到 `<WORKSPACE>/.opencode/skills/<skill-name>/SKILL.md`
-- **仅个人本机有效**：不要写进项目级 skill；通常保持 `unchanged`
+- **系统级共享 OpenWork 行为**：写到 `~/.config/opencode/skills/<skill-name>/SKILL.md`
+- **当前源码仓库专用、且应进入版本控制**：写到项目源码 workspace 的 `.opencode/skills/<skill-name>/SKILL.md`
+- **当前 hosted / isolated session 的 runtime `<WORKSPACE>`**：不要把它当成共享 skill 的沉淀面
+- **仅个人本机有效**：通常保持 `unchanged`
 
 ### 4. 写入内容
 
@@ -89,9 +89,9 @@ description: 在 OpenWork 中，任务完成后把经过证据验证的流程知
 
 如果这个 skill 预期要在 hosted / isolated session 中生效，还必须检查：
 
-- `.opencode/skills/<skill-name>/SKILL.md` 已存在
+- 目标位置中的 `SKILL.md` 已存在
 - 相关 agent 的 `permission.skill` 允许调用它
-- runtime skill allowlist 会把它镜像进 session workspace
+- runtime 加载链路确实能发现它，例如 runtime 镜像、全局 skill 扫描或等价发布机制
 
 如果没有做到这三点，就不算真正完成。
 

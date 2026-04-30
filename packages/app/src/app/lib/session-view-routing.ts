@@ -5,6 +5,7 @@ export type AppRouteView =
   | "dashboard"
   | "session"
   | "proto"
+  | "bid-workbench"
   | "document-agent"
   | "document-writer"
   | "login";
@@ -15,6 +16,7 @@ export const resolveAppRouteView = (pathname: string): AppRouteView => {
   if (path.startsWith("/onboarding")) return "onboarding";
   if (path.startsWith("/session")) return "session";
   if (path.startsWith("/proto")) return "proto";
+  if (path.startsWith("/bid-workbench")) return "bid-workbench";
   if (path.startsWith("/document-writer")) return "document-writer";
   if (path.startsWith("/document-agent")) return "document-agent";
   return "dashboard";
@@ -23,6 +25,7 @@ export const resolveAppRouteView = (pathname: string): AppRouteView => {
 export const routeForSessionView = (view: ResolvedSessionView, sessionId: string): string => {
   const trimmed = sessionId.trim();
   if (!trimmed) return "/session";
+  if (view === "bid-workbench") return `/bid-workbench/${trimmed}`;
   if (view === "document-agent") return `/document-agent/${trimmed}`;
   if (view === "document-writer") return `/document-writer/${trimmed}`;
   return `/session/${trimmed}`;

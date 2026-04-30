@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readlink, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -23,12 +23,13 @@ describe("provisionSessionWorkspace", () => {
   test("denies external directories and system-temp document outputs for hosted session runtimes", () => {
     const rules = buildSessionPermissionRules();
 
-    expect(rules).toHaveLength(42);
+    expect(rules).toHaveLength(43);
     expect(rules).toContainEqual({ permission: "bash", pattern: "*-o /tmp/*.md*", action: "deny" });
     expect(rules).toContainEqual({ permission: "bash", pattern: "*> /tmp/*.md*", action: "deny" });
     expect(rules).toContainEqual({ permission: "bash", pattern: "*-o /private/tmp/*.docx*", action: "deny" });
     expect(rules).toContainEqual({ permission: "bash", pattern: "*> /private/tmp/*.pptx*", action: "deny" });
     expect(rules).toContainEqual({ permission: "glob", pattern: "**/*", action: "deny" });
+    expect(rules).toContainEqual({ permission: "external_directory", pattern: `${process.env.HOME ?? "/Users/storm"}/.config/opencode/skills/*`, action: "allow" });
     expect(rules).toContainEqual({ permission: "external_directory", pattern: "*", action: "deny" });
   });
 
@@ -62,15 +63,57 @@ describe("provisionSessionWorkspace", () => {
     expect(parsed.mcp?.memory).toBeUndefined();
   });
 
+  test("creates a bid-workbench node runtime with shared roots and a private node scope", async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), "openwork-session-workspace-bid-node-"));
+    await mkdir(join(workspacePath, ".opencode", "skills", "docx"), { recursive: true });
+    await writeFile(
+      join(workspacePath, ".opencode", "skills", "docx", "SKILL.md"),
+      "# docx\n",
+      "utf8",
+    );
+    await writeFile(join(workspacePath, "opencode.jsonc"), JSON.stringify({ model: "test" }, null, 2), "utf8");
+
+    const result = await provisionSessionWorkspace(workspacePath, {
+      preferredView: "document-agent",
+      preferredAgent: "common-work",
+      preferredAgentLock: "common-work",
+      runtimeProfileId: "bid-workbench-node",
+      runtimeScopeKind: "bid-workbench-node",
+      runtimeScopeKey: "node-a",
+      bidNodeId: "node-a",
+    });
+
+    expect(await exists(join(result.runtimeDir, "bid-workbench", "tender"))).toBe(true);
+    expect(await exists(join(result.runtimeDir, "bid-workbench", "reference"))).toBe(true);
+    expect(await exists(join(result.runtimeDir, "bid-workbench", "templates"))).toBe(true);
+    expect(await exists(join(result.runtimeDir, "bid-workbench", "output"))).toBe(true);
+    expect(await exists(join(result.runtimeDir, "bid-workbench", "runtime", "node-a", result.runtimeId))).toBe(true);
+    expect(await exists(join(result.runtimeDir, ".openwork", "bid-workbench"))).toBe(true);
+    expect(await exists(join(result.runtimeDir, ".opencode", "openwork-bid-workbench-node.md"))).toBe(true);
+
+    const runtimeConfigRaw = await readFile(join(result.runtimeDir, "opencode.jsonc"), "utf8");
+    const runtimeConfig = JSON.parse(runtimeConfigRaw) as { instructions?: string[] };
+    expect(runtimeConfig.instructions).toContain(".opencode/openwork-bid-workbench-node.md");
+  });
+
   test("creates a runtime directory, a workspace-local temp root, and mirrors required .opencode support files", async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), "openwork-session-workspace-"));
     await mkdir(join(workspacePath, ".opencode", "prompts"), { recursive: true });
     await mkdir(join(workspacePath, ".opencode", "references"), { recursive: true });
+    await mkdir(join(workspacePath, ".opencode", "instructions"), { recursive: true });
     await mkdir(join(workspacePath, ".opencode", "commands"), { recursive: true });
     await mkdir(join(workspacePath, ".opencode", "skills", "docx"), { recursive: true });
-    await writeFile(join(workspacePath, "opencode.json"), JSON.stringify({ model: "test" }), "utf8");
+    await writeFile(
+      join(workspacePath, "opencode.jsonc"),
+      JSON.stringify({
+        model: "test",
+        instructions: [".opencode/instructions/shared-agent-governance.md"],
+      }, null, 2),
+      "utf8",
+    );
     await writeFile(join(workspacePath, ".opencode", "prompts", "doc-orchestrator.md"), "prompt", "utf8");
     await writeFile(join(workspacePath, ".opencode", "references", "doc-state-schema.md"), "reference", "utf8");
+    await writeFile(join(workspacePath, ".opencode", "instructions", "shared-agent-governance.md"), "instruction", "utf8");
     await writeFile(join(workspacePath, ".opencode", "commands", "hello.md"), "---\n---\nhello\n", "utf8");
     await writeFile(join(workspacePath, ".opencode", "skills", "docx", "SKILL.md"), "# skill\n", "utf8");
 
@@ -93,7 +136,9 @@ describe("provisionSessionWorkspace", () => {
     expect(await exists(join(result.runtimeDir, ".opencode", "prompts", "doc-orchestrator.md"))).toBe(true);
     expect(await exists(join(result.runtimeDir, ".opencode", "references", "doc-state-schema.md"))).toBe(true);
     expect(await exists(join(result.runtimeDir, ".opencode", "skills", "docx", "SKILL.md"))).toBe(true);
+    expect(await exists(join(result.runtimeDir, ".opencode", "instructions", "shared-agent-governance.md"))).toBe(true);
     expect(runtimeConfig.model).toBe("test");
+    expect(runtimeConfig.instructions).toContain(".opencode/instructions/shared-agent-governance.md");
     expect(runtimeConfig.instructions).toContain(".opencode/openwork-runtime.md");
     expect(runtimeInstructionRaw).toContain("Minimal runtime contract:");
     expect(runtimeInstructionRaw).toContain("<WORKSPACE>/.tmp/system");
@@ -102,6 +147,49 @@ describe("provisionSessionWorkspace", () => {
     expect(runtimeInstructionRaw).toContain("Do not rely on workspace-external absolute paths or `external_directory`");
     expect(runtimeGitignoreRaw).toContain(".openwork-runtime/");
     expect(runtimeGitignoreRaw).toContain(".tmp/");
+  });
+
+  test("prepares shared bid-workbench roots and a node-private runtime surface for bid-workbench node sessions", async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), "openwork-session-workspace-bid-node-"));
+    await mkdir(join(workspacePath, ".opencode", "skills", "docx"), { recursive: true });
+    await mkdir(join(workspacePath, ".opencode", "skills", "pdf"), { recursive: true });
+    await mkdir(join(workspacePath, ".opencode", "skills", "xlsx"), { recursive: true });
+    await mkdir(join(workspacePath, ".opencode", "skills", "pptx"), { recursive: true });
+    await mkdir(join(workspacePath, ".opencode", "skills", "doc-coauthoring"), { recursive: true });
+    await mkdir(join(workspacePath, ".opencode", "skills", "doc-normalize"), { recursive: true });
+    await mkdir(join(workspacePath, ".opencode", "skills", "hermes-learning-loop"), { recursive: true });
+    await writeFile(join(workspacePath, "opencode.jsonc"), JSON.stringify({ model: "test-bid-node" }, null, 2), "utf8");
+
+    const result = await provisionSessionWorkspace(workspacePath, {
+      runtimeProfileId: "bid-workbench-node",
+      runtimeScopeKind: "bid-workbench-node",
+      runtimeScopeKey: "node-a",
+      bidNodeId: "node-a",
+    });
+
+    const runtimeConfigRaw = await readFile(join(result.runtimeDir, "opencode.jsonc"), "utf8");
+    const runtimeConfig = JSON.parse(runtimeConfigRaw) as { instructions?: string[] };
+    const runtimeInstructionRaw = await readFile(
+      join(result.runtimeDir, ".opencode", "openwork-bid-workbench-node.md"),
+      "utf8",
+    );
+
+    expect(await exists(join(result.runtimeDir, "bid-workbench", "runtime", "node-a", result.runtimeId))).toBe(true);
+    expect(await exists(join(result.runtimeDir, "bid-workbench", "tender"))).toBe(true);
+    expect(await exists(join(result.runtimeDir, "bid-workbench", "reference"))).toBe(true);
+    expect(await exists(join(result.runtimeDir, "bid-workbench", "templates"))).toBe(true);
+    expect(await exists(join(result.runtimeDir, "bid-workbench", "output"))).toBe(true);
+    expect(await exists(join(result.runtimeDir, ".openwork", "bid-workbench"))).toBe(true);
+    expect(await readlink(join(result.runtimeDir, "bid-workbench", "tender"))).toContain(
+      ".opencode/openwork/inbox/bid-workbench/tender",
+    );
+    expect(await readlink(join(result.runtimeDir, ".openwork", "bid-workbench"))).toContain(
+      ".openwork/bid-workbench",
+    );
+    expect(runtimeConfig.instructions).toContain(".opencode/openwork-bid-workbench-node.md");
+    expect(runtimeInstructionRaw).toContain("Bid Workbench Node Contract");
+    expect(runtimeInstructionRaw).toContain("bid-workbench/output/");
+    expect(runtimeInstructionRaw).toContain("node-briefs/node-a.md");
   });
 
   test("prunes runtime skills and unrelated MCP entries for document-agent sessions", async () => {

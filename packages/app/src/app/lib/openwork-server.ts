@@ -576,6 +576,150 @@ export type OpenworkInboxUploadResult = {
   bytes: number;
 };
 
+export type OpenworkBidWorkbenchSourceType =
+  | "tender"
+  | "reference"
+  | "output"
+  | "templates";
+
+export type OpenworkBidWorkbenchStructureSourceKind =
+  | "template"
+  | "tender"
+  | "manual-outline"
+  | "derived-outline";
+
+export type OpenworkBidWorkbenchWorkflowStage =
+  | "outline"
+  | "mapping"
+  | "drafting"
+  | "merge";
+
+export type OpenworkBidWorkbenchCompositionMode =
+  | "strict-reference"
+  | "reference-guided"
+  | "free-generation";
+
+export type OpenworkBidWorkbenchOutput = {
+  path: string;
+  kind: "draft" | "candidate" | "final";
+  createdBySessionId: string | null;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type OpenworkBidWorkbenchSourceRangeKind =
+  | "page-range"
+  | "section-ref"
+  | "anchor"
+  | "note";
+
+export type OpenworkBidWorkbenchSourceRange = {
+  id: string;
+  sourcePath: string;
+  rangeKind: OpenworkBidWorkbenchSourceRangeKind;
+  rangeValue: string;
+  note: string | null;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type OpenworkBidWorkbenchMarkKind =
+  | "note"
+  | "risk"
+  | "todo"
+  | "decision";
+
+export type OpenworkBidWorkbenchNode = {
+  id: string;
+  title: string;
+  level: number;
+  parentId: string | null;
+  children: string[];
+  isLeaf: boolean;
+  sessionId: string | null;
+  activeSessionId: string | null;
+  lastSessionId: string | null;
+  runtimeScopeKey: string | null;
+  lockedBy: string | null;
+  lockedAt: number | null;
+  recentPromptAuthor: string | null;
+  recentPromptAt: number | null;
+  participants: string[];
+  compositionMode: OpenworkBidWorkbenchCompositionMode;
+  assignee: string | null;
+  referencePaths: string[];
+  sourceRanges: OpenworkBidWorkbenchSourceRange[];
+  outputPaths: string[];
+  outputs: OpenworkBidWorkbenchOutput[];
+  primaryOutputPath: string | null;
+  lastEditedOutputPath: string | null;
+  templatePath: string | null;
+  mergedIntoMaster: boolean;
+  mergeRequested: boolean;
+  mergeApplied: boolean;
+  mergeFailed: boolean;
+  mergedOutputPath: string | null;
+  refreshConflictState: "none" | "needs-review" | "orphaned";
+  sourcePath: string;
+  sourceLocator: string;
+  orderIndex: number;
+};
+
+export type OpenworkBidWorkbenchMark = {
+  id: string;
+  nodeId: string;
+  author: string;
+  kind: OpenworkBidWorkbenchMarkKind;
+  text: string;
+  createdAt: number;
+};
+
+export type OpenworkBidWorkbenchProject = {
+  outlineSourcePath: string | null;
+  outlineSourceType: OpenworkBidWorkbenchSourceType | null;
+  structureSourceKind: OpenworkBidWorkbenchStructureSourceKind | null;
+  rootOutputPath: string | null;
+  workflowStage: OpenworkBidWorkbenchWorkflowStage;
+  outlineRevision: number;
+  updatedAt: number;
+};
+
+export type OpenworkBidWorkbenchConstraints = {
+  formatRules: Record<string, unknown>;
+  extractedFromPath: string | null;
+  updatedAt: number;
+};
+
+export type OpenworkBidWorkbenchRefresh = {
+  runId: string;
+  sourcePath: string;
+  sourceHash: string;
+  status: string;
+  summary: string;
+  createdAt: number;
+} | null;
+
+export type OpenworkBidWorkbenchMergeJob = {
+  id: string;
+  sectionId: string;
+  outputPath: string;
+  rootOutputPath: string;
+  status: "requested" | "applied" | "failed";
+  errorSummary: string | null;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type OpenworkBidWorkbenchState = {
+  schemaVersion: number;
+  project: OpenworkBidWorkbenchProject;
+  constraints: OpenworkBidWorkbenchConstraints;
+  nodes: OpenworkBidWorkbenchNode[];
+  marks: OpenworkBidWorkbenchMark[];
+  refresh: OpenworkBidWorkbenchRefresh;
+  mergeJobs: OpenworkBidWorkbenchMergeJob[];
+};
+
 export type OpenworkSoulHeartbeatEntry = {
   id: string;
   ts: string | null;
@@ -1042,6 +1186,7 @@ async function fetchWithTimeout(
       ? AbortSignal.any([upstreamSignal, timeoutController.signal])
       : timeoutController?.signal ?? upstreamSignal;
   const initWithSignal = signal ? { ...init, signal } : init;
+  let didTimeout = false;
 
   // Fallback for runtimes without AbortController support.
   if (!timeoutController) {
@@ -1084,7 +1229,6 @@ async function fetchWithTimeout(
     }
 
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
-    let didTimeout = false;
     timeoutId = setTimeout(() => {
       didTimeout = true;
       try {
@@ -2117,6 +2261,252 @@ export function createOpenworkServerClient(options: { baseUrl: string; token?: s
         baseUrl,
         `/workspace/${encodeURIComponent(workspaceId)}/inbox/${encodeURIComponent(inboxId)}`,
         { token, hostToken, method: "DELETE" },
+      ),
+    getBidWorkbench: (workspaceId: string) =>
+      requestJson<OpenworkBidWorkbenchState>(
+        baseUrl,
+        `/workspace/${encodeURIComponent(workspaceId)}/bid-workbench`,
+        { token, hostToken },
+      ),
+    setBidWorkbenchProjectSource: (
+      workspaceId: string,
+      payload: {
+        sourcePath: string;
+        sourceType: OpenworkBidWorkbenchSourceType;
+        structureSourceKind: OpenworkBidWorkbenchStructureSourceKind;
+      },
+    ) =>
+      requestJson<OpenworkBidWorkbenchState>(
+        baseUrl,
+        `/workspace/${encodeURIComponent(workspaceId)}/bid-workbench/project`,
+        {
+          token,
+          hostToken,
+          method: "POST",
+          body: payload,
+        },
+      ),
+    setBidWorkbenchProjectRootOutput: (
+      workspaceId: string,
+      payload: { rootOutputPath: string | null },
+    ) =>
+      requestJson<OpenworkBidWorkbenchState>(
+        baseUrl,
+        `/workspace/${encodeURIComponent(workspaceId)}/bid-workbench/project/root-output`,
+        {
+          token,
+          hostToken,
+          method: "POST",
+          body: payload,
+        },
+      ),
+    setBidWorkbenchProjectWorkflowStage: (
+      workspaceId: string,
+      payload: { workflowStage: OpenworkBidWorkbenchWorkflowStage },
+    ) =>
+      requestJson<OpenworkBidWorkbenchState>(
+        baseUrl,
+        `/workspace/${encodeURIComponent(workspaceId)}/bid-workbench/project/stage`,
+        {
+          token,
+          hostToken,
+          method: "POST",
+          body: payload,
+        },
+      ),
+    setBidWorkbenchProjectConstraints: (
+      workspaceId: string,
+      payload: {
+        formatRules: Record<string, unknown>;
+        extractedFromPath: string | null;
+      },
+    ) =>
+      requestJson<OpenworkBidWorkbenchState>(
+        baseUrl,
+        `/workspace/${encodeURIComponent(workspaceId)}/bid-workbench/project/constraints`,
+        {
+          token,
+          hostToken,
+          method: "POST",
+          body: payload,
+        },
+      ),
+    refreshBidWorkbench: (workspaceId: string) =>
+      requestJson<OpenworkBidWorkbenchState>(
+        baseUrl,
+        `/workspace/${encodeURIComponent(workspaceId)}/bid-workbench/refresh`,
+        {
+          token,
+          hostToken,
+          method: "POST",
+        },
+      ),
+    setBidWorkbenchSectionSession: (
+      workspaceId: string,
+      sectionId: string,
+      payload: { sessionId: string | null },
+    ) =>
+      requestJson<OpenworkBidWorkbenchState>(
+        baseUrl,
+        `/workspace/${encodeURIComponent(workspaceId)}/bid-workbench/sections/${encodeURIComponent(sectionId)}/session`,
+        {
+          token,
+          hostToken,
+          method: "POST",
+          body: payload,
+        },
+      ),
+    setBidWorkbenchSectionLock: (
+      workspaceId: string,
+      sectionId: string,
+      payload: { lockedBy: string | null },
+    ) =>
+      requestJson<OpenworkBidWorkbenchState>(
+        baseUrl,
+        `/workspace/${encodeURIComponent(workspaceId)}/bid-workbench/sections/${encodeURIComponent(sectionId)}/lock`,
+        {
+          token,
+          hostToken,
+          method: "POST",
+          body: payload,
+        },
+      ),
+    setBidWorkbenchSectionMergedState: (
+      workspaceId: string,
+      sectionId: string,
+      payload: {
+        mergeRequested?: boolean;
+        mergeApplied?: boolean;
+        mergeFailed?: boolean;
+        mergedIntoMaster?: boolean;
+        outputPath?: string | null;
+        rootOutputPath?: string | null;
+        errorSummary?: string | null;
+      },
+    ) =>
+      requestJson<OpenworkBidWorkbenchState>(
+        baseUrl,
+        `/workspace/${encodeURIComponent(workspaceId)}/bid-workbench/sections/${encodeURIComponent(sectionId)}/merge`,
+        {
+          token,
+          hostToken,
+          method: "POST",
+          body: payload,
+        },
+      ),
+    setBidWorkbenchSectionLink: (
+      workspaceId: string,
+      sectionId: string,
+      payload: {
+        kind: "reference" | "output" | "template" | "master-output";
+        path: string;
+        selected: boolean;
+      },
+    ) =>
+      requestJson<OpenworkBidWorkbenchState>(
+        baseUrl,
+        `/workspace/${encodeURIComponent(workspaceId)}/bid-workbench/sections/${encodeURIComponent(sectionId)}/links`,
+        {
+          token,
+          hostToken,
+          method: "POST",
+          body: payload,
+        },
+      ),
+    addBidWorkbenchSectionRange: (
+      workspaceId: string,
+      sectionId: string,
+      payload: {
+        sourcePath: string;
+        rangeKind: OpenworkBidWorkbenchSourceRangeKind;
+        rangeValue: string;
+        note?: string | null;
+      },
+    ) =>
+      requestJson<OpenworkBidWorkbenchState>(
+        baseUrl,
+        `/workspace/${encodeURIComponent(workspaceId)}/bid-workbench/sections/${encodeURIComponent(sectionId)}/ranges`,
+        {
+          token,
+          hostToken,
+          method: "POST",
+          body: payload,
+        },
+      ),
+    deleteBidWorkbenchSectionRange: (
+      workspaceId: string,
+      rangeId: string,
+    ) =>
+      requestJson<OpenworkBidWorkbenchState>(
+        baseUrl,
+        `/workspace/${encodeURIComponent(workspaceId)}/bid-workbench/ranges/${encodeURIComponent(rangeId)}`,
+        {
+          token,
+          hostToken,
+          method: "DELETE",
+        },
+      ),
+    setBidWorkbenchSectionMetadata: (
+      workspaceId: string,
+      sectionId: string,
+      payload: {
+        compositionMode?: OpenworkBidWorkbenchCompositionMode;
+        assignee?: string | null;
+      },
+    ) =>
+      requestJson<OpenworkBidWorkbenchState>(
+        baseUrl,
+        `/workspace/${encodeURIComponent(workspaceId)}/bid-workbench/sections/${encodeURIComponent(sectionId)}/metadata`,
+        {
+          token,
+          hostToken,
+          method: "POST",
+          body: payload,
+        },
+      ),
+    setBidWorkbenchSectionPrimaryOutput: (
+      workspaceId: string,
+      sectionId: string,
+      payload: { primaryOutputPath: string | null },
+    ) =>
+      requestJson<OpenworkBidWorkbenchState>(
+        baseUrl,
+        `/workspace/${encodeURIComponent(workspaceId)}/bid-workbench/sections/${encodeURIComponent(sectionId)}/primary-output`,
+        {
+          token,
+          hostToken,
+          method: "POST",
+          body: payload,
+        },
+      ),
+    addBidWorkbenchSectionMark: (
+      workspaceId: string,
+      sectionId: string,
+      payload: {
+        author: string;
+        kind: OpenworkBidWorkbenchMarkKind;
+        text: string;
+      },
+    ) =>
+      requestJson<OpenworkBidWorkbenchState>(
+        baseUrl,
+        `/workspace/${encodeURIComponent(workspaceId)}/bid-workbench/sections/${encodeURIComponent(sectionId)}/marks`,
+        {
+          token,
+          hostToken,
+          method: "POST",
+          body: payload,
+        },
+      ),
+    deleteBidWorkbenchSectionMark: (workspaceId: string, markId: string) =>
+      requestJson<OpenworkBidWorkbenchState>(
+        baseUrl,
+        `/workspace/${encodeURIComponent(workspaceId)}/bid-workbench/marks/${encodeURIComponent(markId)}`,
+        {
+          token,
+          hostToken,
+          method: "DELETE",
+        },
       ),
     readWorkspaceFile: (workspaceId: string, path: string) =>
       requestJson<OpenworkWorkspaceFileContent>(

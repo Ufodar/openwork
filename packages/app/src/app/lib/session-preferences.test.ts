@@ -150,6 +150,21 @@ describe("resolveSessionPreferences", () => {
     expect(resolved.agentLock).toEqual({ value: "document-writer", source: "stored" });
   });
 
+  test("preserves a stored bid-workbench view as its own dedicated surface", () => {
+    const resolved = resolveSessionPreferences({
+      stored: {
+        view: "bid-workbench",
+        agent: "common-work",
+        agentLock: "common-work",
+      },
+      title: "多人协作投标工作台",
+    });
+
+    expect(resolved.view).toEqual({ value: "bid-workbench", source: "stored" });
+    expect(resolved.agent).toEqual({ value: "common-work", source: "stored" });
+    expect(resolved.agentLock).toEqual({ value: "common-work", source: "stored" });
+  });
+
   test("maps new document writer titles to the document-writer view and lock", () => {
     const resolved = resolveSessionPreferences({
       title: "Document Writer",

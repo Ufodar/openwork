@@ -29,6 +29,26 @@ import { handleDocumentStateMcpRequest } from "./document-state-mcp.js";
 import { handleKnowledgeMcpRequest } from "./knowledge-mcp.js";
 import { createConfiguredRagflowClient, type RagflowClient } from "./ragflow.js";
 import { buildDefaultKnowledgeParserConfig, normalizeKnowledgeLayoutRecognize, sanitizeKnowledgeParserConfig } from "./knowledge-parser-config.js";
+import {
+  acquireBidWorkbenchSectionLock,
+  addBidWorkbenchSectionRange,
+  addBidWorkbenchSectionMark,
+  deleteBidWorkbenchSectionRange,
+  deleteBidWorkbenchSectionMark,
+  getBidWorkbenchState,
+  recordBidWorkbenchSectionPromptActivity,
+  refreshBidWorkbenchState,
+  setBidWorkbenchOutlineSource,
+  setBidWorkbenchProjectConstraints,
+  setBidWorkbenchProjectRootOutput,
+  setBidWorkbenchProjectWorkflowStage,
+  setBidWorkbenchSectionLink,
+  setBidWorkbenchSectionLock,
+  setBidWorkbenchSectionMetadata,
+  setBidWorkbenchSectionMergedState,
+  setBidWorkbenchSectionPrimaryOutput,
+  setBidWorkbenchSectionSession,
+} from "./bid-workbench.js";
 import { RuntimeDocumentStateTokenService } from "./runtime-document-state-tokens.js";
 import { RuntimeKnowledgeTokenService } from "./runtime-knowledge-tokens.js";
 import { SessionOwnershipService } from "./session-ownership.js";
@@ -396,6 +416,7 @@ export function startServer(config: ServerConfig) {
             openworkBaseUrl: resolveServerLoopbackBaseUrl(config),
             runtimeMaintenance,
             sessionActivity,
+            authService: auth,
           });
           return finalize(response);
         } catch (error) {
@@ -472,6 +493,7 @@ export function startServer(config: ServerConfig) {
             openworkBaseUrl: resolveServerLoopbackBaseUrl(config),
             runtimeMaintenance,
             sessionActivity,
+            authService: auth,
           });
           return finalize(response);
         } catch (error) {
@@ -1338,6 +1360,7 @@ export async function proxyOpencodeRequest(input: {
   openworkBaseUrl: string;
   runtimeMaintenance?: RuntimeMaintenanceService;
   sessionActivity?: SessionActivityService;
+  authService?: Pick<AuthService, "getUserByOwnerKey">;
 }) {
   const workspace = input.workspace;
   const proxyPath = input.proxyPath ?? input.url.pathname;
@@ -1402,6 +1425,7 @@ export async function proxyOpencodeRequest(input: {
   let enableDocumentStateForProvisionedSession = false;
   let body: BodyInit | undefined = method === "GET" || method === "HEAD" ? undefined : (input.request.body ?? undefined);
   const startsSessionRun = method === "POST" && /^\/session\/[^/]+\/(prompt|prompt_async|command|shell)$/.test(normalizedProxyPath);
+  const startsPromptRun = method === "POST" && /^\/session\/[^/]+\/(prompt|prompt_async)$/.test(normalizedProxyPath);
   let targetWorkspace = workspace;
   if (workspace && runtimeWorkspace && pathSessionId) {
     targetWorkspace = runtimeWorkspace.opencodeRuntime && input.sessionRuntimeService
@@ -1446,11 +1470,31 @@ export async function proxyOpencodeRequest(input: {
         typeof payload.openworkPreferredAgent === "string" ? payload.openworkPreferredAgent.trim() || null : null,
       preferredAgentLock:
         typeof payload.openworkPreferredAgentLock === "string" ? payload.openworkPreferredAgentLock.trim() || null : null,
+      runtimeProfileId:
+        payload.openworkRuntimeProfileId === "default" || payload.openworkRuntimeProfileId === "document-agent" || payload.openworkRuntimeProfileId === "document-writer" || payload.openworkRuntimeProfileId === "bid-workbench-node"
+          ? payload.openworkRuntimeProfileId
+          : null,
+      runtimeScopeKind:
+        payload.openworkRuntimeScopeKind === "bid-workbench-node"
+          ? payload.openworkRuntimeScopeKind
+          : null,
+      runtimeScopeKey:
+        typeof payload.openworkRuntimeScopeKey === "string"
+          ? payload.openworkRuntimeScopeKey.trim() || null
+          : null,
+      bidNodeId:
+        typeof payload.openworkBidNodeId === "string"
+          ? payload.openworkBidNodeId.trim() || null
+          : null,
     };
     sessionProvisioningHints = provisioningHints;
     delete payload.openworkPreferredView;
     delete payload.openworkPreferredAgent;
     delete payload.openworkPreferredAgentLock;
+    delete payload.openworkRuntimeProfileId;
+    delete payload.openworkRuntimeScopeKind;
+    delete payload.openworkRuntimeScopeKey;
+    delete payload.openworkBidNodeId;
 
     provisionedRuntime = await provisionSessionWorkspace(workspace.path, provisioningHints);
     provisionedRuntimeEntry = input.sessionRuntimeService?.isEnabledForWorkspace(workspace)
@@ -1486,6 +1530,28 @@ export async function proxyOpencodeRequest(input: {
     ];
     payload.permission = nextPermissions;
     body = JSON.stringify(payload);
+  }
+  let bidNodeUsername: string | null = null;
+  let bidNodeSectionId: string | null = null;
+  if (workspace && workspaceId && pathSessionId && runtimeWorkspace?.bidNodeId && startsPromptRun && requesterKey) {
+    if (!input.authService) {
+      throw new ApiError(500, "internal_error", "Auth service is required for bid workbench prompt proxy");
+    }
+    const user = await input.authService.getUserByOwnerKey(requesterKey);
+    if (!user) {
+      throw new ApiError(403, "forbidden", "Missing requester identity");
+    }
+    bidNodeUsername = user.username.trim() || user.id;
+    bidNodeSectionId = runtimeWorkspace.bidNodeId;
+    const lockResult = await acquireBidWorkbenchSectionLock(workspace.path, {
+      sectionId: runtimeWorkspace.bidNodeId,
+      actor: bidNodeUsername,
+    });
+    if (!lockResult.ok) {
+      throw new ApiError(409, "bid_workbench_section_locked", "Section is locked by another user", {
+        lockedBy: lockResult.lockedBy,
+      });
+    }
   }
   if (workspace && input.sessionActivity) {
     if (workspaceId && pathSessionId && runtimeWorkspace?.opencodeRuntime && startsSessionRun && targetWorkspace) {
@@ -1602,6 +1668,10 @@ export async function proxyOpencodeRequest(input: {
             preferredView: sessionProvisioningHints?.preferredView ?? null,
             preferredAgent: sessionProvisioningHints?.preferredAgent ?? null,
             preferredAgentLock: sessionProvisioningHints?.preferredAgentLock ?? null,
+            runtimeProfileId: sessionProvisioningHints?.runtimeProfileId ?? null,
+            runtimeScopeKind: sessionProvisioningHints?.runtimeScopeKind ?? null,
+            runtimeScopeKey: sessionProvisioningHints?.runtimeScopeKey ?? null,
+            bidNodeId: sessionProvisioningHints?.bidNodeId ?? null,
           });
           if (provisionedStartedRuntime && input.sessionRuntimeService) {
             input.sessionRuntimeService.registerSessionRuntime(workspaceId, createdSessionId, provisionedStartedRuntime);
@@ -1647,6 +1717,13 @@ export async function proxyOpencodeRequest(input: {
         return new Response(JSON.stringify(nextPayload), { status: response.status, headers: nextHeaders });
       }
       return new Response(raw, { status: response.status, headers: response.headers });
+    }
+
+    if (workspace && bidNodeUsername && bidNodeSectionId && startsPromptRun && response.ok) {
+      await recordBidWorkbenchSectionPromptActivity(workspace.path, {
+        sectionId: bidNodeSectionId,
+        author: bidNodeUsername,
+      });
     }
 
     if (method === "GET" && /^\/session\/[^/]+\/message$/.test(normalizedProxyPath) && response.ok) {
@@ -4494,6 +4571,288 @@ export function createRoutes(
     });
 
     return jsonResponse({ ok: true, path: relativePath, bytes, updatedAt: after.mtimeMs });
+  });
+
+  addRoute(routes, "GET", "/workspace/:id/bid-workbench", "client", async (ctx) => {
+    const workspace = await resolveWorkspace(config, ctx.params.id);
+    return jsonResponse(await getBidWorkbenchState(workspace.path));
+  });
+
+  addRoute(routes, "POST", "/workspace/:id/bid-workbench/project", "client", async (ctx) => {
+    ensureWritable(config);
+    requireClientScope(ctx, "collaborator");
+    const workspace = await resolveWorkspace(config, ctx.params.id);
+    const body = await readJsonBody(ctx.request);
+    const sourcePath = normalizeWorkspaceRelativePath(String(body.sourcePath ?? ""), { allowSubdirs: true });
+    const sourceType = String(body.sourceType ?? "").trim();
+    if (!["tender", "reference", "output", "templates"].includes(sourceType)) {
+      throw new ApiError(400, "invalid_payload", "Unsupported outline source type");
+    }
+    const structureSourceKind = String(body.structureSourceKind ?? "").trim();
+    if (!["template", "tender", "manual-outline", "derived-outline"].includes(structureSourceKind)) {
+      throw new ApiError(400, "invalid_payload", "Unsupported structure source kind");
+    }
+    return jsonResponse(
+      await setBidWorkbenchOutlineSource(workspace.path, {
+        sourcePath,
+        sourceType: sourceType as "tender" | "reference" | "output" | "templates",
+        structureSourceKind: structureSourceKind as "template" | "tender" | "manual-outline" | "derived-outline",
+      }),
+    );
+  });
+
+  addRoute(routes, "POST", "/workspace/:id/bid-workbench/project/root-output", "client", async (ctx) => {
+    ensureWritable(config);
+    requireClientScope(ctx, "collaborator");
+    const workspace = await resolveWorkspace(config, ctx.params.id);
+    const body = await readJsonBody(ctx.request);
+    const rootOutputPath =
+      typeof body.rootOutputPath === "string" && body.rootOutputPath.trim()
+        ? normalizeWorkspaceRelativePath(body.rootOutputPath, { allowSubdirs: true })
+        : null;
+    return jsonResponse(
+      await setBidWorkbenchProjectRootOutput(workspace.path, {
+        rootOutputPath,
+      }),
+    );
+  });
+
+  addRoute(routes, "POST", "/workspace/:id/bid-workbench/project/stage", "client", async (ctx) => {
+    ensureWritable(config);
+    requireClientScope(ctx, "collaborator");
+    const workspace = await resolveWorkspace(config, ctx.params.id);
+    const body = await readJsonBody(ctx.request);
+    const workflowStage = String(body.workflowStage ?? "").trim();
+    if (!["outline", "mapping", "drafting", "merge"].includes(workflowStage)) {
+      throw new ApiError(400, "invalid_payload", "Unsupported workflow stage");
+    }
+    return jsonResponse(
+      await setBidWorkbenchProjectWorkflowStage(workspace.path, {
+        workflowStage: workflowStage as "outline" | "mapping" | "drafting" | "merge",
+      }),
+    );
+  });
+
+  addRoute(routes, "POST", "/workspace/:id/bid-workbench/project/constraints", "client", async (ctx) => {
+    ensureWritable(config);
+    requireClientScope(ctx, "collaborator");
+    const workspace = await resolveWorkspace(config, ctx.params.id);
+    const body = await readJsonBody(ctx.request);
+    const extractedFromPath =
+      typeof body.extractedFromPath === "string" && body.extractedFromPath.trim()
+        ? normalizeWorkspaceRelativePath(body.extractedFromPath, { allowSubdirs: true })
+        : null;
+    const formatRules =
+      body.formatRules && typeof body.formatRules === "object" && !Array.isArray(body.formatRules)
+        ? body.formatRules as Record<string, unknown>
+        : {};
+    return jsonResponse(
+      await setBidWorkbenchProjectConstraints(workspace.path, {
+        formatRules,
+        extractedFromPath,
+      }),
+    );
+  });
+
+  addRoute(routes, "POST", "/workspace/:id/bid-workbench/refresh", "client", async (ctx) => {
+    ensureWritable(config);
+    requireClientScope(ctx, "collaborator");
+    const workspace = await resolveWorkspace(config, ctx.params.id);
+    return jsonResponse(await refreshBidWorkbenchState(workspace.path));
+  });
+
+  addRoute(routes, "POST", "/workspace/:id/bid-workbench/sections/:sectionId/session", "client", async (ctx) => {
+    ensureWritable(config);
+    requireClientScope(ctx, "collaborator");
+    const workspace = await resolveWorkspace(config, ctx.params.id);
+    const body = await readJsonBody(ctx.request);
+    const sessionId =
+      typeof body.sessionId === "string" && body.sessionId.trim()
+        ? body.sessionId.trim()
+        : null;
+    return jsonResponse(
+      await setBidWorkbenchSectionSession(workspace.path, {
+        sectionId: ctx.params.sectionId,
+        sessionId,
+      }),
+    );
+  });
+
+  addRoute(routes, "POST", "/workspace/:id/bid-workbench/sections/:sectionId/metadata", "client", async (ctx) => {
+    ensureWritable(config);
+    requireClientScope(ctx, "collaborator");
+    const workspace = await resolveWorkspace(config, ctx.params.id);
+    const body = await readJsonBody(ctx.request);
+    const compositionMode =
+      typeof body.compositionMode === "string" && body.compositionMode.trim()
+        ? body.compositionMode.trim()
+        : undefined;
+    const assignee =
+      body.assignee === null
+        ? null
+        : typeof body.assignee === "string" && body.assignee.trim()
+          ? body.assignee.trim()
+          : undefined;
+    return jsonResponse(
+      await setBidWorkbenchSectionMetadata(workspace.path, {
+        sectionId: ctx.params.sectionId,
+        compositionMode:
+          compositionMode as "strict-reference" | "reference-guided" | "free-generation" | undefined,
+        assignee,
+      }),
+    );
+  });
+
+  addRoute(routes, "POST", "/workspace/:id/bid-workbench/sections/:sectionId/lock", "client", async (ctx) => {
+    ensureWritable(config);
+    requireClientScope(ctx, "collaborator");
+    const workspace = await resolveWorkspace(config, ctx.params.id);
+    const body = await readJsonBody(ctx.request);
+    const lockedBy =
+      typeof body.lockedBy === "string" && body.lockedBy.trim()
+        ? body.lockedBy.trim()
+        : null;
+    return jsonResponse(
+      await setBidWorkbenchSectionLock(workspace.path, {
+        sectionId: ctx.params.sectionId,
+        lockedBy,
+      }),
+    );
+  });
+
+  addRoute(routes, "POST", "/workspace/:id/bid-workbench/sections/:sectionId/merge", "client", async (ctx) => {
+    ensureWritable(config);
+    requireClientScope(ctx, "collaborator");
+    const workspace = await resolveWorkspace(config, ctx.params.id);
+    const body = await readJsonBody(ctx.request);
+    return jsonResponse(
+      await setBidWorkbenchSectionMergedState(workspace.path, {
+        sectionId: ctx.params.sectionId,
+        mergeRequested:
+          body.mergeRequested === true || body.mergedIntoMaster === true,
+        mergeApplied: body.mergeApplied === true,
+        mergeFailed: body.mergeFailed === true,
+        outputPath:
+          typeof body.outputPath === "string" && body.outputPath.trim()
+            ? normalizeWorkspaceRelativePath(body.outputPath, { allowSubdirs: true })
+            : null,
+        rootOutputPath:
+          typeof body.rootOutputPath === "string" && body.rootOutputPath.trim()
+            ? normalizeWorkspaceRelativePath(body.rootOutputPath, { allowSubdirs: true })
+            : null,
+        errorSummary:
+          typeof body.errorSummary === "string" && body.errorSummary.trim()
+            ? body.errorSummary.trim()
+            : null,
+      }),
+    );
+  });
+
+  addRoute(routes, "POST", "/workspace/:id/bid-workbench/sections/:sectionId/links", "client", async (ctx) => {
+    ensureWritable(config);
+    requireClientScope(ctx, "collaborator");
+    const workspace = await resolveWorkspace(config, ctx.params.id);
+    const body = await readJsonBody(ctx.request);
+    const kind = String(body.kind ?? "").trim();
+    if (!["reference", "output", "template", "master-output"].includes(kind)) {
+      throw new ApiError(400, "invalid_payload", "Unsupported section link kind");
+    }
+    const path = normalizeWorkspaceRelativePath(String(body.path ?? ""), { allowSubdirs: true });
+    return jsonResponse(
+      await setBidWorkbenchSectionLink(workspace.path, {
+        sectionId: ctx.params.sectionId,
+        kind: kind as "reference" | "output" | "template" | "master-output",
+        path,
+        selected: body.selected !== false,
+      }),
+    );
+  });
+
+  addRoute(routes, "POST", "/workspace/:id/bid-workbench/sections/:sectionId/ranges", "client", async (ctx) => {
+    ensureWritable(config);
+    requireClientScope(ctx, "collaborator");
+    const workspace = await resolveWorkspace(config, ctx.params.id);
+    const body = await readJsonBody(ctx.request);
+    const sourcePath = normalizeWorkspaceRelativePath(String(body.sourcePath ?? ""), { allowSubdirs: true });
+    const rangeKind = String(body.rangeKind ?? "").trim();
+    if (!["page-range", "section-ref", "anchor", "note"].includes(rangeKind)) {
+      throw new ApiError(400, "invalid_payload", "Unsupported section range kind");
+    }
+    const rangeValue = String(body.rangeValue ?? "").trim();
+    if (!rangeValue) {
+      throw new ApiError(400, "invalid_payload", "Range value is required");
+    }
+    const note =
+      typeof body.note === "string" && body.note.trim()
+        ? body.note.trim()
+        : null;
+    return jsonResponse(
+      await addBidWorkbenchSectionRange(workspace.path, {
+        sectionId: ctx.params.sectionId,
+        sourcePath,
+        rangeKind: rangeKind as "page-range" | "section-ref" | "anchor" | "note",
+        rangeValue,
+        note,
+      }),
+    );
+  });
+
+  addRoute(routes, "DELETE", "/workspace/:id/bid-workbench/ranges/:rangeId", "client", async (ctx) => {
+    ensureWritable(config);
+    requireClientScope(ctx, "collaborator");
+    const workspace = await resolveWorkspace(config, ctx.params.id);
+    return jsonResponse(await deleteBidWorkbenchSectionRange(workspace.path, ctx.params.rangeId));
+  });
+
+  addRoute(routes, "POST", "/workspace/:id/bid-workbench/sections/:sectionId/primary-output", "client", async (ctx) => {
+    ensureWritable(config);
+    requireClientScope(ctx, "collaborator");
+    const workspace = await resolveWorkspace(config, ctx.params.id);
+    const body = await readJsonBody(ctx.request);
+    const primaryOutputPath =
+      typeof body.primaryOutputPath === "string" && body.primaryOutputPath.trim()
+        ? normalizeWorkspaceRelativePath(body.primaryOutputPath, { allowSubdirs: true })
+        : null;
+    return jsonResponse(
+      await setBidWorkbenchSectionPrimaryOutput(workspace.path, {
+        sectionId: ctx.params.sectionId,
+        primaryOutputPath,
+      }),
+    );
+  });
+
+  addRoute(routes, "POST", "/workspace/:id/bid-workbench/sections/:sectionId/marks", "client", async (ctx) => {
+    ensureWritable(config);
+    requireClientScope(ctx, "collaborator");
+    const workspace = await resolveWorkspace(config, ctx.params.id);
+    const body = await readJsonBody(ctx.request);
+    const author =
+      typeof body.author === "string" && body.author.trim()
+        ? body.author.trim()
+        : "当前用户";
+    const kind = String(body.kind ?? "").trim();
+    if (!["note", "risk", "todo", "decision"].includes(kind)) {
+      throw new ApiError(400, "invalid_payload", "Unsupported mark kind");
+    }
+    const text = String(body.text ?? "").trim();
+    if (!text) {
+      throw new ApiError(400, "invalid_payload", "Mark text is required");
+    }
+    return jsonResponse(
+      await addBidWorkbenchSectionMark(workspace.path, {
+        sectionId: ctx.params.sectionId,
+        author,
+        kind: kind as "note" | "risk" | "todo" | "decision",
+        text,
+      }),
+    );
+  });
+
+  addRoute(routes, "DELETE", "/workspace/:id/bid-workbench/marks/:markId", "client", async (ctx) => {
+    ensureWritable(config);
+    requireClientScope(ctx, "collaborator");
+    const workspace = await resolveWorkspace(config, ctx.params.id);
+    return jsonResponse(await deleteBidWorkbenchSectionMark(workspace.path, ctx.params.markId));
   });
 
   addRoute(routes, "GET", "/workspace/:id/plugins", "client", async (ctx) => {

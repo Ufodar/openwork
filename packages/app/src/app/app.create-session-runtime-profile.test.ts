@@ -8,6 +8,10 @@ test("createSessionAndOpen forwards preferred session hints to the server create
   expect(file).toContain("openworkPreferredView: nextView");
   expect(file).toContain("openworkPreferredAgent: requestedAgent");
   expect(file).toContain("openworkPreferredAgentLock: requestedAgentLock");
+  expect(file).toContain("openworkRuntimeProfileId: options?.openworkRuntimeProfileId ?? undefined");
+  expect(file).toContain("openworkRuntimeScopeKind: options?.openworkRuntimeScopeKind ?? undefined");
+  expect(file).toContain("openworkRuntimeScopeKey: options?.openworkRuntimeScopeKey ?? undefined");
+  expect(file).toContain("openworkBidNodeId: options?.openworkBidNodeId ?? undefined");
 });
 
 test("createSessionAndOpen uses the shared OpenWork action gate instead of an inline health precheck", () => {

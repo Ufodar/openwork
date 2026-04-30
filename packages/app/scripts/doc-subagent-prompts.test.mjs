@@ -161,6 +161,22 @@ test("doc-writer can read runtime state files and write nested outputs in sessio
   expect(config.agent?.["doc-writer"]?.permission?.skill?.["*"]).toBe("deny");
 });
 
+test("document-writer can maintain global shared skills when hermes escalation requires durable system-wide memory", async () => {
+  const config = JSON.parse(await readFile(resolve(root, "opencode.json"), "utf8"));
+  const readPermission = config.agent?.["document-writer"]?.permission?.read ?? {};
+  const writePermission = config.agent?.["document-writer"]?.permission?.write ?? {};
+  const editPermission = config.agent?.["document-writer"]?.permission?.edit ?? {};
+  const externalPermission = config.agent?.["document-writer"]?.permission?.external_directory ?? {};
+
+  expect(readPermission["$HOME/.config/opencode/skills/**"]).toBe("allow");
+  expect(readPermission["**/.config/opencode/skills/**"]).toBe("allow");
+  expect(writePermission["$HOME/.config/opencode/skills/**"]).toBe("allow");
+  expect(writePermission["**/.config/opencode/skills/**"]).toBe("allow");
+  expect(editPermission["$HOME/.config/opencode/skills/**"]).toBe("allow");
+  expect(editPermission["**/.config/opencode/skills/**"]).toBe("allow");
+  expect(externalPermission["$HOME/.config/opencode/skills/*"]).toBe("allow");
+});
+
 test("doc-planner can reread absolute runtime state paths when refining generated plans", async () => {
   for (const configName of ["opencode.json", "opencode.jsonc"]) {
     const config = JSON.parse(await readFile(resolve(root, configName), "utf8"));

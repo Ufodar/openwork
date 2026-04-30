@@ -1,6 +1,9 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "permission": "allow",
+  "instructions": [
+    ".opencode/instructions/shared-agent-governance.md"
+  ],
   "agent": {
     "document-writer": {
       "description": "User-facing long-document controller that coordinates the doc-* workflow",
@@ -13,6 +16,7 @@
         "*": false,
         "task": true,
         "read": true,
+        "skill": true,
         "doc_state_*": true,
         "state_get_*": true,
         "openwork_knowledge*": true,
@@ -42,13 +46,28 @@
           "requirements.csv": "allow",
           "**/requirements.csv": "allow",
           "reports/**": "allow",
-          "**/reports/**": "allow"
+          "**/reports/**": "allow",
+          "$HOME/.config/opencode/skills/**": "allow",
+          "**/.config/opencode/skills/**": "allow"
         },
-        "edit": "deny",
+        "write": {
+          "*": "deny",
+          "$HOME/.config/opencode/skills/**": "allow",
+          "**/.config/opencode/skills/**": "allow"
+        },
+        "edit": {
+          "*": "deny",
+          "$HOME/.config/opencode/skills/**": "allow",
+          "**/.config/opencode/skills/**": "allow"
+        },
         "bash": "deny",
         "grep": "deny",
+        "external_directory": {
+          "$HOME/.config/opencode/skills/*": "allow"
+        },
         "skill": {
-          "*": "deny"
+          "*": "deny",
+          "hermes-learning-loop": "allow"
         }
       }
     },

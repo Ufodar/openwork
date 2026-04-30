@@ -131,6 +131,7 @@ export type SessionViewProps = {
   clientConnected: boolean;
   openworkServerStatus: OpenworkServerStatus;
   openworkServerClient: OpenworkServerClient | null;
+  sessionUsername: string | null;
   isAdminUser: boolean;
   showLogout: boolean;
   onLogout: () => void;

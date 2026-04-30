@@ -128,7 +128,7 @@ export type OpencodeEvent = {
   properties?: unknown;
 };
 
-export type View = "onboarding" | "dashboard" | "session" | "proto" | "document-writer" | "document-agent";
+export type View = "onboarding" | "dashboard" | "session" | "proto" | "document-writer" | "document-agent" | "bid-workbench";
 
 export type CreateSessionOptions = {
   title?: string;
@@ -136,6 +136,10 @@ export type CreateSessionOptions = {
   agentLock?: string | null;
   view?: View;
   enableDocumentState?: boolean;
+  openworkRuntimeProfileId?: "document-agent" | "document-writer" | "bid-workbench-node" | null;
+  openworkRuntimeScopeKind?: "bid-workbench-node" | null;
+  openworkRuntimeScopeKey?: string | null;
+  openworkBidNodeId?: string | null;
 };
 
 export type StartupPreference = "local" | "server";

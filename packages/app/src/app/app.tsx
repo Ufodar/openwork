@@ -204,6 +204,7 @@ import ProtoWorkspacesView from "./pages/proto-workspaces";
 import ProtoV1UxView from "./pages/proto-v1-ux";
 import DocumentAgentView from "./pages/document-agent";
 import DocumentWriterView from "./pages/document-writer";
+import BidWorkbenchView from "./pages/bid-workbench";
 import LoginView from "./pages/login";
 import SessionKnowledgeModal from "./components/session-knowledge-modal";
 import {
@@ -321,13 +322,18 @@ export default function App() {
     authorization: ProviderAuthAuthorization;
   };
 
+  const isDedicatedSessionView = (
+    view: View | string | null | undefined,
+  ): view is "document-agent" | "document-writer" | "bid-workbench" =>
+    view === "document-agent" || view === "document-writer" || view === "bid-workbench";
+
   const location = useLocation();
   const navigate = useNavigate();
   let routeHydratedSessionKey = "";
   let queuedDocumentAgentRedirect:
     | {
       sessionId: string;
-      view: "document-agent" | "document-writer";
+      view: "document-agent" | "document-writer" | "bid-workbench";
       timer: number;
     }
     | null = null;
@@ -398,7 +404,7 @@ export default function App() {
       navigate("/session");
       return;
     }
-    if (isDocumentSessionView(next)) {
+    if (isDedicatedSessionView(next)) {
       if (sessionId) {
         goToSessionView(next, sessionId);
         return;
@@ -431,11 +437,11 @@ export default function App() {
     goToSessionView("document-writer", sessionId, options);
   };
 
-  const goToSessionView = (
-    view: "document-agent" | "document-writer",
-    sessionId: string,
-    options?: { replace?: boolean },
-  ) => {
+  const goToBidWorkbench = (sessionId: string, options?: { replace?: boolean }) => {
+    goToSessionView("bid-workbench", sessionId, options);
+  };
+
+  const goToSessionView = (view: "document-agent" | "document-writer" | "bid-workbench", sessionId: string, options?: { replace?: boolean }) => {
     const trimmed = sessionId.trim();
     if (!trimmed) {
       navigate("/session", options);
@@ -1677,7 +1683,8 @@ export default function App() {
       if (
         path === `/session/${sessionPath}` ||
         path === `/document-agent/${sessionPath}` ||
-        path === `/document-writer/${sessionPath}`
+        path === `/document-writer/${sessionPath}` ||
+        path === `/bid-workbench/${sessionPath}`
       ) {
         navigate("/session", { replace: true });
       }
@@ -3177,7 +3184,7 @@ export default function App() {
   const persistSessionPreferredView = async (sessionId: string, view: View): Promise<void> => {
     const id = sessionId.trim();
     if (!id) return;
-    if (view !== "document-writer" && view !== "document-agent") return;
+    if (!isDedicatedSessionView(view)) return;
 
     const localBase = openworkSessionPrefsById();
     const localExisting = localBase[id] ?? null;
@@ -3741,6 +3748,13 @@ export default function App() {
     persistSessionPreferredView(sessionId, "document-writer").catch(() => undefined);
   });
 
+  createEffect(() => {
+    if (currentView() !== "bid-workbench") return;
+    const sessionId = activeSessionId();
+    if (!sessionId) return;
+    persistSessionPreferredView(sessionId, "bid-workbench").catch(() => undefined);
+  });
+
   const openSessionInPreferredView = async (
     sessionId: string,
     options?: { title?: string | null; hint?: OpenworkSessionPrefs | null },
@@ -3774,7 +3788,7 @@ export default function App() {
     }
 
     setView(resolved, id);
-    if (isDocumentSessionView(resolved) && resolvedPrefs.view.source === "legacy") {
+    if (isDedicatedSessionView(resolved) && resolvedPrefs.view.source === "legacy") {
       persistSessionPreferredView(id, resolved).catch(() => undefined);
     }
   };
@@ -3790,7 +3804,7 @@ export default function App() {
           null;
         const resolvedPrefs = resolveSessionPreferenceState(sessionId, { title });
         const resolvedLock = resolvedPrefs.agentLock.value;
-        if (isDocumentSessionView(resolvedPrefs.view.value) && resolvedPrefs.view.source === "legacy") {
+        if (isDedicatedSessionView(resolvedPrefs.view.value) && resolvedPrefs.view.source === "legacy") {
           persistSessionPreferredView(sessionId, resolvedPrefs.view.value).catch(() => undefined);
         }
         if (resolvedLock) {
@@ -4659,10 +4673,10 @@ export default function App() {
       const routePath = location.pathname.trim();
       const routeSessionId = (() => {
         const segments = routePath.split("/");
-        // Matches /session/:id, /document-agent/:id, /document-writer/:id (legacy)
+        // Matches /session/:id, /document-agent/:id, /document-writer/:id, /bid-workbench/:id
         if (segments.length >= 3) {
           const page = (segments[1] ?? "").toLowerCase();
-          if (page === "session" || page === "document-agent" || page === "document-writer") {
+          if (page === "session" || page === "document-agent" || page === "document-writer" || page === "bid-workbench") {
             return (segments[2] ?? "").trim() || null;
           }
         }
@@ -5563,6 +5577,10 @@ export default function App() {
           openworkPreferredView: nextView,
           openworkPreferredAgent: requestedAgent,
           openworkPreferredAgentLock: requestedAgentLock,
+          openworkRuntimeProfileId: options?.openworkRuntimeProfileId ?? undefined,
+          openworkRuntimeScopeKind: options?.openworkRuntimeScopeKind ?? undefined,
+          openworkRuntimeScopeKey: options?.openworkRuntimeScopeKey ?? undefined,
+          openworkBidNodeId: options?.openworkBidNodeId ?? undefined,
         });
         mark("session:create:ok");
       } catch (createErr) {
@@ -5625,12 +5643,12 @@ export default function App() {
         persistSessionPreferredAgent(session.id, requestedAgent).catch(() => undefined);
       }
 
-      if (isDocumentSessionView(nextView)) {
+      if (isDedicatedSessionView(nextView)) {
         persistSessionPreferredView(session.id, nextView).catch(() => undefined);
       }
 
       // setSessionViewLockUntil(Date.now() + 1200);
-      if (isDocumentSessionView(nextView)) {
+      if (isDedicatedSessionView(nextView)) {
         goToSessionView(nextView, session.id);
       } else {
         goToSession(session.id);
@@ -6786,6 +6804,7 @@ export default function App() {
     clientConnected: Boolean(client()),
     openworkServerStatus: openworkServerStatus(),
     openworkServerClient: openworkServerClient(),
+    sessionUsername: webAuthUser(),
     isAdminUser: isAdminWebUser(),
     showLogout: showWebLogout(),
     onLogout: logoutWebSession,
@@ -6950,6 +6969,7 @@ export default function App() {
       path.startsWith("/session") ||
       path.startsWith("/document-writer") ||
       path.startsWith("/document-agent") ||
+      path.startsWith("/bid-workbench") ||
       path.startsWith("/proto");
     if (requiresAuthRoute && requiresWebServerAuth() && !openworkSessionAuthenticated()) {
       navigate("/login", { replace: true });
@@ -7113,6 +7133,32 @@ export default function App() {
       return;
     }
 
+    if (path.startsWith("/bid-workbench")) {
+      const [, , sessionSegment] = rawPath.split("/");
+      const id = (sessionSegment ?? "").trim();
+
+      if (!id) {
+        const fallback = activeSessionId();
+        if (fallback) {
+          goToBidWorkbench(fallback, { replace: true });
+        } else {
+          navigate("/session", { replace: true });
+        }
+        return;
+      }
+
+      if (isKnownMissingSession(id)) {
+        if (selectedSessionId() === id) {
+          setSelectedSessionId(null);
+        }
+        navigate("/session", { replace: true });
+        return;
+      }
+
+      ensureRouteSessionHydrated(id);
+      return;
+    }
+
     if (path.startsWith("/proto-v1-ux")) {
       if (isTauriRuntime()) {
         navigate("/dashboard/scheduled", { replace: true });
@@ -7179,6 +7225,9 @@ export default function App() {
         </Match>
         <Match when={currentView() === "document-writer"}>
           <DocumentWriterView {...sessionProps()} />
+        </Match>
+        <Match when={currentView() === "bid-workbench"}>
+          <BidWorkbenchView {...sessionProps()} />
         </Match>
         <Match when={true}>
           <DashboardView {...dashboardProps()} />

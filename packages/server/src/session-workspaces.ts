@@ -1,6 +1,6 @@
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { homedir } from "node:os";
-import { cp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { cp, readFile, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
 
 import { readJsoncFile, writeJsoncFile } from "./jsonc.js";
 import { opencodeConfigPath } from "./workspace-files.js";
@@ -42,6 +42,10 @@ export type SessionWorkspaceEntry = {
   preferredView?: string | null;
   preferredAgent?: string | null;
   preferredAgentLock?: string | null;
+  runtimeProfileId?: string | null;
+  runtimeScopeKind?: string | null;
+  runtimeScopeKey?: string | null;
+  bidNodeId?: string | null;
 };
 
 type RuntimeKnowledgeInstructionRecord = {
@@ -55,9 +59,17 @@ export type SessionRuntimeProvisioningHints = {
   preferredView?: string | null;
   preferredAgent?: string | null;
   preferredAgentLock?: string | null;
+  runtimeProfileId?: "default" | "document-agent" | "document-writer" | "bid-workbench-node" | null;
+  runtimeScopeKind?: "bid-workbench-node" | null;
+  runtimeScopeKey?: string | null;
+  bidNodeId?: string | null;
 };
 
-type RuntimeSessionProfileId = "default" | "document-agent" | "document-writer";
+type RuntimeSessionProfileId =
+  | "default"
+  | "document-agent"
+  | "document-writer"
+  | "bid-workbench-node";
 
 type RuntimeSessionProfile = {
   id: RuntimeSessionProfileId;
@@ -69,6 +81,7 @@ const RUNTIME_INSTRUCTIONS_RELATIVE_PATH = ".opencode/openwork-runtime.md";
 const RUNTIME_PROFILE_RELATIVE_PATH = ".opencode/openwork-runtime-profile.json";
 const KNOWLEDGE_INSTRUCTIONS_RELATIVE_PATH = ".opencode/openwork-knowledge.md";
 const DOC_STATE_INSTRUCTIONS_RELATIVE_PATH = ".opencode/doc-state.md";
+const BID_WORKBENCH_NODE_INSTRUCTIONS_RELATIVE_PATH = ".opencode/openwork-bid-workbench-node.md";
 const SESSION_TMP_ROOT_RELATIVE_PATH = ".tmp/system";
 const HOSTED_SYSTEM_TMP_PREFIXES = ["/tmp/", "/private/tmp/"] as const;
 const HOSTED_REOPENABLE_DOC_EXTENSIONS = [
@@ -86,6 +99,7 @@ const HOSTED_REOPENABLE_DOC_EXTENSIONS = [
 const RUNTIME_MIRRORED_OPENCODE_DIRS = [
   "agent",
   "commands",
+  "instructions",
   "plugins",
   "prompts",
   "references",
@@ -149,9 +163,31 @@ function buildDefaultRuntimeSessionProfile(): RuntimeSessionProfile {
 }
 
 function resolveRuntimeSessionProfile(hints?: SessionRuntimeProvisioningHints | null): RuntimeSessionProfile {
+  const explicitRuntimeProfileId = normalizeOptionalString(hints?.runtimeProfileId)?.toLowerCase() ?? "";
   const preferredView = normalizeOptionalString(hints?.preferredView)?.toLowerCase() ?? "";
   const preferredAgent = normalizeOptionalString(hints?.preferredAgent)?.toLowerCase() ?? "";
   const preferredAgentLock = normalizeOptionalString(hints?.preferredAgentLock)?.toLowerCase() ?? "";
+
+  if (explicitRuntimeProfileId === "bid-workbench-node") {
+    return buildRuntimeSessionProfile("bid-workbench-node", {
+      skillAllowlist: DOCUMENT_SESSION_SKILL_ALLOWLIST,
+      mcpAllowlist: DOCUMENT_SESSION_MCP_ALLOWLIST,
+    });
+  }
+
+  if (explicitRuntimeProfileId === "document-writer") {
+    return buildRuntimeSessionProfile("document-writer", {
+      skillAllowlist: DOCUMENT_WRITER_SESSION_SKILL_ALLOWLIST,
+      mcpAllowlist: DOCUMENT_SESSION_MCP_ALLOWLIST,
+    });
+  }
+
+  if (explicitRuntimeProfileId === "document-agent") {
+    return buildRuntimeSessionProfile("document-agent", {
+      skillAllowlist: DOCUMENT_SESSION_SKILL_ALLOWLIST,
+      mcpAllowlist: DOCUMENT_SESSION_MCP_ALLOWLIST,
+    });
+  }
 
   if (
     preferredView === "document-writer" ||
@@ -181,10 +217,10 @@ function resolveRuntimeSessionProfile(hints?: SessionRuntimeProvisioningHints | 
 function parseRuntimeSessionProfileRecord(raw: unknown): RuntimeSessionProfile {
   const record = raw && typeof raw === "object" ? raw as Record<string, unknown> : null;
   const id = normalizeOptionalString(record?.id);
-  if (id !== "document-agent" && id !== "document-writer") {
+  if (id !== "document-agent" && id !== "document-writer" && id !== "bid-workbench-node") {
     return buildDefaultRuntimeSessionProfile();
   }
-  const fallback = resolveRuntimeSessionProfile({ preferredView: id });
+  const fallback = resolveRuntimeSessionProfile({ runtimeProfileId: id as RuntimeSessionProfileId });
   const skillAllowlist = normalizeStringList(record?.skillAllowlist);
   const mcpAllowlist = normalizeStringList(record?.mcpAllowlist);
   return buildRuntimeSessionProfile(id, {
@@ -252,6 +288,13 @@ async function readStore(path: string): Promise<SessionWorkspaceStore> {
       const preferredAgent = typeof record.preferredAgent === "string" ? record.preferredAgent.trim() || null : null;
       const preferredAgentLock =
         typeof record.preferredAgentLock === "string" ? record.preferredAgentLock.trim() || null : null;
+      const runtimeProfileId =
+        typeof record.runtimeProfileId === "string" ? record.runtimeProfileId.trim() || null : null;
+      const runtimeScopeKind =
+        typeof record.runtimeScopeKind === "string" ? record.runtimeScopeKind.trim() || null : null;
+      const runtimeScopeKey =
+        typeof record.runtimeScopeKey === "string" ? record.runtimeScopeKey.trim() || null : null;
+      const bidNodeId = typeof record.bidNodeId === "string" ? record.bidNodeId.trim() || null : null;
       const opencodeRuntimeRecord =
         record.opencodeRuntime && typeof record.opencodeRuntime === "object"
           ? record.opencodeRuntime as Partial<IsolatedOpencodeRuntime>
@@ -294,6 +337,10 @@ async function readStore(path: string): Promise<SessionWorkspaceStore> {
         preferredView,
         preferredAgent,
         preferredAgentLock,
+        runtimeProfileId,
+        runtimeScopeKind,
+        runtimeScopeKey,
+        bidNodeId,
       };
     }
     return { schemaVersion: 2, updatedAt: Date.now(), workspaces };
@@ -325,6 +372,15 @@ export async function provisionSessionWorkspace(
   await writeRuntimeProjectBoundary(runtimeDir);
   await mirrorWorkspaceOpencodeSupportFiles(workspacePath, runtimeDir, runtimeProfile);
   await writeRuntimeSessionCarrierConfig({ workspacePath, runtimeDir, profile: runtimeProfile });
+  if (runtimeProfile.id === "bid-workbench-node") {
+    const bidNodeId = sanitizeRuntimeScopeSegment(hints?.bidNodeId, "node");
+    await prepareBidWorkbenchNodeRuntime({
+      workspacePath,
+      runtimeDir,
+      runtimeId,
+      bidNodeId,
+    });
+  }
   return { runtimeId, runtimeDir };
 }
 
@@ -384,6 +440,85 @@ async function mirrorWorkspaceOpencodeSupportFiles(
     }
     await cp(sourceDir, targetDir, { recursive: true, force: true });
   }
+}
+
+function sanitizeRuntimeScopeSegment(value: string | null | undefined, fallback: string): string {
+  const trimmed = (value ?? "").trim();
+  if (!trimmed) return fallback;
+  return trimmed.replace(/[^a-zA-Z0-9._-]+/g, "-");
+}
+
+async function ensureSymlinkDir(targetPath: string, linkPath: string): Promise<void> {
+  await ensureDir(dirname(linkPath));
+  await rm(linkPath, { recursive: true, force: true }).catch(() => undefined);
+  await symlink(targetPath, linkPath, "dir");
+}
+
+function buildBidWorkbenchNodeInstructions(input: {
+  privateRuntimeDir: string;
+  sharedRoots: string[];
+  nodeBriefPath: string;
+}): string {
+  return [
+    "# Bid Workbench Node Contract",
+    "",
+    "This session belongs to a single bid-workbench node.",
+    "",
+    `- Treat \`${input.privateRuntimeDir}\` as the default writable scratch and intermediate workspace for this node.`,
+    `- Read shared project assets only from: ${input.sharedRoots.map((value) => `\`${value}\``).join(", ")}.`,
+    `- Read the node brief from \`${input.nodeBriefPath}\` before broad document work.`,
+    "- You may revise this node's own output files under `bid-workbench/output/`.",
+    "- Do not modify other nodes' outputs, other nodes' runtime directories, or the project structure source file.",
+    "- Do not write directly into the final master document from this node session.",
+    "",
+  ].join("\n");
+}
+
+async function prepareBidWorkbenchNodeRuntime(input: {
+  workspacePath: string;
+  runtimeDir: string;
+  runtimeId: string;
+  bidNodeId: string;
+}): Promise<void> {
+  const sharedInboxRoot = join(input.workspacePath, ".opencode", "openwork", "inbox", "bid-workbench");
+  const runtimeBidWorkbenchRoot = join(input.runtimeDir, "bid-workbench");
+  const categories = ["tender", "reference", "templates", "output"] as const;
+  await ensureDir(runtimeBidWorkbenchRoot);
+  await ensureDir(join(input.workspacePath, ".openwork", "bid-workbench", "node-briefs"));
+  for (const category of categories) {
+    const sourceDir = join(sharedInboxRoot, category);
+    await ensureDir(sourceDir);
+    await ensureSymlinkDir(sourceDir, join(runtimeBidWorkbenchRoot, category));
+  }
+
+  const privateRuntimeDir = join(runtimeBidWorkbenchRoot, "runtime", input.bidNodeId, input.runtimeId);
+  await ensureDir(privateRuntimeDir);
+
+  const sharedStateRoot = join(input.workspacePath, ".openwork", "bid-workbench");
+  await ensureDir(sharedStateRoot);
+  await ensureDir(join(input.runtimeDir, ".openwork"));
+  await ensureSymlinkDir(sharedStateRoot, join(input.runtimeDir, ".openwork", "bid-workbench"));
+
+  const instructionPath = join(input.runtimeDir, BID_WORKBENCH_NODE_INSTRUCTIONS_RELATIVE_PATH);
+  await ensureDir(dirname(instructionPath));
+  await writeFile(
+    instructionPath,
+    buildBidWorkbenchNodeInstructions({
+      privateRuntimeDir: relative(input.runtimeDir, privateRuntimeDir) || "bid-workbench/runtime",
+      sharedRoots: categories.map((category) => `bid-workbench/${category}`),
+      nodeBriefPath: `.openwork/bid-workbench/node-briefs/${input.bidNodeId}.md`,
+    }),
+    "utf8",
+  );
+
+  const runtimeConfigPath = opencodeConfigPath(input.runtimeDir);
+  const { data: runtimeConfig } = await readJsoncFile<Record<string, unknown>>(runtimeConfigPath, {});
+  const existingInstructions = normalizeInstructionEntries(runtimeConfig.instructions);
+  runtimeConfig.instructions = [
+    ...existingInstructions.filter((entry) => entry !== BID_WORKBENCH_NODE_INSTRUCTIONS_RELATIVE_PATH),
+    BID_WORKBENCH_NODE_INSTRUCTIONS_RELATIVE_PATH,
+  ];
+  await writeJsoncFile(runtimeConfigPath, runtimeConfig);
 }
 
 function pluginEntryAllowedInRuntime(entryName: string, runtimeProfile: RuntimeSessionProfile): boolean {
@@ -729,9 +864,12 @@ export async function writeRuntimeDocumentStateCarrierConfig(input: {
 }
 
 export function buildSessionPermissionRules(): PermissionRuleset {
+  const globalSkillDir = join(homedir(), ".config", "opencode", "skills");
+  const globalSkillPattern = `${globalSkillDir.replaceAll("\\", "/")}/*`;
   return [
     ...buildHostedSystemTempBashDenyRules(),
     { permission: "glob", pattern: "**/*", action: "deny" },
+    { permission: "external_directory", pattern: globalSkillPattern, action: "allow" },
     { permission: "external_directory", pattern: "*", action: "deny" },
   ];
 }
@@ -771,6 +909,10 @@ export class SessionWorkspaceService {
       preferredView: normalizeOptionalString(entry.preferredView),
       preferredAgent: normalizeOptionalString(entry.preferredAgent),
       preferredAgentLock: normalizeOptionalString(entry.preferredAgentLock),
+      runtimeProfileId: normalizeOptionalString(entry.runtimeProfileId),
+      runtimeScopeKind: normalizeOptionalString(entry.runtimeScopeKind),
+      runtimeScopeKey: normalizeOptionalString(entry.runtimeScopeKey),
+      bidNodeId: normalizeOptionalString(entry.bidNodeId),
     };
     await writeStore(resolveSessionWorkspacePath(ws), store.workspaces);
   }

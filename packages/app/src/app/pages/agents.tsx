@@ -41,6 +41,13 @@ const agentTypes: AgentType[] = [
     icon: FileText,
     status: "available",
   },
+  {
+    id: "bid-workbench",
+    nameKey: "agents.bid_workbench_name",
+    descriptionKey: "agents.bid_workbench_desc",
+    icon: MessageSquare,
+    status: "available",
+  },
 ];
 
 export type AgentsViewProps = {
@@ -80,6 +87,7 @@ export default function AgentsView(props: AgentsViewProps) {
     if (featured.id === "general-assistant") return true;
     if (featured.id === "document-agent") return true;
     if (featured.id === "document-writer") return true;
+    if (featured.id === "bid-workbench") return true;
     return agentByKey().has(normalizeAgentKey(featured.id));
   };
 
@@ -92,6 +100,10 @@ export default function AgentsView(props: AgentsViewProps) {
     if (featured.id === "document-writer") {
       const match = agentByKey().get(normalizeAgentKey("document-writer"));
       return match?.name ?? null;
+    }
+    if (featured.id === "bid-workbench") {
+      const match = agentByKey().get(normalizeAgentKey("common-work"));
+      return match?.name ?? "common-work";
     }
     const match = agentByKey().get(normalizeAgentKey(featured.id));
     return match?.name ?? null;

@@ -1,8 +1,14 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
+import {
+  refreshBidWorkbenchState,
+  setBidWorkbenchOutlineSource,
+  setBidWorkbenchSectionLock,
+} from "./bid-workbench.js";
 import { proxyOpencodeRequest } from "./server.js";
 import { RuntimeDocumentStateTokenService } from "./runtime-document-state-tokens.js";
 import { RuntimeKnowledgeTokenService } from "./runtime-knowledge-tokens.js";
@@ -22,6 +28,50 @@ afterEach(() => {
     delete process.env.OPENWORK_DATA_DIR;
   }
 });
+
+async function writeOutlineDocx(
+  workspacePath: string,
+  relativePath: string,
+  items: Array<{ text: string; level?: number }>,
+) {
+  const absolutePath = join(
+    workspacePath,
+    ".opencode",
+    "openwork",
+    "inbox",
+    relativePath,
+  );
+  await mkdir(dirname(absolutePath), { recursive: true });
+  const script = `
+import json
+import sys
+from docx import Document
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
+
+def set_outline(paragraph, level):
+    pPr = paragraph._p.get_or_add_pPr()
+    outline = OxmlElement("w:outlineLvl")
+    outline.set(qn("w:val"), str(level - 1))
+    pPr.append(outline)
+
+target = sys.argv[1]
+items = json.loads(sys.argv[2])
+document = Document()
+for item in items:
+    paragraph = document.add_paragraph(item["text"])
+    level = item.get("level")
+    if isinstance(level, int):
+        set_outline(paragraph, level)
+document.save(target)
+`;
+  const result = spawnSync("python3", ["-c", script, absolutePath, JSON.stringify(items)], {
+    encoding: "utf8",
+  });
+  if (result.status !== 0) {
+    throw new Error(String(result.stderr || result.stdout || "failed to write docx"));
+  }
+}
 
 describe("proxyOpencodeRequest session creation", () => {
   let workspacePath = "";
@@ -186,6 +236,10 @@ describe("proxyOpencodeRequest session creation", () => {
           openworkPreferredView: "document-agent",
           openworkPreferredAgent: "common-work",
           openworkPreferredAgentLock: "common-work",
+          openworkRuntimeProfileId: "bid-workbench-node",
+          openworkRuntimeScopeKind: "bid-workbench-node",
+          openworkRuntimeScopeKey: "node-a",
+          openworkBidNodeId: "node-a",
         }),
       }),
       url: new URL("http://openwork.local/w/ws_1/opencode/session"),
@@ -203,6 +257,10 @@ describe("proxyOpencodeRequest session creation", () => {
     expect(captured.body?.openworkPreferredView).toBeUndefined();
     expect(captured.body?.openworkPreferredAgent).toBeUndefined();
     expect(captured.body?.openworkPreferredAgentLock).toBeUndefined();
+    expect(captured.body?.openworkRuntimeProfileId).toBeUndefined();
+    expect(captured.body?.openworkRuntimeScopeKind).toBeUndefined();
+    expect(captured.body?.openworkRuntimeScopeKey).toBeUndefined();
+    expect(captured.body?.openworkBidNodeId).toBeUndefined();
     expect(Array.isArray(captured.body?.permission)).toBe(true);
     expect(captured.body?.permission).toEqual(expect.arrayContaining([
       { permission: "external_directory", pattern: "*", action: "deny" },
@@ -240,6 +298,10 @@ describe("proxyOpencodeRequest session creation", () => {
           openworkPreferredView: "document-agent",
           openworkPreferredAgent: "common-work",
           openworkPreferredAgentLock: "common-work",
+          openworkRuntimeProfileId: "bid-workbench-node",
+          openworkRuntimeScopeKind: "bid-workbench-node",
+          openworkRuntimeScopeKey: "node-a",
+          openworkBidNodeId: "node-a",
         }),
       }),
       url: new URL("http://openwork.local/w/ws_1/opencode/session"),
@@ -262,6 +324,10 @@ describe("proxyOpencodeRequest session creation", () => {
     expect(payload.openworkPreferredView).toBe("document-agent");
     expect(payload.openworkPreferredAgent).toBe("common-work");
     expect(payload.openworkPreferredAgentLock).toBe("common-work");
+    expect(runtime?.runtimeProfileId).toBe("bid-workbench-node");
+    expect(runtime?.runtimeScopeKind).toBe("bid-workbench-node");
+    expect(runtime?.runtimeScopeKey).toBe("node-a");
+    expect(runtime?.bidNodeId).toBe("node-a");
   });
 
   test("reduces common-work document sessions to the document runtime skill and MCP surface", async () => {
@@ -339,6 +405,79 @@ describe("proxyOpencodeRequest session creation", () => {
       "xlsx",
     ]);
     expect(Object.keys(runtimeConfig.mcp ?? {}).sort()).toEqual(["bocha-search"]);
+  });
+
+  test("rejects bid-workbench prompt when the section is locked by another user", async () => {
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })) as unknown as typeof fetch;
+
+    const sessionOwnership = new SessionOwnershipService();
+    const sessionWorkspaces = new SessionWorkspaceService();
+    const runtimeKnowledgeTokens = new RuntimeKnowledgeTokenService();
+    const runtimeDocumentStateTokens = new RuntimeDocumentStateTokenService();
+    const auth = {
+      getUserByOwnerKey: async (ownerKey: string) => ({
+        id: ownerKey,
+        username: ownerKey === "owner-alice" ? "alice" : "bob",
+        name: ownerKey === "owner-alice" ? "alice" : "bob",
+        email: null,
+        role: "user",
+        createdAt: Date.now(),
+      }),
+    } as any;
+
+    await sessionOwnership.setOwner(workspace.id, "ses_locked", "owner-alice");
+    await sessionWorkspaces.setWorkspace(workspace.id, "ses_locked", {
+      runtimeId: "rt_locked",
+      runtimeDir: workspace.path,
+      createdAt: Date.now(),
+      bidNodeId: "node-a",
+    } as any);
+
+    await writeOutlineDocx(workspace.path, "bid-workbench/templates/template.docx", [
+      { text: "第一章 节点A", level: 1 },
+    ]);
+    await setBidWorkbenchOutlineSource(workspace.path, {
+      sourcePath: "bid-workbench/templates/template.docx",
+      sourceType: "templates",
+      structureSourceKind: "template",
+    });
+    const state = await refreshBidWorkbenchState(workspace.path);
+    const node = state.nodes.find((entry) => entry.title === "第一章 节点A");
+    expect(node).toBeDefined();
+    await setBidWorkbenchSectionLock(workspace.path, {
+      sectionId: node!.id,
+      lockedBy: "bob",
+    });
+    await sessionWorkspaces.setWorkspace(workspace.id, "ses_locked", {
+      runtimeId: "rt_locked",
+      runtimeDir: workspace.path,
+      createdAt: Date.now(),
+      bidNodeId: node!.id,
+    } as any);
+
+    await expect(proxyOpencodeRequest({
+      request: new Request("http://openwork.local/w/ws_1/opencode/session/ses_locked/prompt", {
+        method: "POST",
+        body: JSON.stringify({ text: "hello" }),
+      }),
+      url: new URL("http://openwork.local/w/ws_1/opencode/session/ses_locked/prompt"),
+      workspace,
+      proxyPath: "/session/ses_locked/prompt",
+      actor: { type: "remote", scope: "collaborator", tokenHash: "owner-alice" },
+      sessionOwnership,
+      sessionWorkspaces,
+      runtimeKnowledgeTokens,
+      runtimeDocumentStateTokens,
+      openworkBaseUrl: "http://127.0.0.1:8789",
+      authService: auth,
+    })).rejects.toMatchObject({
+      status: 409,
+      code: "bid_workbench_section_locked",
+    });
   });
 
   test("can create a session against an isolated per-session opencode runtime", async () => {

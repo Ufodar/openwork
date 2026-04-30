@@ -291,7 +291,7 @@ export type OpencodeCommandDraft = {
   subtask?: boolean;
 };
 
-export type OpenworkSessionView = "onboarding" | "dashboard" | "session" | "proto" | "document-writer" | "document-agent";
+export type OpenworkSessionView = "onboarding" | "dashboard" | "session" | "proto" | "document-writer" | "document-agent" | "bid-workbench";
 
 export type WorkspaceOpenworkConfig = {
   version: number;

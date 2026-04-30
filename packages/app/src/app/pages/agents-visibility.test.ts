@@ -12,11 +12,13 @@ describe("agents visibility", () => {
       { id: "general-assistant" },
       { id: "document-agent" },
       { id: "document-writer" },
+      { id: "bid-workbench" },
     ]);
 
     expect(visible).toEqual([
       { id: "document-agent" },
       { id: "document-writer" },
+      { id: "bid-workbench" },
     ]);
   });
 
@@ -38,6 +40,14 @@ describe("agents visibility", () => {
       agent: "common-work",
       agentLock: "common-work",
       view: "document-agent",
+    });
+  });
+
+  test("routes the featured bid workbench card to a dedicated bid-workbench view", () => {
+    expect(resolveFeaturedAgentLaunch("bid-workbench", null)).toEqual({
+      agent: "common-work",
+      agentLock: "common-work",
+      view: "bid-workbench",
     });
   });
 });

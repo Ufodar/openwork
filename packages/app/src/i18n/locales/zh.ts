@@ -132,6 +132,8 @@ export default {
   "agents.document_agent_desc": "支持word/excel/ppt的编辑和生成，预览图片，带树状文件浏览器，上传要操作的所有文件即可",
   "agents.document_writer_name": "正式文档助手",
   "agents.document_writer_desc": "面向长文档、正式交付件与多文档整理的工作流助手",
+  "agents.bid_workbench_name": "多人协作投标工作台",
+  "agents.bid_workbench_desc": "面向标书场景的章节级协作工作台，支持节点独立对话、材料绑定与后续合并",
 
   // ==================== Document Agent ====================
   "docagent.documents": "文档",

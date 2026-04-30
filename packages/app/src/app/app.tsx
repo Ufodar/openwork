@@ -1352,6 +1352,7 @@ export default function App() {
       partCount: visibleParts,
     });
 
+    let sendStage = "start";
     try {
       if (!compactCommand) {
         setLastPromptSent(content);
@@ -1360,14 +1361,19 @@ export default function App() {
         setPrompt("");
       }
 
+      sendStage = "resolve-model";
       const model = selectedSessionModel();
+      sendStage = "resolve-agent";
       const agent = selectedSessionAgent();
+      sendStage = "build-parts";
       const parts = buildPromptParts(resolvedDraft);
 
       if (resolvedDraft.mode === "shell") {
+        sendStage = "shell";
         await shellInSession(c, sessionID, content);
       } else if (resolvedDraft.command || compactCommand) {
         if (compactCommand) {
+          sendStage = "compact";
           await compactCurrentSession(sessionID);
           finishPerf(perfEnabled, "session.prompt", "done", startedAt, {
             sessionID,
@@ -1383,11 +1389,14 @@ export default function App() {
         }
 
         // Slash command: route through session.command() API
+        sendStage = "command-model";
         const selected = selectedSessionModel();
         const modelString = `${selected.providerID}/${selected.modelID}`;
+        sendStage = "command-files";
         const files = buildCommandFileParts(resolvedDraft);
 
         // session.command() expects `model` as a provider/model string and only supports file parts.
+        sendStage = "command-send";
         unwrap(
           await c.session.command({
             sessionID,
@@ -1400,14 +1409,17 @@ export default function App() {
         );
 
       } else {
+        sendStage = "prompt-send";
         const result = await c.session.promptAsync({
           sessionID,
           model,
           agent: agent ?? undefined,
           parts,
         });
+        sendStage = "prompt-assert";
         assertNoClientError(result);
 
+        sendStage = "session-model-state";
         setSessionModelById((current) => ({
           ...current,
           [sessionID]: model,
@@ -1427,6 +1439,14 @@ export default function App() {
         command: commandName,
       });
     } catch (e) {
+      console.error("[sendPrompt:error]", {
+        stage: sendStage,
+        sessionID,
+        mode: resolvedDraft.mode,
+        command: commandName,
+        message: e instanceof Error ? e.message : safeStringify(e),
+        stack: e instanceof Error ? e.stack : undefined,
+      });
       finishPerf(perfEnabled, "session.prompt", "error", startedAt, {
         sessionID,
         mode: resolvedDraft.mode,

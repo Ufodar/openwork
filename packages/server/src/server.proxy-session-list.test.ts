@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -10,6 +10,16 @@ import type { SessionWorkspaceService } from "./session-workspaces.js";
 
 const originalFetch = globalThis.fetch;
 
+function createFetchMock(
+  handler: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
+): typeof fetch {
+  return handler as unknown as typeof fetch;
+}
+
+function createTempWorkspacePath(prefix: string) {
+  return mkdtemp(join(tmpdir(), `${prefix}-`));
+}
+
 afterEach(() => {
   globalThis.fetch = originalFetch;
 });
@@ -17,7 +27,7 @@ afterEach(() => {
 describe("proxyOpencodeRequest session listing", () => {
   test("aggregates workspace-root session lists from a shared session index", async () => {
     const captured: { url?: string; headers?: Headers } = {};
-    globalThis.fetch = (async (input, init) => {
+    globalThis.fetch = createFetchMock(async (input: RequestInfo | URL, init?: RequestInit) => {
       captured.url = typeof input === "string" ? input : input.toString();
       captured.headers = new Headers(init?.headers);
       return new Response(JSON.stringify([{
@@ -29,7 +39,7 @@ describe("proxyOpencodeRequest session listing", () => {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
-    }) as typeof fetch;
+    });
 
     const workspace: WorkspaceInfo = {
       id: "ws_shared",
@@ -73,16 +83,16 @@ describe("proxyOpencodeRequest session listing", () => {
     expect(payload).toHaveLength(1);
     expect(payload[0]?.id).toBe("ses_123");
     expect(captured.url).toBe("http://127.0.0.1:33459/session");
-    expect(captured.headers?.get("x-opencode-directory")).toBe("/root/ai_staff/openwork");
+    expect(captured.headers?.get("x-opencode-directory")).toBe("/root/ai_staff/openwork/documents/sessions/ses_123");
   });
 
   test("recovers historical workspace sessions when the live opencode list is empty", async () => {
-    globalThis.fetch = (async () => new Response(JSON.stringify([]), {
+    globalThis.fetch = createFetchMock(async () => new Response(JSON.stringify([]), {
       status: 200,
       headers: { "Content-Type": "application/json" },
-    })) as typeof fetch;
+    }));
 
-    const workspacePath = await mkdir(join(tmpdir(), `openwork-session-history-${Date.now()}`), { recursive: true });
+    const workspacePath = await createTempWorkspacePath("openwork-session-history");
     await mkdir(join(workspacePath, ".opencode"), { recursive: true });
     await writeFile(
       join(workspacePath, ".opencode", "openwork.json"),
@@ -135,12 +145,12 @@ describe("proxyOpencodeRequest session listing", () => {
   });
 
   test("merges historical sessions from root and runtime openwork metadata", async () => {
-    globalThis.fetch = (async () => new Response(JSON.stringify([]), {
+    globalThis.fetch = createFetchMock(async () => new Response(JSON.stringify([]), {
       status: 200,
       headers: { "Content-Type": "application/json" },
-    })) as typeof fetch;
+    }));
 
-    const workspacePath = await mkdir(join(tmpdir(), `openwork-session-history-merged-${Date.now()}`), { recursive: true });
+    const workspacePath = await createTempWorkspacePath("openwork-session-history-merged");
     await mkdir(join(workspacePath, ".opencode"), { recursive: true });
     await writeFile(
       join(workspacePath, ".opencode", "openwork.json"),
@@ -206,14 +216,14 @@ describe("proxyOpencodeRequest session listing", () => {
     expect(payload.find((item) => item.id === "ses_runtime_hist_1")?.directory).toBe(runtimeDir);
   });
 
-  test("does not boot an isolated runtime just to list historical sessions", async () => {
+  test("prefers recovered runtime history when the runtime session list is unavailable", async () => {
     let fetchCount = 0;
-    globalThis.fetch = (async () => {
+    globalThis.fetch = createFetchMock(async () => {
       fetchCount += 1;
-      throw new Error("should not query a session-owned runtime for history");
-    }) as typeof fetch;
+      throw new Error("runtime session list unavailable");
+    });
 
-    const workspacePath = await mkdir(join(tmpdir(), `openwork-session-iso-list-${Date.now()}`), { recursive: true });
+    const workspacePath = await createTempWorkspacePath("openwork-session-iso-list");
     const runtimeDir = join(workspacePath, "documents", "sessions", "runtime-iso-1");
     await mkdir(join(runtimeDir, ".opencode"), { recursive: true });
     await writeFile(
@@ -246,15 +256,6 @@ describe("proxyOpencodeRequest session listing", () => {
         runtimeId: "runtime-iso-1",
         runtimeDir,
         createdAt: 1,
-        opencodeRuntime: {
-          mode: "isolated_process",
-          rootDir: join(runtimeDir, ".openwork-runtime", "opencode"),
-          configDir: join(runtimeDir, ".openwork-runtime", "opencode", "config"),
-          dataDir: join(runtimeDir, ".openwork-runtime", "opencode", "data"),
-          stateDir: join(runtimeDir, ".openwork-runtime", "opencode", "state"),
-          cacheDir: join(runtimeDir, ".openwork-runtime", "opencode", "cache"),
-          bindHost: "127.0.0.1",
-        },
       }),
     } as unknown as SessionWorkspaceService;
 
@@ -272,24 +273,21 @@ describe("proxyOpencodeRequest session listing", () => {
       runtimeKnowledgeTokens: { revokeRuntime: async () => undefined, issue: async () => ({ token: "", expiresAt: 0 }), resolve: async () => null } as any,
       runtimeDocumentStateTokens: { revokeRuntime: async () => undefined, issue: async () => ({ token: "", expiresAt: 0 }), resolve: async () => null } as any,
       openworkBaseUrl: "http://127.0.0.1:8789",
-      sessionRuntimeService: {
-        peekSessionWorkspace: () => null,
-      } as any,
     });
 
     const payload = await response.json() as Array<{ id: string; directory: string | null }>;
     expect(payload).toHaveLength(1);
     expect(payload[0]?.id).toBe("ses_iso_1");
     expect(payload[0]?.directory).toBe(runtimeDir);
-    expect(fetchCount).toBe(0);
+    expect(fetchCount).toBe(1);
   });
 
-  test("includes preferred view metadata from isolated session workspace entries", async () => {
-    globalThis.fetch = (async () => {
-      throw new Error("shared session list should not be queried for isolated sessions");
-    }) as typeof fetch;
+  test("includes preferred view metadata from session workspace entries when runtime session listing is unavailable", async () => {
+    globalThis.fetch = createFetchMock(async () => {
+      throw new Error("runtime session list unavailable");
+    });
 
-    const workspacePath = await mkdir(join(tmpdir(), `openwork-session-view-metadata-${Date.now()}`), { recursive: true });
+    const workspacePath = await createTempWorkspacePath("openwork-session-view-metadata");
     const runtimeDir = join(workspacePath, "documents", "sessions", "runtime-doc-agent");
     await mkdir(runtimeDir, { recursive: true });
 
@@ -315,16 +313,6 @@ describe("proxyOpencodeRequest session listing", () => {
         preferredView: "document-agent",
         preferredAgent: "common-work",
         preferredAgentLock: "common-work",
-        opencodeRuntime: {
-          mode: "isolated_process",
-          rootDir: join(runtimeDir, ".openwork-runtime", "opencode"),
-          configDir: join(runtimeDir, ".openwork-runtime", "opencode", "config"),
-          configHomeDir: join(runtimeDir, ".openwork-runtime", "opencode", "config-home"),
-          dataDir: join(runtimeDir, ".openwork-runtime", "opencode", "data"),
-          stateDir: join(runtimeDir, ".openwork-runtime", "opencode", "state"),
-          cacheDir: join(runtimeDir, ".openwork-runtime", "opencode", "cache"),
-          bindHost: "127.0.0.1",
-        },
       }),
     } as unknown as SessionWorkspaceService;
 
@@ -342,9 +330,6 @@ describe("proxyOpencodeRequest session listing", () => {
       runtimeKnowledgeTokens: { revokeRuntime: async () => undefined, issue: async () => ({ token: "", expiresAt: 0 }), resolve: async () => null } as any,
       runtimeDocumentStateTokens: { revokeRuntime: async () => undefined, issue: async () => ({ token: "", expiresAt: 0 }), resolve: async () => null } as any,
       openworkBaseUrl: "http://127.0.0.1:8789",
-      sessionRuntimeService: {
-        peekSessionWorkspace: () => null,
-      } as any,
     });
 
     const payload = await response.json() as Array<Record<string, unknown>>;
@@ -355,11 +340,11 @@ describe("proxyOpencodeRequest session listing", () => {
   });
 
   test("includes preferred view metadata from shared-runtime session workspace entries", async () => {
-    const workspacePath = await mkdir(join(tmpdir(), `openwork-session-shared-profile-${Date.now()}`), { recursive: true });
+    const workspacePath = await createTempWorkspacePath("openwork-session-shared-profile");
     const runtimeDir = join(workspacePath, "documents", "sessions", "runtime-doc-writer");
     await mkdir(runtimeDir, { recursive: true });
 
-    globalThis.fetch = (async () => new Response(JSON.stringify([{
+    globalThis.fetch = createFetchMock(async () => new Response(JSON.stringify([{
       id: "ses_doc_writer",
       title: "Writer Session",
       directory: runtimeDir,
@@ -367,7 +352,7 @@ describe("proxyOpencodeRequest session listing", () => {
     }]), {
       status: 200,
       headers: { "Content-Type": "application/json" },
-    })) as typeof fetch;
+    }));
 
     const workspace: WorkspaceInfo = {
       id: "ws_doc_writer",
@@ -418,13 +403,11 @@ describe("proxyOpencodeRequest session listing", () => {
   });
 
   test("prefers the mapped runtime directory over a workspace-root directory from the shared session list", async () => {
-    const workspacePath = await mkdir(join(tmpdir(), `openwork-session-runtime-dir-preferred-${Date.now()}`), {
-      recursive: true,
-    });
+    const workspacePath = await createTempWorkspacePath("openwork-session-runtime-dir-preferred");
     const runtimeDir = join(workspacePath, "documents", "sessions", "runtime-doc-writer");
     await mkdir(runtimeDir, { recursive: true });
 
-    globalThis.fetch = (async () => new Response(JSON.stringify([{
+    globalThis.fetch = createFetchMock(async () => new Response(JSON.stringify([{
       id: "ses_doc_writer",
       title: "Writer Session",
       directory: workspacePath,
@@ -432,7 +415,7 @@ describe("proxyOpencodeRequest session listing", () => {
     }]), {
       status: 200,
       headers: { "Content-Type": "application/json" },
-    })) as typeof fetch;
+    }));
 
     const workspace: WorkspaceInfo = {
       id: "ws_doc_writer",
@@ -480,13 +463,12 @@ describe("proxyOpencodeRequest session listing", () => {
     expect(payload[0]?.directory).toBe(runtimeDir);
   });
 
-  test("recovers preferred view metadata from runtime profiles for historical isolated sessions", async () => {
-    globalThis.fetch = (async () => new Response(JSON.stringify([]), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    })) as typeof fetch;
+  test("recovers preferred view metadata from runtime profiles for historical session runtimes", async () => {
+    globalThis.fetch = createFetchMock(async () => {
+      throw new Error("runtime session list unavailable");
+    });
 
-    const workspacePath = await mkdir(join(tmpdir(), `openwork-session-runtime-profile-${Date.now()}`), { recursive: true });
+    const workspacePath = await createTempWorkspacePath("openwork-session-runtime-profile");
     const runtimeDir = join(workspacePath, "documents", "sessions", "runtime-profile-1");
     await mkdir(join(runtimeDir, ".opencode"), { recursive: true });
     await writeFile(
@@ -507,6 +489,17 @@ describe("proxyOpencodeRequest session listing", () => {
       baseUrl: "http://127.0.0.1:33459",
     };
 
+    await writeFile(
+      join(runtimeDir, ".opencode", "openwork.json"),
+      JSON.stringify({
+        version: 1,
+        sessions: {
+          ses_runtime_profile: { view: "document-agent" },
+        },
+      }),
+      "utf8",
+    );
+
     const sessionOwnership = {
       listEntries: async () => ({
         ses_runtime_profile: { ownerKey: "host-owner", updatedAt: 1 },
@@ -518,16 +511,6 @@ describe("proxyOpencodeRequest session listing", () => {
         runtimeId: "runtime-profile-1",
         runtimeDir,
         createdAt: 1,
-        opencodeRuntime: {
-          mode: "isolated_process",
-          rootDir: join(runtimeDir, ".openwork-runtime", "opencode"),
-          configDir: join(runtimeDir, ".openwork-runtime", "opencode", "config"),
-          configHomeDir: join(runtimeDir, ".openwork-runtime", "opencode", "config-home"),
-          dataDir: join(runtimeDir, ".openwork-runtime", "opencode", "data"),
-          stateDir: join(runtimeDir, ".openwork-runtime", "opencode", "state"),
-          cacheDir: join(runtimeDir, ".openwork-runtime", "opencode", "cache"),
-          bindHost: "127.0.0.1",
-        },
       }),
     } as unknown as SessionWorkspaceService;
 
@@ -545,9 +528,6 @@ describe("proxyOpencodeRequest session listing", () => {
       runtimeKnowledgeTokens: { revokeRuntime: async () => undefined, issue: async () => ({ token: "", expiresAt: 0 }), resolve: async () => null } as any,
       runtimeDocumentStateTokens: { revokeRuntime: async () => undefined, issue: async () => ({ token: "", expiresAt: 0 }), resolve: async () => null } as any,
       openworkBaseUrl: "http://127.0.0.1:8789",
-      sessionRuntimeService: {
-        peekSessionWorkspace: () => null,
-      } as any,
     });
 
     const payload = await response.json() as Array<Record<string, unknown>>;

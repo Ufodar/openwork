@@ -25,7 +25,6 @@ export const resolveAppRouteView = (pathname: string): AppRouteView => {
 export const routeForSessionView = (view: ResolvedSessionView, sessionId: string): string => {
   const trimmed = sessionId.trim();
   if (!trimmed) return "/session";
-  if (view === "bid-workbench") return `/bid-workbench/${trimmed}`;
   if (view === "document-agent") return `/document-agent/${trimmed}`;
   if (view === "document-writer") return `/document-writer/${trimmed}`;
   return `/session/${trimmed}`;

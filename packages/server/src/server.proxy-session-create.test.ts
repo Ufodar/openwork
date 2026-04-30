@@ -274,6 +274,56 @@ describe("proxyOpencodeRequest session creation", () => {
     expect(await exists(join(runtime?.runtimeDir ?? "", ".opencode", "skills", "openwork-debug", "SKILL.md"))).toBe(false);
   });
 
+  test("never provisions isolated opencode runtimes during hosted session creation", async () => {
+    const captured: { body?: Record<string, unknown> } = {};
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      captured.body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : {};
+      return new Response(JSON.stringify({ id: "ses_shared", title: "Shared Session" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+
+    const sessionOwnership = new SessionOwnershipService();
+    const sessionWorkspaces = new SessionWorkspaceService();
+    const runtimeKnowledgeTokens = new RuntimeKnowledgeTokenService();
+    const runtimeDocumentStateTokens = new RuntimeDocumentStateTokenService();
+
+    const response = await proxyOpencodeRequest({
+      request: new Request("http://openwork.local/w/ws_1/opencode/session", {
+        method: "POST",
+        body: JSON.stringify({
+          title: "Shared Session",
+          openworkPreferredView: "document-agent",
+          openworkPreferredAgent: "common-work",
+          openworkPreferredAgentLock: "common-work",
+          openworkRuntimeProfileId: "document-agent",
+        }),
+      }),
+      url: new URL("http://openwork.local/w/ws_1/opencode/session"),
+      workspace,
+      proxyPath: "/session",
+      actor: { type: "remote", scope: "collaborator", tokenHash: "owner-alice" },
+      sessionOwnership,
+      sessionWorkspaces,
+      runtimeKnowledgeTokens,
+      runtimeDocumentStateTokens,
+      openworkBaseUrl: "http://127.0.0.1:8789",
+    });
+
+    expect(response.status).toBe(200);
+    expect(captured.body?.openworkPreferredView).toBeUndefined();
+    expect(captured.body?.openworkPreferredAgent).toBeUndefined();
+    expect(captured.body?.openworkPreferredAgentLock).toBeUndefined();
+    expect(captured.body?.openworkRuntimeProfileId).toBeUndefined();
+
+    const runtime = await sessionWorkspaces.getWorkspace(workspace.id, "ses_shared");
+    expect(runtime?.runtimeDir).toBeTruthy();
+    expect(runtime?.preferredView).toBe("document-agent");
+    expect(runtime?.preferredAgent).toBe("common-work");
+    expect(runtime?.preferredAgentLock).toBe("common-work");
+  });
+
   test("rewrites the created session payload to the provisioned runtime directory and profile hints", async () => {
     globalThis.fetch = (async () =>
       new Response(JSON.stringify({
@@ -588,67 +638,5 @@ describe("proxyOpencodeRequest session creation", () => {
     expect(metadata.openworkPromptAuthor).toBe("alice");
   });
 
-  test("can create a session against an isolated per-session opencode runtime", async () => {
-    const captured: { url?: string } = {};
-    globalThis.fetch = (async (input: RequestInfo | URL) => {
-      captured.url = typeof input === "string" ? input : input.toString();
-      return new Response(JSON.stringify({ id: "ses_isolated", title: "Isolated Session" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    }) as unknown as typeof fetch;
 
-    const sessionOwnership = new SessionOwnershipService();
-    const sessionWorkspaces = new SessionWorkspaceService();
-    const runtimeKnowledgeTokens = new RuntimeKnowledgeTokenService();
-    const runtimeDocumentStateTokens = new RuntimeDocumentStateTokenService();
-    let registeredSessionId = "";
-
-    const response = await proxyOpencodeRequest({
-      request: new Request("http://openwork.local/w/ws_1/opencode/session", {
-        method: "POST",
-        body: JSON.stringify({ title: "Isolated Session" }),
-      }),
-      url: new URL("http://openwork.local/w/ws_1/opencode/session"),
-      workspace,
-      proxyPath: "/session",
-      actor: { type: "remote", scope: "collaborator", tokenHash: "owner-alice" },
-      sessionOwnership,
-      sessionWorkspaces,
-      runtimeKnowledgeTokens,
-      runtimeDocumentStateTokens,
-      openworkBaseUrl: "http://127.0.0.1:8789",
-      sessionRuntimeService: {
-        isEnabledForWorkspace: () => true,
-        provisionSessionRuntime: async (_workspace: WorkspaceInfo, entry: any) => ({
-          ...entry,
-          opencodeRuntime: {
-            mode: "isolated_process",
-            rootDir: join(entry.runtimeDir, ".openwork-runtime", "opencode"),
-            configDir: join(entry.runtimeDir, ".openwork-runtime", "opencode", "config"),
-            configHomeDir: join(entry.runtimeDir, ".openwork-runtime", "opencode", "config-home"),
-            dataDir: join(entry.runtimeDir, ".openwork-runtime", "opencode", "data"),
-            stateDir: join(entry.runtimeDir, ".openwork-runtime", "opencode", "state"),
-            cacheDir: join(entry.runtimeDir, ".openwork-runtime", "opencode", "cache"),
-            tempDir: join(entry.runtimeDir, ".tmp", "system"),
-            bindHost: "127.0.0.1",
-          },
-        }),
-        startProvisionedRuntime: async () => ({
-          baseUrl: "http://127.0.0.1:4555",
-          pid: 4555,
-          dispose: async () => undefined,
-        }),
-        registerSessionRuntime: (_workspaceId: string, sessionId: string) => {
-          registeredSessionId = sessionId;
-        },
-      } as any,
-    });
-
-    expect(response.status).toBe(200);
-    expect(captured.url).toBe("http://127.0.0.1:4555/session?directory=" + encodeURIComponent((await sessionWorkspaces.getWorkspace(workspace.id, "ses_isolated"))?.runtimeDir ?? ""));
-    expect(registeredSessionId).toBe("ses_isolated");
-    const runtime = await sessionWorkspaces.getWorkspace(workspace.id, "ses_isolated");
-    expect(runtime?.opencodeRuntime?.mode).toBe("isolated_process");
-  });
 });

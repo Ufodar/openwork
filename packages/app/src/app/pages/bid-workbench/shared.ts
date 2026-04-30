@@ -8,6 +8,14 @@ import type {
 
 export type BidWorkbenchFileCategory = "tender" | "reference" | "output" | "templates";
 export type BidWorkbenchTab = "overview" | "workspace" | "constraints";
+export type BidWorkbenchWorkspaceFile = {
+  path: string;
+  size: number;
+  updatedAt: number;
+  type: string;
+  originalName?: string;
+  title?: string;
+};
 
 export const FILE_CATEGORY_ROOTS: Record<BidWorkbenchFileCategory, string> = {
   tender: "bid-workbench/tender",

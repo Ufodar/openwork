@@ -181,7 +181,7 @@ describe("provisionSessionWorkspace", () => {
     expect(await exists(join(result.runtimeDir, "bid-workbench", "output"))).toBe(true);
     expect(await exists(join(result.runtimeDir, ".openwork", "bid-workbench"))).toBe(true);
     expect(await readlink(join(result.runtimeDir, "bid-workbench", "tender"))).toContain(
-      ".opencode/openwork/inbox/bid-workbench/tender",
+      "documents/bid-workbench/tender",
     );
     expect(await readlink(join(result.runtimeDir, ".openwork", "bid-workbench"))).toContain(
       ".openwork/bid-workbench",
@@ -629,7 +629,7 @@ describe("provisionSessionWorkspace", () => {
     expect(instructionRaw).toContain("owner=alice");
   });
 
-  test("persists isolated opencode runtime metadata through the session workspace store", async () => {
+  test("persists session workspace metadata through the session workspace store", async () => {
     process.env.OPENWORK_DATA_DIR = await mkdtemp(join(tmpdir(), "openwork-session-workspace-store-"));
     const service = new SessionWorkspaceService();
 
@@ -637,17 +637,6 @@ describe("provisionSessionWorkspace", () => {
       runtimeId: "runtime_1",
       runtimeDir: "/tmp/runtime-1",
       createdAt: 1,
-      opencodeRuntime: {
-        mode: "isolated_process",
-        rootDir: "/tmp/runtime-1/.openwork-runtime/opencode",
-        configDir: "/tmp/runtime-1/.openwork-runtime/opencode/config",
-        configHomeDir: "/tmp/runtime-1/.openwork-runtime/opencode/config-home",
-        dataDir: "/tmp/runtime-1/.openwork-runtime/opencode/data",
-        stateDir: "/tmp/runtime-1/.openwork-runtime/opencode/state",
-        cacheDir: "/tmp/runtime-1/.openwork-runtime/opencode/cache",
-        tempDir: "/tmp/runtime-1/.tmp/system",
-        bindHost: "127.0.0.1",
-      },
       preferredView: "document-agent",
       preferredAgent: "common-work",
       preferredAgentLock: "common-work",
@@ -655,14 +644,11 @@ describe("provisionSessionWorkspace", () => {
 
     const stored = await service.getWorkspace("ws_1", "ses_1");
     const listed = await service.listWorkspaces("ws_1");
-    expect(stored?.opencodeRuntime?.mode).toBe("isolated_process");
-    expect(stored?.opencodeRuntime?.configDir).toBe("/tmp/runtime-1/.openwork-runtime/opencode/config");
-    expect(stored?.opencodeRuntime?.configHomeDir).toBe("/tmp/runtime-1/.openwork-runtime/opencode/config-home");
-    expect(stored?.opencodeRuntime?.tempDir).toBe("/tmp/runtime-1/.tmp/system");
+    expect(stored?.runtimeDir).toBe("/tmp/runtime-1");
     expect(stored?.preferredView).toBe("document-agent");
     expect(stored?.preferredAgent).toBe("common-work");
     expect(stored?.preferredAgentLock).toBe("common-work");
-    expect(listed.ses_1?.opencodeRuntime?.mode).toBe("isolated_process");
+    expect(listed.ses_1?.runtimeDir).toBe("/tmp/runtime-1");
     expect(listed.ses_1?.preferredView).toBe("document-agent");
     expect(listed.ses_1?.preferredAgent).toBe("common-work");
     expect(listed.ses_1?.preferredAgentLock).toBe("common-work");

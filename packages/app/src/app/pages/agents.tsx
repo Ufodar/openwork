@@ -101,10 +101,6 @@ export default function AgentsView(props: AgentsViewProps) {
       const match = agentByKey().get(normalizeAgentKey("document-writer"));
       return match?.name ?? null;
     }
-    if (featured.id === "bid-workbench") {
-      const match = agentByKey().get(normalizeAgentKey("common-work"));
-      return match?.name ?? "common-work";
-    }
     const match = agentByKey().get(normalizeAgentKey(featured.id));
     return match?.name ?? null;
   };
@@ -143,6 +139,10 @@ export default function AgentsView(props: AgentsViewProps) {
   function handleFeaturedClick(featured: AgentType) {
     if (featured.status === "coming-soon") return;
     if (!isFeaturedAgentAvailable(featured)) return;
+    if (featured.id === "bid-workbench") {
+      props.setView("bid-workbench");
+      return;
+    }
     const agent = resolveFeaturedAgentName(featured);
     const launch = resolveFeaturedAgentLaunch(featured.id, agent);
     props.createSessionAndOpen(launch ?? undefined);

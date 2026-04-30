@@ -24,8 +24,7 @@ export function resolveFeaturedAgentLaunch(
     return { agent: resolved, agentLock: resolved, view: "document-writer", enableDocumentState: true };
   }
   if (featuredId === "bid-workbench") {
-    const resolved = agent ?? "common-work";
-    return { agent: resolved, agentLock: resolved, view: "bid-workbench" };
+    return null;
   }
   return agent ? { agent } : null;
 }

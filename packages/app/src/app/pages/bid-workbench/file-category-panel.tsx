@@ -1,17 +1,17 @@
 import { For, Show } from "solid-js";
 import { FolderPlus } from "lucide-solid";
 
-import type { OpenworkBidWorkbenchSourceType, OpenworkInboxItem } from "../../lib/openwork-server";
+import type { OpenworkBidWorkbenchSourceType } from "../../lib/openwork-server";
 import { CATEGORY_LABELS, FILE_CATEGORY_ROOTS } from "./shared";
-import type { BidWorkbenchFileCategory } from "./shared";
+import type { BidWorkbenchFileCategory, BidWorkbenchWorkspaceFile } from "./shared";
 
 type BidWorkbenchFileCategoryPanelProps = {
   category: BidWorkbenchFileCategory;
-  files: OpenworkInboxItem[];
+  files: BidWorkbenchWorkspaceFile[];
   uploading: boolean;
   currentOutlineSourcePath: string | null | undefined;
   currentRootOutputPath: string | null | undefined;
-  displayInboxPath: (file: OpenworkInboxItem) => string;
+  displayFilePath: (file: BidWorkbenchWorkspaceFile) => string;
   onUpload: (category: BidWorkbenchFileCategory, files: FileList | null) => void | Promise<void>;
   onSetOutlineSource: (path: string, sourceType: OpenworkBidWorkbenchSourceType) => void | Promise<void>;
   onSetRootOutput: (path: string | null) => void | Promise<void>;
@@ -55,7 +55,7 @@ export default function BidWorkbenchFileCategoryPanel(props: BidWorkbenchFileCat
       <div class="space-y-2 text-xs">
         <For each={props.files}>
           {(file) => {
-            const path = () => props.displayInboxPath(file);
+            const path = () => props.displayFilePath(file);
             const isOutlineSource = () => props.currentOutlineSourcePath === path();
             const isRootOutput = () => props.currentRootOutputPath === path();
             return (

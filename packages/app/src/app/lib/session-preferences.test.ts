@@ -150,7 +150,7 @@ describe("resolveSessionPreferences", () => {
     expect(resolved.agentLock).toEqual({ value: "document-writer", source: "stored" });
   });
 
-  test("preserves a stored bid-workbench view as its own dedicated surface", () => {
+  test("ignores stored bid-workbench view for normal session routing while preserving agent hints", () => {
     const resolved = resolveSessionPreferences({
       stored: {
         view: "bid-workbench",
@@ -160,7 +160,7 @@ describe("resolveSessionPreferences", () => {
       title: "多人协作投标工作台",
     });
 
-    expect(resolved.view).toEqual({ value: "bid-workbench", source: "stored" });
+    expect(resolved.view).toEqual({ value: "session", source: "default" });
     expect(resolved.agent).toEqual({ value: "common-work", source: "stored" });
     expect(resolved.agentLock).toEqual({ value: "common-work", source: "stored" });
   });

@@ -51,15 +51,6 @@ describe("runtime maintenance routes", () => {
             runtimeId: "runtime-iso-1",
             runtimeDir: "/root/.openwork/user-workspaces/user-1/documents/sessions/runtime-iso-1",
             createdAt: 1,
-            opencodeRuntime: {
-              mode: "isolated_process",
-              rootDir: "/root/.openwork/user-workspaces/user-1/documents/sessions/runtime-iso-1/.openwork-runtime/opencode",
-              configDir: "/root/.openwork/user-workspaces/user-1/documents/sessions/runtime-iso-1/.openwork-runtime/opencode/config",
-              dataDir: "/root/.openwork/user-workspaces/user-1/documents/sessions/runtime-iso-1/.openwork-runtime/opencode/data",
-              stateDir: "/root/.openwork/user-workspaces/user-1/documents/sessions/runtime-iso-1/.openwork-runtime/opencode/state",
-              cacheDir: "/root/.openwork/user-workspaces/user-1/documents/sessions/runtime-iso-1/.openwork-runtime/opencode/cache",
-              bindHost: "127.0.0.1",
-            },
           },
         }),
       } as any,
@@ -71,19 +62,9 @@ describe("runtime maintenance routes", () => {
       { getState: () => ({ mode: "idle", requestedAt: null, reason: null, force: false }) } as any,
       {
         ensureWorkspace: async () => undefined,
-        ensureSessionRuntime: async () => {
-          throw new Error("should not subscribe by booting an isolated runtime");
-        },
         listActiveSessions: () => [],
       } as any,
       { log: () => undefined } as any,
-      {
-        isEnabledForWorkspace: () => true,
-        peekSessionWorkspace: () => null,
-        resolveSessionWorkspace: async () => {
-          throw new Error("should not boot an isolated runtime while reading maintenance status");
-        },
-      } as any,
     );
 
     const url = new URL("http://openwork.local/admin/runtime/restart");

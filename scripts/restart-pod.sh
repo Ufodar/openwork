@@ -21,9 +21,6 @@ OPENWORK_DRAIN_TIMEOUT_SECONDS_DEFAULT=900
 
 # ---- Bun path ----
 export PATH="$HOME/.bun/bin:$HOME/.opencode/bin:$HOME/.local/bin:$PATH"
-export OPENWORK_SESSION_RUNTIME_MODE="${OPENWORK_SESSION_RUNTIME_MODE:-process}"
-export OPENWORK_MAX_ACTIVE_SESSION_RUNTIMES="${OPENWORK_MAX_ACTIVE_SESSION_RUNTIMES:-30}"
-export OPENWORK_SESSION_RUNTIME_IDLE_TTL_MS="${OPENWORK_SESSION_RUNTIME_IDLE_TTL_MS:-28800000}"
 # Keep the downloaded OpenCode sidecar available as a fallback, but prefer a
 # healthy external opencode binary already installed on the pod.
 export OPENCODE_VERSION="${OPENCODE_VERSION:-1.3.2}"

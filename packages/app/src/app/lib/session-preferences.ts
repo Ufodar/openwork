@@ -16,7 +16,7 @@ export type OpenworkSessionRagflowSelection = {
   topK: number | null;
 };
 
-export type ResolvedSessionView = "session" | "document-agent" | "document-writer" | "bid-workbench";
+export type ResolvedSessionView = "session" | "document-agent" | "document-writer";
 export type ResolvedValueSource = "stored" | "legacy" | "default" | "none";
 
 export type ResolvedSessionPreference<T> = {
@@ -127,7 +127,6 @@ const resolveStoredSessionView = (value: unknown): ResolvedSessionView | null =>
   const view = normalizeStoredView(value);
   if (view === "document-writer") return "document-writer";
   if (view === "document-agent") return "document-agent";
-  if (view === "bid-workbench") return "bid-workbench";
   if (view === "session") return "session";
   return null;
 };

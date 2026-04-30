@@ -6,10 +6,10 @@ usage() {
 Usage: bash scripts/open-hosted-session.sh <session_id>
 
 Locate a hosted OpenWork session runtime from the persisted session-workspaces
-mapping, switch into that runtime's OpenCode config/data directories, and then
-resume the session with:
+mapping, change into that runtime directory, and resume the session against the
+shared OpenCode server with:
 
-  opencode -s <session_id>
+  opencode -C <runtime_dir> -s <session_id>
 
 Optional env:
   OPENWORK_SESSION_WORKSPACES_DIR
@@ -56,11 +56,6 @@ done < <(find "$MAPPING_DIR" -maxdepth 1 -type f -name '*.json' | sort)
 [[ -n "$RUNTIME_DIR" ]] || die "session not found: $SESSION_ID"
 [[ -d "$RUNTIME_DIR" ]] || die "runtime directory does not exist: $RUNTIME_DIR"
 
-export OPENCODE_CONFIG_DIR="$RUNTIME_DIR/.openwork-runtime/opencode/config"
-export XDG_CONFIG_HOME="$RUNTIME_DIR/.openwork-runtime/opencode/config-home"
-export XDG_DATA_HOME="$RUNTIME_DIR/.openwork-runtime/opencode/data"
-export XDG_STATE_HOME="$RUNTIME_DIR/.openwork-runtime/opencode/state"
-export XDG_CACHE_HOME="$RUNTIME_DIR/.openwork-runtime/opencode/cache"
 export TMPDIR="$RUNTIME_DIR/.tmp/system"
 export TMP="$RUNTIME_DIR/.tmp/system"
 export TEMP="$RUNTIME_DIR/.tmp/system"
@@ -70,4 +65,4 @@ cd "$RUNTIME_DIR"
 echo "[open-hosted-session] sessionId=$SESSION_ID"
 echo "[open-hosted-session] runtimeDir=$RUNTIME_DIR"
 
-exec opencode -s "$SESSION_ID"
+exec opencode -C "$RUNTIME_DIR" -s "$SESSION_ID"

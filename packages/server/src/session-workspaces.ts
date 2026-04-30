@@ -22,23 +22,10 @@ type SessionWorkspaceStore = {
   workspaces: Record<string, SessionWorkspaceEntry>;
 };
 
-export type IsolatedOpencodeRuntime = {
-  mode: "isolated_process";
-  rootDir: string;
-  configDir: string;
-  configHomeDir: string;
-  dataDir: string;
-  stateDir: string;
-  cacheDir: string;
-  tempDir: string;
-  bindHost: string;
-};
-
 export type SessionWorkspaceEntry = {
   runtimeId: string;
   runtimeDir: string;
   createdAt: number;
-  opencodeRuntime?: IsolatedOpencodeRuntime;
   preferredView?: string | null;
   preferredAgent?: string | null;
   preferredAgentLock?: string | null;
@@ -295,45 +282,11 @@ async function readStore(path: string): Promise<SessionWorkspaceStore> {
       const runtimeScopeKey =
         typeof record.runtimeScopeKey === "string" ? record.runtimeScopeKey.trim() || null : null;
       const bidNodeId = typeof record.bidNodeId === "string" ? record.bidNodeId.trim() || null : null;
-      const opencodeRuntimeRecord =
-        record.opencodeRuntime && typeof record.opencodeRuntime === "object"
-          ? record.opencodeRuntime as Partial<IsolatedOpencodeRuntime>
-          : null;
-      const opencodeRuntime =
-        opencodeRuntimeRecord?.mode === "isolated_process" &&
-          typeof opencodeRuntimeRecord.rootDir === "string" &&
-          typeof opencodeRuntimeRecord.configDir === "string" &&
-          typeof opencodeRuntimeRecord.dataDir === "string" &&
-          typeof opencodeRuntimeRecord.stateDir === "string" &&
-          typeof opencodeRuntimeRecord.cacheDir === "string"
-          ? {
-              mode: "isolated_process" as const,
-              rootDir: opencodeRuntimeRecord.rootDir.trim(),
-              configDir: opencodeRuntimeRecord.configDir.trim(),
-              configHomeDir:
-                typeof (opencodeRuntimeRecord as Partial<IsolatedOpencodeRuntime>).configHomeDir === "string" &&
-                  (opencodeRuntimeRecord as Partial<IsolatedOpencodeRuntime>).configHomeDir?.trim()
-                  ? (opencodeRuntimeRecord as Partial<IsolatedOpencodeRuntime>).configHomeDir!.trim()
-                  : join(opencodeRuntimeRecord.rootDir.trim(), "config-home"),
-              dataDir: opencodeRuntimeRecord.dataDir.trim(),
-              stateDir: opencodeRuntimeRecord.stateDir.trim(),
-              cacheDir: opencodeRuntimeRecord.cacheDir.trim(),
-              tempDir:
-                typeof (opencodeRuntimeRecord as Partial<IsolatedOpencodeRuntime>).tempDir === "string" &&
-                  (opencodeRuntimeRecord as Partial<IsolatedOpencodeRuntime>).tempDir?.trim()
-                  ? (opencodeRuntimeRecord as Partial<IsolatedOpencodeRuntime>).tempDir!.trim()
-                  : join(runtimeDir, SESSION_TMP_ROOT_RELATIVE_PATH),
-              bindHost: typeof opencodeRuntimeRecord.bindHost === "string" && opencodeRuntimeRecord.bindHost.trim()
-                ? opencodeRuntimeRecord.bindHost.trim()
-                : "127.0.0.1",
-            }
-          : undefined;
       if (!sessionId.trim() || !runtimeId || !runtimeDir) continue;
       workspaces[sessionId] = {
         runtimeId,
         runtimeDir,
         createdAt,
-        opencodeRuntime,
         preferredView,
         preferredAgent,
         preferredAgentLock,
@@ -480,13 +433,13 @@ async function prepareBidWorkbenchNodeRuntime(input: {
   runtimeId: string;
   bidNodeId: string;
 }): Promise<void> {
-  const sharedInboxRoot = join(input.workspacePath, ".opencode", "openwork", "inbox", "bid-workbench");
+  const sharedDocumentsRoot = join(input.workspacePath, "documents", "bid-workbench");
   const runtimeBidWorkbenchRoot = join(input.runtimeDir, "bid-workbench");
   const categories = ["tender", "reference", "templates", "output"] as const;
   await ensureDir(runtimeBidWorkbenchRoot);
   await ensureDir(join(input.workspacePath, ".openwork", "bid-workbench", "node-briefs"));
   for (const category of categories) {
-    const sourceDir = join(sharedInboxRoot, category);
+    const sourceDir = join(sharedDocumentsRoot, category);
     await ensureDir(sourceDir);
     await ensureSymlinkDir(sourceDir, join(runtimeBidWorkbenchRoot, category));
   }
@@ -905,7 +858,6 @@ export class SessionWorkspaceService {
       runtimeId: entry.runtimeId,
       runtimeDir: entry.runtimeDir,
       createdAt: entry.createdAt,
-      opencodeRuntime: entry.opencodeRuntime,
       preferredView: normalizeOptionalString(entry.preferredView),
       preferredAgent: normalizeOptionalString(entry.preferredAgent),
       preferredAgentLock: normalizeOptionalString(entry.preferredAgentLock),

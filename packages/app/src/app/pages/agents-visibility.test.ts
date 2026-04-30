@@ -43,11 +43,7 @@ describe("agents visibility", () => {
     });
   });
 
-  test("routes the featured bid workbench card to a dedicated bid-workbench view", () => {
-    expect(resolveFeaturedAgentLaunch("bid-workbench", null)).toEqual({
-      agent: "common-work",
-      agentLock: "common-work",
-      view: "bid-workbench",
-    });
+  test("does not create a session payload for the featured bid workbench card", () => {
+    expect(resolveFeaturedAgentLaunch("bid-workbench", null)).toBeNull();
   });
 });

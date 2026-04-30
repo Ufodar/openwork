@@ -12,14 +12,11 @@ describe("session view routing", () => {
   });
 
   test("resolves /bid-workbench routes to the bid-workbench view", () => {
+    expect(resolveAppRouteView("/bid-workbench")).toBe("bid-workbench");
     expect(resolveAppRouteView("/bid-workbench/ses_123")).toBe("bid-workbench");
   });
 
   test("builds the document-writer route for locked writer sessions", () => {
     expect(routeForSessionView("document-writer", "ses_123")).toBe("/document-writer/ses_123");
-  });
-
-  test("builds the bid-workbench route for bid collaboration sessions", () => {
-    expect(routeForSessionView("bid-workbench", "ses_123")).toBe("/bid-workbench/ses_123");
   });
 });

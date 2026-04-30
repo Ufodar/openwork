@@ -13,7 +13,7 @@ afterEach(() => {
 });
 
 describe("proxyOpencodeRequest session activity routing", () => {
-  test("uses session-scoped activity tracking for isolated prompt runs", async () => {
+  test("tracks prompt runs at workspace scope after removing isolated per-session runtimes", async () => {
     globalThis.fetch = (async () =>
       new Response(JSON.stringify({ ok: true }), {
         status: 202,
@@ -38,15 +38,6 @@ describe("proxyOpencodeRequest session activity routing", () => {
         runtimeId: "runtime-iso",
         runtimeDir,
         createdAt: 1,
-        opencodeRuntime: {
-          mode: "isolated_process",
-          rootDir: join(runtimeDir, ".openwork-runtime", "opencode"),
-          configDir: join(runtimeDir, ".openwork-runtime", "opencode", "config"),
-          dataDir: join(runtimeDir, ".openwork-runtime", "opencode", "data"),
-          stateDir: join(runtimeDir, ".openwork-runtime", "opencode", "state"),
-          cacheDir: join(runtimeDir, ".openwork-runtime", "opencode", "cache"),
-          bindHost: "127.0.0.1",
-        },
       }),
     } as unknown as SessionWorkspaceService;
 
@@ -65,19 +56,9 @@ describe("proxyOpencodeRequest session activity routing", () => {
       sessionWorkspaces,
       runtimeKnowledgeTokens: { revokeRuntime: async () => undefined, issue: async () => ({ token: "", expiresAt: 0 }), resolve: async () => null } as any,
       runtimeDocumentStateTokens: { revokeRuntime: async () => undefined, issue: async () => ({ token: "", expiresAt: 0 }), resolve: async () => null } as any,
-      sessionRuntimeService: {
-        resolveSessionWorkspace: async () => ({
-          ...workspace,
-          baseUrl: "http://127.0.0.1:4555",
-          directory: runtimeDir,
-        }),
-      } as any,
       sessionActivity: {
         ensureWorkspace: async () => {
           calls.push("workspace");
-        },
-        ensureSessionRuntime: async (_workspaceId: string, sessionId: string, sessionWorkspace: WorkspaceInfo) => {
-          calls.push(`session:${sessionId}:${sessionWorkspace.baseUrl}:${sessionWorkspace.directory}`);
         },
         notePromptStart: (_workspaceId: string, sessionId: string) => {
           calls.push(`prompt:${sessionId}`);
@@ -88,14 +69,13 @@ describe("proxyOpencodeRequest session activity routing", () => {
     });
 
     expect(response.status).toBe(202);
-    expect(calls).toContain(`session:ses_iso:http://127.0.0.1:4555:${runtimeDir}`);
+    expect(calls).toContain("workspace");
     expect(calls).toContain("prompt:ses_iso");
-    expect(calls).not.toContain("workspace");
   });
 
   test("overrides an incoming root x-opencode-directory header with the isolated runtime directory", async () => {
     const captured = { url: "", directory: "" };
-    globalThis.fetch = (async (input, init) => {
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       captured.url = typeof input === "string" ? input : input.toString();
       captured.directory = new Headers(init?.headers).get("x-opencode-directory") ?? "";
       return new Response(JSON.stringify({ ok: true }), {
@@ -122,15 +102,6 @@ describe("proxyOpencodeRequest session activity routing", () => {
         runtimeId: "runtime-iso",
         runtimeDir,
         createdAt: 1,
-        opencodeRuntime: {
-          mode: "isolated_process",
-          rootDir: join(runtimeDir, ".openwork-runtime", "opencode"),
-          configDir: join(runtimeDir, ".openwork-runtime", "opencode", "config"),
-          dataDir: join(runtimeDir, ".openwork-runtime", "opencode", "data"),
-          stateDir: join(runtimeDir, ".openwork-runtime", "opencode", "state"),
-          cacheDir: join(runtimeDir, ".openwork-runtime", "opencode", "cache"),
-          bindHost: "127.0.0.1",
-        },
       }),
     } as unknown as SessionWorkspaceService;
 
@@ -148,24 +119,17 @@ describe("proxyOpencodeRequest session activity routing", () => {
       sessionWorkspaces,
       runtimeKnowledgeTokens: { revokeRuntime: async () => undefined, issue: async () => ({ token: "", expiresAt: 0 }), resolve: async () => null } as any,
       runtimeDocumentStateTokens: { revokeRuntime: async () => undefined, issue: async () => ({ token: "", expiresAt: 0 }), resolve: async () => null } as any,
-      sessionRuntimeService: {
-        resolveSessionWorkspace: async () => ({
-          ...workspace,
-          baseUrl: "http://127.0.0.1:4555",
-          directory: runtimeDir,
-        }),
-      } as any,
       openworkBaseUrl: "http://127.0.0.1:8789",
     });
 
     expect(response.status).toBe(202);
-    expect(captured.url).toBe("http://127.0.0.1:4555/session/ses_iso/prompt_async?directory=" + encodeURIComponent(runtimeDir));
+    expect(captured.url).toBe("http://127.0.0.1:33459/session/ses_iso/prompt_async?directory=" + encodeURIComponent(runtimeDir));
     expect(captured.directory).toBe(runtimeDir);
   });
 
-  test("routes event subscriptions scoped by runtime directory through the isolated session runtime", async () => {
+  test("routes event subscriptions scoped by runtime directory through the shared workspace server", async () => {
     const captured = { url: "", directory: "" };
-    globalThis.fetch = (async (input, init) => {
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       captured.url = typeof input === "string" ? input : input.toString();
       captured.directory = new Headers(init?.headers).get("x-opencode-directory") ?? "";
       return new Response("data: {\"type\":\"server.connected\",\"properties\":{}}\n\n", {
@@ -193,15 +157,6 @@ describe("proxyOpencodeRequest session activity routing", () => {
           runtimeId: "runtime-iso",
           runtimeDir,
           createdAt: 1,
-          opencodeRuntime: {
-            mode: "isolated_process",
-            rootDir: join(runtimeDir, ".openwork-runtime", "opencode"),
-            configDir: join(runtimeDir, ".openwork-runtime", "opencode", "config"),
-            dataDir: join(runtimeDir, ".openwork-runtime", "opencode", "data"),
-            stateDir: join(runtimeDir, ".openwork-runtime", "opencode", "state"),
-            cacheDir: join(runtimeDir, ".openwork-runtime", "opencode", "cache"),
-            bindHost: "127.0.0.1",
-          },
         },
       }),
     } as unknown as SessionWorkspaceService;
@@ -218,117 +173,13 @@ describe("proxyOpencodeRequest session activity routing", () => {
       sessionWorkspaces,
       runtimeKnowledgeTokens: { revokeRuntime: async () => undefined, issue: async () => ({ token: "", expiresAt: 0 }), resolve: async () => null } as any,
       runtimeDocumentStateTokens: { revokeRuntime: async () => undefined, issue: async () => ({ token: "", expiresAt: 0 }), resolve: async () => null } as any,
-      sessionRuntimeService: {
-        resolveSessionWorkspace: async () => ({
-          ...workspace,
-          baseUrl: "http://127.0.0.1:4555",
-          directory: runtimeDir,
-        }),
-      } as any,
       openworkBaseUrl: "http://127.0.0.1:8789",
     });
 
     expect(response.status).toBe(200);
-    expect(captured.url).toBe(`http://127.0.0.1:4555/event?directory=${encodeURIComponent(runtimeDir)}`);
+    expect(captured.url).toBe(`http://127.0.0.1:33459/event?directory=${encodeURIComponent(runtimeDir)}`);
     expect(captured.directory).toBe(runtimeDir);
   });
 
-  test("trims oversized message summary diffs when loading session history", async () => {
-    globalThis.fetch = (async () =>
-      new Response(JSON.stringify([
-        {
-          info: {
-            id: "msg_1",
-            role: "user",
-            summary: {
-              diffs: Array.from({ length: 25 }, (_, index) => ({
-                file: `outputs/part-${index + 1}.md`,
-                status: "modified",
-                additions: index + 1,
-                deletions: index,
-                before: "a".repeat(50_000),
-                after: "b".repeat(50_000),
-              })),
-            },
-          },
-          parts: [],
-        },
-      ]), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      })) as unknown as typeof fetch;
 
-    const workspace: WorkspaceInfo = {
-      id: "ws_1",
-      name: "alice",
-      path: "/root/.openwork/user-workspaces/user-1",
-      workspaceType: "local",
-      baseUrl: "http://127.0.0.1:33459",
-    };
-
-    const runtimeDir = join(workspace.path, "documents", "sessions", "runtime-iso");
-    const sessionOwnership = {
-      getOwner: async () => "owner-alice",
-      removeOwner: async () => undefined,
-    } as unknown as SessionOwnershipService;
-    const sessionWorkspaces = {
-      getWorkspace: async () => ({
-        runtimeId: "runtime-iso",
-        runtimeDir,
-        createdAt: 1,
-        opencodeRuntime: {
-          mode: "isolated_process",
-          rootDir: join(runtimeDir, ".openwork-runtime", "opencode"),
-          configDir: join(runtimeDir, ".openwork-runtime", "opencode", "config"),
-          dataDir: join(runtimeDir, ".openwork-runtime", "opencode", "data"),
-          stateDir: join(runtimeDir, ".openwork-runtime", "opencode", "state"),
-          cacheDir: join(runtimeDir, ".openwork-runtime", "opencode", "cache"),
-          bindHost: "127.0.0.1",
-        },
-      }),
-    } as unknown as SessionWorkspaceService;
-
-    const response = await proxyOpencodeRequest({
-      request: new Request("http://openwork.local/w/ws_1/opencode/session/ses_iso/message", {
-        method: "GET",
-      }),
-      url: new URL("http://openwork.local/w/ws_1/opencode/session/ses_iso/message"),
-      workspace,
-      proxyPath: "/session/ses_iso/message",
-      actor: { type: "remote", scope: "owner", tokenHash: "owner-alice" },
-      sessionOwnership,
-      sessionWorkspaces,
-      runtimeKnowledgeTokens: { revokeRuntime: async () => undefined, issue: async () => ({ token: "", expiresAt: 0 }), resolve: async () => null } as any,
-      runtimeDocumentStateTokens: { revokeRuntime: async () => undefined, issue: async () => ({ token: "", expiresAt: 0 }), resolve: async () => null } as any,
-      sessionRuntimeService: {
-        resolveSessionWorkspace: async () => ({
-          ...workspace,
-          baseUrl: "http://127.0.0.1:4555",
-          directory: runtimeDir,
-        }),
-      } as any,
-      openworkBaseUrl: "http://127.0.0.1:8789",
-    });
-
-    expect(response.status).toBe(200);
-    const payload = await response.json() as Array<{ info?: { summary?: Record<string, unknown> } }>;
-    const summary = payload[0]?.info?.summary ?? {};
-    expect(Array.isArray(summary.diffs)).toBe(true);
-    expect((summary.diffs as unknown[]).length).toBe(20);
-    expect(summary.diffsTruncated).toBe(true);
-    expect(summary.omittedDiffCount).toBe(5);
-    expect(summary.files).toBe(25);
-    expect(summary.additions).toBe(325);
-    expect(summary.deletions).toBe(300);
-    expect(summary.diffs).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        file: "outputs/part-1.md",
-        status: "modified",
-        additions: 1,
-        deletions: 0,
-      }),
-    ]));
-    expect(JSON.stringify(summary.diffs)).not.toContain("aaaa");
-    expect(JSON.stringify(summary.diffs)).not.toContain("bbbb");
-  });
 });

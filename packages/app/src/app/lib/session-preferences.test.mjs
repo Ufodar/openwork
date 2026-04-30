@@ -45,13 +45,13 @@ describe("resolveSessionPreferences", () => {
     expect(resolved.agent).toEqual({ value: "common-work", source: "default" });
   });
 
-  test("explicit stored bid-workbench view stays on bid-workbench", () => {
+  test("explicit stored bid-workbench view falls back to session while keeping agent hints", () => {
     const resolved = resolveSessionPreferences({
       stored: { view: "bid-workbench", agent: "common-work", agentLock: "common-work" },
       title: "多人协作投标工作台",
     });
 
-    expect(resolved.view).toEqual({ value: "bid-workbench", source: "stored" });
+    expect(resolved.view).toEqual({ value: "session", source: "default" });
     expect(resolved.agentLock).toEqual({ value: "common-work", source: "stored" });
     expect(resolved.agent).toEqual({ value: "common-work", source: "stored" });
   });

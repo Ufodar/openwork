@@ -324,8 +324,8 @@ export default function App() {
 
   const isDedicatedSessionView = (
     view: View | string | null | undefined,
-  ): view is "document-agent" | "document-writer" | "bid-workbench" =>
-    view === "document-agent" || view === "document-writer" || view === "bid-workbench";
+  ): view is "document-agent" | "document-writer" =>
+    view === "document-agent" || view === "document-writer";
 
   const location = useLocation();
   const navigate = useNavigate();
@@ -333,7 +333,7 @@ export default function App() {
   let queuedDocumentAgentRedirect:
     | {
       sessionId: string;
-      view: "document-agent" | "document-writer" | "bid-workbench";
+      view: "document-agent" | "document-writer";
       timer: number;
     }
     | null = null;
@@ -404,6 +404,10 @@ export default function App() {
       navigate("/session");
       return;
     }
+    if (next === "bid-workbench") {
+      navigate("/bid-workbench");
+      return;
+    }
     if (isDedicatedSessionView(next)) {
       if (sessionId) {
         goToSessionView(next, sessionId);
@@ -437,11 +441,7 @@ export default function App() {
     goToSessionView("document-writer", sessionId, options);
   };
 
-  const goToBidWorkbench = (sessionId: string, options?: { replace?: boolean }) => {
-    goToSessionView("bid-workbench", sessionId, options);
-  };
-
-  const goToSessionView = (view: "document-agent" | "document-writer" | "bid-workbench", sessionId: string, options?: { replace?: boolean }) => {
+  const goToSessionView = (view: "document-agent" | "document-writer", sessionId: string, options?: { replace?: boolean }) => {
     const trimmed = sessionId.trim();
     if (!trimmed) {
       navigate("/session", options);
@@ -1683,8 +1683,7 @@ export default function App() {
       if (
         path === `/session/${sessionPath}` ||
         path === `/document-agent/${sessionPath}` ||
-        path === `/document-writer/${sessionPath}` ||
-        path === `/bid-workbench/${sessionPath}`
+        path === `/document-writer/${sessionPath}`
       ) {
         navigate("/session", { replace: true });
       }
@@ -3748,13 +3747,6 @@ export default function App() {
     persistSessionPreferredView(sessionId, "document-writer").catch(() => undefined);
   });
 
-  createEffect(() => {
-    if (currentView() !== "bid-workbench") return;
-    const sessionId = activeSessionId();
-    if (!sessionId) return;
-    persistSessionPreferredView(sessionId, "bid-workbench").catch(() => undefined);
-  });
-
   const openSessionInPreferredView = async (
     sessionId: string,
     options?: { title?: string | null; hint?: OpenworkSessionPrefs | null },
@@ -4673,10 +4665,10 @@ export default function App() {
       const routePath = location.pathname.trim();
       const routeSessionId = (() => {
         const segments = routePath.split("/");
-        // Matches /session/:id, /document-agent/:id, /document-writer/:id, /bid-workbench/:id
+        // Matches /session/:id, /document-agent/:id, /document-writer/:id
         if (segments.length >= 3) {
           const page = (segments[1] ?? "").toLowerCase();
-          if (page === "session" || page === "document-agent" || page === "document-writer" || page === "bid-workbench") {
+          if (page === "session" || page === "document-agent" || page === "document-writer") {
             return (segments[2] ?? "").trim() || null;
           }
         }
@@ -7135,10 +7127,10 @@ export default function App() {
 
     if (path.startsWith("/bid-workbench")) {
       const [, , sessionSegment] = rawPath.split("/");
-      const id = (sessionSegment ?? "").trim();
+      const legacySessionId = (sessionSegment ?? "").trim();
 
-      if (!id) {
-        navigate("/session", { replace: true });
+      if (legacySessionId) {
+        navigate("/bid-workbench", { replace: true });
         return;
       }
 

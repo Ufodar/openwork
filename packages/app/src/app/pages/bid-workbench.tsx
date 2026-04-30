@@ -87,31 +87,31 @@ export default function BidWorkbenchView(props: SessionViewProps) {
   const [rangeValueDraft, setRangeValueDraft] = createSignal("");
   const [rangeNoteDraft, setRangeNoteDraft] = createSignal("");
   const actorName = createMemo(() => props.sessionUsername?.trim() || DEFAULT_NODE_AUTHOR);
-  const sessionId = createMemo(() => props.selectedSessionId?.trim() ?? "");
 
   const [workbenchState, { mutate: mutateWorkbenchState, refetch: refetchWorkbenchState }] = createResource(
-    () => `${workspaceId()}:${sessionId()}:bid-workbench`,
+    workspaceId,
     async (): Promise<OpenworkBidWorkbenchState> => {
+      const currentWorkspaceId = workspaceId();
       const client = props.openworkServerClient;
-      if (!workspaceId || !client) return EMPTY_WORKBENCH_STATE;
-      return client.getBidWorkbench(workspaceId());
+      if (!currentWorkspaceId || !client) return EMPTY_WORKBENCH_STATE;
+      return client.getBidWorkbench(currentWorkspaceId);
     },
   );
 
   const [tenderFiles, { refetch: refetchTenderFiles }] = createResource(
-    () => `${workspaceId()}:${sessionId()}:tender`,
+    workspaceId,
     async () => listCategoryFiles(props, "tender"),
   );
   const [referenceFiles, { refetch: refetchReferenceFiles }] = createResource(
-    () => `${workspaceId()}:${sessionId()}:reference`,
+    workspaceId,
     async () => listCategoryFiles(props, "reference"),
   );
   const [outputFiles, { refetch: refetchOutputFiles }] = createResource(
-    () => `${workspaceId()}:${sessionId()}:output`,
+    workspaceId,
     async () => listCategoryFiles(props, "output"),
   );
   const [templateFiles, { refetch: refetchTemplateFiles }] = createResource(
-    () => `${workspaceId()}:${sessionId()}:templates`,
+    workspaceId,
     async () => listCategoryFiles(props, "templates"),
   );
 

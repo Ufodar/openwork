@@ -42,7 +42,7 @@ async function listCategoryFiles(
   props: SessionViewProps,
   category: BidWorkbenchFileCategory,
 ): Promise<BidWorkbenchWorkspaceFile[]> {
-  const workspaceId = props.activeWorkspaceId?.trim();
+  const workspaceId = props.openworkServerWorkspaceId?.trim();
   const serverUrl = props.openworkServerUrl?.trim();
   const token = props.openworkServerToken?.trim();
   if (!workspaceId || !serverUrl || !token) return [];
@@ -72,6 +72,7 @@ async function listCategoryFiles(
 
 export default function BidWorkbenchView(props: SessionViewProps) {
   const navigate = useNavigate();
+  const workspaceId = createMemo(() => props.openworkServerWorkspaceId?.trim() ?? "");
   const [activeTab, setActiveTab] = createSignal<BidWorkbenchTab>("workspace");
   const [selectedNodeId, setSelectedNodeId] = createSignal<string | null>(null);
   const [saving, setSaving] = createSignal(false);
@@ -89,29 +90,28 @@ export default function BidWorkbenchView(props: SessionViewProps) {
   const sessionId = createMemo(() => props.selectedSessionId?.trim() ?? "");
 
   const [workbenchState, { mutate: mutateWorkbenchState, refetch: refetchWorkbenchState }] = createResource(
-    () => `${props.activeWorkspaceId}:${sessionId()}:bid-workbench`,
+    () => `${workspaceId()}:${sessionId()}:bid-workbench`,
     async (): Promise<OpenworkBidWorkbenchState> => {
-      const workspaceId = props.activeWorkspaceId?.trim();
       const client = props.openworkServerClient;
       if (!workspaceId || !client) return EMPTY_WORKBENCH_STATE;
-      return client.getBidWorkbench(workspaceId);
+      return client.getBidWorkbench(workspaceId());
     },
   );
 
   const [tenderFiles, { refetch: refetchTenderFiles }] = createResource(
-    () => `${props.activeWorkspaceId}:${sessionId()}:tender`,
+    () => `${workspaceId()}:${sessionId()}:tender`,
     async () => listCategoryFiles(props, "tender"),
   );
   const [referenceFiles, { refetch: refetchReferenceFiles }] = createResource(
-    () => `${props.activeWorkspaceId}:${sessionId()}:reference`,
+    () => `${workspaceId()}:${sessionId()}:reference`,
     async () => listCategoryFiles(props, "reference"),
   );
   const [outputFiles, { refetch: refetchOutputFiles }] = createResource(
-    () => `${props.activeWorkspaceId}:${sessionId()}:output`,
+    () => `${workspaceId()}:${sessionId()}:output`,
     async () => listCategoryFiles(props, "output"),
   );
   const [templateFiles, { refetch: refetchTemplateFiles }] = createResource(
-    () => `${props.activeWorkspaceId}:${sessionId()}:templates`,
+    () => `${workspaceId()}:${sessionId()}:templates`,
     async () => listCategoryFiles(props, "templates"),
   );
 
@@ -198,11 +198,10 @@ export default function BidWorkbenchView(props: SessionViewProps) {
   };
 
   const setOutlineSource = async (path: string, sourceType: OpenworkBidWorkbenchSourceType) => {
-    const workspaceId = props.activeWorkspaceId?.trim();
     const client = props.openworkServerClient;
-    if (!workspaceId || !client) return;
+    if (!workspaceId() || !client) return;
     await runStateMutation(() =>
-      client.setBidWorkbenchProjectSource(workspaceId, {
+      client.setBidWorkbenchProjectSource(workspaceId(), {
         sourcePath: path,
         sourceType,
         structureSourceKind: inferStructureSourceKind(sourceType),
@@ -211,30 +210,27 @@ export default function BidWorkbenchView(props: SessionViewProps) {
   };
 
   const refreshOutline = async () => {
-    const workspaceId = props.activeWorkspaceId?.trim();
     const client = props.openworkServerClient;
-    if (!workspaceId || !client) return;
+    if (!workspaceId() || !client) return;
     setRefreshingOutline(true);
     try {
-      await runStateMutation(() => client.refreshBidWorkbench(workspaceId));
+      await runStateMutation(() => client.refreshBidWorkbench(workspaceId()));
     } finally {
       setRefreshingOutline(false);
     }
   };
 
   const setRootOutputPath = async (path: string | null) => {
-    const workspaceId = props.activeWorkspaceId?.trim();
     const client = props.openworkServerClient;
-    if (!workspaceId || !client) return;
-    await runStateMutation(() => client.setBidWorkbenchProjectRootOutput(workspaceId, { rootOutputPath: path }));
+    if (!workspaceId() || !client) return;
+    await runStateMutation(() => client.setBidWorkbenchProjectRootOutput(workspaceId(), { rootOutputPath: path }));
   };
 
   const setWorkflowStage = async (workflowStage: "outline" | "mapping" | "drafting" | "merge") => {
-    const workspaceId = props.activeWorkspaceId?.trim();
     const client = props.openworkServerClient;
-    if (!workspaceId || !client) return;
+    if (!workspaceId() || !client) return;
     await runStateMutation(() =>
-      client.setBidWorkbenchProjectWorkflowStage(workspaceId, { workflowStage }),
+      client.setBidWorkbenchProjectWorkflowStage(workspaceId(), { workflowStage }),
     );
   };
 
@@ -242,22 +238,20 @@ export default function BidWorkbenchView(props: SessionViewProps) {
     formatRules: Record<string, unknown>;
     extractedFromPath: string | null;
   }) => {
-    const workspaceId = props.activeWorkspaceId?.trim();
     const client = props.openworkServerClient;
-    if (!workspaceId || !client) return;
+    if (!workspaceId() || !client) return;
     await runStateMutation(() =>
-      client.setBidWorkbenchProjectConstraints(workspaceId, payload),
+      client.setBidWorkbenchProjectConstraints(workspaceId(), payload),
     );
   };
 
   const addMark = async () => {
     const nodeId = selectedNodeId();
     const text = markDraft().trim();
-    const workspaceId = props.activeWorkspaceId?.trim();
     const client = props.openworkServerClient;
-    if (!nodeId || !text || !workspaceId || !client) return;
+    if (!nodeId || !text || !workspaceId() || !client) return;
     const result = await runStateMutation(() =>
-      client.addBidWorkbenchSectionMark(workspaceId, nodeId, {
+      client.addBidWorkbenchSectionMark(workspaceId(), nodeId, {
         author: actorName(),
         kind: markKind(),
         text,
@@ -267,21 +261,19 @@ export default function BidWorkbenchView(props: SessionViewProps) {
   };
 
   const removeMark = async (markId: string) => {
-    const workspaceId = props.activeWorkspaceId?.trim();
     const client = props.openworkServerClient;
-    if (!workspaceId || !client) return;
-    await runStateMutation(() => client.deleteBidWorkbenchSectionMark(workspaceId, markId));
+    if (!workspaceId() || !client) return;
+    await runStateMutation(() => client.deleteBidWorkbenchSectionMark(workspaceId(), markId));
   };
 
   const addRange = async () => {
     const nodeId = selectedNodeId();
-    const workspaceId = props.activeWorkspaceId?.trim();
     const client = props.openworkServerClient;
     const sourcePath = rangeSourcePath().trim();
     const rangeValue = rangeValueDraft().trim();
-    if (!nodeId || !workspaceId || !client || !sourcePath || !rangeValue) return;
+    if (!nodeId || !workspaceId() || !client || !sourcePath || !rangeValue) return;
     const result = await runStateMutation(() =>
-      client.addBidWorkbenchSectionRange(workspaceId, nodeId, {
+      client.addBidWorkbenchSectionRange(workspaceId(), nodeId, {
         sourcePath,
         rangeKind: rangeKind(),
         rangeValue,
@@ -295,10 +287,9 @@ export default function BidWorkbenchView(props: SessionViewProps) {
   };
 
   const removeRange = async (rangeId: string) => {
-    const workspaceId = props.activeWorkspaceId?.trim();
     const client = props.openworkServerClient;
-    if (!workspaceId || !client) return;
-    await runStateMutation(() => client.deleteBidWorkbenchSectionRange(workspaceId, rangeId));
+    if (!workspaceId() || !client) return;
+    await runStateMutation(() => client.deleteBidWorkbenchSectionRange(workspaceId(), rangeId));
   };
 
   const createNodeSession = async (node: OpenworkBidWorkbenchNode) => {
@@ -318,11 +309,10 @@ export default function BidWorkbenchView(props: SessionViewProps) {
       openworkBidNodeId: node.id,
     });
     if (!nextSessionId) return;
-    const workspaceId = props.activeWorkspaceId?.trim();
     const client = props.openworkServerClient;
-    if (!workspaceId || !client) return;
+    if (!workspaceId() || !client) return;
     await runStateMutation(() =>
-      client.setBidWorkbenchSectionSession(workspaceId, node.id, {
+      client.setBidWorkbenchSectionSession(workspaceId(), node.id, {
         sessionId: nextSessionId,
       }),
     );
@@ -330,11 +320,10 @@ export default function BidWorkbenchView(props: SessionViewProps) {
   };
 
   const toggleLock = async (node: OpenworkBidWorkbenchNode) => {
-    const workspaceId = props.activeWorkspaceId?.trim();
     const client = props.openworkServerClient;
-    if (!workspaceId || !client) return;
+    if (!workspaceId() || !client) return;
     await runStateMutation(() =>
-      client.setBidWorkbenchSectionLock(workspaceId, node.id, {
+      client.setBidWorkbenchSectionLock(workspaceId(), node.id, {
         lockedBy: node.lockedBy ? null : actorName(),
       }),
     );
@@ -347,16 +336,14 @@ export default function BidWorkbenchView(props: SessionViewProps) {
       assignee?: string | null;
     },
   ) => {
-    const workspaceId = props.activeWorkspaceId?.trim();
     const client = props.openworkServerClient;
-    if (!workspaceId || !client) return;
-    await runStateMutation(() => client.setBidWorkbenchSectionMetadata(workspaceId, node.id, patch));
+    if (!workspaceId() || !client) return;
+    await runStateMutation(() => client.setBidWorkbenchSectionMetadata(workspaceId(), node.id, patch));
   };
 
   const markMerged = async (node: OpenworkBidWorkbenchNode) => {
-    const workspaceId = props.activeWorkspaceId?.trim();
     const client = props.openworkServerClient;
-    if (!workspaceId || !client) return;
+    if (!workspaceId() || !client) return;
     const outputPath = node.primaryOutputPath ?? node.lastEditedOutputPath ?? node.outputPaths[0] ?? null;
     const rootOutputPath = workbenchState()?.project.rootOutputPath ?? null;
     if (!rootOutputPath) {
@@ -368,7 +355,7 @@ export default function BidWorkbenchView(props: SessionViewProps) {
       return;
     }
     await runStateMutation(() =>
-      client.setBidWorkbenchSectionMergedState(workspaceId, node.id, {
+      client.setBidWorkbenchSectionMergedState(workspaceId(), node.id, {
         mergeRequested: true,
         outputPath,
         rootOutputPath,
@@ -377,11 +364,10 @@ export default function BidWorkbenchView(props: SessionViewProps) {
   };
 
   const bindReference = async (node: OpenworkBidWorkbenchNode, path: string) => {
-    const workspaceId = props.activeWorkspaceId?.trim();
     const client = props.openworkServerClient;
-    if (!workspaceId || !client) return;
+    if (!workspaceId() || !client) return;
     await runStateMutation(() =>
-      client.setBidWorkbenchSectionLink(workspaceId, node.id, {
+      client.setBidWorkbenchSectionLink(workspaceId(), node.id, {
         kind: "reference",
         path,
         selected: !node.referencePaths.includes(path),
@@ -390,11 +376,10 @@ export default function BidWorkbenchView(props: SessionViewProps) {
   };
 
   const bindOutput = async (node: OpenworkBidWorkbenchNode, path: string) => {
-    const workspaceId = props.activeWorkspaceId?.trim();
     const client = props.openworkServerClient;
-    if (!workspaceId || !client) return;
+    if (!workspaceId() || !client) return;
     await runStateMutation(() =>
-      client.setBidWorkbenchSectionLink(workspaceId, node.id, {
+      client.setBidWorkbenchSectionLink(workspaceId(), node.id, {
         kind: "output",
         path,
         selected: !node.outputPaths.includes(path),
@@ -403,11 +388,10 @@ export default function BidWorkbenchView(props: SessionViewProps) {
   };
 
   const bindTemplate = async (node: OpenworkBidWorkbenchNode, path: string) => {
-    const workspaceId = props.activeWorkspaceId?.trim();
     const client = props.openworkServerClient;
-    if (!workspaceId || !client) return;
+    if (!workspaceId() || !client) return;
     await runStateMutation(() =>
-      client.setBidWorkbenchSectionLink(workspaceId, node.id, {
+      client.setBidWorkbenchSectionLink(workspaceId(), node.id, {
         kind: "template",
         path,
         selected: node.templatePath !== path,
@@ -416,21 +400,20 @@ export default function BidWorkbenchView(props: SessionViewProps) {
   };
 
   const setPrimaryOutput = async (node: OpenworkBidWorkbenchNode, primaryOutputPath: string) => {
-    const workspaceId = props.activeWorkspaceId?.trim();
     const client = props.openworkServerClient;
-    if (!workspaceId || !client) return;
+    if (!workspaceId() || !client) return;
     await runStateMutation(() =>
-      client.setBidWorkbenchSectionPrimaryOutput(workspaceId, node.id, {
+      client.setBidWorkbenchSectionPrimaryOutput(workspaceId(), node.id, {
         primaryOutputPath,
       }),
     );
   };
 
   const handleUpload = async (category: BidWorkbenchFileCategory, files: FileList | null) => {
-    const workspaceId = props.activeWorkspaceId?.trim();
+    const currentWorkspaceId = workspaceId();
     const serverUrl = props.openworkServerUrl?.trim();
     const token = props.openworkServerToken?.trim();
-    if (!workspaceId || !serverUrl || !token || !files?.length) return;
+    if (!currentWorkspaceId || !serverUrl || !token || !files?.length) return;
     setUploadingCategory(category);
     try {
       for (const file of Array.from(files)) {
@@ -438,7 +421,7 @@ export default function BidWorkbenchView(props: SessionViewProps) {
         const query = new URLSearchParams({
           path: `${FILE_CATEGORY_ROOTS[category]}/${relativePath}`,
         });
-        const url = buildWorkbenchUrl(serverUrl, workspaceId, "/document/upload", query);
+        const url = buildWorkbenchUrl(serverUrl, currentWorkspaceId, "/document/upload", query);
         const form = new FormData();
         form.append("file", file, file.name);
         const response = await fetch(url, {

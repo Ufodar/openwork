@@ -7138,24 +7138,17 @@ export default function App() {
       const id = (sessionSegment ?? "").trim();
 
       if (!id) {
-        const fallback = activeSessionId();
-        if (fallback) {
-          goToBidWorkbench(fallback, { replace: true });
-        } else {
-          navigate("/session", { replace: true });
-        }
-        return;
-      }
-
-      if (isKnownMissingSession(id)) {
-        if (selectedSessionId() === id) {
-          setSelectedSessionId(null);
-        }
         navigate("/session", { replace: true });
         return;
       }
 
-      ensureRouteSessionHydrated(id);
+      routeHydratedSessionKey = "";
+      if (selectedSessionId() !== null) {
+        setSelectedSessionId(null);
+      }
+      if (routeSessionHydratingId() !== null) {
+        setRouteSessionHydratingId(null);
+      }
       return;
     }
 

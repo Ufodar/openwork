@@ -1303,7 +1303,7 @@ export default function App() {
     return fallback;
   };
 
-  async function sendPrompt(draft?: ComposerDraft) {
+  async function sendPrompt(draft?: ComposerDraft): Promise<boolean> {
     const hasExplicitDraft = Boolean(draft);
     const fallbackText = prompt().trim();
     const resolvedDraft: ComposerDraft = draft ?? {
@@ -1313,17 +1313,33 @@ export default function App() {
       text: fallbackText,
     };
     const content = (resolvedDraft.resolvedText ?? resolvedDraft.text).trim();
-    if (!content && !resolvedDraft.attachments.length) return;
+    if (!content && !resolvedDraft.attachments.length) return false;
 
-    const c = client();
-    if (!c) return;
+    let c = client();
+    if (!c) {
+      const ready = await ensureOpenworkServerActionReady({
+        getStatus: openworkServerStatus,
+        getHasClient: () => Boolean(client()),
+        reconnect: reconnectOpenworkServer,
+        allowLimited: true,
+      });
+      if (!ready.ok) {
+        setError(t("app.connection_lost", currentLocale()));
+        return false;
+      }
+      c = client();
+    }
+    if (!c) {
+      setError(t("app.connection_lost", currentLocale()));
+      return false;
+    }
 
     const compactShortcut = /^\/compact(?:\s+.*)?$/i.test(content);
     const compactCommand = resolvedDraft.command?.name === "compact" || compactShortcut;
     const commandName = compactCommand ? "compact" : (resolvedDraft.command?.name ?? null);
     if (compactCommand && !selectedSessionId()) {
       setError("Select a session with messages before running /compact.");
-      return;
+      return false;
     }
 
     let sessionID = selectedSessionId();
@@ -1331,7 +1347,7 @@ export default function App() {
       await createSessionAndOpen();
       sessionID = selectedSessionId();
     }
-    if (!sessionID) return;
+    if (!sessionID) return false;
 
     setBusy(true);
     setBusyLabel("status.running");
@@ -1352,7 +1368,6 @@ export default function App() {
       partCount: visibleParts,
     });
 
-    let sendStage = "start";
     try {
       if (!compactCommand) {
         setLastPromptSent(content);
@@ -1361,26 +1376,21 @@ export default function App() {
         setPrompt("");
       }
 
-      sendStage = "resolve-model";
       const model = selectedSessionModel();
-      sendStage = "resolve-agent";
       const agent = selectedSessionAgent();
-      sendStage = "build-parts";
       const parts = buildPromptParts(resolvedDraft);
 
       if (resolvedDraft.mode === "shell") {
-        sendStage = "shell";
         await shellInSession(c, sessionID, content);
       } else if (resolvedDraft.command || compactCommand) {
         if (compactCommand) {
-          sendStage = "compact";
           await compactCurrentSession(sessionID);
           finishPerf(perfEnabled, "session.prompt", "done", startedAt, {
             sessionID,
             mode: resolvedDraft.mode,
             command: commandName,
           });
-          return;
+          return true;
         }
 
         const command = resolvedDraft.command;
@@ -1389,14 +1399,11 @@ export default function App() {
         }
 
         // Slash command: route through session.command() API
-        sendStage = "command-model";
         const selected = selectedSessionModel();
         const modelString = `${selected.providerID}/${selected.modelID}`;
-        sendStage = "command-files";
         const files = buildCommandFileParts(resolvedDraft);
 
         // session.command() expects `model` as a provider/model string and only supports file parts.
-        sendStage = "command-send";
         unwrap(
           await c.session.command({
             sessionID,
@@ -1409,17 +1416,14 @@ export default function App() {
         );
 
       } else {
-        sendStage = "prompt-send";
         const result = await c.session.promptAsync({
           sessionID,
           model,
           agent: agent ?? undefined,
           parts,
         });
-        sendStage = "prompt-assert";
         assertNoClientError(result);
 
-        sendStage = "session-model-state";
         setSessionModelById((current) => ({
           ...current,
           [sessionID]: model,
@@ -1438,15 +1442,8 @@ export default function App() {
         mode: resolvedDraft.mode,
         command: commandName,
       });
+      return true;
     } catch (e) {
-      console.error("[sendPrompt:error]", {
-        stage: sendStage,
-        sessionID,
-        mode: resolvedDraft.mode,
-        command: commandName,
-        message: e instanceof Error ? e.message : safeStringify(e),
-        stack: e instanceof Error ? e.stack : undefined,
-      });
       finishPerf(perfEnabled, "session.prompt", "error", startedAt, {
         sessionID,
         mode: resolvedDraft.mode,
@@ -1455,6 +1452,7 @@ export default function App() {
       });
       const message = e instanceof Error ? e.message : safeStringify(e);
       setError(addOpencodeCacheHint(message));
+      return false;
     } finally {
       resetBusyState();
     }

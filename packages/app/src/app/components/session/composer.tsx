@@ -26,7 +26,7 @@ type ComposerProps = {
   developerMode: boolean;
   busy: boolean;
   isStreaming: boolean;
-  onSend: (draft: ComposerDraft) => void;
+  onSend: (draft: ComposerDraft) => Promise<boolean> | boolean | void;
   onStop: () => void;
   onDraftChange: (draft: ComposerDraft) => void;
   selectedModelLabel: string;
@@ -848,7 +848,7 @@ export default function Composer(props: ComposerProps) {
     applyHistoryDraft(target);
   };
 
-  const sendDraft = () => {
+  const sendDraft = async () => {
     // Ensure any pending debounce updates are committed before sending
     flushDraftChange();
 
@@ -870,8 +870,19 @@ export default function Composer(props: ComposerProps) {
       }
     }
 
+    let sent = false;
+    try {
+      sent = (await props.onSend(draft)) !== false;
+    } catch {
+      sent = false;
+    }
+
+    if (!sent) {
+      queueMicrotask(() => focusEditorEnd());
+      return;
+    }
+
     recordHistory(draft);
-    props.onSend(draft);
     setSlashOpen(false);
     setSlashQuery("");
     setAttachments([]);

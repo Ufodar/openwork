@@ -50,6 +50,7 @@ async function fetchWithTimeout(
   }
 
   try {
+    let didTimeout = false;
     // Fallback linking when AbortSignal.any is unavailable.
     if (upstreamSignal && !canComposeSignals) {
       const relayAbort = () => {
@@ -77,7 +78,6 @@ async function fetchWithTimeout(
     }
 
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
-    let didTimeout = false;
     timeoutId = setTimeout(() => {
       didTimeout = true;
       try {

@@ -156,7 +156,7 @@ export type SessionViewProps = {
   anyActiveRuns: boolean;
   installUpdateAndRestart: () => void;
   createSessionAndOpen: (options?: CreateSessionOptions) => Promise<string | undefined>;
-  sendPromptAsync: (draft: ComposerDraft) => Promise<void>;
+  sendPromptAsync: (draft: ComposerDraft) => Promise<boolean>;
   abortSession: (sessionId?: string) => Promise<void>;
   sessionRevertMessageId: string | null;
   undoLastUserMessage: () => Promise<void>;
@@ -2162,9 +2162,21 @@ export default function SessionView(props: SessionViewProps) {
     return null;
   });
 
-  const handleSendPrompt = (draft: ComposerDraft) => {
+  const resetPendingRun = () => {
+    setRunStartedAt(null);
+    setRunHasBegun(false);
+    setRunLastProgressAt(null);
+    setRunBaseline({ assistantId: null, partCount: 0 });
+  };
+
+  const handleSendPrompt = async (draft: ComposerDraft) => {
     startRun();
-    props.sendPromptAsync(draft).catch(() => undefined);
+    const sent = await props.sendPromptAsync(draft).catch(() => false);
+    if (sent === false) {
+      resetPendingRun();
+      return false;
+    }
+    return true;
   };
 
   const handleBrowserAutomationQuickstart = async () => {

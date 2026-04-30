@@ -2007,9 +2007,7 @@ export default function DocumentWriterView(props: SessionViewProps) {
     props.setPrompt(draft.text);
   };
 
-  const handleSendPrompt = (draft: ComposerDraft) => {
-    props.sendPromptAsync(draft).catch(() => undefined);
-  };
+  const handleSendPrompt = (draft: ComposerDraft) => props.sendPromptAsync(draft).catch(() => false);
 
   const cancelRun = () => {
     const id = sessionId().trim();

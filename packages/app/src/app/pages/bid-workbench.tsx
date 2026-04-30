@@ -127,7 +127,6 @@ export default function BidWorkbenchView(props: SessionViewProps) {
     return id ? nodesById().get(id) ?? null : null;
   });
   const leafNodes = createMemo(() => (workbenchState()?.nodes ?? []).filter((node) => node.isLeaf));
-  const mergeJobs = createMemo(() => workbenchState()?.mergeJobs ?? []);
   const lockedNodes = createMemo(() => leafNodes().filter((node) => Boolean(node.lockedBy)));
   const nodesWithoutReferences = createMemo(() => leafNodes().filter((node) => node.referencePaths.length === 0));
   const nodesWithoutOutputs = createMemo(() => leafNodes().filter((node) => !node.primaryOutputPath));
@@ -418,12 +417,11 @@ export default function BidWorkbenchView(props: SessionViewProps) {
     try {
       for (const file of Array.from(files)) {
         const relativePath = file.webkitRelativePath?.trim() || file.name;
-        const query = new URLSearchParams({
-          path: `${FILE_CATEGORY_ROOTS[category]}/${relativePath}`,
-        });
-        const url = buildWorkbenchUrl(serverUrl, currentWorkspaceId, "/document/upload", query);
+        const url = buildWorkbenchUrl(serverUrl, currentWorkspaceId, "/document/upload");
         const form = new FormData();
         form.append("file", file, file.name);
+        form.append("baseDir", FILE_CATEGORY_ROOTS[category]);
+        form.append("relativePath", relativePath);
         const response = await fetch(url, {
           method: "POST",
           headers: {
@@ -466,11 +464,17 @@ export default function BidWorkbenchView(props: SessionViewProps) {
         }`}
         onClick={() => setSelectedNodeId(node.id)}
       >
-        <div class="flex items-center justify-between gap-3">
+        <div class="flex items-start justify-between gap-3">
           <div class="min-w-0">
             <div class="truncate font-medium">{node.title}</div>
-            <div class="mt-1 text-[11px] opacity-80">
-              L{node.level} · {node.isLeaf ? "叶子节点" : "目录节点"}
+            <div class="mt-1 flex flex-wrap items-center gap-2 text-[11px] opacity-80">
+              <span>L{node.level}</span>
+              <span>{node.isLeaf ? "叶子节点" : "目录节点"}</span>
+              <Show when={node.isLeaf}>
+                <span>引用 {node.referencePaths.length}</span>
+                <span>产出 {node.outputPaths.length}</span>
+                <span>{node.lockedBy ? `编辑中：${node.lockedBy}` : "未锁定"}</span>
+              </Show>
             </div>
           </div>
           <div class="flex items-center gap-2 text-[11px]">
@@ -479,6 +483,9 @@ export default function BidWorkbenchView(props: SessionViewProps) {
                 <Lock size={12} />
                 {node.lockedBy}
               </span>
+            </Show>
+            <Show when={node.primaryOutputPath}>
+              <span class="rounded-full bg-emerald-3 px-2 py-0.5 text-emerald-11">主产出</span>
             </Show>
             <Show when={node.activeSessionId ?? node.sessionId}>
               <span class="rounded-full bg-blue-3 px-2 py-0.5 text-blue-11">会话</span>
@@ -560,7 +567,7 @@ export default function BidWorkbenchView(props: SessionViewProps) {
         </Match>
 
         <Match when={activeTab() === "workspace"}>
-          <div class="grid min-h-0 flex-1 grid-cols-[320px_minmax(420px,1fr)_380px]">
+          <div class="grid min-h-0 flex-1 grid-cols-[300px_minmax(560px,1fr)_420px]">
             <div class="min-h-0 overflow-auto border-r border-dls-border bg-dls-surface/60 p-4">
               <div class="space-y-5">
                 <For each={["tender", "reference", "output", "templates"] as const}>
@@ -585,7 +592,7 @@ export default function BidWorkbenchView(props: SessionViewProps) {
               <div class="mb-4 flex items-center justify-between gap-3">
                 <div>
                   <div class="text-base font-semibold">投标章节树</div>
-                  <div class="mt-1 text-xs text-dls-secondary">章节来自你指定的文档结构。手动修改主文件后，点击刷新章节树同步。</div>
+                  <div class="mt-1 text-xs text-dls-secondary">中间区域是核心工作区。这里直接维护模板章节树，以及每个叶子节点要引用什么、产出什么、当前由谁编辑。</div>
                 </div>
                 <div class="flex items-center gap-2">
                   <button
@@ -606,43 +613,36 @@ export default function BidWorkbenchView(props: SessionViewProps) {
                 <div class="mb-4 rounded-xl border border-red-6 bg-red-2 px-3 py-2 text-xs text-red-11">{saveError()}</div>
               </Show>
 
-              <div class="mb-4 rounded-2xl border border-dls-border bg-dls-surface p-4">
-                <div class="mb-2 text-sm font-semibold">章节主源</div>
-                <div class="text-xs text-dls-secondary">{currentOutlineSourceLabel()}</div>
-                <div class="mt-2 grid grid-cols-2 gap-3 text-xs">
-                  <div class="rounded-xl bg-dls-background px-3 py-2"><div class="text-dls-secondary">结构版本</div><div class="mt-1 font-medium">{workbenchState()?.project.outlineRevision ?? 0}</div></div>
-                  <div class="rounded-xl bg-dls-background px-3 py-2"><div class="text-dls-secondary">最近刷新</div><div class="mt-1 font-medium">{formatTimestamp(workbenchState()?.refresh?.createdAt)}</div></div>
+              <div class="mb-4 grid grid-cols-4 gap-3 text-xs">
+                <div class="rounded-2xl border border-dls-border bg-dls-surface px-3 py-3">
+                  <div class="text-dls-secondary">章节主源</div>
+                  <div class="mt-1 line-clamp-2 font-medium text-dls-text">{currentOutlineSourceLabel()}</div>
                 </div>
-                <div class="mt-3 rounded-xl bg-dls-background px-3 py-2 text-xs"><div class="text-dls-secondary">总文档目标</div><div class="mt-1 break-all font-medium text-dls-text">{currentRootOutputLabel()}</div></div>
-                <Show when={workbenchState()?.refresh}>
-                  <div class="mt-3 rounded-xl bg-dls-background px-3 py-2 text-[11px] text-dls-secondary">{workbenchState()?.refresh?.summary}</div>
-                </Show>
+                <div class="rounded-2xl border border-dls-border bg-dls-surface px-3 py-3">
+                  <div class="text-dls-secondary">结构版本</div>
+                  <div class="mt-1 font-medium text-dls-text">{workbenchState()?.project.outlineRevision ?? 0}</div>
+                </div>
+                <div class="rounded-2xl border border-dls-border bg-dls-surface px-3 py-3">
+                  <div class="text-dls-secondary">最近刷新</div>
+                  <div class="mt-1 font-medium text-dls-text">{formatTimestamp(workbenchState()?.refresh?.createdAt)}</div>
+                </div>
+                <div class="rounded-2xl border border-dls-border bg-dls-surface px-3 py-3">
+                  <div class="text-dls-secondary">总文档目标</div>
+                  <div class="mt-1 line-clamp-2 font-medium text-dls-text">{currentRootOutputLabel()}</div>
+                </div>
               </div>
-
-              <Show when={mergeJobs().length > 0}>
-                <div class="mb-4 rounded-2xl border border-dls-border bg-dls-surface p-4">
-                  <div class="mb-2 text-sm font-semibold">合并编排清单</div>
-                  <div class="space-y-2 text-xs text-dls-secondary">
-                    <For each={mergeJobs()}>
-                      {(job) => (
-                        <div class="flex items-center justify-between rounded-lg bg-dls-background px-3 py-2">
-                          <span class="truncate pr-3">
-                            {nodesById().get(job.sectionId)?.title ?? job.sectionId}
-                          </span>
-                          <span class="truncate text-right text-dls-text">{job.outputPath}</span>
-                        </div>
-                      )}
-                    </For>
-                  </div>
-                </div>
-              </Show>
 
               <Show
                 when={(workbenchState()?.nodes?.length ?? 0) > 0}
                 fallback={<div class="rounded-2xl border border-dashed border-dls-border bg-dls-surface px-4 py-8 text-sm text-dls-secondary">还没有章节树。请先在左侧选择一个文件设为章节主源，再刷新章节树。</div>}
               >
-                <div class="space-y-3">
-                  <For each={rootNodes()}>{(node) => renderNodeTree(node)}</For>
+                <div class="min-h-[520px] rounded-2xl border border-dls-border bg-dls-surface p-3">
+                  <Show when={workbenchState()?.refresh?.summary}>
+                    <div class="mb-3 rounded-xl bg-dls-background px-3 py-2 text-[11px] text-dls-secondary">{workbenchState()?.refresh?.summary}</div>
+                  </Show>
+                  <div class="space-y-3">
+                    <For each={rootNodes()}>{(node) => renderNodeTree(node)}</For>
+                  </div>
                 </div>
               </Show>
             </div>

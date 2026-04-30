@@ -29,7 +29,17 @@ export default function BidWorkbenchFileCategoryPanel(props: BidWorkbenchFileCat
           <label class="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-dls-border bg-dls-hover px-2 py-1 text-[11px] text-dls-text">
             <FolderPlus size={12} />
             上传文件
-            <input type="file" multiple class="hidden" onChange={(event) => void props.onUpload(props.category, event.currentTarget.files)} />
+            <input
+              type="file"
+              multiple
+              class="hidden"
+              onChange={(event) => {
+                const input = event.currentTarget;
+                void Promise.resolve(props.onUpload(props.category, input.files)).finally(() => {
+                  input.value = "";
+                });
+              }}
+            />
           </label>
           <label class="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-dls-border bg-dls-hover px-2 py-1 text-[11px] text-dls-text">
             <FolderPlus size={12} />
@@ -42,7 +52,12 @@ export default function BidWorkbenchFileCategoryPanel(props: BidWorkbenchFileCat
                 element.setAttribute("webkitdirectory", "");
                 element.setAttribute("directory", "");
               }}
-              onChange={(event) => void props.onUpload(props.category, event.currentTarget.files)}
+              onChange={(event) => {
+                const input = event.currentTarget;
+                void Promise.resolve(props.onUpload(props.category, input.files)).finally(() => {
+                  input.value = "";
+                });
+              }}
             />
           </label>
         </div>

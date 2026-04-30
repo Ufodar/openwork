@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { stat, writeFile } from "node:fs/promises";
-import { extname, join } from "node:path";
+import { extname, join, relative, resolve, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { ApiError } from "./errors.js";
@@ -207,8 +207,21 @@ function resolveInboxDir(workspacePath: string): string {
   return join(workspacePath, ".opencode", "openwork", "inbox");
 }
 
-function resolveInboxFilePath(workspacePath: string, relativePath: string): string {
-  return join(resolveInboxDir(workspacePath), relativePath);
+function resolveSharedDocumentFilePath(workspacePath: string, relativePath: string): string {
+  const docsRoot = resolve(workspacePath, "documents");
+  const normalized = String(relativePath ?? "").trim().replace(/\\/g, "/").replace(/^\/+/, "");
+  const absolutePath = resolve(docsRoot, normalized);
+  const rel = relative(docsRoot, absolutePath);
+  const segments = rel.split(/[\\/]+/).filter(Boolean);
+  if (!segments.length || segments.includes("..") || isAbsolute(rel)) {
+    throw new ApiError(
+      400,
+      "bid_workbench_invalid_source_path",
+      "Bid workbench source path must stay inside the shared documents root",
+      { relativePath },
+    );
+  }
+  return absolutePath;
 }
 
 function hashSectionId(sourcePath: string, key: string): string {
@@ -588,7 +601,7 @@ async function extractSectionsFromSource(
   workspacePath: string,
   sourcePath: string,
 ): Promise<{ sections: ExtractedSection[]; sourceHash: string }> {
-  const absolutePath = resolveInboxFilePath(workspacePath, sourcePath);
+  const absolutePath = resolveSharedDocumentFilePath(workspacePath, sourcePath);
   if (!(await exists(absolutePath))) {
     throw new ApiError(404, "bid_workbench_source_not_found", "Outline source file not found", {
       sourcePath,

@@ -25,20 +25,8 @@ import { ApiError } from "./errors.js";
 
 async function createWorkspace(): Promise<string> {
   const workspace = await mkdtemp(join(tmpdir(), "openwork-bid-workbench-"));
-  await mkdir(join(workspace, ".opencode", "openwork", "inbox"), { recursive: true });
+  await mkdir(join(workspace, "documents"), { recursive: true });
   return workspace;
-}
-
-async function writeInboxFile(workspacePath: string, relativePath: string, content: string) {
-  const absolutePath = join(
-    workspacePath,
-    ".opencode",
-    "openwork",
-    "inbox",
-    relativePath,
-  );
-  await mkdir(dirname(absolutePath), { recursive: true });
-  await writeFile(absolutePath, content, "utf8");
 }
 
 async function writeOutlineDocx(
@@ -48,9 +36,7 @@ async function writeOutlineDocx(
 ) {
   const absolutePath = join(
     workspacePath,
-    ".opencode",
-    "openwork",
-    "inbox",
+    "documents",
     relativePath,
   );
   await mkdir(dirname(absolutePath), { recursive: true });

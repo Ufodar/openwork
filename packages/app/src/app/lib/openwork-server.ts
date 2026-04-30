@@ -128,6 +128,20 @@ export type OpenworkWorkspaceList = {
   activeId?: string | null;
 };
 
+export type OpenworkDocumentItem = {
+  name: string;
+  updatedAt: number;
+  size: number;
+  type: string;
+  originalName?: string;
+  title?: string;
+};
+
+export type OpenworkDocumentListResponse = {
+  items: OpenworkDocumentItem[];
+  dirs: string[];
+};
+
 export type OpenworkKnowledgeScope = "mine" | "others";
 
 export type OpenworkKnowledgeItem = {
@@ -1515,6 +1529,40 @@ export function createOpenworkServerClient(options: { baseUrl: string; token?: s
         `/workspace/${encodeURIComponent(workspaceId)}/sessions/${encodeURIComponent(sessionId)}`,
         { token, hostToken, method: "DELETE", timeoutMs: timeouts.deleteSession },
       ),
+    listWorkspaceDocuments: (workspaceId: string, options?: { sessionId?: string | null }) => {
+      const search = new URLSearchParams();
+      if (options?.sessionId?.trim()) search.set("session", options.sessionId.trim());
+      const suffix = search.toString();
+      return requestJson<OpenworkDocumentListResponse>(
+        baseUrl,
+        `/w/${encodeURIComponent(workspaceId)}/documents${suffix ? `?${suffix}` : ""}`,
+        { token, hostToken, timeoutMs: timeouts.binary },
+      );
+    },
+    uploadWorkspaceDocument: (
+      workspaceId: string,
+      payload: {
+        file: File;
+        sessionId?: string | null;
+        path?: string | null;
+        baseDir?: string | null;
+        relativePath?: string | null;
+      },
+    ) => {
+      const search = new URLSearchParams();
+      if (payload.sessionId?.trim()) search.set("session", payload.sessionId.trim());
+      const suffix = search.toString();
+      const form = new FormData();
+      form.append("file", payload.file, payload.file.name);
+      if (payload.path?.trim()) form.append("path", payload.path.trim());
+      if (payload.baseDir?.trim()) form.append("baseDir", payload.baseDir.trim());
+      if (payload.relativePath?.trim()) form.append("relativePath", payload.relativePath.trim());
+      return requestMultipartJson<{ ok: boolean; name: string }>(
+        baseUrl,
+        `/w/${encodeURIComponent(workspaceId)}/document/upload${suffix ? `?${suffix}` : ""}`,
+        { token, hostToken, method: "POST", body: form, timeoutMs: timeouts.binary },
+      );
+    },
     listKnowledge: (workspaceId: string, scope: OpenworkKnowledgeScope = "mine") =>
       requestJson<OpenworkKnowledgeListResponse>(
         baseUrl,

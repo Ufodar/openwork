@@ -32,32 +32,14 @@ import {
 } from "./bid-workbench/shared";
 import type { BidWorkbenchFileCategory, BidWorkbenchTab } from "./bid-workbench/shared";
 
-function buildWorkbenchUrl(baseUrl: string, workspaceId: string, pathname: string, query?: URLSearchParams) {
-  const root = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
-  const suffix = query && query.toString() ? `?${query.toString()}` : "";
-  return new URL(`/w/${encodeURIComponent(workspaceId)}${pathname}${suffix}`, root);
-}
-
 async function listCategoryFiles(
   props: SessionViewProps,
   category: BidWorkbenchFileCategory,
 ): Promise<BidWorkbenchWorkspaceFile[]> {
   const workspaceId = props.openworkServerWorkspaceId?.trim();
-  const serverUrl = props.openworkServerUrl?.trim();
-  const token = props.openworkServerToken?.trim();
-  if (!workspaceId || !serverUrl || !token) return [];
-  const url = buildWorkbenchUrl(serverUrl, workspaceId, "/documents");
-  const response = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  });
-  if (!response.ok) {
-    throw new Error(`列出文件失败（${response.status}）`);
-  }
-  const data = (await response.json()) as {
-    items?: Array<{ name: string; updatedAt: number; size: number; type: string }>;
-  };
+  const client = props.openworkServerClient;
+  if (!workspaceId || !client) return [];
+  const data = await client.listWorkspaceDocuments(workspaceId);
   const prefix = `${FILE_CATEGORY_ROOTS[category]}/`;
   return (data.items ?? [])
     .filter((item) => item.name.startsWith(prefix))
@@ -410,28 +392,17 @@ export default function BidWorkbenchView(props: SessionViewProps) {
 
   const handleUpload = async (category: BidWorkbenchFileCategory, files: FileList | null) => {
     const currentWorkspaceId = workspaceId();
-    const serverUrl = props.openworkServerUrl?.trim();
-    const token = props.openworkServerToken?.trim();
-    if (!currentWorkspaceId || !serverUrl || !token || !files?.length) return;
+    const client = props.openworkServerClient;
+    if (!currentWorkspaceId || !client || !files?.length) return;
     setUploadingCategory(category);
     try {
       for (const file of Array.from(files)) {
         const relativePath = file.webkitRelativePath?.trim() || file.name;
-        const url = buildWorkbenchUrl(serverUrl, currentWorkspaceId, "/document/upload");
-        const form = new FormData();
-        form.append("file", file, file.name);
-        form.append("baseDir", FILE_CATEGORY_ROOTS[category]);
-        form.append("relativePath", relativePath);
-        const response = await fetch(url, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-          body: form,
+        await client.uploadWorkspaceDocument(currentWorkspaceId, {
+          file,
+          baseDir: FILE_CATEGORY_ROOTS[category],
+          relativePath,
         });
-        if (!response.ok) {
-          throw new Error(`上传文件失败（${response.status}）`);
-        }
       }
       await refreshAll();
     } finally {

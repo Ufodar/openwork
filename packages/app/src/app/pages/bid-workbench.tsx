@@ -279,19 +279,20 @@ export default function BidWorkbenchView(props: SessionViewProps) {
       navigate(`/document-agent/${existingSessionId}`);
       return;
     }
-    const nextSessionId = await props.createSessionAndOpen({
+    const client = props.openworkServerClient;
+    if (!workspaceId() || !client) return;
+    const created = await client.createWorkspaceOpencodeSession(workspaceId(), {
       title: `投标节点｜${node.title}`,
-      agent: "common-work",
-      agentLock: "common-work",
-      view: "document-agent",
+      openworkPreferredView: "document-agent",
+      openworkPreferredAgent: "common-work",
+      openworkPreferredAgentLock: "common-work",
       openworkRuntimeProfileId: "bid-workbench-node",
       openworkRuntimeScopeKind: "bid-workbench-node",
       openworkRuntimeScopeKey: node.runtimeScopeKey ?? node.id,
       openworkBidNodeId: node.id,
     });
+    const nextSessionId = created.id?.trim();
     if (!nextSessionId) return;
-    const client = props.openworkServerClient;
-    if (!workspaceId() || !client) return;
     await runStateMutation(() =>
       client.setBidWorkbenchSectionSession(workspaceId(), node.id, {
         sessionId: nextSessionId,

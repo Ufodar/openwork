@@ -1,3 +1,4 @@
+import type { Session } from "@opencode-ai/sdk/v2/client";
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import { formatBytes, isTauriRuntime } from "../utils";
 import type { ScheduledJob } from "./tauri";
@@ -299,6 +300,17 @@ export type OpenworkWorkspaceFileWriteResult = {
   path: string;
   bytes: number;
   updatedAt: number;
+};
+
+export type OpenworkWorkspaceSessionCreateInput = {
+  title?: string;
+  openworkPreferredView?: "session" | "document-agent" | "document-writer";
+  openworkPreferredAgent?: string | null;
+  openworkPreferredAgentLock?: string | null;
+  openworkRuntimeProfileId?: "document-agent" | "document-writer" | "bid-workbench-node" | null;
+  openworkRuntimeScopeKind?: "bid-workbench-node" | null;
+  openworkRuntimeScopeKey?: string | null;
+  openworkBidNodeId?: string | null;
 };
 
 export type OpenworkCommandItem = {
@@ -1528,6 +1540,21 @@ export function createOpenworkServerClient(options: { baseUrl: string; token?: s
         baseUrl,
         `/workspace/${encodeURIComponent(workspaceId)}/sessions/${encodeURIComponent(sessionId)}`,
         { token, hostToken, method: "DELETE", timeoutMs: timeouts.deleteSession },
+      ),
+    createWorkspaceOpencodeSession: (
+      workspaceId: string,
+      payload: OpenworkWorkspaceSessionCreateInput,
+    ) =>
+      requestJson<Session>(
+        baseUrl,
+        `/w/${encodeURIComponent(workspaceId)}/opencode/session`,
+        {
+          token,
+          hostToken,
+          method: "POST",
+          body: payload,
+          timeoutMs: timeouts.deleteSession,
+        },
       ),
     listWorkspaceDocuments: (workspaceId: string, options?: { sessionId?: string | null }) => {
       const search = new URLSearchParams();

@@ -1315,7 +1315,20 @@ export default function App() {
     const content = (resolvedDraft.resolvedText ?? resolvedDraft.text).trim();
     if (!content && !resolvedDraft.attachments.length) return false;
 
+    const recreateOpenworkClient = () => {
+      const openworkBaseUrl = openworkServerBaseUrl().trim();
+      const auth = openworkServerAuth();
+      if (!openworkBaseUrl || !auth.token) return null;
+      const opencodeUrl = `${openworkBaseUrl.replace(/\/+$/, "")}/opencode`;
+      const nextClient = createClient(opencodeUrl, undefined, { token: auth.token, mode: "openwork" });
+      setClient(nextClient);
+      return nextClient;
+    };
+
     let c = client();
+    if (!c) {
+      c = recreateOpenworkClient();
+    }
     if (!c) {
       const ready = await ensureOpenworkServerActionReady({
         getStatus: openworkServerStatus,
@@ -1323,16 +1336,7 @@ export default function App() {
         reconnect: reconnectOpenworkServer,
         allowLimited: true,
       });
-      c = client();
-      if (!c) {
-        const openworkBaseUrl = openworkServerBaseUrl().trim();
-        const auth = openworkServerAuth();
-        if (ready.ok && openworkBaseUrl && auth.token) {
-          const opencodeUrl = `${openworkBaseUrl.replace(/\/+$/, "")}/opencode`;
-          c = createClient(opencodeUrl, undefined, { token: auth.token, mode: "openwork" });
-          setClient(c);
-        }
-      }
+      c = client() ?? recreateOpenworkClient();
       if (!ready.ok && !c) {
         setError(t("app.connection_lost", currentLocale()));
         return false;

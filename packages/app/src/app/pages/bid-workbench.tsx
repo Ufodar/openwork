@@ -13,8 +13,7 @@ import type {
   OpenworkBidWorkbenchNode,
   OpenworkBidWorkbenchSourceRangeKind,
   OpenworkBidWorkbenchSourceType,
-  OpenworkBidWorkbenchState,
-  OpenworkInboxItem,
+  OpenworkBidWorkbenchState
 } from "../lib/openwork-server";
 import BidWorkbenchOverviewTab from "./bid-workbench/overview-tab";
 import BidWorkbenchFileCategoryPanel from "./bid-workbench/file-category-panel";
@@ -27,22 +26,48 @@ import {
   FILE_CATEGORY_ROOTS,
   STRUCTURE_SOURCE_KIND_LABELS,
   TAB_LABELS,
+  type BidWorkbenchWorkspaceFile,
   formatTimestamp,
   inferStructureSourceKind,
 } from "./bid-workbench/shared";
 import type { BidWorkbenchFileCategory, BidWorkbenchTab } from "./bid-workbench/shared";
 
+function buildWorkbenchUrl(baseUrl: string, workspaceId: string, pathname: string, query?: URLSearchParams) {
+  const root = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
+  const suffix = query && query.toString() ? `?${query.toString()}` : "";
+  return new URL(`/w/${encodeURIComponent(workspaceId)}${pathname}${suffix}`, root);
+}
+
 async function listCategoryFiles(
   props: SessionViewProps,
   category: BidWorkbenchFileCategory,
-): Promise<OpenworkInboxItem[]> {
+): Promise<BidWorkbenchWorkspaceFile[]> {
   const workspaceId = props.activeWorkspaceId?.trim();
-  const client = props.openworkServerClient;
-  if (!workspaceId || !client) return [];
-  const result = await client.listInbox(workspaceId, {
-    prefix: FILE_CATEGORY_ROOTS[category],
+  const serverUrl = props.openworkServerUrl?.trim();
+  const token = props.openworkServerToken?.trim();
+  if (!workspaceId || !serverUrl || !token) return [];
+  const url = buildWorkbenchUrl(serverUrl, workspaceId, "/documents");
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
   });
-  return result.items;
+  if (!response.ok) {
+    throw new Error(`列出文件失败（${response.status}）`);
+  }
+  const data = (await response.json()) as {
+    items?: Array<{ name: string; updatedAt: number; size: number; type: string }>;
+  };
+  const prefix = `${FILE_CATEGORY_ROOTS[category]}/`;
+  return (data.items ?? [])
+    .filter((item) => item.name.startsWith(prefix))
+    .map((item) => ({
+      path: item.name,
+      updatedAt: item.updatedAt,
+      size: item.size,
+      type: item.type,
+      originalName: item.name.split("/").pop(),
+    }));
 }
 
 export default function BidWorkbenchView(props: SessionViewProps) {
@@ -403,15 +428,29 @@ export default function BidWorkbenchView(props: SessionViewProps) {
 
   const handleUpload = async (category: BidWorkbenchFileCategory, files: FileList | null) => {
     const workspaceId = props.activeWorkspaceId?.trim();
-    const client = props.openworkServerClient;
-    if (!workspaceId || !client || !files?.length) return;
+    const serverUrl = props.openworkServerUrl?.trim();
+    const token = props.openworkServerToken?.trim();
+    if (!workspaceId || !serverUrl || !token || !files?.length) return;
     setUploadingCategory(category);
     try {
       for (const file of Array.from(files)) {
         const relativePath = file.webkitRelativePath?.trim() || file.name;
-        await client.uploadInbox(workspaceId, file, {
+        const query = new URLSearchParams({
           path: `${FILE_CATEGORY_ROOTS[category]}/${relativePath}`,
         });
+        const url = buildWorkbenchUrl(serverUrl, workspaceId, "/document/upload", query);
+        const form = new FormData();
+        form.append("file", file, file.name);
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          body: form,
+        });
+        if (!response.ok) {
+          throw new Error(`上传文件失败（${response.status}）`);
+        }
       }
       await refreshAll();
     } finally {
@@ -432,7 +471,7 @@ export default function BidWorkbenchView(props: SessionViewProps) {
     }
   };
 
-  const displayInboxPath = (file: OpenworkInboxItem) => file.path?.trim() || file.name?.trim() || file.id;
+  const displayFilePath = (file: BidWorkbenchWorkspaceFile) => file.path.trim();
 
   const renderNodeTree = (node: OpenworkBidWorkbenchNode): any => (
     <div class="space-y-2">
@@ -549,7 +588,7 @@ export default function BidWorkbenchView(props: SessionViewProps) {
                       uploading={uploadingCategory() === category}
                       currentOutlineSourcePath={workbenchState()?.project.outlineSourcePath}
                       currentRootOutputPath={workbenchState()?.project.rootOutputPath}
-                      displayInboxPath={displayInboxPath}
+                      displayFilePath={displayFilePath}
                       onUpload={handleUpload}
                       onSetOutlineSource={setOutlineSource}
                       onSetRootOutput={setRootOutputPath}
@@ -646,7 +685,7 @@ export default function BidWorkbenchView(props: SessionViewProps) {
                       referenceFiles={referenceFiles() ?? []}
                       outputFiles={outputFiles() ?? []}
                       templateFiles={templateFiles() ?? []}
-                      displayInboxPath={displayInboxPath}
+                      displayFilePath={displayFilePath}
                       onSetAssigneeDraft={setAssigneeDraft}
                       onSetMarkDraft={setMarkDraft}
                       onSetMarkKind={setMarkKind}
@@ -678,7 +717,7 @@ export default function BidWorkbenchView(props: SessionViewProps) {
           <BidWorkbenchConstraintsTab
             constraints={workbenchState()?.constraints ?? EMPTY_WORKBENCH_STATE.constraints}
             sourceFiles={constraintSourceFiles()}
-            displayInboxPath={displayInboxPath}
+            displayFilePath={displayFilePath}
             onSave={saveConstraints}
           />
         </Match>

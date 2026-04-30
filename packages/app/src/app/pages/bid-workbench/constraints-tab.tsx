@@ -1,11 +1,12 @@
 import { For, createEffect, createMemo, createSignal } from "solid-js";
 
-import type { OpenworkBidWorkbenchConstraints, OpenworkInboxItem } from "../../lib/openwork-server";
+import type { OpenworkBidWorkbenchConstraints } from "../../lib/openwork-server";
+import type { BidWorkbenchWorkspaceFile } from "./shared";
 
 type BidWorkbenchConstraintsTabProps = {
   constraints: OpenworkBidWorkbenchConstraints;
-  sourceFiles: OpenworkInboxItem[];
-  displayInboxPath: (file: OpenworkInboxItem) => string;
+  sourceFiles: BidWorkbenchWorkspaceFile[];
+  displayFilePath: (file: BidWorkbenchWorkspaceFile) => string;
   onSave: (payload: {
     formatRules: Record<string, unknown>;
     extractedFromPath: string | null;
@@ -30,7 +31,7 @@ export default function BidWorkbenchConstraintsTab(props: BidWorkbenchConstraint
   const [notes, setNotes] = createSignal("");
 
   const sourceOptions = createMemo(() =>
-    props.sourceFiles.map((file) => props.displayInboxPath(file)),
+    props.sourceFiles.map((file) => props.displayFilePath(file)),
   );
 
   createEffect(() => {

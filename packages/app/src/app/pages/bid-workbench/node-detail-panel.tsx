@@ -14,9 +14,9 @@ import type {
   OpenworkBidWorkbenchNode,
   OpenworkBidWorkbenchSourceRange,
   OpenworkBidWorkbenchSourceRangeKind,
-  OpenworkInboxItem,
 } from "../../lib/openwork-server";
 import {
+  type BidWorkbenchWorkspaceFile,
   COMPOSITION_MODE_LABELS,
   MARK_KIND_LABELS,
 } from "./shared";
@@ -31,10 +31,10 @@ type BidWorkbenchNodeDetailPanelProps = {
   rangeKind: OpenworkBidWorkbenchSourceRangeKind;
   rangeValueDraft: string;
   rangeNoteDraft: string;
-  referenceFiles: OpenworkInboxItem[];
-  outputFiles: OpenworkInboxItem[];
-  templateFiles: OpenworkInboxItem[];
-  displayInboxPath: (file: OpenworkInboxItem) => string;
+  referenceFiles: BidWorkbenchWorkspaceFile[];
+  outputFiles: BidWorkbenchWorkspaceFile[];
+  templateFiles: BidWorkbenchWorkspaceFile[];
+  displayFilePath: (file: BidWorkbenchWorkspaceFile) => string;
   onSetAssigneeDraft: (value: string) => void;
   onSetMarkDraft: (value: string) => void;
   onSetMarkKind: (value: OpenworkBidWorkbenchMark["kind"]) => void;
@@ -127,7 +127,7 @@ export default function BidWorkbenchNodeDetailPanel(props: BidWorkbenchNodeDetai
         <div class="space-y-2 text-xs">
           <For each={props.referenceFiles}>
             {(file) => {
-              const path = () => props.displayInboxPath(file);
+              const path = () => props.displayFilePath(file);
               const selected = () => props.node.referencePaths.includes(path());
               return (
                 <button class={`flex w-full items-start justify-between rounded-lg border px-3 py-2 text-left ${selected() ? "border-dls-accent bg-dls-hover" : "border-dls-border bg-dls-background"}`} onClick={() => void props.onBindReference(props.node, path())}>
@@ -145,7 +145,7 @@ export default function BidWorkbenchNodeDetailPanel(props: BidWorkbenchNodeDetai
         <div class="space-y-2 text-xs">
           <For each={props.outputFiles}>
             {(file) => {
-              const path = () => props.displayInboxPath(file);
+              const path = () => props.displayFilePath(file);
               const selected = () => props.node.outputPaths.includes(path());
               const isPrimary = () => props.node.primaryOutputPath === path();
               return (
@@ -173,7 +173,7 @@ export default function BidWorkbenchNodeDetailPanel(props: BidWorkbenchNodeDetai
         <div class="space-y-2 text-xs">
           <For each={props.templateFiles}>
             {(file) => {
-              const path = () => props.displayInboxPath(file);
+              const path = () => props.displayFilePath(file);
               const selected = () => props.node.templatePath === path();
               return (
                 <button class={`flex w-full items-start justify-between rounded-lg border px-3 py-2 text-left ${selected() ? "border-dls-accent bg-dls-hover" : "border-dls-border bg-dls-background"}`} onClick={() => void props.onBindTemplate(props.node, path())}>

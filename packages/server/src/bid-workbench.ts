@@ -1,8 +1,9 @@
 import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { stat, writeFile } from "node:fs/promises";
-import { extname, join, relative, resolve, isAbsolute } from "node:path";
+import { dirname, extname, join, relative, resolve, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { ApiError } from "./errors.js";
@@ -191,9 +192,27 @@ type OutlineItem = {
 const DOCX_EXTENSIONS = new Set([".docx", ".docm", ".dotx", ".dotm"]);
 const MARKDOWN_EXTENSIONS = new Set([".md", ".mdx", ".markdown"]);
 const NODE_OUTPUT_EXTENSIONS = new Set([".docx", ".xlsx"]);
-const EXTRACT_OUTLINE_SCRIPT = fileURLToPath(
-  new URL("../../../.opencode/runtime-support/bid-workbench/extract_outline.py", import.meta.url),
-);
+
+function resolveExtractOutlineScriptPath(): string {
+  const sourceRoot = resolve(fileURLToPath(new URL("../../../", import.meta.url)));
+  const execRoot = resolve(dirname(process.execPath), "..", "..", "..", "..");
+  const cwdRoot = resolve(process.cwd());
+  const candidateRoots = [sourceRoot, execRoot, cwdRoot];
+
+  for (const root of candidateRoots) {
+    const candidate = join(root, ".opencode", "runtime-support", "bid-workbench", "extract_outline.py");
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  throw new ApiError(
+    500,
+    "bid_workbench_outline_extractor_missing",
+    "Bid workbench outline extractor script is missing",
+    { candidateRoots },
+  );
+}
 
 function resolveBidWorkbenchRoot(workspacePath: string): string {
   return join(workspacePath, ".openwork", "bid-workbench");
@@ -555,7 +574,7 @@ function extractMarkdownSections(sourcePath: string, content: string): Extracted
 }
 
 function extractDocxSections(workspacePath: string, sourcePath: string, absolutePath: string): ExtractedSection[] {
-  const result = spawnSync("python3", [EXTRACT_OUTLINE_SCRIPT, absolutePath], {
+  const result = spawnSync("python3", [resolveExtractOutlineScriptPath(), absolutePath], {
     encoding: "utf8",
   });
   if (result.status !== 0) {

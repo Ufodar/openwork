@@ -8,5 +8,6 @@ test("bid-workbench creates node sessions through the workspace proxy instead of
   expect(file).toContain("client.createWorkspaceOpencodeSession(workspaceId(), {");
   expect(file).toContain('openworkPreferredView: "document-agent"');
   expect(file).toContain('openworkRuntimeProfileId: "bid-workbench-node"');
+  expect(file).toContain("await Promise.resolve(props.selectSession(nextSessionId)).catch(() => undefined);");
   expect(file).not.toContain("const nextSessionId = await props.createSessionAndOpen({");
 });

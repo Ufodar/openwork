@@ -276,6 +276,7 @@ export default function BidWorkbenchView(props: SessionViewProps) {
   const createNodeSession = async (node: OpenworkBidWorkbenchNode) => {
     const existingSessionId = node.activeSessionId ?? node.sessionId;
     if (existingSessionId) {
+      await Promise.resolve(props.selectSession(existingSessionId)).catch(() => undefined);
       navigate(`/document-agent/${existingSessionId}`);
       return;
     }
@@ -298,6 +299,7 @@ export default function BidWorkbenchView(props: SessionViewProps) {
         sessionId: nextSessionId,
       }),
     );
+    await Promise.resolve(props.selectSession(nextSessionId)).catch(() => undefined);
     navigate(`/document-agent/${nextSessionId}`);
   };
 

@@ -977,6 +977,7 @@ export default function App() {
     lastUserModelFromMessages,
     developerMode,
     setError,
+    getError: error,
     setSseConnected,
     prepareConnection: async () => {
       const ready = await ensureOpenworkServerActionReady({

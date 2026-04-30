@@ -152,6 +152,7 @@ export function createSessionStore(options: {
   lastUserModelFromMessages: (messages: MessageWithParts[]) => ModelRef | null;
   developerMode: () => boolean;
   setError: (message: string | null) => void;
+  getError?: () => string | null;
   setSseConnected: (connected: boolean) => void;
   prepareConnection?: () => Promise<boolean>;
   markReloadRequired?: (reason: ReloadReason, trigger?: ReloadTrigger) => void;
@@ -401,6 +402,15 @@ export function createSessionStore(options: {
     const message = error instanceof Error ? error.message : fallback;
     if (!message) return;
     options.setError(addOpencodeCacheHint(message));
+  };
+
+  const clearRecoverableSelectedSessionError = (sessionID: string) => {
+    if (sessionID !== options.selectedSessionId()) return;
+    const current = options.getError?.()?.trim() ?? "";
+    if (!current) return;
+    if (current === "Request timed out.") {
+      options.setError(null);
+    }
   };
 
   const truncateErrorField = (value: unknown, max = 500) => {
@@ -1115,6 +1125,9 @@ export function createSessionStore(options: {
           }
 
           setStore("messages", info.sessionID, (current = []) => upsertMessageInfo(current, info));
+          if (info.role === "assistant") {
+            clearRecoverableSelectedSessionError(info.sessionID);
+          }
         }
       }
     }
@@ -1162,6 +1175,10 @@ export function createSessionStore(options: {
               draft.parts[part.messageID] = upsertPartInfo(parts, part);
             }),
           );
+          const message = (store.messages[part.sessionID] ?? []).find((item) => item.id === part.messageID);
+          if (message?.role === "assistant") {
+            clearRecoverableSelectedSessionError(part.sessionID);
+          }
           const partUpdatedMs = Math.round((perfNow() - partUpdatedStartedAt) * 100) / 100;
           if (sessionDebugEnabled() && (partUpdatedMs >= 8 || (delta?.length ?? 0) >= 120)) {
             const textLength =

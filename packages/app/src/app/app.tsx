@@ -1323,11 +1323,20 @@ export default function App() {
         reconnect: reconnectOpenworkServer,
         allowLimited: true,
       });
-      if (!ready.ok) {
+      c = client();
+      if (!c) {
+        const openworkBaseUrl = openworkServerBaseUrl().trim();
+        const auth = openworkServerAuth();
+        if (ready.ok && openworkBaseUrl && auth.token) {
+          const opencodeUrl = `${openworkBaseUrl.replace(/\/+$/, "")}/opencode`;
+          c = createClient(opencodeUrl, undefined, { token: auth.token, mode: "openwork" });
+          setClient(c);
+        }
+      }
+      if (!ready.ok && !c) {
         setError(t("app.connection_lost", currentLocale()));
         return false;
       }
-      c = client();
     }
     if (!c) {
       setError(t("app.connection_lost", currentLocale()));

@@ -1441,24 +1441,22 @@ export async function acquireBidWorkbenchSectionLock(
 
 export async function recordBidWorkbenchMessageAuthor(
   workspacePath: string,
-  input: { sessionId: string; messageId: string; sectionId: string; author: string; createdAt?: number },
+  input: { sessionId: string; messageId: string; author: string; createdAt?: number },
 ): Promise<void> {
   await ensureSchema(workspacePath);
   const sessionId = input.sessionId.trim();
   const messageId = input.messageId.trim();
   const author = input.author.trim();
-  const sectionId = input.sectionId.trim();
-  if (!sessionId || !messageId || !author || !sectionId) return;
+  if (!sessionId || !messageId || !author) return;
   const now = input.createdAt ?? Date.now();
   const db = openDb(workspacePath);
   try {
     db.run(
-      `INSERT INTO bid_workbench_message_authors(session_id, message_id, section_node_id, username, created_at)
-       VALUES (?, ?, ?, ?, ?)
+      `INSERT INTO bid_workbench_message_authors(session_id, message_id, author, created_at)
+       VALUES (?, ?, ?, ?)
        ON CONFLICT(session_id, message_id) DO UPDATE SET
-         username = excluded.username,
-         section_node_id = excluded.section_node_id`,
-      [sessionId, messageId, sectionId, author, now],
+         author = excluded.author`,
+      [sessionId, messageId, author, now],
     );
   } finally {
     db.close();
@@ -1476,12 +1474,12 @@ export async function listBidWorkbenchMessageAuthors(
   const db = openDb(workspacePath);
   try {
     const rows = db.query(
-      `SELECT message_id, username FROM bid_workbench_message_authors WHERE session_id = ?`,
+      `SELECT message_id, author FROM bid_workbench_message_authors WHERE session_id = ?`,
     ).all(sid) as Array<Record<string, unknown>>;
     for (const row of rows) {
       const messageId = row.message_id ? String(row.message_id) : "";
-      const username = row.username ? String(row.username) : "";
-      if (messageId && username) result.set(messageId, username);
+      const author = row.author ? String(row.author) : "";
+      if (messageId && author) result.set(messageId, author);
     }
   } finally {
     db.close();
@@ -1520,59 +1518,6 @@ export async function recordBidWorkbenchSectionPromptActivity(
       db.exec("ROLLBACK;");
       throw error;
     }
-  } finally {
-    db.close();
-  }
-}
-
-export async function recordBidWorkbenchPromptMessageAuthor(
-  workspacePath: string,
-  input: { sessionId: string; messageId: string; author: string; createdAt?: number },
-): Promise<void> {
-  await ensureSchema(workspacePath);
-  const sessionId = input.sessionId.trim();
-  const messageId = input.messageId.trim();
-  const author = input.author.trim();
-  if (!sessionId || !messageId || !author) return;
-  const now = input.createdAt ?? Date.now();
-  const db = openDb(workspacePath);
-  try {
-    db.run(
-      `INSERT INTO bid_workbench_message_authors(session_id, message_id, author, created_at)
-       VALUES (?, ?, ?, ?)
-       ON CONFLICT(session_id, message_id)
-       DO UPDATE SET author = excluded.author`,
-      [sessionId, messageId, author, now],
-    );
-  } finally {
-    db.close();
-  }
-}
-
-export async function listBidWorkbenchPromptMessageAuthors(
-  workspacePath: string,
-  sessionId: string,
-): Promise<Map<string, string>> {
-  await ensureSchema(workspacePath);
-  const normalizedSessionId = sessionId.trim();
-  if (!normalizedSessionId) return new Map();
-  const db = openDb(workspacePath);
-  try {
-    const rows = db
-      .query(
-        `SELECT message_id, author
-         FROM bid_workbench_message_authors
-         WHERE session_id = ?`,
-      )
-      .all(normalizedSessionId) as Array<Record<string, unknown>>;
-    const map = new Map<string, string>();
-    for (const row of rows) {
-      const messageId = typeof row.message_id === "string" ? row.message_id.trim() : "";
-      const author = typeof row.author === "string" ? row.author.trim() : "";
-      if (!messageId || !author) continue;
-      map.set(messageId, author);
-    }
-    return map;
   } finally {
     db.close();
   }

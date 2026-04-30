@@ -49,6 +49,15 @@ type MessageBlock = {
 
 type MessageBlockItem = MessageBlock | StepClusterBlock;
 
+function messagePromptAuthor(message: MessageWithParts): string {
+  const info = message.info as Record<string, unknown>;
+  const metadata = info?.metadata && typeof info.metadata === "object"
+    ? info.metadata as Record<string, unknown>
+    : null;
+  const author = metadata?.openworkPromptAuthor;
+  return typeof author === "string" ? author.trim() : "";
+}
+
 /** Icon for a given tool category */
 function ToolIcon(props: { category: string; size?: number }) {
   const s = () => props.size ?? 12;
@@ -1115,6 +1124,13 @@ export default function MessageList(props: MessageListProps) {
                       : "max-w-[68ch] text-[15px] leading-7 text-gray-12 group pl-2")
                   } ${searchOutlineClass}`}
               >
+                <Show when={block.isUser && messagePromptAuthor(block.message)}>
+                  {(author) => (
+                    <div class="mb-2 text-[11px] font-medium text-gray-9">
+                      {author()}
+                    </div>
+                  )}
+                </Show>
                 <Show when={attachmentsForMessage(block.message).length > 0}>
                   <div class={block.isUser ? "mb-3 flex flex-wrap gap-2" : "mb-4 flex flex-wrap gap-2"}>
                     <For each={attachmentsForMessage(block.message)}>

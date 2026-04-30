@@ -480,6 +480,114 @@ describe("proxyOpencodeRequest session creation", () => {
     });
   });
 
+  test("injects bid-workbench prompt author metadata into session messages", async () => {
+    let proxiedMessageId = "";
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/prompt")) {
+        const payload = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : {};
+        proxiedMessageId = typeof payload.messageID === "string" ? payload.messageID : "";
+        return new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (url.includes("/message")) {
+        return new Response(JSON.stringify([
+          {
+            info: { id: proxiedMessageId, role: "user" },
+            parts: [{ id: "part_1", messageID: proxiedMessageId, type: "text", text: "hello" }],
+          },
+        ]), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+
+    const sessionOwnership = new SessionOwnershipService();
+    const sessionWorkspaces = new SessionWorkspaceService();
+    const runtimeKnowledgeTokens = new RuntimeKnowledgeTokenService();
+    const runtimeDocumentStateTokens = new RuntimeDocumentStateTokenService();
+    const auth = {
+      getUserByOwnerKey: async (ownerKey: string) => ({
+        id: ownerKey,
+        username: ownerKey === "owner-alice" ? "alice" : "bob",
+        name: ownerKey === "owner-alice" ? "alice" : "bob",
+        email: null,
+        role: "user",
+        createdAt: Date.now(),
+      }),
+    } as any;
+
+    await writeOutlineDocx(workspace.path, "bid-workbench/templates/template.docx", [
+      { text: "第一章 节点A", level: 1 },
+    ]);
+    await setBidWorkbenchOutlineSource(workspace.path, {
+      sourcePath: "bid-workbench/templates/template.docx",
+      sourceType: "templates",
+      structureSourceKind: "template",
+    });
+    const state = await refreshBidWorkbenchState(workspace.path);
+    const node = state.nodes.find((entry) => entry.title === "第一章 节点A");
+    expect(node).toBeDefined();
+
+    await sessionOwnership.setOwner(workspace.id, "ses_author", "owner-alice");
+    await sessionWorkspaces.setWorkspace(workspace.id, "ses_author", {
+      runtimeId: "rt_author",
+      runtimeDir: workspace.path,
+      createdAt: Date.now(),
+      bidNodeId: node!.id,
+    } as any);
+
+    const promptResponse = await proxyOpencodeRequest({
+      request: new Request("http://openwork.local/w/ws_1/opencode/session/ses_author/prompt", {
+        method: "POST",
+        body: JSON.stringify({ text: "hello" }),
+      }),
+      url: new URL("http://openwork.local/w/ws_1/opencode/session/ses_author/prompt"),
+      workspace,
+      proxyPath: "/session/ses_author/prompt",
+      actor: { type: "remote", scope: "collaborator", tokenHash: "owner-alice" },
+      sessionOwnership,
+      sessionWorkspaces,
+      runtimeKnowledgeTokens,
+      runtimeDocumentStateTokens,
+      openworkBaseUrl: "http://127.0.0.1:8789",
+      authService: auth,
+    });
+
+    expect(promptResponse.status).toBe(200);
+    expect(proxiedMessageId).toBeTruthy();
+
+    const messageResponse = await proxyOpencodeRequest({
+      request: new Request("http://openwork.local/w/ws_1/opencode/session/ses_author/message", {
+        method: "GET",
+      }),
+      url: new URL("http://openwork.local/w/ws_1/opencode/session/ses_author/message"),
+      workspace,
+      proxyPath: `/session/${encodeURIComponent("ses_author")}/message`,
+      actor: { type: "remote", scope: "collaborator", tokenHash: "owner-alice" },
+      sessionOwnership,
+      sessionWorkspaces,
+      runtimeKnowledgeTokens,
+      runtimeDocumentStateTokens,
+      openworkBaseUrl: "http://127.0.0.1:8789",
+      authService: auth,
+    });
+
+    expect(messageResponse.status).toBe(200);
+    const messages = await messageResponse.json() as Array<Record<string, unknown>>;
+    const first = messages[0] as Record<string, unknown>;
+    const info = first.info as Record<string, unknown>;
+    const metadata = info.metadata as Record<string, unknown>;
+    expect(metadata.openworkPromptAuthor).toBe("alice");
+  });
+
   test("can create a session against an isolated per-session opencode runtime", async () => {
     const captured: { url?: string } = {};
     globalThis.fetch = (async (input: RequestInfo | URL) => {

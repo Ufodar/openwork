@@ -36,6 +36,8 @@ import {
   deleteBidWorkbenchSectionRange,
   deleteBidWorkbenchSectionMark,
   getBidWorkbenchState,
+  listBidWorkbenchMessageAuthors,
+  recordBidWorkbenchMessageAuthor,
   recordBidWorkbenchSectionPromptActivity,
   refreshBidWorkbenchState,
   setBidWorkbenchOutlineSource,
@@ -766,7 +768,10 @@ function sanitizeSummaryRecordForProxy(summary: Record<string, unknown>): Record
   };
 }
 
-function sanitizeMessageSummaryForProxy(message: Record<string, unknown>): Record<string, unknown> {
+function sanitizeMessageSummaryForProxy(
+  message: Record<string, unknown>,
+  promptAuthors?: ReadonlyMap<string, string>,
+): Record<string, unknown> {
   let nextMessage = message;
 
   const summary = nextMessage.summary;
@@ -781,12 +786,26 @@ function sanitizeMessageSummaryForProxy(message: Record<string, unknown>): Recor
   if (info && typeof info === "object") {
     const infoRecord = info as Record<string, unknown>;
     const infoSummary = infoRecord.summary;
-    if (infoSummary && typeof infoSummary === "object") {
+    const role = typeof infoRecord.role === "string" ? infoRecord.role.trim() : "";
+    const messageId = typeof infoRecord.id === "string" ? infoRecord.id.trim() : "";
+    const promptAuthor = role === "user" && messageId && promptAuthors ? promptAuthors.get(messageId) ?? "" : "";
+    const nextMetadata = promptAuthor
+      ? {
+          ...((infoRecord.metadata && typeof infoRecord.metadata === "object")
+            ? infoRecord.metadata as Record<string, unknown>
+            : {}),
+          openworkPromptAuthor: promptAuthor,
+        }
+      : null;
+    if (infoSummary && typeof infoSummary === "object" || nextMetadata) {
       nextMessage = {
         ...nextMessage,
         info: {
           ...infoRecord,
-          summary: sanitizeSummaryRecordForProxy(infoSummary as Record<string, unknown>),
+          ...(infoSummary && typeof infoSummary === "object"
+            ? { summary: sanitizeSummaryRecordForProxy(infoSummary as Record<string, unknown>) }
+            : {}),
+          ...(nextMetadata ? { metadata: nextMetadata } : {}),
         },
       };
     }
@@ -795,10 +814,15 @@ function sanitizeMessageSummaryForProxy(message: Record<string, unknown>): Recor
   return nextMessage;
 }
 
-function sanitizeSessionMessagesResponseForProxy(value: unknown): unknown {
+function sanitizeSessionMessagesResponseForProxy(
+  value: unknown,
+  promptAuthors?: ReadonlyMap<string, string>,
+): unknown {
   if (Array.isArray(value)) {
     return value.map((item) =>
-      item && typeof item === "object" ? sanitizeMessageSummaryForProxy(item as Record<string, unknown>) : item,
+      item && typeof item === "object"
+        ? sanitizeMessageSummaryForProxy(item as Record<string, unknown>, promptAuthors)
+        : item,
     );
   }
   if (value && typeof value === "object" && Array.isArray((value as Record<string, unknown>).items)) {
@@ -806,7 +830,9 @@ function sanitizeSessionMessagesResponseForProxy(value: unknown): unknown {
     return {
       ...record,
       items: ((record.items as unknown[]) ?? []).map((item) =>
-        item && typeof item === "object" ? sanitizeMessageSummaryForProxy(item as Record<string, unknown>) : item,
+        item && typeof item === "object"
+          ? sanitizeMessageSummaryForProxy(item as Record<string, unknown>, promptAuthors)
+          : item,
       ),
     };
   }
@@ -1533,6 +1559,7 @@ export async function proxyOpencodeRequest(input: {
   }
   let bidNodeUsername: string | null = null;
   let bidNodeSectionId: string | null = null;
+  let bidNodeMessageId: string | null = null;
   if (workspace && workspaceId && pathSessionId && runtimeWorkspace?.bidNodeId && startsPromptRun && requesterKey) {
     if (!input.authService) {
       throw new ApiError(500, "internal_error", "Auth service is required for bid workbench prompt proxy");
@@ -1552,6 +1579,19 @@ export async function proxyOpencodeRequest(input: {
         lockedBy: lockResult.lockedBy,
       });
     }
+    const rawBody = typeof body === "string" ? body : await input.request.text();
+    let promptPayload: Record<string, unknown> = {};
+    try {
+      promptPayload = rawBody.trim() ? JSON.parse(rawBody) as Record<string, unknown> : {};
+    } catch {
+      throw new ApiError(400, "invalid_json", "Invalid JSON body");
+    }
+    const existingMessageId = typeof promptPayload.messageID === "string"
+      ? promptPayload.messageID.trim()
+      : "";
+    bidNodeMessageId = existingMessageId || `msg_${shortId().replace(/-/g, "")}`;
+    promptPayload.messageID = bidNodeMessageId;
+    body = JSON.stringify(promptPayload);
   }
   if (workspace && input.sessionActivity) {
     if (workspaceId && pathSessionId && runtimeWorkspace?.opencodeRuntime && startsSessionRun && targetWorkspace) {
@@ -1724,6 +1764,13 @@ export async function proxyOpencodeRequest(input: {
         sectionId: bidNodeSectionId,
         author: bidNodeUsername,
       });
+      if (pathSessionId && bidNodeMessageId) {
+        await recordBidWorkbenchMessageAuthor(workspace.path, {
+          sessionId: pathSessionId,
+          messageId: bidNodeMessageId,
+          author: bidNodeUsername,
+        });
+      }
     }
 
     if (method === "GET" && /^\/session\/[^/]+\/message$/.test(normalizedProxyPath) && response.ok) {
@@ -1734,7 +1781,11 @@ export async function proxyOpencodeRequest(input: {
       } catch {
         return new Response(raw, { status: response.status, headers: response.headers });
       }
-      const payload = sanitizeSessionMessagesResponseForProxy(parsed);
+      const promptAuthors =
+        workspace && pathSessionId
+          ? await listBidWorkbenchMessageAuthors(workspace.path, pathSessionId)
+          : undefined;
+      const payload = sanitizeSessionMessagesResponseForProxy(parsed, promptAuthors);
       const nextHeaders = new Headers(response.headers);
       nextHeaders.set("Content-Type", "application/json");
       return new Response(JSON.stringify(payload), { status: response.status, headers: nextHeaders });

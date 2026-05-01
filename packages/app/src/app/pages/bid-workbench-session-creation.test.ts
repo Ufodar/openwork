@@ -19,3 +19,10 @@ test("bid-workbench waits for both workspace id and openwork client before cachi
   expect(file).toContain("return id && props.openworkServerClient ? id : \"\";");
   expect(file).toContain("createResource(\n    workspaceResourceKey,");
 });
+
+test("app proactively resolves the workspace id when opening bid-workbench directly", () => {
+  const file = readFileSync(join(import.meta.dir, "..", "app.tsx"), "utf8");
+
+  expect(file).toContain('if (!path.startsWith("/bid-workbench")) return;');
+  expect(file).toContain("void ensureOpenworkServerWorkspaceIdResolved().catch(() => undefined);");
+});

@@ -3891,6 +3891,15 @@ export default function App() {
   });
 
   createEffect(() => {
+    const path = location.pathname.trim().toLowerCase();
+    if (!path.startsWith("/bid-workbench")) return;
+    if (openworkServerStatus() !== "connected") return;
+    if (!openworkServerClient()) return;
+    if ((openworkServerWorkspaceId() ?? "").trim()) return;
+    void ensureOpenworkServerWorkspaceIdResolved().catch(() => undefined);
+  });
+
+  createEffect(() => {
     if (!ragflowPickerOpen()) return;
     void refreshRagflowDatasets().catch(() => undefined);
   });

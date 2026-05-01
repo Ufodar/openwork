@@ -11,3 +11,11 @@ test("bid-workbench creates node sessions through the workspace proxy instead of
   expect(file).toContain("await Promise.resolve(props.selectSession(nextSessionId)).catch(() => undefined);");
   expect(file).not.toContain("const nextSessionId = await props.createSessionAndOpen({");
 });
+
+test("bid-workbench waits for both workspace id and openwork client before caching empty workspace data", () => {
+  const file = readFileSync(join(import.meta.dir, "bid-workbench.tsx"), "utf8");
+
+  expect(file).toContain("const workspaceResourceKey = createMemo(() => {");
+  expect(file).toContain("return id && props.openworkServerClient ? id : \"\";");
+  expect(file).toContain("createResource(\n    workspaceResourceKey,");
+});

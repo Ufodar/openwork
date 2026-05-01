@@ -55,6 +55,10 @@ async function listCategoryFiles(
 export default function BidWorkbenchView(props: SessionViewProps) {
   const navigate = useNavigate();
   const workspaceId = createMemo(() => props.openworkServerWorkspaceId?.trim() ?? "");
+  const workspaceResourceKey = createMemo(() => {
+    const id = workspaceId();
+    return id && props.openworkServerClient ? id : "";
+  });
   const [activeTab, setActiveTab] = createSignal<BidWorkbenchTab>("workspace");
   const [selectedNodeId, setSelectedNodeId] = createSignal<string | null>(null);
   const [saving, setSaving] = createSignal(false);
@@ -71,7 +75,7 @@ export default function BidWorkbenchView(props: SessionViewProps) {
   const actorName = createMemo(() => props.sessionUsername?.trim() || DEFAULT_NODE_AUTHOR);
 
   const [workbenchState, { mutate: mutateWorkbenchState, refetch: refetchWorkbenchState }] = createResource(
-    workspaceId,
+    workspaceResourceKey,
     async (): Promise<OpenworkBidWorkbenchState> => {
       const currentWorkspaceId = workspaceId();
       const client = props.openworkServerClient;
@@ -81,19 +85,19 @@ export default function BidWorkbenchView(props: SessionViewProps) {
   );
 
   const [tenderFiles, { refetch: refetchTenderFiles }] = createResource(
-    workspaceId,
+    workspaceResourceKey,
     async () => listCategoryFiles(props, "tender"),
   );
   const [referenceFiles, { refetch: refetchReferenceFiles }] = createResource(
-    workspaceId,
+    workspaceResourceKey,
     async () => listCategoryFiles(props, "reference"),
   );
   const [outputFiles, { refetch: refetchOutputFiles }] = createResource(
-    workspaceId,
+    workspaceResourceKey,
     async () => listCategoryFiles(props, "output"),
   );
   const [templateFiles, { refetch: refetchTemplateFiles }] = createResource(
-    workspaceId,
+    workspaceResourceKey,
     async () => listCategoryFiles(props, "templates"),
   );
 

@@ -2664,6 +2664,11 @@ export default function App() {
     const active = workspaceStore.activeWorkspaceDisplay();
     const client = openworkServerClient();
     const openworkUrl = openworkServerUrl().trim();
+    const existingWorkspaceId = (openworkServerWorkspaceId() ?? "").trim();
+    const preserveExplicitBidWorkbenchWorkspace =
+      typeof window !== "undefined" &&
+      window.location.pathname.trim().toLowerCase().startsWith("/bid-workbench") &&
+      Boolean(existingWorkspaceId);
 
     if (!client || openworkServerStatus() !== "connected") {
       setOpenworkServerWorkspaceId(null);
@@ -2696,7 +2701,7 @@ export default function App() {
             : (response.activeId ? items.find((entry) => entry.id === response.activeId) : null) ?? items[0];
           setOpenworkServerWorkspaceId(match?.id ?? response.activeId ?? null);
         } catch {
-          if (!cancelled) setOpenworkServerWorkspaceId(null);
+          if (!cancelled && !preserveExplicitBidWorkbenchWorkspace) setOpenworkServerWorkspaceId(null);
         }
       };
 
@@ -2710,6 +2715,9 @@ export default function App() {
     if (active.workspaceType === "local") {
       const root = normalizeDirectoryPath(resolveActiveClientWorkspaceRoot());
       if (!root) {
+        if (preserveExplicitBidWorkbenchWorkspace) {
+          return;
+        }
         setOpenworkServerWorkspaceId(null);
         return;
       }
@@ -2723,7 +2731,7 @@ export default function App() {
           const match = items.find((entry) => normalizeDirectoryPath(entry.path) === root);
           setOpenworkServerWorkspaceId(match?.id ?? response.activeId ?? null);
         } catch {
-          if (!cancelled) setOpenworkServerWorkspaceId(null);
+          if (!cancelled && !preserveExplicitBidWorkbenchWorkspace) setOpenworkServerWorkspaceId(null);
         }
       };
 
@@ -2734,6 +2742,9 @@ export default function App() {
       return;
     }
 
+    if (preserveExplicitBidWorkbenchWorkspace) {
+      return;
+    }
     setOpenworkServerWorkspaceId(null);
   });
 

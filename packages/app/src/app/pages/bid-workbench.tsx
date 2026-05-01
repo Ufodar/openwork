@@ -250,7 +250,8 @@ export default function BidWorkbenchView(props: SessionViewProps) {
     const nodes = currentWorkbenchState().nodes ?? [];
     const current = selectedNodeId();
     if (current && nodes.some((node) => node.id === current)) return;
-    setSelectedNodeId(nodes[0]?.id ?? null);
+    const firstLeaf = nodes.find((node) => node.isLeaf);
+    setSelectedNodeId(firstLeaf?.id ?? nodes[0]?.id ?? null);
   });
 
   createEffect(() => {
@@ -555,7 +556,10 @@ export default function BidWorkbenchView(props: SessionViewProps) {
               <Show when={node.isLeaf}>
                 <span>引用 {node.referencePaths.length}</span>
                 <span>产出 {node.outputPaths.length}</span>
-                <span>{node.lockedBy ? `编辑中：${node.lockedBy}` : "未锁定"}</span>
+                <span>{node.lockedBy ? "已上锁" : "未锁定"}</span>
+                <Show when={node.recentPromptAuthor}>
+                  <span>最近发送 {node.recentPromptAuthor}</span>
+                </Show>
               </Show>
             </div>
           </div>
@@ -565,6 +569,9 @@ export default function BidWorkbenchView(props: SessionViewProps) {
                 <Lock size={12} />
                 {node.lockedBy}
               </span>
+            </Show>
+            <Show when={node.assignee}>
+              <span class="rounded-full bg-violet-3 px-2 py-0.5 text-violet-11">负责人 {node.assignee}</span>
             </Show>
             <Show when={node.primaryOutputPath}>
               <span class="rounded-full bg-emerald-3 px-2 py-0.5 text-emerald-11">主产出</span>

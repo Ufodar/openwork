@@ -63,6 +63,7 @@ type BidWorkbenchNodeDetailPanelProps = {
 };
 
 export default function BidWorkbenchNodeDetailPanel(props: BidWorkbenchNodeDetailPanelProps) {
+  const isLeaf = () => props.node.isLeaf;
   const rangeSourceOptions = (): string[] => {
     const values = [props.node.sourcePath, ...props.node.referencePaths];
     if (props.node.templatePath) values.push(props.node.templatePath);
@@ -88,39 +89,59 @@ export default function BidWorkbenchNodeDetailPanel(props: BidWorkbenchNodeDetai
           <span class="rounded-full bg-dls-background px-3 py-1">当前编辑：{props.node.lockedBy ?? "未锁定"}</span>
           <span class="rounded-full bg-dls-background px-3 py-1">会话：{props.node.activeSessionId ?? props.node.sessionId ? "已绑定" : "未创建"}</span>
           <span class="rounded-full bg-dls-background px-3 py-1">合并：{props.node.mergeApplied ? "已合并" : props.node.mergeRequested ? "待合并" : "未登记"}</span>
+          <Show when={props.node.recentPromptAuthor}>
+            <span class="rounded-full bg-dls-background px-3 py-1">最近发送：{props.node.recentPromptAuthor}</span>
+          </Show>
+          <Show when={(props.node.participants?.length ?? 0) > 0}>
+            <span class="rounded-full bg-dls-background px-3 py-1">参与者：{props.node.participants.length}</span>
+          </Show>
+          <Show when={props.node.assignee}>
+            <span class="rounded-full bg-dls-background px-3 py-1">负责人：{props.node.assignee}</span>
+          </Show>
+          <span class="rounded-full bg-dls-background px-3 py-1">来源：{props.node.sourceLocator}</span>
         </div>
 
-        <div class="mt-4 grid grid-cols-1 gap-3 text-xs">
-          <label class="space-y-1">
-            <div class="text-dls-secondary">生成模式</div>
-            <select class="w-full rounded-lg border border-dls-border bg-dls-background px-3 py-2" value={props.node.compositionMode} onInput={(event) => void props.onUpdateNodeMetadata(props.node, { compositionMode: event.currentTarget.value as OpenworkBidWorkbenchCompositionMode })}>
-              <For each={Object.entries(COMPOSITION_MODE_LABELS) as Array<[OpenworkBidWorkbenchCompositionMode, string]>}>
-                {([value, label]) => <option value={value}>{label}</option>}
-              </For>
-            </select>
-          </label>
-          <label class="space-y-1">
-            <div class="text-dls-secondary">负责人</div>
-            <div class="flex gap-2">
-              <input class="flex-1 rounded-lg border border-dls-border bg-dls-background px-3 py-2" value={props.assigneeDraft} onInput={(event) => props.onSetAssigneeDraft(event.currentTarget.value)} placeholder="填写负责人" />
-              <button class="rounded-lg border border-dls-border bg-dls-hover px-3 py-2" onClick={() => void props.onUpdateNodeMetadata(props.node, { assignee: props.assigneeDraft.trim() || null })}>保存</button>
+        <Show
+          when={isLeaf()}
+          fallback={
+            <div class="mt-4 rounded-xl border border-dls-border bg-dls-background px-3 py-3 text-xs text-dls-secondary">
+              目录节点只承担结构导航，不创建节点会话、不绑定引用和产出。请在中间章节树中选择叶子节点进行写作和协作。
             </div>
-          </label>
-        </div>
+          }
+        >
+          <div class="mt-4 grid grid-cols-1 gap-3 text-xs">
+            <label class="space-y-1">
+              <div class="text-dls-secondary">生成模式</div>
+              <select class="w-full rounded-lg border border-dls-border bg-dls-background px-3 py-2" value={props.node.compositionMode} onInput={(event) => void props.onUpdateNodeMetadata(props.node, { compositionMode: event.currentTarget.value as OpenworkBidWorkbenchCompositionMode })}>
+                <For each={Object.entries(COMPOSITION_MODE_LABELS) as Array<[OpenworkBidWorkbenchCompositionMode, string]>}>
+                  {([value, label]) => <option value={value}>{label}</option>}
+                </For>
+              </select>
+            </label>
+            <label class="space-y-1">
+              <div class="text-dls-secondary">负责人</div>
+              <div class="flex gap-2">
+                <input class="flex-1 rounded-lg border border-dls-border bg-dls-background px-3 py-2" value={props.assigneeDraft} onInput={(event) => props.onSetAssigneeDraft(event.currentTarget.value)} placeholder="填写负责人" />
+                <button class="rounded-lg border border-dls-border bg-dls-hover px-3 py-2" onClick={() => void props.onUpdateNodeMetadata(props.node, { assignee: props.assigneeDraft.trim() || null })}>保存</button>
+              </div>
+            </label>
+          </div>
 
-        <div class="mt-4 flex flex-wrap gap-2">
-          <button class="inline-flex items-center gap-2 rounded-lg border border-dls-border bg-dls-hover px-3 py-2 text-xs" onClick={() => void props.onCreateNodeSession(props.node)}>
-            <MessageSquarePlus size={14} />
-            {(props.node.activeSessionId ?? props.node.sessionId) ? "打开节点对话" : "创建节点对话"}
-          </button>
-          <button class="inline-flex items-center gap-2 rounded-lg border border-dls-border bg-dls-hover px-3 py-2 text-xs" onClick={() => void props.onMarkMerged(props.node)}>
-            <CheckCircle2 size={14} />
-            写入总文档
-          </button>
-        </div>
+          <div class="mt-4 flex flex-wrap gap-2">
+            <button class="inline-flex items-center gap-2 rounded-lg border border-dls-border bg-dls-hover px-3 py-2 text-xs" onClick={() => void props.onCreateNodeSession(props.node)}>
+              <MessageSquarePlus size={14} />
+              {(props.node.activeSessionId ?? props.node.sessionId) ? "打开节点对话" : "创建节点对话"}
+            </button>
+            <button class="inline-flex items-center gap-2 rounded-lg border border-dls-border bg-dls-hover px-3 py-2 text-xs" onClick={() => void props.onMarkMerged(props.node)}>
+              <CheckCircle2 size={14} />
+              写入总文档
+            </button>
+          </div>
+        </Show>
       </section>
 
-      <details class="rounded-2xl border border-dls-border bg-dls-surface p-4" open>
+      <Show when={isLeaf()}>
+        <details class="rounded-2xl border border-dls-border bg-dls-surface p-4" open>
         <summary class="mb-3 flex cursor-pointer list-none items-center gap-2 text-sm font-semibold"><Folder size={14} />参考文件绑定</summary>
         <div class="space-y-2 text-xs">
           <For each={props.referenceFiles}>
@@ -136,9 +157,9 @@ export default function BidWorkbenchNodeDetailPanel(props: BidWorkbenchNodeDetai
             }}
           </For>
         </div>
-      </details>
+        </details>
 
-      <details class="rounded-2xl border border-dls-border bg-dls-surface p-4" open>
+        <details class="rounded-2xl border border-dls-border bg-dls-surface p-4" open>
         <summary class="mb-3 flex cursor-pointer list-none items-center gap-2 text-sm font-semibold"><FileText size={14} />产出文件绑定</summary>
         <div class="space-y-2 text-xs">
           <For each={props.outputFiles}>
@@ -164,9 +185,9 @@ export default function BidWorkbenchNodeDetailPanel(props: BidWorkbenchNodeDetai
             }}
           </For>
         </div>
-      </details>
+        </details>
 
-      <details class="rounded-2xl border border-dls-border bg-dls-surface p-4">
+        <details class="rounded-2xl border border-dls-border bg-dls-surface p-4">
         <summary class="mb-3 flex cursor-pointer list-none items-center gap-2 text-sm font-semibold"><CheckCircle2 size={14} />模板文件绑定</summary>
         <div class="space-y-2 text-xs">
           <For each={props.templateFiles}>
@@ -182,9 +203,9 @@ export default function BidWorkbenchNodeDetailPanel(props: BidWorkbenchNodeDetai
             }}
           </For>
         </div>
-      </details>
+        </details>
 
-      <details class="rounded-2xl border border-dls-border bg-dls-surface p-4">
+        <details class="rounded-2xl border border-dls-border bg-dls-surface p-4">
         <summary class="mb-3 flex cursor-pointer list-none items-center gap-2 text-sm font-semibold"><Folder size={14} />范围选择</summary>
         <div class="mb-3 grid grid-cols-1 gap-2 text-xs">
           <select class="rounded-lg border border-dls-border bg-dls-background px-3 py-2" value={props.rangeSourcePath} onInput={(event) => props.onSetRangeSourcePath(event.currentTarget.value)}>
@@ -224,9 +245,9 @@ export default function BidWorkbenchNodeDetailPanel(props: BidWorkbenchNodeDetai
             <div class="rounded-lg border border-dashed border-dls-border px-3 py-3 text-dls-secondary">当前节点还没有范围选择</div>
           </Show>
         </div>
-      </details>
+        </details>
 
-      <details class="rounded-2xl border border-dls-border bg-dls-surface p-4">
+        <details class="rounded-2xl border border-dls-border bg-dls-surface p-4">
         <summary class="mb-3 flex cursor-pointer list-none items-center gap-2 text-sm font-semibold"><FileText size={14} />协作标记</summary>
         <div class="mb-3 grid grid-cols-[120px_1fr_auto] gap-2">
           <select class="rounded-lg border border-dls-border bg-dls-background px-3 py-2 text-xs" value={props.markKind} onInput={(event) => props.onSetMarkKind(event.currentTarget.value as OpenworkBidWorkbenchMark["kind"])}>
@@ -254,7 +275,8 @@ export default function BidWorkbenchNodeDetailPanel(props: BidWorkbenchNodeDetai
             <div class="rounded-lg border border-dashed border-dls-border px-3 py-3 text-dls-secondary">当前节点还没有协作标记</div>
           </Show>
         </div>
-      </details>
+        </details>
+      </Show>
     </div>
   );
 }

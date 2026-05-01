@@ -15,8 +15,9 @@ test("bid-workbench creates node sessions through the workspace proxy instead of
 test("bid-workbench waits for both workspace id and openwork client before caching empty workspace data", () => {
   const file = readFileSync(join(import.meta.dir, "bid-workbench.tsx"), "utf8");
 
-  expect(file).toContain("const workspaceResourceKey = createMemo(() => {");
-  expect(file).toContain("return id && props.openworkServerClient ? id : undefined;");
+  expect(file).toContain("const [stableWorkspaceId, setStableWorkspaceId] = createSignal<string | null>(null);");
+  expect(file).toContain("setStableWorkspaceId((current) => (current === id ? current : id));");
+  expect(file).toContain("const workspaceResourceKey = createMemo(() => stableWorkspaceId() ?? undefined);");
   expect(file).toContain("createResource(\n    workspaceResourceKey,");
   expect(file).toContain("const [visibleWorkbenchState, setVisibleWorkbenchState] = createSignal<OpenworkBidWorkbenchState>(EMPTY_WORKBENCH_STATE);");
   expect(file).toContain("const currentWorkbenchState = createMemo(() => {");

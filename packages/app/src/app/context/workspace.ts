@@ -1374,8 +1374,12 @@ export function createWorkspaceStore(options: {
         if (navigate && !options.selectedSessionId()) {
           const pathname = typeof window !== "undefined" ? window.location.pathname.toLowerCase() : "";
           const hash = typeof window !== "undefined" ? window.location.hash.toLowerCase() : "";
-          const isDashboardRoute = pathname.startsWith("/dashboard") || hash.startsWith("#/dashboard");
-          if (!isDashboardRoute) {
+          const preservesExplicitRoute =
+            pathname.startsWith("/dashboard") ||
+            pathname.startsWith("/bid-workbench") ||
+            hash.startsWith("#/dashboard") ||
+            hash.startsWith("#/bid-workbench");
+          if (!preservesExplicitRoute) {
             options.setTab("scheduled");
             options.setView("session");
           }

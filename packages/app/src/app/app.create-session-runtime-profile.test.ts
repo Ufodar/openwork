@@ -20,3 +20,12 @@ test("createSessionAndOpen uses the shared OpenWork action gate instead of an in
   expect(file).toContain("ensureOpenworkServerActionReady({");
   expect(file).not.toContain("const health = unwrap(await c.global.health");
 });
+
+test("OpenWork client recreation uses the active workspace scoped opencode route", () => {
+  const file = readFileSync(join(import.meta.dir, "app.tsx"), "utf8");
+
+  expect(file).toContain("const resolveActiveOpencodeClientBaseUrl = () => {");
+  expect(file).toContain("buildOpenworkWorkspaceBaseUrl(hostBaseUrl, workspaceId)");
+  expect(file).toContain("const opencodeUrl = resolveActiveOpencodeClientBaseUrl();");
+  expect(file).not.toContain("const opencodeUrl = `${openworkBaseUrl.replace(/\\\\/+$/, \"\")}/opencode`;");
+});

@@ -175,6 +175,7 @@ import {
   type OpenCodeRouterInfo,
 } from "./lib/tauri";
 import {
+  buildOpenworkWorkspaceBaseUrl,
   parseOpenworkWorkspaceIdFromUrl,
   readOpenworkConnectInviteFromSearch,
   stripOpenworkConnectInviteFromUrl,
@@ -576,6 +577,22 @@ export default function App() {
     const auth = openworkServerAuth();
     return createOpenworkServerClient({ baseUrl, token: auth.token, hostToken: auth.hostToken });
   });
+
+  const resolveActiveOpencodeClientBaseUrl = () => {
+    const current = baseUrl().trim();
+    if (current) return current.replace(/\/+$/, "");
+
+    const hostBaseUrl = openworkServerBaseUrl().trim();
+    if (!hostBaseUrl) return "";
+
+    const workspaceId =
+      workspaceStore.activeWorkspaceId().trim() ||
+      openworkServerWorkspaceId()?.trim() ||
+      parseOpenworkWorkspaceIdFromUrl(hostBaseUrl) ||
+      "";
+    const workspaceBaseUrl = buildOpenworkWorkspaceBaseUrl(hostBaseUrl, workspaceId) ?? hostBaseUrl;
+    return `${workspaceBaseUrl.replace(/\/+$/, "")}/opencode`;
+  };
 
   const devtoolsOpenworkClient = createMemo(() => openworkServerClient());
 
@@ -1316,10 +1333,9 @@ export default function App() {
     if (!content && !resolvedDraft.attachments.length) return false;
 
     const recreateOpenworkClient = () => {
-      const openworkBaseUrl = openworkServerBaseUrl().trim();
+      const opencodeUrl = resolveActiveOpencodeClientBaseUrl();
       const auth = openworkServerAuth();
-      if (!openworkBaseUrl || !auth.token) return null;
-      const opencodeUrl = `${openworkBaseUrl.replace(/\/+$/, "")}/opencode`;
+      if (!opencodeUrl || !auth.token) return null;
       const nextClient = createClient(opencodeUrl, undefined, { token: auth.token, mode: "openwork" });
       setClient(nextClient);
       return nextClient;
@@ -5232,10 +5248,9 @@ export default function App() {
 
     let activeClient = client();
     if (!activeClient) {
-      const openworkBaseUrl = openworkServerBaseUrl().trim();
+      const opencodeUrl = resolveActiveOpencodeClientBaseUrl();
       const auth = openworkServerAuth();
-      if (openworkBaseUrl && auth.token) {
-        const opencodeUrl = `${openworkBaseUrl.replace(/\/+$/, "")}/opencode`;
+      if (opencodeUrl && auth.token) {
         activeClient = createClient(opencodeUrl, undefined, { token: auth.token, mode: "openwork" });
         setClient(activeClient);
       }
@@ -5425,10 +5440,9 @@ export default function App() {
 
     let activeClient = client();
     if (!activeClient) {
-      const openworkBaseUrl = openworkServerBaseUrl().trim();
+      const opencodeUrl = resolveActiveOpencodeClientBaseUrl();
       const auth = openworkServerAuth();
-      if (openworkBaseUrl && auth.token) {
-        const opencodeUrl = `${openworkBaseUrl.replace(/\/+$/, "")}/opencode`;
+      if (opencodeUrl && auth.token) {
         activeClient = createClient(opencodeUrl, undefined, { token: auth.token, mode: "openwork" });
         setClient(activeClient);
       }

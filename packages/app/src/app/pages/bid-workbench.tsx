@@ -32,22 +32,32 @@ import {
 } from "./bid-workbench/shared";
 import type { BidWorkbenchFileCategory, BidWorkbenchTab } from "./bid-workbench/shared";
 
-async function listCategoryFiles(
+function normalizeWorkspaceFiles(
+  items: Array<{ name: string; updatedAt?: number; size?: number; type?: string }> = [],
+): BidWorkbenchWorkspaceFile[] {
+  return items.map((item) => ({
+    path: item.name,
+    updatedAt: item.updatedAt,
+    size: item.size,
+    type: item.type,
+    originalName: item.name.split("/").pop(),
+  }));
+}
+
+function filterCategoryFiles(
+  files: BidWorkbenchWorkspaceFile[],
+  category: BidWorkbenchFileCategory,
+): BidWorkbenchWorkspaceFile[] {
+  const prefix = `${FILE_CATEGORY_ROOTS[category]}/`;
+  return files.filter((file) => file.path.startsWith(prefix));
+}
+
+async function listWorkspaceFiles(
   client: NonNullable<SessionViewProps["openworkServerClient"]>,
   workspaceId: string,
-  category: BidWorkbenchFileCategory,
 ): Promise<BidWorkbenchWorkspaceFile[]> {
   const data = await client.listWorkspaceDocuments(workspaceId);
-  const prefix = `${FILE_CATEGORY_ROOTS[category]}/`;
-  return (data.items ?? [])
-    .filter((item) => item.name.startsWith(prefix))
-    .map((item) => ({
-      path: item.name,
-      updatedAt: item.updatedAt,
-      size: item.size,
-      type: item.type,
-      originalName: item.name.split("/").pop(),
-    }));
+  return normalizeWorkspaceFiles(data.items ?? []);
 }
 
 export default function BidWorkbenchView(props: SessionViewProps) {
@@ -67,10 +77,7 @@ export default function BidWorkbenchView(props: SessionViewProps) {
   const [rangeValueDraft, setRangeValueDraft] = createSignal("");
   const [rangeNoteDraft, setRangeNoteDraft] = createSignal("");
   const [visibleWorkbenchState, setVisibleWorkbenchState] = createSignal<OpenworkBidWorkbenchState>(EMPTY_WORKBENCH_STATE);
-  const [visibleTenderFiles, setVisibleTenderFiles] = createSignal<BidWorkbenchWorkspaceFile[]>([]);
-  const [visibleReferenceFiles, setVisibleReferenceFiles] = createSignal<BidWorkbenchWorkspaceFile[]>([]);
-  const [visibleOutputFiles, setVisibleOutputFiles] = createSignal<BidWorkbenchWorkspaceFile[]>([]);
-  const [visibleTemplateFiles, setVisibleTemplateFiles] = createSignal<BidWorkbenchWorkspaceFile[]>([]);
+  const [visibleWorkspaceFiles, setVisibleWorkspaceFiles] = createSignal<BidWorkbenchWorkspaceFile[]>([]);
   const [stableWorkspaceId, setStableWorkspaceId] = createSignal<string | null>(null);
   const actorName = createMemo(() => props.sessionUsername?.trim() || DEFAULT_NODE_AUTHOR);
 
@@ -92,40 +99,13 @@ export default function BidWorkbenchView(props: SessionViewProps) {
     },
   );
 
-  const [tenderFiles, { refetch: refetchTenderFiles }] = createResource(
+  const [workspaceFiles, { refetch: refetchWorkspaceFiles }] = createResource(
     workspaceResourceKey,
     async (currentWorkspaceId) => {
       const client = props.openworkServerClient;
       if (!currentWorkspaceId) return [] as BidWorkbenchWorkspaceFile[];
-      if (!client) return visibleTenderFiles();
-      return listCategoryFiles(client, currentWorkspaceId, "tender");
-    },
-  );
-  const [referenceFiles, { refetch: refetchReferenceFiles }] = createResource(
-    workspaceResourceKey,
-    async (currentWorkspaceId) => {
-      const client = props.openworkServerClient;
-      if (!currentWorkspaceId) return [] as BidWorkbenchWorkspaceFile[];
-      if (!client) return visibleReferenceFiles();
-      return listCategoryFiles(client, currentWorkspaceId, "reference");
-    },
-  );
-  const [outputFiles, { refetch: refetchOutputFiles }] = createResource(
-    workspaceResourceKey,
-    async (currentWorkspaceId) => {
-      const client = props.openworkServerClient;
-      if (!currentWorkspaceId) return [] as BidWorkbenchWorkspaceFile[];
-      if (!client) return visibleOutputFiles();
-      return listCategoryFiles(client, currentWorkspaceId, "output");
-    },
-  );
-  const [templateFiles, { refetch: refetchTemplateFiles }] = createResource(
-    workspaceResourceKey,
-    async (currentWorkspaceId) => {
-      const client = props.openworkServerClient;
-      if (!currentWorkspaceId) return [] as BidWorkbenchWorkspaceFile[];
-      if (!client) return visibleTemplateFiles();
-      return listCategoryFiles(client, currentWorkspaceId, "templates");
+      if (!client) return visibleWorkspaceFiles();
+      return listWorkspaceFiles(client, currentWorkspaceId);
     },
   );
 
@@ -138,30 +118,9 @@ export default function BidWorkbenchView(props: SessionViewProps) {
 
   createEffect(() => {
     const key = workspaceResourceKey();
-    const files = tenderFiles();
+    const files = workspaceFiles();
     if (!key || !files) return;
-    setVisibleTenderFiles(files);
-  });
-
-  createEffect(() => {
-    const key = workspaceResourceKey();
-    const files = referenceFiles();
-    if (!key || !files) return;
-    setVisibleReferenceFiles(files);
-  });
-
-  createEffect(() => {
-    const key = workspaceResourceKey();
-    const files = outputFiles();
-    if (!key || !files) return;
-    setVisibleOutputFiles(files);
-  });
-
-  createEffect(() => {
-    const key = workspaceResourceKey();
-    const files = templateFiles();
-    if (!key || !files) return;
-    setVisibleTemplateFiles(files);
+    setVisibleWorkspaceFiles(files);
   });
 
   const currentWorkbenchState = createMemo(() => {
@@ -170,28 +129,26 @@ export default function BidWorkbenchView(props: SessionViewProps) {
     return key && nextState ? nextState : visibleWorkbenchState();
   });
 
-  const currentTenderFiles = createMemo(() => {
+  const currentWorkspaceFiles = createMemo(() => {
     const key = workspaceResourceKey();
-    const files = tenderFiles();
-    return key && files ? files : visibleTenderFiles();
+    const files = workspaceFiles();
+    return key && files ? files : visibleWorkspaceFiles();
+  });
+
+  const currentTenderFiles = createMemo(() => {
+    return filterCategoryFiles(currentWorkspaceFiles(), "tender");
   });
 
   const currentReferenceFiles = createMemo(() => {
-    const key = workspaceResourceKey();
-    const files = referenceFiles();
-    return key && files ? files : visibleReferenceFiles();
+    return filterCategoryFiles(currentWorkspaceFiles(), "reference");
   });
 
   const currentOutputFiles = createMemo(() => {
-    const key = workspaceResourceKey();
-    const files = outputFiles();
-    return key && files ? files : visibleOutputFiles();
+    return filterCategoryFiles(currentWorkspaceFiles(), "output");
   });
 
   const currentTemplateFiles = createMemo(() => {
-    const key = workspaceResourceKey();
-    const files = templateFiles();
-    return key && files ? files : visibleTemplateFiles();
+    return filterCategoryFiles(currentWorkspaceFiles(), "templates");
   });
 
   const nodesById = createMemo(() => {
@@ -264,10 +221,7 @@ export default function BidWorkbenchView(props: SessionViewProps) {
   const refreshAll = async () => {
     await Promise.all([
       refetchWorkbenchState(),
-      refetchTenderFiles(),
-      refetchReferenceFiles(),
-      refetchOutputFiles(),
-      refetchTemplateFiles(),
+      refetchWorkspaceFiles(),
     ]);
   };
 

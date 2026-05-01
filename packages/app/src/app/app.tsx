@@ -6868,7 +6868,7 @@ export default function App() {
     onLogout: logoutWebSession,
     openworkServerSettings: openworkServerSettings(),
     openworkServerHostInfo: openworkServerHostInfo(),
-    openworkServerWorkspaceId: openworkServerWorkspaceId(),
+    openworkServerWorkspaceId: resolvedDevtoolsWorkspaceId(),
     engineInfo: workspaceStore.engine(),
     stopHost,
     headerStatus: headerStatus(),

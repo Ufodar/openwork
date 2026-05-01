@@ -30,4 +30,5 @@ test("app proactively resolves the workspace id when opening bid-workbench direc
   expect(file).toContain("void ensureOpenworkServerWorkspaceIdResolved().catch(() => undefined);");
   expect(file).toContain("const preserveExplicitBidWorkbenchWorkspace =");
   expect(file).toContain("window.location.pathname.trim().toLowerCase().startsWith(\"/bid-workbench\")");
+  expect(file).toContain("openworkServerWorkspaceId: resolvedDevtoolsWorkspaceId(),");
 });

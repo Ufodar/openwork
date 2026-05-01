@@ -235,6 +235,16 @@ export default function BidWorkbenchView(props: SessionViewProps) {
   });
 
   const currentRootOutputLabel = createMemo(() => currentWorkbenchState().project.rootOutputPath ?? "未设置总文档");
+  const currentTreeSummary = createMemo(() =>
+    [
+      `结构版本 ${currentWorkbenchState().project.outlineRevision ?? 0}`,
+      `叶子节点 ${leafNodes().length}`,
+      `已锁定 ${lockedNodes().length}`,
+      `无引用 ${nodesWithoutReferences().length}`,
+      `无主产出 ${nodesWithoutOutputs().length}`,
+      `待合并 ${leafNodes().filter((node) => node.mergeRequested && !node.mergeApplied).length}`,
+    ].join(" · "),
+  );
 
   createEffect(() => {
     const nodes = currentWorkbenchState().nodes ?? [];
@@ -536,7 +546,7 @@ export default function BidWorkbenchView(props: SessionViewProps) {
         }`}
         onClick={() => setSelectedNodeId(node.id)}
       >
-        <div class="flex items-start justify-between gap-3">
+        <div class="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
           <div class="min-w-0">
             <div class="truncate font-medium">{node.title}</div>
             <div class="mt-1 flex flex-wrap items-center gap-2 text-[11px] opacity-80">
@@ -549,7 +559,7 @@ export default function BidWorkbenchView(props: SessionViewProps) {
               </Show>
             </div>
           </div>
-          <div class="flex items-center gap-2 text-[11px]">
+          <div class="flex flex-wrap items-center justify-end gap-2 text-[11px]">
             <Show when={node.lockedBy}>
               <span class="inline-flex items-center gap-1 rounded-full bg-amber-3 px-2 py-0.5 text-amber-11">
                 <Lock size={12} />
@@ -639,8 +649,12 @@ export default function BidWorkbenchView(props: SessionViewProps) {
         </Match>
 
         <Match when={activeTab() === "workspace"}>
-          <div class="grid min-h-0 flex-1 grid-cols-[300px_minmax(560px,1fr)_420px]">
-            <div class="min-h-0 overflow-auto border-r border-dls-border bg-dls-surface/60 p-4">
+          <div class="grid min-h-0 flex-1 grid-cols-1 xl:grid-cols-[280px_minmax(0,1fr)_390px]">
+            <aside class="min-h-0 overflow-auto border-b border-dls-border bg-dls-surface/60 p-3 xl:border-b-0 xl:border-r">
+              <div class="mb-3">
+                <div class="text-sm font-semibold">资源区</div>
+                <div class="mt-1 text-xs text-dls-secondary">模板、参考资料和产出文件都集中在这里，默认优先维护模板和参考文件。</div>
+              </div>
               <div class="space-y-5">
                 <For each={["tender", "reference", "output", "templates"] as const}>
                   {(category) => (
@@ -658,26 +672,34 @@ export default function BidWorkbenchView(props: SessionViewProps) {
                   )}
                 </For>
               </div>
-            </div>
+            </aside>
 
-            <div class="min-h-0 overflow-auto p-4">
-              <div class="mb-4 flex items-center justify-between gap-3">
-                <div>
-                  <div class="text-base font-semibold">投标章节树</div>
-                  <div class="mt-1 text-xs text-dls-secondary">中间区域是核心工作区。这里直接维护模板章节树，以及每个叶子节点要引用什么、产出什么、当前由谁编辑。</div>
-                </div>
-                <div class="flex items-center gap-2">
-                  <button
+            <main class="min-h-0 overflow-auto p-4">
+              <div class="sticky top-0 z-10 mb-4 rounded-2xl border border-dls-border bg-dls-background/95 p-3 backdrop-blur">
+                <div class="flex flex-wrap items-start justify-between gap-3">
+                  <div class="min-w-0">
+                    <div class="text-base font-semibold">投标章节树</div>
+                    <div class="mt-1 text-xs text-dls-secondary">
+                      中间区域是核心工作区。章节树直接展示叶子节点的引用、产出、锁和会话状态。
+                    </div>
+                    <div class="mt-2 flex flex-wrap gap-2 text-[11px]">
+                      <span class="rounded-full bg-dls-surface px-3 py-1">主源：{currentWorkbenchState().project.outlineSourcePath ? currentOutlineSourceLabel() : "未设置"}</span>
+                      <span class="rounded-full bg-dls-surface px-3 py-1">总文档：{currentWorkbenchState().project.rootOutputPath ?? "未设置"}</span>
+                    </div>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <button
                     class="inline-flex items-center gap-2 rounded-lg border border-dls-border bg-dls-surface px-3 py-2 text-xs"
                     onClick={() => void refreshOutline()}
                     disabled={refreshingOutline() || !currentWorkbenchState().project.outlineSourcePath}
-                  >
-                    <RefreshCw size={14} />
-                    {refreshingOutline() ? "刷新中..." : "刷新章节树"}
-                  </button>
-                  <Show when={saving()}>
-                    <div class="text-xs text-dls-secondary">保存中...</div>
-                  </Show>
+                    >
+                      <RefreshCw size={14} />
+                      {refreshingOutline() ? "刷新中..." : "刷新章节树"}
+                    </button>
+                    <Show when={saving()}>
+                      <div class="text-xs text-dls-secondary">保存中...</div>
+                    </Show>
+                  </div>
                 </div>
               </div>
 
@@ -685,41 +707,30 @@ export default function BidWorkbenchView(props: SessionViewProps) {
                 <div class="mb-4 rounded-xl border border-red-6 bg-red-2 px-3 py-2 text-xs text-red-11">{saveError()}</div>
               </Show>
 
-              <div class="mb-4 grid grid-cols-4 gap-3 text-xs">
-                <div class="rounded-2xl border border-dls-border bg-dls-surface px-3 py-3">
-                  <div class="text-dls-secondary">章节主源</div>
-                  <div class="mt-1 line-clamp-2 font-medium text-dls-text">{currentOutlineSourceLabel()}</div>
-                </div>
-                  <div class="rounded-2xl border border-dls-border bg-dls-surface px-3 py-3">
-                    <div class="text-dls-secondary">结构版本</div>
-                    <div class="mt-1 font-medium text-dls-text">{currentWorkbenchState().project.outlineRevision ?? 0}</div>
-                  </div>
-                  <div class="rounded-2xl border border-dls-border bg-dls-surface px-3 py-3">
-                    <div class="text-dls-secondary">最近刷新</div>
-                    <div class="mt-1 font-medium text-dls-text">{formatTimestamp(currentWorkbenchState().refresh?.createdAt)}</div>
-                  </div>
-                <div class="rounded-2xl border border-dls-border bg-dls-surface px-3 py-3">
-                  <div class="text-dls-secondary">总文档目标</div>
-                  <div class="mt-1 line-clamp-2 font-medium text-dls-text">{currentRootOutputLabel()}</div>
-                </div>
-              </div>
-
               <Show
                 when={(currentWorkbenchState().nodes?.length ?? 0) > 0}
                 fallback={<div class="rounded-2xl border border-dashed border-dls-border bg-dls-surface px-4 py-8 text-sm text-dls-secondary">还没有章节树。请先在左侧选择一个文件设为章节主源，再刷新章节树。</div>}
               >
-                <div class="min-h-[520px] rounded-2xl border border-dls-border bg-dls-surface p-3">
-                  <Show when={currentWorkbenchState().refresh?.summary}>
-                    <div class="mb-3 rounded-xl bg-dls-background px-3 py-2 text-[11px] text-dls-secondary">{currentWorkbenchState().refresh?.summary}</div>
-                  </Show>
-                  <div class="space-y-3">
+                <div class="min-h-[520px] rounded-2xl border border-dls-border bg-dls-surface">
+                  <div class="border-b border-dls-border px-3 py-2 text-[11px] text-dls-secondary">
+                    {currentWorkbenchState().refresh?.summary ?? currentTreeSummary()}
+                  </div>
+                  <div class="grid grid-cols-[minmax(0,1fr)_240px] gap-3 border-b border-dls-border px-3 py-2 text-[11px] font-medium text-dls-secondary">
+                    <div>章节节点</div>
+                    <div class="text-right">引用 / 产出 / 协作</div>
+                  </div>
+                  <div class="space-y-3 p-3">
                     <For each={rootNodes()}>{(node) => renderNodeTree(node)}</For>
                   </div>
                 </div>
               </Show>
-            </div>
+            </main>
 
-            <div class="min-h-0 overflow-auto border-l border-dls-border bg-dls-surface/60 p-4">
+            <aside class="min-h-0 overflow-auto border-t border-dls-border bg-dls-surface/60 p-4 xl:border-l xl:border-t-0">
+              <div class="mb-3">
+                <div class="text-sm font-semibold">节点检查器</div>
+                <div class="mt-1 text-xs text-dls-secondary">右侧只处理当前选中节点。高频操作置顶，低频配置折叠。</div>
+              </div>
               <Show
                 when={selectedNode()}
                 fallback={<div class="rounded-2xl border border-dashed border-dls-border px-4 py-8 text-sm text-dls-secondary">请选择一个节点</div>}
@@ -764,7 +775,7 @@ export default function BidWorkbenchView(props: SessionViewProps) {
                   );
                 }}
               </Show>
-            </div>
+            </aside>
           </div>
         </Match>
 

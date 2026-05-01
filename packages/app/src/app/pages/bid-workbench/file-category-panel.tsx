@@ -18,15 +18,29 @@ type BidWorkbenchFileCategoryPanelProps = {
 };
 
 export default function BidWorkbenchFileCategoryPanel(props: BidWorkbenchFileCategoryPanelProps) {
+  const fileCount = () => props.files.length;
+  const shouldOpen = () =>
+    props.category === "templates" ||
+    props.category === "reference" ||
+    fileCount() > 0 ||
+    props.currentOutlineSourcePath?.startsWith(FILE_CATEGORY_ROOTS[props.category]) ||
+    props.currentRootOutputPath?.startsWith(FILE_CATEGORY_ROOTS[props.category]);
+
   return (
-    <section class="rounded-2xl border border-dls-border bg-dls-surface p-3">
-      <div class="mb-3 flex items-center justify-between gap-2">
-        <div>
+    <details class="rounded-2xl border border-dls-border bg-dls-surface" open={shouldOpen()}>
+      <summary class="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-3">
+        <div class="min-w-0">
           <div class="text-sm font-semibold">{CATEGORY_LABELS[props.category]}</div>
-          <div class="text-[11px] text-dls-secondary">{FILE_CATEGORY_ROOTS[props.category]}</div>
+          <div class="mt-1 text-[11px] text-dls-secondary">{FILE_CATEGORY_ROOTS[props.category]}</div>
         </div>
-        <div class="flex items-center gap-2">
-          <label class="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-dls-border bg-dls-hover px-2 py-1 text-[11px] text-dls-text">
+        <div class="shrink-0 rounded-full bg-dls-background px-2 py-1 text-[11px] text-dls-secondary">
+          {fileCount()} 个
+        </div>
+      </summary>
+
+      <div class="border-t border-dls-border px-3 pb-3 pt-2">
+        <div class="mb-3 flex items-center gap-2">
+          <label class="inline-flex min-h-11 cursor-pointer items-center gap-1 rounded-lg border border-dls-border bg-dls-hover px-2 py-2 text-[11px] text-dls-text">
             <FolderPlus size={12} />
             上传文件
             <input
@@ -41,7 +55,7 @@ export default function BidWorkbenchFileCategoryPanel(props: BidWorkbenchFileCat
               }}
             />
           </label>
-          <label class="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-dls-border bg-dls-hover px-2 py-1 text-[11px] text-dls-text">
+          <label class="inline-flex min-h-11 cursor-pointer items-center gap-1 rounded-lg border border-dls-border bg-dls-hover px-2 py-2 text-[11px] text-dls-text">
             <FolderPlus size={12} />
             上传目录
             <input
@@ -61,56 +75,56 @@ export default function BidWorkbenchFileCategoryPanel(props: BidWorkbenchFileCat
             />
           </label>
         </div>
-      </div>
 
-      <Show when={props.uploading}>
-        <div class="mb-2 rounded-lg bg-dls-hover px-2 py-1 text-xs text-dls-secondary">上传中...</div>
-      </Show>
+        <Show when={props.uploading}>
+          <div class="mb-2 rounded-lg bg-dls-hover px-2 py-1 text-xs text-dls-secondary">上传中...</div>
+        </Show>
 
-      <div class="space-y-2 text-xs">
-        <For each={props.files}>
-          {(file) => {
-            const path = () => props.displayFilePath(file);
-            const isOutlineSource = () => props.currentOutlineSourcePath === path();
-            const isRootOutput = () => props.currentRootOutputPath === path();
-            return (
-              <div class="rounded-lg border border-dls-border bg-dls-background px-2 py-2">
-                <div class="truncate font-medium">{path()}</div>
-                <div class="mt-1 flex items-center justify-between gap-2 text-[11px] text-dls-secondary">
-                  <span>{file.size ?? 0} B</span>
-                  <div class="flex items-center gap-2">
-                    <button
-                      class={`rounded-md px-2 py-1 ${
-                        isOutlineSource()
-                          ? "bg-dls-accent text-white"
-                          : "border border-dls-border bg-dls-hover text-dls-text"
-                      }`}
-                      onClick={() => void props.onSetOutlineSource(path(), props.category as OpenworkBidWorkbenchSourceType)}
-                    >
-                      {isOutlineSource() ? "章节主源" : "设为主源"}
-                    </button>
-                    <Show when={props.category === "output"}>
+        <div class="space-y-2 text-xs">
+          <For each={props.files}>
+            {(file) => {
+              const path = () => props.displayFilePath(file);
+              const isOutlineSource = () => props.currentOutlineSourcePath === path();
+              const isRootOutput = () => props.currentRootOutputPath === path();
+              return (
+                <div class="rounded-xl border border-dls-border bg-dls-background px-2 py-2">
+                  <div class="truncate text-[12px] font-medium">{path()}</div>
+                  <div class="mt-1 flex items-center justify-between gap-2 text-[11px] text-dls-secondary">
+                    <span>{file.size ?? 0} B</span>
+                    <div class="flex items-center gap-2">
                       <button
                         class={`rounded-md px-2 py-1 ${
-                          isRootOutput()
-                            ? "bg-emerald-6 text-white"
+                          isOutlineSource()
+                            ? "bg-dls-accent text-white"
                             : "border border-dls-border bg-dls-hover text-dls-text"
                         }`}
-                        onClick={() => void props.onSetRootOutput(isRootOutput() ? null : path())}
+                        onClick={() => void props.onSetOutlineSource(path(), props.category as OpenworkBidWorkbenchSourceType)}
                       >
-                        {isRootOutput() ? "总文档" : "设为总文档"}
+                        {isOutlineSource() ? "章节主源" : "设为主源"}
                       </button>
-                    </Show>
+                      <Show when={props.category === "output"}>
+                        <button
+                          class={`rounded-md px-2 py-1 ${
+                            isRootOutput()
+                              ? "bg-emerald-6 text-white"
+                              : "border border-dls-border bg-dls-hover text-dls-text"
+                          }`}
+                          onClick={() => void props.onSetRootOutput(isRootOutput() ? null : path())}
+                        >
+                          {isRootOutput() ? "总文档" : "设为总文档"}
+                        </button>
+                      </Show>
+                    </div>
                   </div>
                 </div>
-              </div>
-            );
-          }}
-        </For>
-        <Show when={props.files.length === 0}>
-          <div class="rounded-lg border border-dashed border-dls-border px-2 py-3 text-dls-secondary">暂无文件</div>
-        </Show>
+              );
+            }}
+          </For>
+          <Show when={props.files.length === 0}>
+            <div class="rounded-lg border border-dashed border-dls-border px-2 py-3 text-dls-secondary">暂无文件</div>
+          </Show>
+        </div>
       </div>
-    </section>
+    </details>
   );
 }

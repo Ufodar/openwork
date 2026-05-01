@@ -83,13 +83,11 @@ export default function BidWorkbenchNodeDetailPanel(props: BidWorkbenchNodeDetai
           </button>
         </div>
 
-        <div class="mt-4 grid grid-cols-2 gap-3 text-xs">
-          <div class="rounded-xl bg-dls-background px-3 py-2"><div class="text-dls-secondary">节点类型</div><div class="mt-1 font-medium">{props.node.isLeaf ? "叶子节点" : "目录节点"}</div></div>
-          <div class="rounded-xl bg-dls-background px-3 py-2"><div class="text-dls-secondary">当前编辑人</div><div class="mt-1 font-medium">{props.node.lockedBy ?? "未锁定"}</div></div>
-          <div class="rounded-xl bg-dls-background px-3 py-2"><div class="text-dls-secondary">绑定会话</div><div class="mt-1 break-all font-medium">{props.node.activeSessionId ?? props.node.sessionId ?? "未创建"}</div></div>
-          <div class="rounded-xl bg-dls-background px-3 py-2"><div class="text-dls-secondary">合并状态</div><div class="mt-1 font-medium">{props.node.mergeApplied ? "已合并" : props.node.mergeRequested ? "待合并" : "未登记"}</div></div>
-          <div class="rounded-xl bg-dls-background px-3 py-2"><div class="text-dls-secondary">来源位置</div><div class="mt-1 break-all font-medium">{props.node.sourceLocator}</div></div>
-          <div class="rounded-xl bg-dls-background px-3 py-2"><div class="text-dls-secondary">模板文件</div><div class="mt-1 break-all font-medium">{props.node.templatePath ?? "未绑定"}</div></div>
+        <div class="mt-4 flex flex-wrap gap-2 text-[11px]">
+          <span class="rounded-full bg-dls-background px-3 py-1">节点：{props.node.isLeaf ? "叶子" : "目录"}</span>
+          <span class="rounded-full bg-dls-background px-3 py-1">当前编辑：{props.node.lockedBy ?? "未锁定"}</span>
+          <span class="rounded-full bg-dls-background px-3 py-1">会话：{props.node.activeSessionId ?? props.node.sessionId ? "已绑定" : "未创建"}</span>
+          <span class="rounded-full bg-dls-background px-3 py-1">合并：{props.node.mergeApplied ? "已合并" : props.node.mergeRequested ? "待合并" : "未登记"}</span>
         </div>
 
         <div class="mt-4 grid grid-cols-1 gap-3 text-xs">
@@ -122,8 +120,8 @@ export default function BidWorkbenchNodeDetailPanel(props: BidWorkbenchNodeDetai
         </div>
       </section>
 
-      <section class="rounded-2xl border border-dls-border bg-dls-surface p-4">
-        <div class="mb-3 flex items-center gap-2 text-sm font-semibold"><Folder size={14} />参考文件绑定</div>
+      <details class="rounded-2xl border border-dls-border bg-dls-surface p-4" open>
+        <summary class="mb-3 flex cursor-pointer list-none items-center gap-2 text-sm font-semibold"><Folder size={14} />参考文件绑定</summary>
         <div class="space-y-2 text-xs">
           <For each={props.referenceFiles}>
             {(file) => {
@@ -138,10 +136,10 @@ export default function BidWorkbenchNodeDetailPanel(props: BidWorkbenchNodeDetai
             }}
           </For>
         </div>
-      </section>
+      </details>
 
-      <section class="rounded-2xl border border-dls-border bg-dls-surface p-4">
-        <div class="mb-3 flex items-center gap-2 text-sm font-semibold"><FileText size={14} />产出文件绑定</div>
+      <details class="rounded-2xl border border-dls-border bg-dls-surface p-4" open>
+        <summary class="mb-3 flex cursor-pointer list-none items-center gap-2 text-sm font-semibold"><FileText size={14} />产出文件绑定</summary>
         <div class="space-y-2 text-xs">
           <For each={props.outputFiles}>
             {(file) => {
@@ -166,10 +164,10 @@ export default function BidWorkbenchNodeDetailPanel(props: BidWorkbenchNodeDetai
             }}
           </For>
         </div>
-      </section>
+      </details>
 
-      <section class="rounded-2xl border border-dls-border bg-dls-surface p-4">
-        <div class="mb-3 flex items-center gap-2 text-sm font-semibold"><CheckCircle2 size={14} />模板文件绑定</div>
+      <details class="rounded-2xl border border-dls-border bg-dls-surface p-4">
+        <summary class="mb-3 flex cursor-pointer list-none items-center gap-2 text-sm font-semibold"><CheckCircle2 size={14} />模板文件绑定</summary>
         <div class="space-y-2 text-xs">
           <For each={props.templateFiles}>
             {(file) => {
@@ -184,10 +182,10 @@ export default function BidWorkbenchNodeDetailPanel(props: BidWorkbenchNodeDetai
             }}
           </For>
         </div>
-      </section>
+      </details>
 
-      <section class="rounded-2xl border border-dls-border bg-dls-surface p-4">
-        <div class="mb-3 flex items-center gap-2 text-sm font-semibold"><Folder size={14} />范围选择</div>
+      <details class="rounded-2xl border border-dls-border bg-dls-surface p-4">
+        <summary class="mb-3 flex cursor-pointer list-none items-center gap-2 text-sm font-semibold"><Folder size={14} />范围选择</summary>
         <div class="mb-3 grid grid-cols-1 gap-2 text-xs">
           <select class="rounded-lg border border-dls-border bg-dls-background px-3 py-2" value={props.rangeSourcePath} onInput={(event) => props.onSetRangeSourcePath(event.currentTarget.value)}>
             <For each={rangeSourceOptions()}>
@@ -226,10 +224,10 @@ export default function BidWorkbenchNodeDetailPanel(props: BidWorkbenchNodeDetai
             <div class="rounded-lg border border-dashed border-dls-border px-3 py-3 text-dls-secondary">当前节点还没有范围选择</div>
           </Show>
         </div>
-      </section>
+      </details>
 
-      <section class="rounded-2xl border border-dls-border bg-dls-surface p-4">
-        <div class="mb-3 flex items-center gap-2 text-sm font-semibold"><FileText size={14} />协作标记</div>
+      <details class="rounded-2xl border border-dls-border bg-dls-surface p-4">
+        <summary class="mb-3 flex cursor-pointer list-none items-center gap-2 text-sm font-semibold"><FileText size={14} />协作标记</summary>
         <div class="mb-3 grid grid-cols-[120px_1fr_auto] gap-2">
           <select class="rounded-lg border border-dls-border bg-dls-background px-3 py-2 text-xs" value={props.markKind} onInput={(event) => props.onSetMarkKind(event.currentTarget.value as OpenworkBidWorkbenchMark["kind"])}>
             <For each={Object.entries(MARK_KIND_LABELS) as Array<[OpenworkBidWorkbenchMark["kind"], string]>}>
@@ -256,7 +254,7 @@ export default function BidWorkbenchNodeDetailPanel(props: BidWorkbenchNodeDetai
             <div class="rounded-lg border border-dashed border-dls-border px-3 py-3 text-dls-secondary">当前节点还没有协作标记</div>
           </Show>
         </div>
-      </section>
+      </details>
     </div>
   );
 }

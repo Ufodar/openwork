@@ -57,7 +57,7 @@ export default function BidWorkbenchView(props: SessionViewProps) {
   const workspaceId = createMemo(() => props.openworkServerWorkspaceId?.trim() ?? "");
   const workspaceResourceKey = createMemo(() => {
     const id = workspaceId();
-    return id && props.openworkServerClient ? id : "";
+    return id && props.openworkServerClient ? id : undefined;
   });
   const [activeTab, setActiveTab] = createSignal<BidWorkbenchTab>("workspace");
   const [selectedNodeId, setSelectedNodeId] = createSignal<string | null>(null);
@@ -72,6 +72,11 @@ export default function BidWorkbenchView(props: SessionViewProps) {
   const [rangeKind, setRangeKind] = createSignal<OpenworkBidWorkbenchSourceRangeKind>("page-range");
   const [rangeValueDraft, setRangeValueDraft] = createSignal("");
   const [rangeNoteDraft, setRangeNoteDraft] = createSignal("");
+  const [visibleWorkbenchState, setVisibleWorkbenchState] = createSignal<OpenworkBidWorkbenchState>(EMPTY_WORKBENCH_STATE);
+  const [visibleTenderFiles, setVisibleTenderFiles] = createSignal<BidWorkbenchWorkspaceFile[]>([]);
+  const [visibleReferenceFiles, setVisibleReferenceFiles] = createSignal<BidWorkbenchWorkspaceFile[]>([]);
+  const [visibleOutputFiles, setVisibleOutputFiles] = createSignal<BidWorkbenchWorkspaceFile[]>([]);
+  const [visibleTemplateFiles, setVisibleTemplateFiles] = createSignal<BidWorkbenchWorkspaceFile[]>([]);
   const actorName = createMemo(() => props.sessionUsername?.trim() || DEFAULT_NODE_AUTHOR);
 
   const [workbenchState, { mutate: mutateWorkbenchState, refetch: refetchWorkbenchState }] = createResource(
@@ -101,50 +106,115 @@ export default function BidWorkbenchView(props: SessionViewProps) {
     async () => listCategoryFiles(props, "templates"),
   );
 
+  createEffect(() => {
+    const key = workspaceResourceKey();
+    const nextState = workbenchState();
+    if (!key || !nextState) return;
+    setVisibleWorkbenchState(nextState);
+  });
+
+  createEffect(() => {
+    const key = workspaceResourceKey();
+    const files = tenderFiles();
+    if (!key || !files) return;
+    setVisibleTenderFiles(files);
+  });
+
+  createEffect(() => {
+    const key = workspaceResourceKey();
+    const files = referenceFiles();
+    if (!key || !files) return;
+    setVisibleReferenceFiles(files);
+  });
+
+  createEffect(() => {
+    const key = workspaceResourceKey();
+    const files = outputFiles();
+    if (!key || !files) return;
+    setVisibleOutputFiles(files);
+  });
+
+  createEffect(() => {
+    const key = workspaceResourceKey();
+    const files = templateFiles();
+    if (!key || !files) return;
+    setVisibleTemplateFiles(files);
+  });
+
+  const currentWorkbenchState = createMemo(() => {
+    const key = workspaceResourceKey();
+    const nextState = workbenchState();
+    return key && nextState ? nextState : visibleWorkbenchState();
+  });
+
+  const currentTenderFiles = createMemo(() => {
+    const key = workspaceResourceKey();
+    const files = tenderFiles();
+    return key && files ? files : visibleTenderFiles();
+  });
+
+  const currentReferenceFiles = createMemo(() => {
+    const key = workspaceResourceKey();
+    const files = referenceFiles();
+    return key && files ? files : visibleReferenceFiles();
+  });
+
+  const currentOutputFiles = createMemo(() => {
+    const key = workspaceResourceKey();
+    const files = outputFiles();
+    return key && files ? files : visibleOutputFiles();
+  });
+
+  const currentTemplateFiles = createMemo(() => {
+    const key = workspaceResourceKey();
+    const files = templateFiles();
+    return key && files ? files : visibleTemplateFiles();
+  });
+
   const nodesById = createMemo(() => {
     const map = new Map<string, OpenworkBidWorkbenchNode>();
-    for (const node of workbenchState()?.nodes ?? []) map.set(node.id, node);
+    for (const node of currentWorkbenchState().nodes ?? []) map.set(node.id, node);
     return map;
   });
 
-  const rootNodes = createMemo(() => (workbenchState()?.nodes ?? []).filter((node) => !node.parentId));
+  const rootNodes = createMemo(() => (currentWorkbenchState().nodes ?? []).filter((node) => !node.parentId));
   const selectedNode = createMemo(() => {
     const id = selectedNodeId();
     return id ? nodesById().get(id) ?? null : null;
   });
-  const leafNodes = createMemo(() => (workbenchState()?.nodes ?? []).filter((node) => node.isLeaf));
+  const leafNodes = createMemo(() => (currentWorkbenchState().nodes ?? []).filter((node) => node.isLeaf));
   const lockedNodes = createMemo(() => leafNodes().filter((node) => Boolean(node.lockedBy)));
   const nodesWithoutReferences = createMemo(() => leafNodes().filter((node) => node.referencePaths.length === 0));
   const nodesWithoutOutputs = createMemo(() => leafNodes().filter((node) => !node.primaryOutputPath));
-  const conflictNodes = createMemo(() => (workbenchState()?.nodes ?? []).filter((node) => node.refreshConflictState !== "none"));
+  const conflictNodes = createMemo(() => (currentWorkbenchState().nodes ?? []).filter((node) => node.refreshConflictState !== "none"));
   const constraintSourceFiles = createMemo(() => [
-    ...(tenderFiles() ?? []),
-    ...(templateFiles() ?? []),
-    ...(referenceFiles() ?? []),
-    ...(outputFiles() ?? []),
+    ...(currentTenderFiles() ?? []),
+    ...(currentTemplateFiles() ?? []),
+    ...(currentReferenceFiles() ?? []),
+    ...(currentOutputFiles() ?? []),
   ]);
 
   const marksForSelectedNode = createMemo(() => {
     const nodeId = selectedNodeId();
     if (!nodeId) return [] as OpenworkBidWorkbenchMark[];
-    return (workbenchState()?.marks ?? [])
+    return (currentWorkbenchState().marks ?? [])
       .filter((item) => item.nodeId === nodeId)
       .sort((a, b) => b.createdAt - a.createdAt);
   });
 
   const currentOutlineSourceLabel = createMemo(() => {
-    const sourceType = workbenchState()?.project.outlineSourceType;
-    const sourcePath = workbenchState()?.project.outlineSourcePath;
+    const sourceType = currentWorkbenchState().project.outlineSourceType;
+    const sourcePath = currentWorkbenchState().project.outlineSourcePath;
     if (!sourceType || !sourcePath) return "未设置章节主源";
-    const kind = workbenchState()?.project.structureSourceKind;
+    const kind = currentWorkbenchState().project.structureSourceKind;
     const kindLabel = kind ? STRUCTURE_SOURCE_KIND_LABELS[kind] : "未指定";
     return `${CATEGORY_LABELS[sourceType]} · ${kindLabel} · ${sourcePath}`;
   });
 
-  const currentRootOutputLabel = createMemo(() => workbenchState()?.project.rootOutputPath ?? "未设置总文档");
+  const currentRootOutputLabel = createMemo(() => currentWorkbenchState().project.rootOutputPath ?? "未设置总文档");
 
   createEffect(() => {
-    const nodes = workbenchState()?.nodes ?? [];
+    const nodes = currentWorkbenchState().nodes ?? [];
     const current = selectedNodeId();
     if (current && nodes.some((node) => node.id === current)) return;
     setSelectedNodeId(nodes[0]?.id ?? null);
@@ -333,7 +403,7 @@ export default function BidWorkbenchView(props: SessionViewProps) {
     const client = props.openworkServerClient;
     if (!workspaceId() || !client) return;
     const outputPath = node.primaryOutputPath ?? node.lastEditedOutputPath ?? node.outputPaths[0] ?? null;
-    const rootOutputPath = workbenchState()?.project.rootOutputPath ?? null;
+    const rootOutputPath = currentWorkbenchState().project.rootOutputPath ?? null;
     if (!rootOutputPath) {
       setSaveError("请先设置总文档。");
       return;
@@ -421,13 +491,13 @@ export default function BidWorkbenchView(props: SessionViewProps) {
   const fileListForCategory = (category: BidWorkbenchFileCategory) => {
     switch (category) {
       case "tender":
-        return tenderFiles() ?? [];
+        return currentTenderFiles() ?? [];
       case "reference":
-        return referenceFiles() ?? [];
+        return currentReferenceFiles() ?? [];
       case "output":
-        return outputFiles() ?? [];
+        return currentOutputFiles() ?? [];
       case "templates":
-        return templateFiles() ?? [];
+        return currentTemplateFiles() ?? [];
     }
   };
 
@@ -531,8 +601,8 @@ export default function BidWorkbenchView(props: SessionViewProps) {
           <BidWorkbenchOverviewTab
             outlineSourceLabel={currentOutlineSourceLabel()}
             rootOutputLabel={currentRootOutputLabel()}
-            workflowStage={workbenchState()?.project.workflowStage ?? "outline"}
-            outlineRevision={workbenchState()?.project.outlineRevision ?? 0}
+            workflowStage={currentWorkbenchState().project.workflowStage ?? "outline"}
+            outlineRevision={currentWorkbenchState().project.outlineRevision ?? 0}
             leafNodeCount={leafNodes().length}
             lockedNodeCount={lockedNodes().length}
             conflictNodeCount={conflictNodes().length}
@@ -540,7 +610,7 @@ export default function BidWorkbenchView(props: SessionViewProps) {
             nodesWithoutOutputsCount={nodesWithoutOutputs().length}
             requestedMergeCount={leafNodes().filter((node) => node.mergeRequested && !node.mergeApplied).length}
             appliedMergeCount={leafNodes().filter((node) => node.mergeApplied).length}
-            refreshSummary={workbenchState()?.refresh?.summary}
+            refreshSummary={currentWorkbenchState().refresh?.summary}
             onSetWorkflowStage={setWorkflowStage}
           />
         </Match>
@@ -555,8 +625,8 @@ export default function BidWorkbenchView(props: SessionViewProps) {
                       category={category}
                       files={fileListForCategory(category)}
                       uploading={uploadingCategory() === category}
-                      currentOutlineSourcePath={workbenchState()?.project.outlineSourcePath}
-                      currentRootOutputPath={workbenchState()?.project.rootOutputPath}
+                      currentOutlineSourcePath={currentWorkbenchState().project.outlineSourcePath}
+                      currentRootOutputPath={currentWorkbenchState().project.rootOutputPath}
                       displayFilePath={displayFilePath}
                       onUpload={handleUpload}
                       onSetOutlineSource={setOutlineSource}
@@ -577,7 +647,7 @@ export default function BidWorkbenchView(props: SessionViewProps) {
                   <button
                     class="inline-flex items-center gap-2 rounded-lg border border-dls-border bg-dls-surface px-3 py-2 text-xs"
                     onClick={() => void refreshOutline()}
-                    disabled={refreshingOutline() || !workbenchState()?.project.outlineSourcePath}
+                    disabled={refreshingOutline() || !currentWorkbenchState().project.outlineSourcePath}
                   >
                     <RefreshCw size={14} />
                     {refreshingOutline() ? "刷新中..." : "刷新章节树"}
@@ -597,14 +667,14 @@ export default function BidWorkbenchView(props: SessionViewProps) {
                   <div class="text-dls-secondary">章节主源</div>
                   <div class="mt-1 line-clamp-2 font-medium text-dls-text">{currentOutlineSourceLabel()}</div>
                 </div>
-                <div class="rounded-2xl border border-dls-border bg-dls-surface px-3 py-3">
-                  <div class="text-dls-secondary">结构版本</div>
-                  <div class="mt-1 font-medium text-dls-text">{workbenchState()?.project.outlineRevision ?? 0}</div>
-                </div>
-                <div class="rounded-2xl border border-dls-border bg-dls-surface px-3 py-3">
-                  <div class="text-dls-secondary">最近刷新</div>
-                  <div class="mt-1 font-medium text-dls-text">{formatTimestamp(workbenchState()?.refresh?.createdAt)}</div>
-                </div>
+                  <div class="rounded-2xl border border-dls-border bg-dls-surface px-3 py-3">
+                    <div class="text-dls-secondary">结构版本</div>
+                    <div class="mt-1 font-medium text-dls-text">{currentWorkbenchState().project.outlineRevision ?? 0}</div>
+                  </div>
+                  <div class="rounded-2xl border border-dls-border bg-dls-surface px-3 py-3">
+                    <div class="text-dls-secondary">最近刷新</div>
+                    <div class="mt-1 font-medium text-dls-text">{formatTimestamp(currentWorkbenchState().refresh?.createdAt)}</div>
+                  </div>
                 <div class="rounded-2xl border border-dls-border bg-dls-surface px-3 py-3">
                   <div class="text-dls-secondary">总文档目标</div>
                   <div class="mt-1 line-clamp-2 font-medium text-dls-text">{currentRootOutputLabel()}</div>
@@ -612,12 +682,12 @@ export default function BidWorkbenchView(props: SessionViewProps) {
               </div>
 
               <Show
-                when={(workbenchState()?.nodes?.length ?? 0) > 0}
+                when={(currentWorkbenchState().nodes?.length ?? 0) > 0}
                 fallback={<div class="rounded-2xl border border-dashed border-dls-border bg-dls-surface px-4 py-8 text-sm text-dls-secondary">还没有章节树。请先在左侧选择一个文件设为章节主源，再刷新章节树。</div>}
               >
                 <div class="min-h-[520px] rounded-2xl border border-dls-border bg-dls-surface p-3">
-                  <Show when={workbenchState()?.refresh?.summary}>
-                    <div class="mb-3 rounded-xl bg-dls-background px-3 py-2 text-[11px] text-dls-secondary">{workbenchState()?.refresh?.summary}</div>
+                  <Show when={currentWorkbenchState().refresh?.summary}>
+                    <div class="mb-3 rounded-xl bg-dls-background px-3 py-2 text-[11px] text-dls-secondary">{currentWorkbenchState().refresh?.summary}</div>
                   </Show>
                   <div class="space-y-3">
                     <For each={rootNodes()}>{(node) => renderNodeTree(node)}</For>
@@ -644,9 +714,9 @@ export default function BidWorkbenchView(props: SessionViewProps) {
                       rangeKind={rangeKind()}
                       rangeValueDraft={rangeValueDraft()}
                       rangeNoteDraft={rangeNoteDraft()}
-                      referenceFiles={referenceFiles() ?? []}
-                      outputFiles={outputFiles() ?? []}
-                      templateFiles={templateFiles() ?? []}
+                      referenceFiles={currentReferenceFiles() ?? []}
+                      outputFiles={currentOutputFiles() ?? []}
+                      templateFiles={currentTemplateFiles() ?? []}
                       displayFilePath={displayFilePath}
                       onSetAssigneeDraft={setAssigneeDraft}
                       onSetMarkDraft={setMarkDraft}
@@ -677,7 +747,7 @@ export default function BidWorkbenchView(props: SessionViewProps) {
 
         <Match when={activeTab() === "constraints"}>
           <BidWorkbenchConstraintsTab
-            constraints={workbenchState()?.constraints ?? EMPTY_WORKBENCH_STATE.constraints}
+            constraints={currentWorkbenchState().constraints ?? EMPTY_WORKBENCH_STATE.constraints}
             sourceFiles={constraintSourceFiles()}
             displayFilePath={displayFilePath}
             onSave={saveConstraints}

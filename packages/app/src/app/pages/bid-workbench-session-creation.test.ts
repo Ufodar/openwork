@@ -16,8 +16,11 @@ test("bid-workbench waits for both workspace id and openwork client before cachi
   const file = readFileSync(join(import.meta.dir, "bid-workbench.tsx"), "utf8");
 
   expect(file).toContain("const workspaceResourceKey = createMemo(() => {");
-  expect(file).toContain("return id && props.openworkServerClient ? id : \"\";");
+  expect(file).toContain("return id && props.openworkServerClient ? id : undefined;");
   expect(file).toContain("createResource(\n    workspaceResourceKey,");
+  expect(file).toContain("const [visibleWorkbenchState, setVisibleWorkbenchState] = createSignal<OpenworkBidWorkbenchState>(EMPTY_WORKBENCH_STATE);");
+  expect(file).toContain("const currentWorkbenchState = createMemo(() => {");
+  expect(file).toContain("return key && nextState ? nextState : visibleWorkbenchState();");
 });
 
 test("app proactively resolves the workspace id when opening bid-workbench directly", () => {

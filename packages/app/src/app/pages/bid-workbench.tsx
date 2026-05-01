@@ -511,7 +511,7 @@ export default function BidWorkbenchView(props: SessionViewProps) {
                 <span>引用 {node.referencePaths.length}</span>
                 <span>产出 {node.outputPaths.length}</span>
                 <span>{node.lockedBy ? "已上锁" : "未锁定"}</span>
-                <Show when={node.recentPromptAuthor}>
+                <Show when={node.recentPromptAuthor && node.recentPromptAuthor !== node.lockedBy}>
                   <span>最近发送 {node.recentPromptAuthor}</span>
                 </Show>
               </Show>
@@ -521,7 +521,7 @@ export default function BidWorkbenchView(props: SessionViewProps) {
             <Show when={node.lockedBy}>
               <span class="inline-flex items-center gap-1 rounded-full bg-amber-3 px-2 py-0.5 text-amber-11">
                 <Lock size={12} />
-                {node.lockedBy}
+                编辑中 · {node.lockedBy}
               </span>
             </Show>
             <Show when={node.assignee}>

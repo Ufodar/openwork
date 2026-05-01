@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 
-import { resolveDocumentSessionReconnectRecoveryToken } from "./document-session-recovery";
+import {
+  resolveDocumentSessionReconnectRecoveryToken,
+  resolveDocumentSessionTimedOutRecoveryToken,
+} from "./document-session-recovery";
 
 describe("resolveDocumentSessionReconnectRecoveryToken", () => {
   test("queues recovery when a session returns from disconnected to connected", () => {
@@ -49,6 +52,42 @@ describe("resolveDocumentSessionReconnectRecoveryToken", () => {
       resolveDocumentSessionReconnectRecoveryToken({
         previousStatus: "disconnected",
         nextStatus: "connected",
+        workspaceId: "ws_1",
+        sessionId: "",
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("resolveDocumentSessionTimedOutRecoveryToken", () => {
+  test("queues recovery only for the explicit request timeout banner", () => {
+    expect(
+      resolveDocumentSessionTimedOutRecoveryToken({
+        error: "Request timed out.",
+        workspaceId: "ws_1",
+        sessionId: "ses_1",
+      }),
+    ).toBe("ws_1:ses_1:request-timeout");
+  });
+
+  test("skips recovery for other errors or incomplete identities", () => {
+    expect(
+      resolveDocumentSessionTimedOutRecoveryToken({
+        error: "OpenWork server not connected.",
+        workspaceId: "ws_1",
+        sessionId: "ses_1",
+      }),
+    ).toBeNull();
+    expect(
+      resolveDocumentSessionTimedOutRecoveryToken({
+        error: "Request timed out.",
+        workspaceId: "",
+        sessionId: "ses_1",
+      }),
+    ).toBeNull();
+    expect(
+      resolveDocumentSessionTimedOutRecoveryToken({
+        error: "Request timed out.",
         workspaceId: "ws_1",
         sessionId: "",
       }),

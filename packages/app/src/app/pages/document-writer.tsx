@@ -11,7 +11,10 @@ import Composer from "../components/session/composer";
 import QuestionModal from "../components/question-modal";
 import SessionKnowledgeSurface from "../components/session/session-knowledge-surface";
 import ToolMonitorPanel from "../components/tool-monitor/tool-monitor-panel";
-import { createDocumentSessionReconnectRecovery } from "../lib/document-session-recovery";
+import {
+  createDocumentSessionReconnectRecovery,
+  createDocumentSessionTimedOutRecovery,
+} from "../lib/document-session-recovery";
 import { DOCUMENT_UPLOAD_ACCEPT } from "../lib/documents";
 import { MARKDOWN_PREVIEW_CLASS, renderMarkdownPreview } from "../lib/markdown-preview";
 import { isTodoCompletedStatus } from "../lib/todo-status";
@@ -691,6 +694,17 @@ export default function DocumentWriterView(props: SessionViewProps) {
   });
   createDocumentSessionReconnectRecovery({
     serverStatus: () => props.openworkServerStatus,
+    workspaceId,
+    sessionId,
+    ready: () => Boolean(apiConfig()) && !sessionHydrating(),
+    recover: async (activeSessionId) => {
+      const hydrated = await props.selectSession(activeSessionId);
+      if (hydrated === false) return;
+      await refetchDocuments();
+    },
+  });
+  createDocumentSessionTimedOutRecovery({
+    error: () => props.error,
     workspaceId,
     sessionId,
     ready: () => Boolean(apiConfig()) && !sessionHydrating(),

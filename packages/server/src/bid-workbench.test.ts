@@ -313,6 +313,10 @@ describe("bid-workbench", () => {
     const brief = await readFile(briefPath, "utf8");
     expect(brief).toContain("节点任务简报");
     expect(brief).toContain("运行约束");
+    expect(brief).toContain("最近发送人：storm");
+    expect(brief).toContain("当前主产出：bid-workbench/output/out-a.docx");
+    expect(brief).toContain("- bid-workbench/output/out-a.docx (draft)");
+    expect(brief).not.toContain("- 暂无节点产出");
   });
 
   test("persists structure source kind and rejects non-docx root outputs", async () => {

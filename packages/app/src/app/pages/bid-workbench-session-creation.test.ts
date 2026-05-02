@@ -12,6 +12,15 @@ test("bid-workbench creates node sessions through the workspace proxy instead of
   expect(file).not.toContain("const nextSessionId = await props.createSessionAndOpen({");
 });
 
+test("bid-workbench refreshes node binding before reopening an existing node session", () => {
+  const file = readFileSync(join(import.meta.dir, "bid-workbench.tsx"), "utf8");
+
+  expect(file).toContain("if (existingSessionId) {");
+  expect(file).toContain("client.setBidWorkbenchSectionSession(workspaceId(), node.id, {");
+  expect(file).toContain("sessionId: existingSessionId,");
+  expect(file).toContain("navigate(`/document-agent/${existingSessionId}`);");
+});
+
 test("bid-workbench waits for both workspace id and openwork client before caching empty workspace data", () => {
   const file = readFileSync(join(import.meta.dir, "bid-workbench.tsx"), "utf8");
 

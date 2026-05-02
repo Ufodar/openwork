@@ -1373,6 +1373,7 @@ export async function setBidWorkbenchSectionMetadata(
   } finally {
     db.close();
   }
+  await writeBidWorkbenchNodeBrief(workspacePath, input.sectionId);
   return getBidWorkbenchState(workspacePath);
 }
 
@@ -1553,6 +1554,7 @@ export async function recordBidWorkbenchSectionPromptActivity(
   } finally {
     db.close();
   }
+  await writeBidWorkbenchNodeBrief(workspacePath, input.sectionId);
 }
 
 export async function setBidWorkbenchSectionMergedState(
@@ -1638,6 +1640,7 @@ export async function setBidWorkbenchSectionPrimaryOutput(
   } finally {
     db.close();
   }
+  await writeBidWorkbenchNodeBrief(workspacePath, input.sectionId);
   return getBidWorkbenchState(workspacePath);
 }
 
@@ -1756,6 +1759,7 @@ export async function setBidWorkbenchSectionLink(
   } finally {
     db.close();
   }
+  await writeBidWorkbenchNodeBrief(workspacePath, input.sectionId);
   return getBidWorkbenchState(workspacePath);
 }
 

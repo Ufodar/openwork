@@ -338,6 +338,14 @@ export default function BidWorkbenchView(props: SessionViewProps) {
   const createNodeSession = async (node: OpenworkBidWorkbenchNode) => {
     const existingSessionId = node.activeSessionId ?? node.sessionId;
     if (existingSessionId) {
+      const client = props.openworkServerClient;
+      if (workspaceId() && client) {
+        await runStateMutation(() =>
+          client.setBidWorkbenchSectionSession(workspaceId(), node.id, {
+            sessionId: existingSessionId,
+          }),
+        );
+      }
       await Promise.resolve(props.selectSession(existingSessionId)).catch(() => undefined);
       navigate(`/document-agent/${existingSessionId}`);
       return;

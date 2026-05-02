@@ -1,13 +1,11 @@
 import { copyFile, readFile, writeFile, readdir, stat, rm, rename, mkdtemp } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { dirname, join, resolve, relative, basename, extname, isAbsolute } from "node:path";
-import { createHash } from "node:crypto";
-import { spawnSync } from "node:child_process";
+import { dirname, join, resolve, extname, isAbsolute } from "node:path";
 import jwt from "jsonwebtoken";
 import type { ServerConfig, WorkspaceInfo, Actor } from "./types.js";
 import { ApiError } from "./errors.js";
 import { ensureDir, exists, shortId } from "./utils.js";
 import type { SessionWorkspaceService } from "./session-workspaces.js";
+import { ensureDocxZipPath } from "./docx-conversion.js";
 
 // Local types to avoid circular dependencies
 interface RequestContext {
@@ -175,10 +173,6 @@ function resolveInboxDir(workspacePath: string): string {
     return join(workspacePath, ".opencode", "openwork", "inbox");
 }
 
-function resolveDocxConversionCacheDir(workspacePath: string): string {
-    return join(workspacePath, ".opencode", "openwork", "cache", "docx-convert");
-}
-
 function decodeInboxId(id: string): string {
     const raw = (id ?? "").trim();
     if (!raw) {
@@ -204,78 +198,6 @@ export async function persistUploadedDocumentFile(destPath: string, file: File) 
         await writeFile(tmpPath, Buffer.from(await file.arrayBuffer()));
     }
     await rename(tmpPath, destPath);
-}
-
-
-async function ensureDocxZipPath(workspacePath: string, inputPath: string): Promise<string> {
-    const ext = extname(inputPath).toLowerCase();
-    if (DOCX_ZIP_EXTENSIONS.has(ext)) return inputPath;
-
-    if (ext !== ".doc") {
-        throw new ApiError(400, "unsupported_docx_copy_source", "Only .docx/.docm/.dotx/.dotm sources are supported (or .doc with LibreOffice installed).");
-    }
-
-    const cacheDir = resolveDocxConversionCacheDir(workspacePath);
-    await ensureDir(cacheDir);
-
-    const info = await stat(inputPath);
-    const signature = createHash("sha256")
-        .update(`${inputPath}:${info.size}:${info.mtimeMs}`)
-        .digest("hex")
-        .slice(0, 12);
-    const dest = join(cacheDir, `converted-${signature}.docx`);
-    if (await exists(dest)) return dest;
-
-    const tmpDir = join(cacheDir, `tmp-${shortId()}`);
-    await ensureDir(tmpDir);
-    try {
-        const convert = spawnSync(
-            "soffice",
-            [
-                "--headless",
-                "--nologo",
-                "--nofirststartwizard",
-                "--convert-to",
-                "docx",
-                "--outdir",
-                tmpDir,
-                inputPath,
-            ],
-            { encoding: "utf8" },
-        );
-        if (convert.status !== 0) {
-            const stderr = String(convert.stderr || "").trim();
-            const stdout = String(convert.stdout || "").trim();
-            throw new ApiError(
-                400,
-                "docx_conversion_failed",
-                stderr || stdout || "Failed to convert .doc to .docx (LibreOffice).",
-            );
-        }
-
-        const expected = join(tmpDir, `${basename(inputPath, ext)}.docx`);
-        const convertedPath = (await exists(expected))
-            ? expected
-            : (() => {
-                // Best-effort fallback: pick the first .docx file in the output dir.
-                return null;
-            })();
-
-        let source = convertedPath;
-        if (!source) {
-            const entries = await readdir(tmpDir, { withFileTypes: true });
-            const found = entries.find((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".docx"));
-            if (!found) {
-                throw new ApiError(400, "docx_conversion_failed", "LibreOffice did not produce a .docx output.");
-            }
-            source = join(tmpDir, found.name);
-        }
-
-        await rename(source, dest);
-        return dest;
-    } finally {
-        await rm(tmpDir, { recursive: true, force: true }).catch(() => undefined);
-    }
 }
 
 async function resolveSessionInboxFilePath({

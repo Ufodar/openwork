@@ -341,6 +341,19 @@ describe("bid-workbench", () => {
     } satisfies Partial<ApiError>);
   });
 
+  test("accepts legacy .doc files as outline sources", async () => {
+    const workspacePath = await createWorkspace();
+    const state = await setBidWorkbenchOutlineSource(workspacePath, {
+      sourcePath: "bid-workbench/templates/template.doc",
+      sourceType: "templates",
+      structureSourceKind: "template",
+    });
+
+    expect(state.project.outlineSourcePath).toBe("bid-workbench/templates/template.doc");
+    expect(state.project.outlineSourceType).toBe("templates");
+    expect(state.project.structureSourceKind).toBe("template");
+  });
+
   test("tracks multiple outputs and primary output separately", async () => {
     const workspacePath = await createWorkspace();
     const sourcePath = "bid-workbench/tender/outline.docx";

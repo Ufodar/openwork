@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 
 import { ApiError } from "./errors.js";
 import { ensureDir, exists, shortId } from "./utils.js";
+import { ensureDocxZipPath } from "./docx-conversion.js";
 
 export type BidWorkbenchSourceType =
   | "tender"
@@ -190,6 +191,7 @@ type OutlineItem = {
 };
 
 const DOCX_EXTENSIONS = new Set([".docx", ".docm", ".dotx", ".dotm"]);
+const DOC_OUTLINE_EXTENSIONS = new Set([".doc", ...DOCX_EXTENSIONS]);
 const MARKDOWN_EXTENSIONS = new Set([".md", ".mdx", ".markdown"]);
 const NODE_OUTPUT_EXTENSIONS = new Set([".docx", ".xlsx"]);
 
@@ -309,13 +311,13 @@ function parseFormatRulesJson(value: unknown): Record<string, unknown> {
   }
 }
 
-function ensureDocxOutlineSource(sourcePath: string): void {
+function ensureOfficeOutlineSource(sourcePath: string): void {
   const extension = extname(sourcePath).toLowerCase();
-  if (!DOCX_EXTENSIONS.has(extension)) {
+  if (!DOC_OUTLINE_EXTENSIONS.has(extension)) {
     throw new ApiError(
       400,
       "bid_workbench_invalid_outline_source",
-      "Production bid workbench outline sources must be DOCX files",
+      "Production bid workbench outline sources must be DOCX or DOC files",
       { sourcePath },
     );
   }
@@ -647,8 +649,9 @@ async function extractSectionsFromSource(
     return { sections, sourceHash };
   }
 
-  if (DOCX_EXTENSIONS.has(extension)) {
-    const sections = extractDocxSections(workspacePath, sourcePath, absolutePath);
+  if (DOC_OUTLINE_EXTENSIONS.has(extension)) {
+    const docxPath = await ensureDocxZipPath(workspacePath, absolutePath);
+    const sections = extractDocxSections(workspacePath, sourcePath, docxPath);
     if (sections.length === 0) {
       throw new ApiError(
         400,
@@ -663,7 +666,7 @@ async function extractSectionsFromSource(
   throw new ApiError(
     400,
     "bid_workbench_unsupported_source",
-    "Outline source currently supports Markdown and DOCX files only",
+    "Outline source currently supports Markdown, DOCX, and DOC files only",
     { sourcePath },
   );
 }
@@ -1033,7 +1036,7 @@ export async function setBidWorkbenchOutlineSource(
     structureSourceKind: BidWorkbenchStructureSourceKind;
   },
 ): Promise<BidWorkbenchState> {
-  ensureDocxOutlineSource(input.sourcePath);
+  ensureOfficeOutlineSource(input.sourcePath);
   await ensureSchema(workspacePath);
   const now = Date.now();
   const db = openDb(workspacePath);

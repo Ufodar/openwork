@@ -1,6 +1,8 @@
 import { For, Match, Show, Switch, createEffect, createMemo, createResource, createSignal } from "solid-js";
 import {
   ArrowLeft,
+  ChevronDown,
+  ChevronRight,
   Lock,
   RefreshCw,
 } from "lucide-solid";
@@ -16,7 +18,7 @@ import type {
   OpenworkBidWorkbenchState
 } from "../lib/openwork-server";
 import BidWorkbenchOverviewTab from "./bid-workbench/overview-tab";
-import BidWorkbenchFileCategoryPanel from "./bid-workbench/file-category-panel";
+import BidWorkbenchResourceSidebar from "./bid-workbench/resource-sidebar";
 import BidWorkbenchNodeDetailPanel from "./bid-workbench/node-detail-panel";
 import BidWorkbenchConstraintsTab from "./bid-workbench/constraints-tab";
 import {
@@ -27,6 +29,7 @@ import {
   STRUCTURE_SOURCE_KIND_LABELS,
   TAB_LABELS,
   type BidWorkbenchWorkspaceFile,
+  displayFileName,
   formatTimestamp,
   inferStructureSourceKind,
 } from "./bid-workbench/shared";
@@ -64,7 +67,9 @@ export default function BidWorkbenchView(props: SessionViewProps) {
   const navigate = useNavigate();
   const workspaceId = createMemo(() => props.openworkServerWorkspaceId?.trim() ?? "");
   const [activeTab, setActiveTab] = createSignal<BidWorkbenchTab>("workspace");
+  const [activeResourceCategory, setActiveResourceCategory] = createSignal<BidWorkbenchFileCategory>("templates");
   const [selectedNodeId, setSelectedNodeId] = createSignal<string | null>(null);
+  const [expandedNodeIds, setExpandedNodeIds] = createSignal<Set<string>>(new Set());
   const [saving, setSaving] = createSignal(false);
   const [saveError, setSaveError] = createSignal<string | null>(null);
   const [uploadingCategory, setUploadingCategory] = createSignal<BidWorkbenchFileCategory | null>(null);
@@ -203,6 +208,13 @@ export default function BidWorkbenchView(props: SessionViewProps) {
     ].join(" · "),
   );
 
+  const resourceCategories = createMemo(() => [
+    { category: "templates" as const, files: currentTemplateFiles() ?? [] },
+    { category: "reference" as const, files: currentReferenceFiles() ?? [] },
+    { category: "tender" as const, files: currentTenderFiles() ?? [] },
+    { category: "output" as const, files: currentOutputFiles() ?? [] },
+  ]);
+
   createEffect(() => {
     const nodes = currentWorkbenchState().nodes ?? [];
     const current = selectedNodeId();
@@ -216,6 +228,40 @@ export default function BidWorkbenchView(props: SessionViewProps) {
     setAssigneeDraft(node?.assignee ?? "");
     const nextRangeSource = node?.referencePaths[0] ?? node?.templatePath ?? node?.sourcePath ?? "";
     setRangeSourcePath((current) => (current && (node?.sourceRanges.some((range) => range.sourcePath === current) || current === nextRangeSource) ? current : nextRangeSource));
+  });
+
+  createEffect(() => {
+    const categories = resourceCategories();
+    const active = activeResourceCategory();
+    if (categories.some((entry) => entry.category === active)) return;
+    setActiveResourceCategory("templates");
+  });
+
+  createEffect(() => {
+    const nodes = currentWorkbenchState().nodes ?? [];
+    const previous = expandedNodeIds();
+    const next = new Set<string>();
+    for (const node of nodes) {
+      if (node.isLeaf) continue;
+      if (previous.has(node.id) || node.level <= 2) next.add(node.id);
+    }
+    if (next.size !== previous.size || Array.from(next).some((id) => !previous.has(id))) {
+      setExpandedNodeIds(next);
+    }
+  });
+
+  createEffect(() => {
+    const node = selectedNode();
+    if (!node) return;
+    const next = new Set(expandedNodeIds());
+    let cursor = node.parentId ? nodesById().get(node.parentId) ?? null : null;
+    while (cursor) {
+      next.add(cursor.id);
+      cursor = cursor.parentId ? nodesById().get(cursor.parentId) ?? null : null;
+    }
+    if (next.size !== expandedNodeIds().size || Array.from(next).some((id) => !expandedNodeIds().has(id))) {
+      setExpandedNodeIds(next);
+    }
   });
 
   const refreshAll = async () => {
@@ -484,75 +530,139 @@ export default function BidWorkbenchView(props: SessionViewProps) {
     }
   };
 
-  const fileListForCategory = (category: BidWorkbenchFileCategory) => {
-    switch (category) {
-      case "tender":
-        return currentTenderFiles() ?? [];
-      case "reference":
-        return currentReferenceFiles() ?? [];
-      case "output":
-        return currentOutputFiles() ?? [];
-      case "templates":
-        return currentTemplateFiles() ?? [];
-    }
+  const displayFilePath = (file: BidWorkbenchWorkspaceFile) => file.path.trim();
+  const isExpanded = (nodeId: string) => expandedNodeIds().has(nodeId);
+  const toggleExpanded = (nodeId: string) => {
+    setExpandedNodeIds((current) => {
+      const next = new Set(current);
+      if (next.has(nodeId)) next.delete(nodeId);
+      else next.add(nodeId);
+      return next;
+    });
   };
 
-  const displayFilePath = (file: BidWorkbenchWorkspaceFile) => file.path.trim();
+  const renderPathList = (paths: string[]) => {
+    if (paths.length === 0) return <span class="text-dls-secondary">未关联</span>;
+    return (
+      <div class="flex min-w-0 flex-wrap items-center gap-1">
+        <For each={paths.slice(0, 2)}>
+          {(path) => (
+            <span class="max-w-[120px] truncate rounded-full bg-dls-background px-2 py-0.5 text-[11px] text-dls-text">
+              {displayFileName(path)}
+            </span>
+          )}
+        </For>
+        <Show when={paths.length > 2}>
+          <span class="text-dls-secondary">+{paths.length - 2}</span>
+        </Show>
+      </div>
+    );
+  };
 
-  const renderNodeTree = (node: OpenworkBidWorkbenchNode): any => (
-    <div class="space-y-2">
-      <button
-        class={`w-full rounded-xl border px-3 py-2 text-left text-sm transition-colors ${
-          selectedNodeId() === node.id
-            ? "border-dls-accent bg-dls-hover text-dls-text"
-            : "border-dls-border bg-dls-surface text-dls-secondary hover:bg-dls-hover hover:text-dls-text"
-        }`}
-        onClick={() => setSelectedNodeId(node.id)}
-      >
-        <div class="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
-          <div class="min-w-0">
-            <div class="truncate font-medium">{node.title}</div>
-            <div class="mt-1 flex flex-wrap items-center gap-2 text-[11px] opacity-80">
-              <span>L{node.level}</span>
-              <span>{node.isLeaf ? "叶子节点" : "目录节点"}</span>
-              <Show when={node.isLeaf}>
-                <span>引用 {node.referencePaths.length}</span>
-                <span>产出 {node.outputPaths.length}</span>
-                <span>{node.lockedBy ? "已上锁" : "未锁定"}</span>
-                <Show when={node.recentPromptAuthor && node.recentPromptAuthor !== node.lockedBy}>
-                  <span>最近发送 {node.recentPromptAuthor}</span>
-                </Show>
+  const renderNodeRows = (node: OpenworkBidWorkbenchNode): any => {
+    const children = node.children
+      .map((id) => nodesById().get(id))
+      .filter(Boolean) as OpenworkBidWorkbenchNode[];
+    const selected = () => selectedNodeId() === node.id;
+    const leftPadding = `${Math.max(0, node.level - 1) * 18}px`;
+    const mergedLabel = node.mergeApplied ? "已合并" : node.mergeRequested ? "待写入" : "—";
+
+    return (
+      <div>
+        <div
+          role="button"
+          tabindex="0"
+          class={`grid w-full grid-cols-[minmax(320px,1.5fr)_minmax(120px,0.7fr)_minmax(140px,0.8fr)_120px_84px_84px] items-center gap-3 border-b border-dls-border/70 px-3 py-2 text-left text-sm transition-colors ${
+            selected()
+              ? "bg-dls-hover text-dls-text"
+              : "bg-dls-surface text-dls-secondary hover:bg-dls-hover/70 hover:text-dls-text"
+          }`}
+          onClick={() => setSelectedNodeId(node.id)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              setSelectedNodeId(node.id);
+            }
+          }}
+        >
+          <div class="min-w-0" style={{ paddingLeft: leftPadding }}>
+            <div class="flex items-center gap-2">
+              <Show when={children.length > 0} fallback={<span class="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-dls-border text-[10px]">•</span>}>
+                <button
+                  class="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-dls-border bg-dls-background text-dls-secondary"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    toggleExpanded(node.id);
+                  }}
+                >
+                  <Show when={isExpanded(node.id)} fallback={<ChevronRight size={12} />}>
+                    <ChevronDown size={12} />
+                  </Show>
+                </button>
               </Show>
+              <div class="min-w-0">
+                <div class="truncate font-medium text-dls-text">{node.title}</div>
+                <div class="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-dls-secondary">
+                  <span>L{node.level}</span>
+                  <span>{node.isLeaf ? "叶子" : `目录 · ${children.length} 子节点`}</span>
+                  <Show when={!node.isLeaf && node.refreshConflictState !== "none"}>
+                    <span class="rounded-full bg-red-3 px-2 py-0.5 text-red-11">结构待处理</span>
+                  </Show>
+                </div>
+              </div>
             </div>
           </div>
-          <div class="flex flex-wrap items-center justify-end gap-2 text-[11px]">
-            <Show when={node.lockedBy}>
-              <span class="inline-flex items-center gap-1 rounded-full bg-amber-3 px-2 py-0.5 text-amber-11">
-                <Lock size={12} />
-                编辑中 · {node.lockedBy}
+
+          <div class="min-w-0 text-xs">
+            <Show when={node.isLeaf} fallback={<span class="text-dls-secondary">—</span>}>
+              {renderPathList(node.referencePaths)}
+            </Show>
+          </div>
+
+          <div class="min-w-0 text-xs">
+            <Show when={node.isLeaf} fallback={<span class="text-dls-secondary">—</span>}>
+              <Show when={node.primaryOutputPath} fallback={renderPathList(node.outputPaths)}>
+                <div class="flex min-w-0 items-center gap-1">
+                  <span class="max-w-[120px] truncate rounded-full bg-emerald-3 px-2 py-0.5 text-[11px] text-emerald-11">
+                    {displayFileName(node.primaryOutputPath!)}
+                  </span>
+                  <Show when={node.outputPaths.length > 1}>
+                    <span class="text-dls-secondary">+{node.outputPaths.length - 1}</span>
+                  </Show>
+                </div>
+              </Show>
+            </Show>
+          </div>
+
+          <div class="text-xs">
+            <Show when={node.isLeaf} fallback={<span class="text-dls-secondary">—</span>}>
+              <Show when={node.lockedBy} fallback={<span class="text-dls-secondary">未锁定</span>}>
+                <span class="rounded-full bg-amber-3 px-2 py-0.5 text-amber-11">{node.lockedBy}</span>
+              </Show>
+            </Show>
+          </div>
+
+          <div class="text-xs">
+            <Show when={node.isLeaf && (node.activeSessionId ?? node.sessionId)} fallback={<span class="text-dls-secondary">—</span>}>
+              <span class="rounded-full bg-blue-3 px-2 py-0.5 text-blue-11">已绑定</span>
+            </Show>
+          </div>
+
+          <div class="text-xs">
+            <Show when={node.isLeaf} fallback={<span class="text-dls-secondary">—</span>}>
+              <span class={mergedLabel === "已合并" ? "rounded-full bg-emerald-3 px-2 py-0.5 text-emerald-11" : mergedLabel === "待写入" ? "rounded-full bg-violet-3 px-2 py-0.5 text-violet-11" : "text-dls-secondary"}>
+                {mergedLabel}
               </span>
-            </Show>
-            <Show when={node.assignee}>
-              <span class="rounded-full bg-violet-3 px-2 py-0.5 text-violet-11">负责人 {node.assignee}</span>
-            </Show>
-            <Show when={node.primaryOutputPath}>
-              <span class="rounded-full bg-emerald-3 px-2 py-0.5 text-emerald-11">主产出</span>
-            </Show>
-            <Show when={node.activeSessionId ?? node.sessionId}>
-              <span class="rounded-full bg-blue-3 px-2 py-0.5 text-blue-11">会话</span>
             </Show>
           </div>
         </div>
-      </button>
-      <Show when={node.children.length > 0}>
-        <div class="ml-4 space-y-2 border-l border-dls-border pl-3">
-          <For each={node.children.map((id) => nodesById().get(id)).filter(Boolean) as OpenworkBidWorkbenchNode[]}>
-            {(child) => renderNodeTree(child)}
-          </For>
-        </div>
-      </Show>
-    </div>
-  );
+
+        <Show when={children.length > 0 && isExpanded(node.id)}>
+          <For each={children}>{(child) => renderNodeRows(child)}</For>
+        </Show>
+      </div>
+    );
+  };
 
   return (
     <div class="flex h-full min-h-0 flex-col bg-dls-background text-dls-text">
@@ -618,49 +728,37 @@ export default function BidWorkbenchView(props: SessionViewProps) {
         </Match>
 
         <Match when={activeTab() === "workspace"}>
-          <div class="grid min-h-0 flex-1 grid-cols-1 xl:grid-cols-[280px_minmax(0,1fr)_390px]">
-            <aside class="min-h-0 overflow-auto border-b border-dls-border bg-dls-surface/60 p-3 xl:border-b-0 xl:border-r">
-              <div class="mb-3">
-                <div class="text-sm font-semibold">资源区</div>
-                <div class="mt-1 text-xs text-dls-secondary">模板、参考资料和产出文件都集中在这里，默认优先维护模板和参考文件。</div>
-              </div>
-              <div class="space-y-5">
-                <For each={["tender", "reference", "output", "templates"] as const}>
-                  {(category) => (
-                    <BidWorkbenchFileCategoryPanel
-                      category={category}
-                      files={fileListForCategory(category)}
-                      uploading={uploadingCategory() === category}
-                      currentOutlineSourcePath={currentWorkbenchState().project.outlineSourcePath}
-                      currentRootOutputPath={currentWorkbenchState().project.rootOutputPath}
-                      displayFilePath={displayFilePath}
-                      onUpload={handleUpload}
-                      onSetOutlineSource={setOutlineSource}
-                      onSetRootOutput={setRootOutputPath}
-                    />
-                  )}
-                </For>
-              </div>
+          <div class="grid min-h-0 flex-1 grid-cols-1 xl:grid-cols-[260px_minmax(0,1fr)_360px]">
+            <aside class="min-h-0 overflow-hidden border-b border-dls-border xl:border-b-0 xl:border-r">
+              <BidWorkbenchResourceSidebar
+                categories={resourceCategories()}
+                activeCategory={activeResourceCategory()}
+                uploading={uploadingCategory() === activeResourceCategory()}
+                currentOutlineSourcePath={currentWorkbenchState().project.outlineSourcePath}
+                currentRootOutputPath={currentWorkbenchState().project.rootOutputPath}
+                onSelectCategory={setActiveResourceCategory}
+                onUpload={handleUpload}
+                onSetOutlineSource={setOutlineSource}
+                onSetRootOutput={setRootOutputPath}
+              />
             </aside>
 
             <main class="min-h-0 overflow-auto p-4">
-              <div class="sticky top-0 z-10 mb-4 rounded-2xl border border-dls-border bg-dls-background/95 p-3 backdrop-blur">
-                <div class="flex flex-wrap items-start justify-between gap-3">
+              <div class="mb-4 rounded-2xl border border-dls-border bg-dls-surface p-3">
+                <div class="flex flex-wrap items-center justify-between gap-3">
                   <div class="min-w-0">
-                    <div class="text-base font-semibold">投标章节树</div>
-                    <div class="mt-1 text-xs text-dls-secondary">
-                      中间区域是核心工作区。章节树直接展示叶子节点的引用、产出、锁和会话状态。
-                    </div>
-                    <div class="mt-2 flex flex-wrap gap-2 text-[11px]">
-                      <span class="rounded-full bg-dls-surface px-3 py-1">主源：{currentWorkbenchState().project.outlineSourcePath ? currentOutlineSourceLabel() : "未设置"}</span>
-                      <span class="rounded-full bg-dls-surface px-3 py-1">总文档：{currentWorkbenchState().project.rootOutputPath ?? "未设置"}</span>
+                    <div class="text-base font-semibold">投标章节主表</div>
+                    <div class="mt-1 flex flex-wrap gap-2 text-[11px] text-dls-secondary">
+                      <span class="rounded-full bg-dls-background px-3 py-1">主源：{currentWorkbenchState().project.outlineSourcePath ? currentOutlineSourceLabel() : "未设置"}</span>
+                      <span class="rounded-full bg-dls-background px-3 py-1">总文档：{currentWorkbenchState().project.rootOutputPath ?? "未设置"}</span>
+                      <span class="rounded-full bg-dls-background px-3 py-1">{currentWorkbenchState().refresh?.summary ?? currentTreeSummary()}</span>
                     </div>
                   </div>
                   <div class="flex items-center gap-2">
                     <button
-                    class="inline-flex items-center gap-2 rounded-lg border border-dls-border bg-dls-surface px-3 py-2 text-xs"
-                    onClick={() => void refreshOutline()}
-                    disabled={refreshingOutline() || !currentWorkbenchState().project.outlineSourcePath}
+                      class="inline-flex items-center gap-2 rounded-lg border border-dls-border bg-dls-background px-3 py-2 text-xs"
+                      onClick={() => void refreshOutline()}
+                      disabled={refreshingOutline() || !currentWorkbenchState().project.outlineSourcePath}
                     >
                       <RefreshCw size={14} />
                       {refreshingOutline() ? "刷新中..." : "刷新章节树"}
@@ -681,15 +779,16 @@ export default function BidWorkbenchView(props: SessionViewProps) {
                 fallback={<div class="rounded-2xl border border-dashed border-dls-border bg-dls-surface px-4 py-8 text-sm text-dls-secondary">还没有章节树。请先在左侧选择一个文件设为章节主源，再刷新章节树。</div>}
               >
                 <div class="min-h-[520px] rounded-2xl border border-dls-border bg-dls-surface">
-                  <div class="border-b border-dls-border px-3 py-2 text-[11px] text-dls-secondary">
-                    {currentWorkbenchState().refresh?.summary ?? currentTreeSummary()}
-                  </div>
-                  <div class="grid grid-cols-[minmax(0,1fr)_240px] gap-3 border-b border-dls-border px-3 py-2 text-[11px] font-medium text-dls-secondary">
+                  <div class="grid grid-cols-[minmax(320px,1.5fr)_minmax(120px,0.7fr)_minmax(140px,0.8fr)_120px_84px_84px] gap-3 border-b border-dls-border px-3 py-2 text-[11px] font-medium text-dls-secondary">
                     <div>章节节点</div>
-                    <div class="text-right">引用 / 产出 / 协作</div>
+                    <div>引用文件</div>
+                    <div>产出文件</div>
+                    <div>当前编辑</div>
+                    <div>会话</div>
+                    <div>总文档</div>
                   </div>
-                  <div class="space-y-3 p-3">
-                    <For each={rootNodes()}>{(node) => renderNodeTree(node)}</For>
+                  <div>
+                    <For each={rootNodes()}>{(node) => renderNodeRows(node)}</For>
                   </div>
                 </div>
               </Show>

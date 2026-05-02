@@ -86,6 +86,37 @@ export function formatTimestamp(timestamp: number | null | undefined): string {
   return new Date(timestamp).toLocaleString("zh-CN", { hour12: false });
 }
 
+export function displayPathTail(path: string, depth = 2): string {
+  const segments = String(path ?? "")
+    .split("/")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (segments.length <= depth) return segments.join("/");
+  return segments.slice(-depth).join("/");
+}
+
+export function displayFileName(path: string): string {
+  const segments = String(path ?? "")
+    .split("/")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return segments.at(-1) ?? path;
+}
+
+export function formatFileSize(size: number | null | undefined): string {
+  const bytes = Number(size ?? 0);
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  const digits = value >= 10 || unitIndex === 0 ? 0 : 1;
+  return `${value.toFixed(digits)} ${units[unitIndex]}`;
+}
+
 export function inferStructureSourceKind(
   sourceType: OpenworkBidWorkbenchSourceType,
 ): OpenworkBidWorkbenchStructureSourceKind {

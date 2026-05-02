@@ -7008,6 +7008,12 @@ export default function App() {
   createEffect(() => {
     const rawPath = location.pathname.trim();
     const path = rawPath.toLowerCase();
+    // Document-session routes can be entered before the OpenWork-backed client
+    // and workspace resolution are ready. Read them here so the route hydrator
+    // automatically re-runs once those prerequisites settle.
+    void openworkServerStatus();
+    void client();
+    void resolvedDevtoolsWorkspaceId();
     if (!path.startsWith("/session")) {
       clearQueuedDocumentAgentRedirect();
     }
@@ -7049,6 +7055,18 @@ export default function App() {
 
     const ensureRouteSessionHydrated = (sessionId: string) => {
       const key = `${workspaceStore.activeWorkspaceId()}::${sessionId}`;
+      const existingSelectedSession = selectedSession();
+      const alreadyHydratedSelection =
+        selectedSessionId() === sessionId &&
+        existingSelectedSession?.id === sessionId &&
+        Boolean(existingSelectedSession.directory?.trim());
+      if (alreadyHydratedSelection) {
+        routeHydratedSessionKey = key;
+        if (error() === "OpenWork server not connected.") {
+          setError(null);
+        }
+        return;
+      }
       if (selectedSessionId() === sessionId && routeHydratedSessionKey === key) return;
       setRouteSessionHydratingId(sessionId);
       void selectSession(sessionId)

@@ -42,3 +42,15 @@ test("app proactively resolves the workspace id when opening bid-workbench direc
   expect(file).toContain("window.location.pathname.trim().toLowerCase().startsWith(\"/bid-workbench\")");
   expect(file).toContain("openworkServerWorkspaceId: resolvedDevtoolsWorkspaceId(),");
 });
+
+test("document routes re-evaluate hydration when the OpenWork client becomes ready and skip duplicate hydration for preselected sessions", () => {
+  const file = readFileSync(join(import.meta.dir, "..", "app.tsx"), "utf8");
+
+  expect(file).toContain("void openworkServerStatus();");
+  expect(file).toContain("void client();");
+  expect(file).toContain("void resolvedDevtoolsWorkspaceId();");
+  expect(file).toContain("const alreadyHydratedSelection =");
+  expect(file).toContain("existingSelectedSession.directory?.trim()");
+  expect(file).toContain('if (error() === "OpenWork server not connected.") {');
+  expect(file).toContain("setError(null);");
+});
